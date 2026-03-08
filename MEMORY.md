@@ -43,10 +43,23 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 
 ## Next Execution Priorities
 
-1. Expand fixture corpus for stale/degraded and multi-language ambiguity scenarios.
-2. Add tree-sitter grammar bootstrap/management workflow for reproducible environments.
-3. Improve semantic resolution toward interprocedural and import-alias precision (beyond heuristic matching).
-4. Keep production API boundary as separate next phase (library-first remains canonical).
+1. Add reproducible tree-sitter grammar bootstrap workflow (`scripts/setup-tree-sitter-grammars.sh`).
+2. Add CI validation for tree-sitter parser path with grammar install in workflow.
+3. Expand fixtures/benchmarks for multi-language ambiguity scenarios:
+   Python method/function collisions.
+   Java overload-like call ambiguity.
+4. Design production API boundary as a dedicated phase:
+   ADR for boundary and scope.
+   Minimal HTTP/gRPC edge over current library-first runtime.
+5. Elixir semantic resolution improvements:
+   alias/import-aware resolution (`alias Foo.Bar, as: Baz` -> `Baz.fn()` maps to `Foo.Bar/fn`).
+6. Elixir extraction quality improvements:
+   distinguish `def`, `defp`, `defmacro`, `defdelegate`.
+   improve `do/end` unit boundary precision.
+7. Add Elixir-specific fixtures:
+   ambiguous local vs aliased module calls.
+   mixed `def/defp` scenarios.
+   ExUnit module scenarios with rank/guardrails expectations.
 
 ## Update Rule
 
