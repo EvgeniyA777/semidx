@@ -83,9 +83,12 @@ Current scope is contract architecture plus a working MVP runtime implementation
 - Clojure retrieval uses `clj-kondo` as primary parser with fallback path
 - Elixir and Python retrieval paths are implemented in the same runtime adapter pipeline
 - multi-language call/symbol resolution has module/class-aware normalization for Java, Elixir, Python
+- import-aware and owner-aware disambiguation is applied when resolving ambiguous call targets
+- optional tree-sitter extraction path is available for Clojure/Java (grammar-path configured)
 - tiered structural-first ranking and non-compensating confidence model implemented
 - late raw-code escalation stage is implemented and controlled by query options/constraints
 - PostgreSQL persistence adapter stores snapshots plus unit/call-edge graph projections
+- queryable graph access API is available via storage adapters (`query-units`, `query-callers`, `query-callees`)
 - fixture-driven retrieval benchmarks are integrated into local and CI gates
 
 ## License

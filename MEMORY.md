@@ -16,11 +16,13 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Contract layer is established (`contracts/schemas`, `contracts/examples`, `fixtures/retrieval`).
 - Clojure-side contract mirror is implemented with `malli`.
 - MVP runtime is implemented with public API in `semantic-code-indexing.core`.
-- Clojure parser path is `clj-kondo` primary with regex fallback.
-- Java/Elixir/Python parser paths are lightweight regex-based with class/module-aware symbol and call normalization.
+- Clojure parser path supports `clj-kondo` primary with regex fallback and optional tree-sitter extraction mode.
+- Java parser path supports regex mode and optional tree-sitter extraction mode.
+- Elixir/Python parser paths are regex-based with class/module-aware symbol and call normalization.
 - Retrieval uses structural-first tiered scoring with non-compensating confidence ceilings.
 - Raw-code escalation stage is implemented (opt-in, late, bounded by query constraints).
-- Optional persistence adapters exist: in-memory and PostgreSQL (snapshots + unit/call-edge projections).
+- Semantic resolution includes import-aware and owner-aware call target disambiguation.
+- Optional persistence adapters exist: in-memory and PostgreSQL (snapshots + unit/call-edge projections + query API).
 - Retrieval benchmark suite exists and is integrated into gates (`scripts/run-benchmarks.sh`).
 - Postgres integration smoke exists in tests (enabled by `SCI_TEST_POSTGRES_URL`) and CI service job.
 
@@ -36,14 +38,14 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 
 - No deep compiler-grade semantic resolution yet.
 - No production API server boundary yet (library-first only).
-- No full tree-sitter/AST extraction path yet (only optional availability probe/diagnostics).
-- Persistence model is still retrieval-oriented and not yet a full queryable semantic graph engine.
+- Tree-sitter path currently depends on external grammar-path configuration (no bundled grammar management).
+- Persistence graph queries are retrieval-oriented and not yet a full semantic graph query language.
 
 ## Next Execution Priorities
 
-1. Add tree-sitter-backed structural extraction path (beyond availability probe) for Java/Clojure.
-2. Improve language-specific semantic resolution (imports, callsite ownership, ambiguous target disambiguation).
-3. Expand fixture corpus for stale/degraded and multi-language ambiguity scenarios.
+1. Expand fixture corpus for stale/degraded and multi-language ambiguity scenarios.
+2. Add tree-sitter grammar bootstrap/management workflow for reproducible environments.
+3. Improve semantic resolution toward interprocedural and import-alias precision (beyond heuristic matching).
 4. Keep production API boundary as separate next phase (library-first remains canonical).
 
 ## Update Rule

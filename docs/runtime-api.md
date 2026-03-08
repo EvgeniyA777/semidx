@@ -41,7 +41,20 @@ Example with parser options:
 (sci/create-index
  {:root_path "."
   :parser_opts {:clojure_engine :clj-kondo
+                :java_engine :regex
                 :tree_sitter_enabled false}})
+```
+
+Tree-sitter extraction path (optional):
+
+```clojure
+(sci/create-index
+ {:root_path "."
+  :parser_opts {:clojure_engine :tree-sitter
+                :java_engine :tree-sitter
+                :tree_sitter_enabled true
+                :tree_sitter_grammars {:clojure "/opt/grammars/tree-sitter-clojure"
+                                       :java "/opt/grammars/tree-sitter-java"}}})
 ```
 
 ### `update-index`
@@ -108,6 +121,30 @@ Returns `impact_hints` only for the same query semantics.
 
 ```clojure
 (sci/impact-analysis index query)
+```
+
+### `query-units`
+
+Query persisted graph units from a storage adapter.
+
+```clojure
+(sci/query-units pg-store "." {:module "my.app.order" :limit 50})
+```
+
+### `query-callers`
+
+Query persisted callers of a specific `unit_id`.
+
+```clojure
+(sci/query-callers pg-store "." "src/my/app/order.clj::my.app.order/validate-order" {:limit 50})
+```
+
+### `query-callees`
+
+Query persisted callees of a specific `unit_id`.
+
+```clojure
+(sci/query-callees pg-store "." "src/my/app/order.clj::my.app.order/process-order" {:limit 50})
 ```
 
 ## Storage Adapters
@@ -189,7 +226,8 @@ Smoke helper:
 
 - Clojure parser pipeline is `clj-kondo` first, with regex fallback.
 - Java, Elixir, and Python parsers are lightweight regex-based in MVP.
-- `tree-sitter` remains optional; when enabled in parser opts, runtime emits availability diagnostics for Clojure/Java.
+- `tree-sitter` extraction is implemented for Clojure and Java when corresponding grammar paths are configured.
+- If tree-sitter is requested but unavailable/misconfigured, runtime falls back with diagnostics (`tree_sitter_*` codes).
 - Raw-code escalation stage is late and opt-in via query options (`allow_raw_code_escalation`) and bounded by `constraints.max_raw_code_level`.
 - Ranking is structural-first and tiered, with hard ceilings when Tier1 evidence is missing.
 - Output contracts are validated against local `malli` mirrors of JSON schemas.

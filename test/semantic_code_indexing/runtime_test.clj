@@ -129,13 +129,55 @@
     (is (= (:snapshot_id index-a) (:snapshot_id index-b)))
     (is (= (count (:units index-a)) (count (:units index-b))))))
 
+(deftest storage-query-api-regression-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-storage-query-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        order-units (sci/query-units storage tmp-root {:module "my.app.order" :limit 20})
+        process-unit-id (some->> order-units (filter #(= "my.app.order/process-order" (:symbol %))) first :unit_id)
+        validate-unit-id (some->> order-units (filter #(= "my.app.order/validate-order" (:symbol %))) first :unit_id)
+        callers (sci/query-callers storage tmp-root validate-unit-id {:limit 20})
+        callees (sci/query-callees storage tmp-root process-unit-id {:limit 20})]
+    (is (seq order-units))
+    (is process-unit-id)
+    (is validate-unit-id)
+    (is (some #(= "my.app.order/process-order" (:symbol %)) callers))
+    (is (some #(= "my.app.order/validate-order" (:symbol %)) callees))))
+
+(deftest tree-sitter-parser-path-test
+  (let [clj-grammar (System/getenv "SCI_TREE_SITTER_CLOJURE_GRAMMAR_PATH")
+        java-grammar (System/getenv "SCI_TREE_SITTER_JAVA_GRAMMAR_PATH")]
+    (if (and (seq clj-grammar) (seq java-grammar))
+      (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-tree-sitter-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+            _ (create-sample-repo! tmp-root)
+            index (sci/create-index {:root_path tmp-root
+                                     :parser_opts {:clojure_engine :tree-sitter
+                                                   :java_engine :tree-sitter
+                                                   :tree_sitter_enabled true
+                                                   :tree_sitter_grammars {:clojure clj-grammar
+                                                                          :java java-grammar}}})
+            clj-diags (get-in index [:files "src/my/app/order.clj" :diagnostics])
+            java-diags (get-in index [:files "src/com/acme/CheckoutService.java" :diagnostics])]
+        (is (some #(= "tree_sitter_active" (:code %)) clj-diags))
+        (is (some #(= "tree_sitter_active" (:code %)) java-diags)))
+      (is true "Tree-sitter grammar paths are not configured; skipping tree-sitter parser test."))))
+
 (deftest postgres-storage-roundtrip-test
   (if-let [jdbc-url (System/getenv "SCI_TEST_POSTGRES_URL")]
     (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-pg-storage-test" (make-array java.nio.file.attribute.FileAttribute 0)))
           _ (create-sample-repo! tmp-root)
           storage (sci/postgres-storage {:jdbc-url jdbc-url})
           index-a (sci/create-index {:root_path tmp-root :storage storage})
-          index-b (sci/create-index {:root_path tmp-root :storage storage :load_latest true})]
+          index-b (sci/create-index {:root_path tmp-root :storage storage :load_latest true})
+          order-units (sci/query-units storage tmp-root {:module "my.app.order" :limit 20})
+          process-unit-id (some->> order-units (filter #(= "my.app.order/process-order" (:symbol %))) first :unit_id)
+          validate-unit-id (some->> order-units (filter #(= "my.app.order/validate-order" (:symbol %))) first :unit_id)
+          callers (sci/query-callers storage tmp-root validate-unit-id {:limit 20})
+          callees (sci/query-callees storage tmp-root process-unit-id {:limit 20})]
       (is (= (:snapshot_id index-a) (:snapshot_id index-b)))
-      (is (= (count (:units index-a)) (count (:units index-b)))))
+      (is (= (count (:units index-a)) (count (:units index-b))))
+      (is (seq order-units))
+      (is (some #(= "my.app.order/process-order" (:symbol %)) callers))
+      (is (some #(= "my.app.order/validate-order" (:symbol %)) callees)))
     (is true "SCI_TEST_POSTGRES_URL is not set; skipping postgres storage smoke test.")))

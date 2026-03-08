@@ -1,12 +1,14 @@
 (ns semantic-code-indexing.runtime.storage
   (:require [clojure.data.json :as json]
-            [clojure.string :as str]
             [next.jdbc :as jdbc]))
 
 (defprotocol IndexStorage
   (init-storage! [storage])
   (save-index! [storage index])
-  (load-latest-index [storage root-path]))
+  (load-latest-index [storage root-path])
+  (fetch-units [storage root-path opts])
+  (fetch-callers [storage root-path unit-id opts])
+  (fetch-callees [storage root-path unit-id opts]))
 
 (defrecord InMemoryStorage [state]
   IndexStorage
@@ -15,7 +17,43 @@
     (swap! state assoc (:root_path index) index)
     true)
   (load-latest-index [_ root-path]
-    (get @state root-path)))
+    (get @state root-path))
+  (fetch-units [_ root-path {:keys [snapshot_id module symbol limit] :or {limit 100}}]
+    (let [idx (get @state root-path)]
+      (if (or (nil? idx)
+              (and snapshot_id (not= snapshot_id (:snapshot_id idx))))
+        []
+        (->> (:unit_order idx)
+             (map #(get (:units idx) %))
+             (remove nil?)
+             (filter #(if module (= module (:module %)) true))
+             (filter #(if symbol (= symbol (:symbol %)) true))
+             (take limit)
+             vec))))
+  (fetch-callers [_ root-path unit-id {:keys [snapshot_id limit] :or {limit 100}}]
+    (let [idx (get @state root-path)]
+      (if (or (nil? idx)
+              (and snapshot_id (not= snapshot_id (:snapshot_id idx))))
+        []
+        (->> (get (:callers_index idx) unit-id #{})
+             (map #(get (:units idx) %))
+             (remove nil?)
+             (take limit)
+             vec))))
+  (fetch-callees [_ root-path unit-id {:keys [snapshot_id limit] :or {limit 100}}]
+    (let [idx (get @state root-path)]
+      (if (or (nil? idx)
+              (and snapshot_id (not= snapshot_id (:snapshot_id idx))))
+        []
+        (let [callees (->> (:callers_index idx)
+                           (filter (fn [[_ callers]] (contains? callers unit-id)))
+                           (map first)
+                           vec)]
+          (->> callees
+               (map #(get (:units idx) %))
+               (remove nil?)
+               (take limit)
+               vec))))))
 
 (defn in-memory-storage []
   (->InMemoryStorage (atom {})))
@@ -53,6 +91,25 @@
                         {:caller caller :callee callee})
                       callers)))
        vec))
+
+(defn- row-payload [row]
+  (parse-json (:semantic_index_units/payload row
+                                             (:semantic_index_snapshots/payload row
+                                                                                (:payload row)))))
+
+(defn- latest-snapshot-id [datasource root-path]
+  (when-let [row (first (jdbc/execute! datasource
+                                       ["select snapshot_id
+                                         from semantic_index_snapshots
+                                         where root_path = ?
+                                         order by id desc
+                                         limit 1"
+                                        root-path]))]
+    (or (:semantic_index_snapshots/snapshot_id row)
+        (:snapshot_id row))))
+
+(defn- resolve-snapshot-id [datasource root-path snapshot-id]
+  (or snapshot-id (latest-snapshot-id datasource root-path)))
 
 (defrecord PostgresStorage [datasource]
   IndexStorage
@@ -158,8 +215,69 @@
                                            order by id desc
                                            limit 1"
                                           root-path]))]
-      (parse-json (:semantic_index_snapshots/payload row (:payload row))))))
+      (parse-json (:semantic_index_snapshots/payload row (:payload row)))))
+  (fetch-units [_ root-path {:keys [snapshot_id module symbol limit] :or {limit 100}}]
+    (if-let [sid (resolve-snapshot-id datasource root-path snapshot_id)]
+      (let [sql (str "select payload
+                      from semantic_index_units
+                      where root_path = ? and snapshot_id = ?"
+                     (when module " and module = ?")
+                     (when symbol " and symbol = ?")
+                     " order by path asc, start_line asc limit ?")
+            params (cond-> [sql root-path sid]
+                     module (conj module)
+                     symbol (conj symbol)
+                     :always (conj limit))]
+        (->> (jdbc/execute! datasource params)
+             (mapv row-payload)))
+      []))
+  (fetch-callers [_ root-path unit-id {:keys [snapshot_id limit] :or {limit 100}}]
+    (if-let [sid (resolve-snapshot-id datasource root-path snapshot_id)]
+      (->> (jdbc/execute! datasource
+                          ["select u.payload
+                            from semantic_index_call_edges e
+                            join semantic_index_units u
+                              on u.root_path = e.root_path
+                             and u.snapshot_id = e.snapshot_id
+                             and u.unit_id = e.caller_unit_id
+                            where e.root_path = ?
+                              and e.snapshot_id = ?
+                              and e.callee_unit_id = ?
+                            order by u.path asc, u.start_line asc
+                            limit ?"
+                           root-path sid unit-id limit])
+           (mapv row-payload))
+      []))
+  (fetch-callees [_ root-path unit-id {:keys [snapshot_id limit] :or {limit 100}}]
+    (if-let [sid (resolve-snapshot-id datasource root-path snapshot_id)]
+      (->> (jdbc/execute! datasource
+                          ["select u.payload
+                            from semantic_index_call_edges e
+                            join semantic_index_units u
+                              on u.root_path = e.root_path
+                             and u.snapshot_id = e.snapshot_id
+                             and u.unit_id = e.callee_unit_id
+                            where e.root_path = ?
+                              and e.snapshot_id = ?
+                              and e.caller_unit_id = ?
+                            order by u.path asc, u.start_line asc
+                            limit ?"
+                           root-path sid unit-id limit])
+           (mapv row-payload))
+      [])))
 
 (defn postgres-storage [opts]
   (let [db-spec (normalize-db-spec opts)]
     (->PostgresStorage (jdbc/get-datasource db-spec))))
+
+(defn query-units [storage root-path opts]
+  (init-storage! storage)
+  (fetch-units storage root-path opts))
+
+(defn query-callers [storage root-path unit-id opts]
+  (init-storage! storage)
+  (fetch-callers storage root-path unit-id opts))
+
+(defn query-callees [storage root-path unit-id opts]
+  (init-storage! storage)
+  (fetch-callees storage root-path unit-id opts))

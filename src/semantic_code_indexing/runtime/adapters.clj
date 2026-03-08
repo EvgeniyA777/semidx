@@ -14,7 +14,7 @@
   #"\[([a-zA-Z0-9\._\-]+)(?:\s+:as\s+[a-zA-Z0-9_\-]+)?\]")
 
 (def ^:private java-package-re #"^\s*package\s+([a-zA-Z0-9_\.]+)\s*;")
-(def ^:private java-import-re #"^\s*import\s+([a-zA-Z0-9_\.]+)\s*;")
+(def ^:private java-import-re #"^\s*import\s+([a-zA-Z0-9_\.\*]+)\s*;")
 (def ^:private java-class-re #"^\s*(?:public\s+)?(?:class|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")
 (def ^:private java-method-re
   #"^\s*(?:public|private|protected|static|final|native|synchronized|abstract|default|\s)+[a-zA-Z0-9_<>,\[\]\.\?\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*(?:\{|throws|;)")
@@ -24,10 +24,10 @@
 (def ^:private ex-import-re #"^\s*(?:alias|import|require|use)\s+([A-Za-z0-9_\.]+)")
 (def ^:private ex-def-re #"^\s*(defp?|defmacro|defmacrop)\s+([a-zA-Z_][a-zA-Z0-9_!?]*)")
 (def ^:private ex-test-re #"^\s*test\s+\"([^\"]+)\"\s+do")
-(def ^:private ex-call-re #"\b([A-Za-z_][A-Za-z0-9_\.!?\.]*)\s*\(")
+(def ^:private ex-call-re #"\b([A-Za-z_][A-Za-z0-9_\.!?]*)\s*\(")
 
 (def ^:private py-import-re #"^\s*import\s+([a-zA-Z0-9_\.]+)")
-(def ^:private py-from-import-re #"^\s*from\s+([a-zA-Z0-9_\.]+)\s+import\s+")
+(def ^:private py-from-import-re #"^\s*from\s+([a-zA-Z0-9_\.]+)\s+import\s+([A-Za-z0-9_,\s\*]+)")
 (def ^:private py-class-re #"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)")
 (def ^:private py-def-re #"^\s*(?:async\s+def|def)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 (def ^:private py-call-re #"\b([A-Za-z_][A-Za-z0-9_\.]*)\s*\(")
@@ -47,6 +47,9 @@
 (def ^:private py-call-stop
   #{"if" "for" "while" "return" "yield" "lambda" "class" "def" "print"})
 
+(def ^:private ts-line-re
+  #"^\s*(\d+):(\d+)\s*-\s*(\d+):(\d+)\s+(.+?)\s*$")
+
 (defn language-by-path [path]
   (cond
     (or (str/ends-with? path ".clj")
@@ -65,7 +68,8 @@
   (-> file slurp str/split-lines vec))
 
 (defn- trim-signature [line]
-  (-> line str/trim (subs 0 (min 180 (count (str/trim line))))))
+  (let [t (str/trim (or line ""))]
+    (subs t 0 (min 180 (count t)))))
 
 (defn- unit-end-lines [starts total-lines]
   (let [pairs (partition 2 1 (concat starts [(inc total-lines)]))]
@@ -73,6 +77,20 @@
 
 (defn- tail-token [token]
   (some-> token str (str/split #"[\./#]") last))
+
+(defn- parse-python-import [line]
+  (if-let [[_ from names] (re-find py-from-import-re line)]
+    (let [parts (->> (str/split names #",")
+                     (map str/trim)
+                     (remove str/blank?))]
+      (vec (cons from
+                 (map (fn [n]
+                        (if (= n "*")
+                          from
+                          (str from "." n)))
+                      parts))))
+    (when-let [[_ imp] (re-find py-import-re line)]
+      [imp])))
 
 (defonce ^:private tree-sitter-availability (atom nil))
 
@@ -86,11 +104,51 @@
       (reset! tree-sitter-availability available?)
       available?)))
 
+(defn- parser-grammar-path [parser-opts lang]
+  (or (get-in parser-opts [:tree_sitter_grammars lang])
+      (get-in parser-opts [:tree_sitter_grammars (keyword lang)])
+      (get parser-opts (keyword (str "tree_sitter_" (name lang) "_grammar")))
+      (System/getenv (case lang
+                       :clojure "SCI_TREE_SITTER_CLOJURE_GRAMMAR_PATH"
+                       :java "SCI_TREE_SITTER_JAVA_GRAMMAR_PATH"
+                       nil))))
+
+(defn- parse-ts-line [line]
+  (when-let [[_ sr sc er ec text] (re-find ts-line-re line)]
+    (let [plain (str/trim (first (str/split text #"`")))
+          source (if (str/includes? plain ":")
+                   (second (str/split plain #":\s*" 2))
+                   plain)
+          node-type (last (str/split (str/trim source) #"\s+"))
+          value (some-> (re-find #"`([^`]*)`" text) second)]
+      {:indent (count (re-find #"^\s*" line))
+       :start-row (parse-long sr)
+       :start-col (parse-long sc)
+       :end-row (parse-long er)
+       :end-col (parse-long ec)
+       :text text
+       :node-type node-type
+       :value value})))
+
+(defn- tree-sitter-cst [abs-path grammar-path]
+  (let [{:keys [exit out err]}
+        (try
+          (sh/sh "tree-sitter" "parse" "--cst" "--grammar-path" grammar-path abs-path)
+          (catch Exception e
+            {:exit 127 :out "" :err (.getMessage e)}))]
+    (if (zero? (int exit))
+      {:ok? true
+       :lines (->> (str/split-lines out) (keep parse-ts-line) vec)
+       :err nil}
+      {:ok? false
+       :lines []
+       :err (or err "tree-sitter parse failed")})))
+
 (defn- add-tree-sitter-diag [parsed enabled? language]
   (if (and enabled? (#{"clojure" "java"} language))
     (if (tree-sitter-available?)
       (update parsed :diagnostics conj {:code "tree_sitter_probe"
-                                        :summary "tree-sitter CLI detected; adapter remains canonical extraction source."})
+                                        :summary "tree-sitter CLI detected."})
       (update parsed :diagnostics conj {:code "tree_sitter_unavailable"
                                         :summary "tree-sitter requested but CLI is unavailable; using adapter parser."}))
     parsed))
@@ -136,9 +194,8 @@
                                          (if (str/includes? (:raw-symbol d) "/")
                                            (:raw-symbol d)
                                            (str ns-name "/" (:raw-symbol d)))
-                                         (:raw-symbol d))
-                                unit-id (str path "::" symbol)]
-                            {:unit_id unit-id
+                                         (:raw-symbol d))]
+                            {:unit_id (str path "::" symbol)
                              :kind (:kind d)
                              :symbol symbol
                              :path path
@@ -251,7 +308,7 @@
       (let [fallback (parse-clojure-regex path lines)
             extra (cond-> [{:code "kondo_no_units" :summary "clj-kondo returned no var definitions for file."}]
                     (seq err) (conj {:code "kondo_stderr"
-                                     :summary (subs err 0 (min 200 (count err)))}))]
+                                     :summary (subs err 0 (min 220 (count err)))}))]
         (-> fallback
             (update :diagnostics into extra)
             (assoc :parser_mode "fallback")))
@@ -265,13 +322,113 @@
                                         :summary (str "clj-kondo exit=" exit)}])
             (assoc :parser_mode "fallback"))))))
 
+(defn- extract-top-level-list-ranges [ts-lines]
+  (let [lists (->> ts-lines (filter #(= "list_lit" (:node-type %))) vec)]
+    (->> lists
+         (remove (fn [node]
+                   (some (fn [outer]
+                           (and (not= node outer)
+                                (<= (:start-row outer) (:start-row node))
+                                (>= (:end-row outer) (:end-row node))
+                                (or (< (:start-row outer) (:start-row node))
+                                    (> (:end-row outer) (:end-row node)))))
+                         lists)))
+         (sort-by (juxt :start-row :start-col))
+         vec)))
+
+(defn- sym-names-in-range [ts-lines start-row end-row]
+  (->> ts-lines
+       (filter #(= "sym_name" (:node-type %)))
+       (filter #(<= start-row (:start-row %) end-row))
+       (sort-by (juxt :start-row :start-col))
+       (keep :value)
+       vec))
+
+(defn- parse-clojure-tree-sitter [root-path path src-lines parser-opts]
+  (let [grammar-path (parser-grammar-path parser-opts :clojure)
+        abs (-> (io/file root-path path) .getCanonicalPath)
+        imports (->> src-lines (mapcat #(map second (re-seq clj-require-re %))) distinct vec)
+        ns-name (some (fn [line] (some-> (re-find #"^\s*\(ns\s+([^\s\)]+).*" line) second)) src-lines)]
+    (cond
+      (not (tree-sitter-available?))
+      {:ok? false
+       :reason {:code "tree_sitter_unavailable"
+                :summary "tree-sitter CLI is unavailable for clojure tree-sitter parser."}}
+
+      (str/blank? (str grammar-path))
+      {:ok? false
+       :reason {:code "tree_sitter_missing_grammar"
+                :summary "No tree-sitter Clojure grammar path configured."}}
+
+      :else
+      (let [{:keys [ok? lines err]} (tree-sitter-cst abs grammar-path)
+            ts-lines lines]
+        (if-not ok?
+          {:ok? false
+           :reason {:code "tree_sitter_parse_failed"
+                    :summary (str "tree-sitter parse failed: " (subs (str err) 0 (min 220 (count (str err)))))}}
+          (let [ranges (extract-top-level-list-ranges ts-lines)
+                defs (->> ranges
+                          (keep (fn [r]
+                                  (let [syms (sym-names-in-range ts-lines (:start-row r) (:end-row r))
+                                        op (first syms)
+                                        raw-name (second syms)]
+                                    (when (and op raw-name (contains? #{"defn" "defn-" "defmacro" "defmulti" "defmethod" "def" "deftest"} op))
+                                      {:start-line (inc (:start-row r))
+                                       :end-line (inc (:end-row r))
+                                       :operator op
+                                       :raw-symbol raw-name
+                                       :calls (->> (drop 2 syms)
+                                                   (remove clj-call-stop)
+                                                   distinct
+                                                   vec)}))))
+                          vec)
+                units (->> defs
+                           (map (fn [{:keys [start-line end-line operator raw-symbol calls]}]
+                                  (let [symbol (if (and ns-name (not (str/includes? raw-symbol "/")))
+                                                 (str ns-name "/" raw-symbol)
+                                                 raw-symbol)]
+                                    {:unit_id (str path "::" symbol)
+                                     :kind (clj-kind operator path)
+                                     :symbol symbol
+                                     :path path
+                                     :module ns-name
+                                     :start_line start-line
+                                     :end_line end-line
+                                     :signature (safe-line src-lines start-line)
+                                     :summary (str (clj-kind operator path) " " symbol)
+                                     :docstring_excerpt nil
+                                     :imports imports
+                                     :calls calls
+                                     :parser_mode "full"})))
+                           vec)]
+            (if (seq units)
+              {:ok? true
+               :result {:language "clojure"
+                        :module ns-name
+                        :imports imports
+                        :units units
+                        :diagnostics [{:code "tree_sitter_active"
+                                       :summary "Clojure analyzed using tree-sitter CST extraction."}]
+                        :parser_mode "full"}}
+              {:ok? false
+               :reason {:code "tree_sitter_no_units"
+                        :summary "tree-sitter did not extract Clojure units."}})))))))
+
 (defn- parse-clojure [root-path path lines {:keys [clojure_engine tree_sitter_enabled]
                                             :or {clojure_engine :clj-kondo
-                                                 tree_sitter_enabled false}}]
-  (let [parsed (case clojure_engine
+                                                 tree_sitter_enabled false}
+                                            :as parser-opts}]
+  (let [engine (or clojure_engine :clj-kondo)
+        parsed (case engine
                  :regex (parse-clojure-regex path lines)
+                 :tree-sitter
+                 (let [{:keys [ok? result reason]} (parse-clojure-tree-sitter root-path path lines parser-opts)]
+                   (if ok?
+                     result
+                     (-> (parse-clojure-kondo root-path path lines)
+                         (update :diagnostics conj reason))))
                  :clj-kondo (parse-clojure-kondo root-path path lines)
-                 :tree-sitter (parse-clojure-kondo root-path path lines)
                  (parse-clojure-kondo root-path path lines))]
     (add-tree-sitter-diag parsed tree_sitter_enabled "clojure")))
 
@@ -293,7 +450,7 @@
        distinct
        vec))
 
-(defn- parse-java [path lines parser-opts]
+(defn- parse-java-regex [path lines]
   (let [line-count (count lines)
         pkg (some (fn [line] (some-> (re-find java-package-re line) second)) lines)
         imports (->> lines
@@ -323,10 +480,9 @@
                           (let [start-line (:start-line m)
                                 cls (or (:class m) "UnknownClass")
                                 symbol (str (when pkg (str pkg ".")) cls "#" (:method m))
-                                unit-id (str path "::" symbol)
                                 body (->> (subvec lines (dec start-line) end-line)
                                           (str/join "\n"))]
-                            {:unit_id unit-id
+                            {:unit_id (str path "::" symbol)
                              :kind (java-kind path (:method m))
                              :symbol symbol
                              :path path
@@ -339,14 +495,126 @@
                              :imports imports
                              :calls (extract-java-calls body)
                              :parser_mode "full"})))
-                   vec)
-        parsed {:language "java"
-                :module pkg
-                :imports imports
-                :units units
-                :diagnostics []
-                :parser_mode "full"}]
-    (add-tree-sitter-diag parsed (:tree_sitter_enabled parser-opts) "java")))
+                   vec)]
+    {:language "java"
+     :module pkg
+     :imports imports
+     :units units
+     :diagnostics []
+     :parser_mode "full"}))
+
+(defn- node-name-inside [ts-lines node name-marker]
+  (->> ts-lines
+       (filter #(<= (:start-row node) (:start-row %) (:end-row node)))
+       (filter #(< (:indent node) (:indent %)))
+       (filter #(and (= "identifier" (:node-type %))
+                     (str/includes? (:text %) name-marker)
+                     (:value %)))
+       (sort-by (juxt :start-row :start-col))
+       first
+       :value))
+
+(defn- parse-java-tree-sitter [root-path path src-lines parser-opts]
+  (let [grammar-path (parser-grammar-path parser-opts :java)
+        abs (-> (io/file root-path path) .getCanonicalPath)
+        pkg (some (fn [line] (some-> (re-find java-package-re line) second)) src-lines)
+        imports (->> src-lines
+                     (keep (fn [line] (some-> (re-find java-import-re line) second)))
+                     distinct
+                     vec)]
+    (cond
+      (not (tree-sitter-available?))
+      {:ok? false
+       :reason {:code "tree_sitter_unavailable"
+                :summary "tree-sitter CLI is unavailable for java tree-sitter parser."}}
+
+      (str/blank? (str grammar-path))
+      {:ok? false
+       :reason {:code "tree_sitter_missing_grammar"
+                :summary "No tree-sitter Java grammar path configured."}}
+
+      :else
+      (let [{:keys [ok? lines err]} (tree-sitter-cst abs grammar-path)
+            ts-lines lines]
+        (if-not ok?
+          {:ok? false
+           :reason {:code "tree_sitter_parse_failed"
+                    :summary (str "tree-sitter parse failed: " (subs (str err) 0 (min 220 (count (str err)))))}}
+          (let [classes (->> ts-lines
+                             (filter #(= "class_declaration" (:node-type %)))
+                             (map (fn [c] (assoc c :class-name (or (node-name-inside ts-lines c "name:") "UnknownClass"))))
+                             vec)
+                methods (->> ts-lines
+                             (filter #(= "method_declaration" (:node-type %)))
+                             (map (fn [m]
+                                    (let [method-name (or (node-name-inside ts-lines m "name:") "unknownMethod")
+                                          cls (->> classes
+                                                   (filter #(<= (:start-row %) (:start-row m) (:end-row %)))
+                                                   sort-by
+                                                   last
+                                                   :class-name)
+                                          calls (->> ts-lines
+                                                     (filter #(and (= "method_invocation" (:node-type %))
+                                                                   (<= (:start-row m) (:start-row %) (:end-row m))))
+                                                     (map #(node-name-inside ts-lines % "name:"))
+                                                     (remove nil?)
+                                                     distinct
+                                                     vec)]
+                                      {:start-line (inc (:start-row m))
+                                       :end-line (inc (:end-row m))
+                                       :method method-name
+                                       :class (or cls "UnknownClass")
+                                       :calls calls})))
+                             vec)
+                units (->> methods
+                           (map (fn [{:keys [start-line end-line method class calls]}]
+                                  (let [symbol (str (when pkg (str pkg ".")) class "#" method)]
+                                    {:unit_id (str path "::" symbol)
+                                     :kind (java-kind path method)
+                                     :symbol symbol
+                                     :path path
+                                     :module (if pkg (str pkg "." class) class)
+                                     :start_line start-line
+                                     :end_line end-line
+                                     :signature (safe-line src-lines start-line)
+                                     :summary (str "method " symbol)
+                                     :docstring_excerpt nil
+                                     :imports imports
+                                     :calls (->> calls
+                                                 (mapcat (fn [token]
+                                                           (let [tail (tail-token token)]
+                                                             (cond-> [token]
+                                                               (and tail (not= tail token)) (conj tail)))))
+                                                 (remove #(contains? java-call-stop %))
+                                                 distinct
+                                                 vec)
+                                     :parser_mode "full"})))
+                           vec)]
+            (if (seq units)
+              {:ok? true
+               :result {:language "java"
+                        :module pkg
+                        :imports imports
+                        :units units
+                        :diagnostics [{:code "tree_sitter_active"
+                                       :summary "Java analyzed using tree-sitter CST extraction."}]
+                        :parser_mode "full"}}
+              {:ok? false
+               :reason {:code "tree_sitter_no_units"
+                        :summary "tree-sitter did not extract Java units."}})))))))
+
+(defn- parse-java [root-path path lines {:keys [java_engine tree_sitter_enabled]
+                                         :or {java_engine :regex}
+                                         :as parser-opts}]
+  (let [engine (if (true? tree_sitter_enabled) :tree-sitter java_engine)
+        parsed (if (= engine :tree-sitter)
+                 (let [{:keys [ok? result reason]} (parse-java-tree-sitter root-path path lines parser-opts)]
+                   (if ok?
+                     result
+                     (-> (parse-java-regex path lines)
+                         (update :diagnostics conj reason))))
+                 (parse-java-regex path lines))]
+    (add-tree-sitter-diag parsed tree_sitter_enabled "java")))
 
 (defn- ex-test-symbol [module test-name]
   (let [slug (-> test-name
@@ -457,9 +725,7 @@
   (let [line-count (count lines)
         module (py-module-name path)
         imports (->> lines
-                     (keep (fn [line]
-                             (or (some-> (re-find py-import-re line) second)
-                                 (some-> (re-find py-from-import-re line) second))))
+                     (mapcat parse-python-import)
                      distinct
                      vec)
         defs (loop [idx 0
@@ -476,7 +742,6 @@
                      (re-find py-class-re line)
                      (let [[_ cls] (re-find py-class-re line)
                            entry {:start-line (inc idx)
-                                  :indent indent
                                   :kind "class"
                                   :raw-symbol (str module "." cls)
                                   :signature (trim-signature line)}]
@@ -489,13 +754,10 @@
                                     (str module "." class-name "/" fn-name)
                                     (str module "/" fn-name))
                            kind (if class-name
-                                  (if (str/starts-with? (str/lower-case fn-name) "test")
-                                    "test"
-                                    "method")
+                                  (if (str/starts-with? (str/lower-case fn-name) "test") "test" "method")
                                   (py-kind path fn-name))
                            entry {:start-line (inc idx)
-                                  :indent indent
-                                  :kind (if (= kind "test") "test" kind)
+                                  :kind kind
                                   :raw-symbol symbol
                                   :signature (trim-signature line)}]
                        (recur (inc idx) pruned (conj out entry)))
@@ -560,7 +822,7 @@
        (let [lines (slurp-lines abs)]
          (case language
            "clojure" (parse-clojure root-path file-path lines parser-opts)
-           "java" (parse-java file-path lines parser-opts)
+           "java" (parse-java root-path file-path lines parser-opts)
            "elixir" (parse-elixir file-path lines)
            "python" (parse-python file-path lines)
            (fallback-unit file-path lines language "unsupported_language")))

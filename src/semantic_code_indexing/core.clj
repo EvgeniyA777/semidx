@@ -57,3 +57,24 @@
   - OR :jdbc-url (+ optional :user, :password)"
   [opts]
   (storage/postgres-storage opts))
+
+(defn query-units
+  "Query persisted units from storage by root path and optional filters.
+
+  Options:
+  - :snapshot_id exact snapshot (optional, latest if omitted)
+  - :module exact module name (optional)
+  - :symbol exact symbol name (optional)
+  - :limit max rows (default 100)"
+  [storage-adapter root-path opts]
+  (storage/query-units storage-adapter root-path opts))
+
+(defn query-callers
+  "Query persisted callers for a unit id."
+  [storage-adapter root-path unit-id opts]
+  (storage/query-callers storage-adapter root-path unit-id opts))
+
+(defn query-callees
+  "Query persisted callees for a unit id."
+  [storage-adapter root-path unit-id opts]
+  (storage/query-callees storage-adapter root-path unit-id opts))

@@ -126,25 +126,77 @@
          distinct
          vec)))
 
-(defn- narrow-targets [caller targets token units-by-id]
+(defn- symbol-scope [symbol]
+  (let [s (str symbol)]
+    (cond
+      (str/includes? s "/") (first (str/split s #"/" 2))
+      (str/includes? s "#") (first (str/split s #"#" 2))
+      :else nil)))
+
+(defn- owner-from-token [token]
+  (let [t (str token)]
+    (cond
+      (str/includes? t "#") (first (str/split t #"#" 2))
+      (str/includes? t ".") (first (str/split t #"\." 2))
+      (str/includes? t "/") (first (str/split t #"/" 2))
+      :else nil)))
+
+(defn- owner-match? [token candidate]
+  (let [owner (some-> token owner-from-token lower)
+        cand-scope (some-> candidate :symbol symbol-scope lower)
+        cand-module (some-> candidate :module lower)
+        scope-tail (some-> cand-scope (str/split #"\.") last)]
+    (if (str/blank? owner)
+      true
+      (or (= owner cand-scope)
+          (= owner cand-module)
+          (= owner scope-tail)
+          (and cand-scope (str/ends-with? cand-scope (str "." owner)))
+          (and cand-module (str/ends-with? cand-module (str "." owner)))))))
+
+(defn- normalize-import-prefix [imp]
+  (let [s (str imp)]
+    (if (str/ends-with? s ".*")
+      (subs s 0 (- (count s) 2))
+      s)))
+
+(defn- import-match? [imports candidate]
+  (let [scope (some-> candidate :symbol symbol-scope)
+        module (:module candidate)
+        imports* (->> imports (map normalize-import-prefix) (remove str/blank?) distinct)]
+    (if (empty? imports*)
+      false
+      (some (fn [imp]
+              (or (= imp scope)
+                  (= imp module)
+                  (and scope (str/starts-with? scope (str imp ".")))
+                  (and module (str/starts-with? module (str imp ".")))))
+            imports*))))
+
+(defn- narrow-targets [caller targets token units-by-id files-by-path]
   (let [by-id #(get units-by-id %)
-        candidates (->> targets (map by-id) (remove nil?) vec)]
+        candidates (->> targets (map by-id) (remove nil?) vec)
+        caller-imports (get-in files-by-path [(:path caller) :imports] [])]
     (cond
       (<= (count candidates) 1)
       (mapv :unit_id candidates)
 
-      (re-find #"[./#/]" (str token))
-      (mapv :unit_id candidates)
-
       :else
-      (let [same-path (filter #(= (:path %) (:path caller)) candidates)
-            same-module (filter #(= (:module %) (:module caller)) candidates)]
+      (let [owner-filtered (if (re-find #"[./#/]" (str token))
+                             (filter #(owner-match? token %) candidates)
+                             candidates)
+            import-filtered (if (seq caller-imports)
+                              (filter #(import-match? caller-imports %) owner-filtered)
+                              owner-filtered)
+            same-path (filter #(= (:path %) (:path caller)) import-filtered)
+            same-module (filter #(= (:module %) (:module caller)) import-filtered)]
         (cond
           (seq same-path) (mapv :unit_id same-path)
           (seq same-module) (mapv :unit_id same-module)
-          :else (mapv :unit_id candidates))))))
+          (seq import-filtered) (mapv :unit_id import-filtered)
+          :else (mapv :unit_id owner-filtered))))))
 
-(defn- build-callers-index [units]
+(defn- build-callers-index [units files-by-path]
   (let [token-index (build-call-token-index units)
         units-by-id (into {} (map (juxt :unit_id identity) units))]
     (reduce
@@ -155,7 +207,7 @@
                                 (mapcat #(get token-index % #{}))
                                 distinct
                                 vec)
-                narrowed (narrow-targets caller target-ids token units-by-id)]
+                narrowed (narrow-targets caller target-ids token units-by-id files-by-path)]
             (reduce (fn [a target-id]
                       (if (= target-id (:unit_id caller))
                         a
@@ -189,7 +241,7 @@
      :symbol_index (build-symbol-index units)
      :path_index (index-by :path units)
      :module_index (index-by :module units)
-     :callers_index (build-callers-index units)
+     :callers_index (build-callers-index units (:files files-data))
      :module_dependents (build-module-dependents (:files files-data))}))
 
 (defn- maybe-load-latest [storage-adapter root-path load-latest?]
