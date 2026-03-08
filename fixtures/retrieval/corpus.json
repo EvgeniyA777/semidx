@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "suite": "retrieval_core_seed",
+  "fixtures": [
+    {
+      "fixture_id": "retrieval_symbol_target_definition_001",
+      "category": "symbol_target",
+      "path": "symbol-target-definition.json",
+      "purpose": "Exact symbol-target retrieval should keep the authority definition in the top authority band."
+    },
+    {
+      "fixture_id": "retrieval_diff_impact_localized_001",
+      "category": "diff_centered",
+      "path": "diff-impact-localized.json",
+      "purpose": "Diff-centered retrieval should anchor directly on changed spans and nearby tests."
+    },
+    {
+      "fixture_id": "retrieval_partial_parser_fallback_001",
+      "category": "partial_parser",
+      "path": "partial-parser-fallback.json",
+      "purpose": "Fallback parsing should degrade confidence and block autonomy rather than pretend to be exact."
+    },
+    {
+      "fixture_id": "retrieval_multi_file_broad_impact_001",
+      "category": "multi_file_change",
+      "path": "multi-file-broad-impact.json",
+      "purpose": "Broad multi-file impact should remain explainable and review-oriented."
+    }
+  ]
+}

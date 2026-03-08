@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "override_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "trace_id": "66666666-6666-4666-8666-666666666666",
+  "original_autonomy_posture": "autonomy_blocked",
+  "original_blocking_reasons": [
+    {
+      "code": "target_ambiguous",
+      "summary": "The retrieval result did not localize a single authority target."
+    },
+    {
+      "code": "confidence_low",
+      "summary": "Confidence stayed low after fallback parsing and limited graph evidence."
+    }
+  ],
+  "requested_action": {
+    "action_class": "draft_patch",
+    "scope": "selected checkout and payment units only",
+    "multi_file": true,
+    "apply_requested": false
+  },
+  "override_reason": {
+    "code": "incident_mitigation_needed",
+    "summary": "The incident workflow requires a draft remediation plan before the next review checkpoint."
+  },
+  "actor_id": "incident_commander",
+  "human_review_status": "required_pending",
+  "timestamp": "2026-03-08T19:31:10Z"
+}

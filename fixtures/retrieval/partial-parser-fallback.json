@@ -1,0 +1,58 @@
+{
+  "fixture_id": "retrieval_partial_parser_fallback_001",
+  "category": "partial_parser",
+  "purpose": "Ensure fallback parsing degrades confidence and prevents silent autonomy promotion.",
+  "adr_refs": ["ADR-004", "ADR-008", "ADR-011", "ADR-014"],
+  "snapshot_ref": "seed-clojure-app@rev-003",
+  "input": {
+    "query": {
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "bug_investigation",
+        "details": "Investigate duplicate payment submission under retry and partial parser coverage."
+      },
+      "targets": {
+        "modules": ["my.app.checkout", "my.app.payments"],
+        "diff_summary": "Observed failure spans checkout request handling and retry recovery."
+      },
+      "constraints": {
+        "token_budget": 2600,
+        "snapshot_id": "seed-clojure-app@rev-003",
+        "language_allowlist": ["clojure"],
+        "allowed_path_prefixes": ["src/my/app/", "test/my/app/"],
+        "max_raw_code_level": "enclosing_unit",
+        "freshness": "allow_stale_if_flagged"
+      },
+      "hints": {
+        "preferred_modules": ["my.app.checkout", "my.app.payments"],
+        "suspected_symbols": ["my.app.payments/charge!"],
+        "focus_on_tests": true,
+        "prefer_definitions_over_callers": true,
+        "prefer_breadth_over_depth": true
+      },
+      "options": {
+        "include_tests": true,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": true,
+        "favor_compact_packet": false,
+        "favor_higher_recall": true
+      },
+      "trace": {
+        "trace_id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        "request_id": "fixture-partial-parser-001"
+      }
+    }
+  },
+  "expected": {
+    "must_include_warning_codes": ["parser_partial", "target_ambiguous"],
+    "must_include_degradation_codes": ["parser_fallback"],
+    "confidence_level": "low",
+    "autonomy_posture": "autonomy_blocked",
+    "review_required": true,
+    "disallowed_behaviors": [
+      "promote_low_confidence_to_high",
+      "auto_apply_without_override",
+      "hide_original_blocking_reasons"
+    ]
+  }
+}

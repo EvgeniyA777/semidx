@@ -1,0 +1,185 @@
+{
+  "schema_version": "1.0",
+  "examples": [
+    {
+      "example_id": "query_symbol_target_001",
+      "contract_family": "retrieval_query",
+      "path": "queries/symbol-target.json",
+      "schema": "../schemas/retrieval-query.schema.json",
+      "adr_refs": ["ADR-009", "ADR-016"],
+      "purpose": "Exact symbol-target retrieval with soft hints and hard raw-code limits.",
+      "expected_interpretation": "Should bias toward the authority definition and nearby tests without escalating to full-file raw code."
+    },
+    {
+      "example_id": "query_diff_centered_001",
+      "contract_family": "retrieval_query",
+      "path": "queries/diff-centered.json",
+      "schema": "../schemas/retrieval-query.schema.json",
+      "adr_refs": ["ADR-009", "ADR-016"],
+      "purpose": "Diff-centered impact query with changed spans and strict path boundaries.",
+      "expected_interpretation": "Should prioritize direct overlap, downstream impact hints, and the nearest tests."
+    },
+    {
+      "example_id": "query_bug_investigation_001",
+      "contract_family": "retrieval_query",
+      "path": "queries/bug-investigation.json",
+      "schema": "../schemas/retrieval-query.schema.json",
+      "adr_refs": ["ADR-009", "ADR-016"],
+      "purpose": "Bug investigation query with broader recall and raw-code escalation allowed.",
+      "expected_interpretation": "Should remain structural-first even when lexical and semantic signals widen candidate recall."
+    },
+    {
+      "example_id": "query_test_targeting_001",
+      "contract_family": "retrieval_query",
+      "path": "queries/test-targeting.json",
+      "schema": "../schemas/retrieval-query.schema.json",
+      "adr_refs": ["ADR-009", "ADR-016"],
+      "purpose": "Test-targeting query centered on a known production unit and candidate test namespaces.",
+      "expected_interpretation": "Should rank adjacent tests over broad repository scans."
+    },
+    {
+      "example_id": "context_packet_high_confidence_001",
+      "contract_family": "context_packet",
+      "path": "context-packets/high-confidence.json",
+      "schema": "../schemas/context-packet.schema.json",
+      "adr_refs": ["ADR-002", "ADR-008", "ADR-016"],
+      "purpose": "High-confidence context packet with compact repo map and bounded evidence.",
+      "expected_interpretation": "Represents a retrieval result ready for patch drafting on a localized target."
+    },
+    {
+      "example_id": "context_packet_degraded_fallback_001",
+      "contract_family": "context_packet",
+      "path": "context-packets/degraded-fallback.json",
+      "schema": "../schemas/context-packet.schema.json",
+      "adr_refs": ["ADR-002", "ADR-008", "ADR-016"],
+      "purpose": "Degraded context packet under partial parser coverage and broader impact ambiguity.",
+      "expected_interpretation": "Shows bounded output even when confidence remains low and raw-code escalation was necessary."
+    },
+    {
+      "example_id": "diagnostics_high_confidence_trace_001",
+      "contract_family": "diagnostics_trace",
+      "path": "diagnostics/high-confidence-trace.json",
+      "schema": "../schemas/diagnostics-trace.schema.json",
+      "adr_refs": ["ADR-010", "ADR-013", "ADR-016"],
+      "purpose": "Complete successful trace with stage summaries and default-safe redaction.",
+      "expected_interpretation": "Shows the happy path where structural evidence and bounded scope agree."
+    },
+    {
+      "example_id": "diagnostics_degraded_trace_001",
+      "contract_family": "diagnostics_trace",
+      "path": "diagnostics/degraded-trace.json",
+      "schema": "../schemas/diagnostics-trace.schema.json",
+      "adr_refs": ["ADR-010", "ADR-013", "ADR-016"],
+      "purpose": "Degraded trace with parser fallback and ambiguity warnings.",
+      "expected_interpretation": "Shows how degradations, confidence, and guardrails remain explicit under partial evidence."
+    },
+    {
+      "example_id": "event_query_validation_completed_001",
+      "contract_family": "retrieval_stage_event",
+      "path": "events/query-validation-completed.json",
+      "schema": "../schemas/retrieval-stage-event.schema.json",
+      "adr_refs": ["ADR-013", "ADR-016"],
+      "purpose": "Canonical successful validation event.",
+      "expected_interpretation": "Represents the normalized ingress point for an accepted structured query."
+    },
+    {
+      "example_id": "event_candidate_generation_degraded_001",
+      "contract_family": "retrieval_stage_event",
+      "path": "events/candidate-generation-degraded.json",
+      "schema": "../schemas/retrieval-stage-event.schema.json",
+      "adr_refs": ["ADR-013", "ADR-016"],
+      "purpose": "Degraded candidate generation event with bounded warning and degradation codes.",
+      "expected_interpretation": "Signals partial parser coverage without dumping raw parser output."
+    },
+    {
+      "example_id": "event_raw_code_fetch_skipped_001",
+      "contract_family": "retrieval_stage_event",
+      "path": "events/raw-code-fetch-skipped.json",
+      "schema": "../schemas/retrieval-stage-event.schema.json",
+      "adr_refs": ["ADR-013", "ADR-016"],
+      "purpose": "Skipped raw-code fetch event due to sufficient structural evidence.",
+      "expected_interpretation": "Shows late-fetch policy working as intended."
+    },
+    {
+      "example_id": "event_result_finalization_completed_001",
+      "contract_family": "retrieval_stage_event",
+      "path": "events/result-finalization-completed.json",
+      "schema": "../schemas/retrieval-stage-event.schema.json",
+      "adr_refs": ["ADR-013", "ADR-016"],
+      "purpose": "Completed finalization event after packet assembly and confidence computation.",
+      "expected_interpretation": "Marks the end of a bounded retrieval flow ready for host consumption."
+    },
+    {
+      "example_id": "confidence_high_001",
+      "contract_family": "confidence",
+      "path": "confidence/high.json",
+      "schema": "../schemas/confidence.schema.json",
+      "adr_refs": ["ADR-008", "ADR-016"],
+      "purpose": "High confidence with exact target resolution and no major missing evidence.",
+      "expected_interpretation": "Suitable companion for a localized drafting flow."
+    },
+    {
+      "example_id": "confidence_medium_001",
+      "contract_family": "confidence",
+      "path": "confidence/medium.json",
+      "schema": "../schemas/confidence.schema.json",
+      "adr_refs": ["ADR-008", "ADR-016"],
+      "purpose": "Medium confidence with some unresolved impact and partial evidence gaps.",
+      "expected_interpretation": "Suitable for planning and targeted follow-up reads, not for broad autonomous apply."
+    },
+    {
+      "example_id": "confidence_low_001",
+      "contract_family": "confidence",
+      "path": "confidence/low.json",
+      "schema": "../schemas/confidence.schema.json",
+      "adr_refs": ["ADR-008", "ADR-016"],
+      "purpose": "Low confidence under parser fallback and target ambiguity.",
+      "expected_interpretation": "Should keep the host in blocked or review-required posture."
+    },
+    {
+      "example_id": "guardrail_draft_patch_safe_001",
+      "contract_family": "guardrail_assessment",
+      "path": "guardrails/draft-patch-safe.json",
+      "schema": "../schemas/guardrail-assessment.schema.json",
+      "adr_refs": ["ADR-011", "ADR-016"],
+      "purpose": "Localized target with bounded draft-patch autonomy.",
+      "expected_interpretation": "Allows draft patching on the selected unit only."
+    },
+    {
+      "example_id": "guardrail_plan_safe_001",
+      "contract_family": "guardrail_assessment",
+      "path": "guardrails/plan-safe.json",
+      "schema": "../schemas/guardrail-assessment.schema.json",
+      "adr_refs": ["ADR-011", "ADR-016"],
+      "purpose": "Moderate confidence result that remains planning-only.",
+      "expected_interpretation": "Requires more evidence before draft patching."
+    },
+    {
+      "example_id": "guardrail_autonomy_blocked_001",
+      "contract_family": "guardrail_assessment",
+      "path": "guardrails/autonomy-blocked.json",
+      "schema": "../schemas/guardrail-assessment.schema.json",
+      "adr_refs": ["ADR-011", "ADR-016"],
+      "purpose": "Blocked posture with ambiguity and broad impact risk flags.",
+      "expected_interpretation": "Host should not silently promote this result to an apply path."
+    },
+    {
+      "example_id": "policy_override_record_001",
+      "contract_family": "override_record",
+      "path": "policy/override-record.json",
+      "schema": "../schemas/override-record.schema.json",
+      "adr_refs": ["ADR-015", "ADR-016"],
+      "purpose": "Explicit host override that weakens a blocked recommendation.",
+      "expected_interpretation": "Preserves the original recommendation while recording who overrode it and why."
+    },
+    {
+      "example_id": "policy_human_review_approved_001",
+      "contract_family": "human_review_record",
+      "path": "policy/human-review-approved.json",
+      "schema": "../schemas/human-review-record.schema.json",
+      "adr_refs": ["ADR-015", "ADR-016"],
+      "purpose": "Human review approval attached to a high-risk override.",
+      "expected_interpretation": "Shows the canonical record required before executing a risky action."
+    }
+  ]
+}

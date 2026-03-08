@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "autonomy_posture": "plan_safe",
+  "blocking_reasons": [],
+  "required_next_steps": [
+    {
+      "code": "fetch_more_context",
+      "summary": "Read the enclosing implementation unit before drafting a patch."
+    },
+    {
+      "code": "inspect_related_tests",
+      "summary": "Confirm the closest relevant tests before proposing edits."
+    }
+  ],
+  "allowed_action_scope": {
+    "mode": "plan_only",
+    "allow_multi_file_edit": false,
+    "allow_apply_without_human_review": false,
+    "max_raw_code_level": "local_neighborhood"
+  },
+  "risk_flags": [
+    {
+      "code": "impact_needs_confirmation",
+      "summary": "Impact hints suggest at least one unresolved downstream dependency."
+    }
+  ]
+}

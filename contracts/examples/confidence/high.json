@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "level": "high",
+  "score": 0.92,
+  "reasons": [
+    {
+      "code": "exact_target_resolved",
+      "summary": "Target symbol resolved to the authority definition."
+    },
+    {
+      "code": "graph_agreement_strong",
+      "summary": "Definition, callers, and adjacent tests agree on the selected unit."
+    }
+  ],
+  "warnings": [],
+  "missing_evidence": []
+}

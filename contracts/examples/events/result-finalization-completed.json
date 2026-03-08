@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "event_name": "result_finalization.completed",
+  "timestamp": "2026-03-08T19:22:11Z",
+  "trace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "request_id": "req-event-finalization-001",
+  "stage": "result_finalization",
+  "status": "completed",
+  "summary": "Confidence, guardrails, and packet metadata emitted for host consumption.",
+  "counters": {
+    "warning_count": 0,
+    "degradation_count": 0,
+    "selected_units": 2
+  },
+  "task_id": "task-order-debug-001",
+  "query_intent": "code_understanding",
+  "warning_codes": [],
+  "degradation_codes": [],
+  "duration_ms": 2,
+  "budget_summary": {
+    "requested_tokens": 1800,
+    "estimated_tokens": 740
+  },
+  "redaction_level": "default_safe"
+}

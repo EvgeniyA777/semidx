@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "intent": {
+    "purpose": "change_impact",
+    "details": "Assess the downstream impact of a change in order validation and ranking logic."
+  },
+  "targets": {
+    "paths": ["src/my/app/order.clj"],
+    "changed_spans": [
+      {
+        "path": "src/my/app/order.clj",
+        "start_line": 48,
+        "end_line": 77
+      }
+    ],
+    "diff_summary": "Touched validation branches and the public process-order path."
+  },
+  "constraints": {
+    "token_budget": 2200,
+    "snapshot_id": "repo-snapshot-20260308-001",
+    "language_allowlist": ["clojure"],
+    "allowed_path_prefixes": ["src/my/app/", "test/my/app/"],
+    "max_raw_code_level": "local_neighborhood",
+    "freshness": "current_snapshot"
+  },
+  "hints": {
+    "preferred_paths": ["src/my/app/order.clj", "src/my/app/order/rules.clj"],
+    "preferred_modules": ["my.app.order", "my.app.order.rules"],
+    "suspected_symbols": ["my.app.order/process-order", "my.app.order/validate-order"],
+    "focus_on_tests": true,
+    "prefer_definitions_over_callers": false,
+    "prefer_breadth_over_depth": true
+  },
+  "options": {
+    "include_tests": true,
+    "include_impact_hints": true,
+    "allow_raw_code_escalation": true,
+    "favor_compact_packet": false,
+    "favor_higher_recall": true
+  },
+  "trace": {
+    "trace_id": "22222222-2222-4222-8222-222222222222",
+    "request_id": "req-diff-impact-001",
+    "task_id": "task-order-impact-001",
+    "actor_id": "impact_agent"
+  }
+}

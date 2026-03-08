@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "intent": {
+    "purpose": "test_targeting",
+    "details": "Find the smallest relevant test set for changes around order validation and fulfillment scheduling."
+  },
+  "targets": {
+    "paths": ["src/my/app/order.clj", "src/my/app/fulfillment.clj"],
+    "tests": ["test/my/app/order_test.clj", "test/my/app/fulfillment_test.clj"]
+  },
+  "constraints": {
+    "token_budget": 1500,
+    "snapshot_id": "repo-snapshot-20260308-001",
+    "language_allowlist": ["clojure"],
+    "allowed_path_prefixes": ["src/my/app/", "test/my/app/"],
+    "max_raw_code_level": "target_span",
+    "freshness": "current_snapshot"
+  },
+  "hints": {
+    "preferred_paths": ["test/my/app/order_test.clj", "test/my/app/fulfillment_test.clj"],
+    "preferred_modules": ["my.app.order-test", "my.app.fulfillment-test"],
+    "suspected_symbols": ["my.app.order/process-order"],
+    "focus_on_tests": true,
+    "prefer_definitions_over_callers": false,
+    "prefer_breadth_over_depth": false
+  },
+  "options": {
+    "include_tests": true,
+    "include_impact_hints": true,
+    "allow_raw_code_escalation": false,
+    "favor_compact_packet": true,
+    "favor_higher_recall": false
+  },
+  "trace": {
+    "trace_id": "44444444-4444-4444-8444-444444444444",
+    "request_id": "req-test-targeting-001",
+    "task_id": "task-test-scope-001",
+    "actor_id": "test_agent"
+  }
+}

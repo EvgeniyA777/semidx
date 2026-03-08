@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semantic-code-indexing.example/contracts/schemas/guardrail-assessment.schema.json",
+  "title": "Guardrail Assessment",
+  "description": "Retrieval-scoped autonomy guardrail companion contract.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "autonomy_posture",
+    "blocking_reasons",
+    "required_next_steps",
+    "allowed_action_scope",
+    "risk_flags"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "autonomy_posture": {
+      "$ref": "common.schema.json#/$defs/autonomyPosture"
+    },
+    "blocking_reasons": {
+      "$ref": "common.schema.json#/$defs/codedItemArray"
+    },
+    "required_next_steps": {
+      "$ref": "common.schema.json#/$defs/codedItemArray"
+    },
+    "allowed_action_scope": {
+      "type": "object",
+      "required": ["mode", "allow_multi_file_edit", "allow_apply_without_human_review"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["analysis_only", "plan_only", "draft_patch_on_selected_unit_only"]
+        },
+        "allow_multi_file_edit": {
+          "type": "boolean"
+        },
+        "allow_apply_without_human_review": {
+          "type": "boolean"
+        },
+        "max_raw_code_level": {
+          "$ref": "common.schema.json#/$defs/rawFetchLevel"
+        }
+      }
+    },
+    "risk_flags": {
+      "$ref": "common.schema.json#/$defs/codedItemArray"
+    }
+  }
+}
+

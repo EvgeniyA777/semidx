@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "event_name": "candidate_generation.degraded",
+  "timestamp": "2026-03-08T19:30:02Z",
+  "trace_id": "88888888-8888-4888-8888-888888888888",
+  "request_id": "req-event-candidates-001",
+  "stage": "candidate_generation",
+  "status": "degraded",
+  "summary": "Generated a broader candidate set under partial parser coverage.",
+  "counters": {
+    "candidate_units": 14,
+    "candidate_files": 6
+  },
+  "task_id": "task-payment-bug-001",
+  "query_intent": "bug_investigation",
+  "warning_codes": ["parser_partial"],
+  "degradation_codes": ["parser_fallback"],
+  "duration_ms": 17,
+  "budget_summary": {
+    "requested_tokens": 2600,
+    "estimated_tokens": 1520
+  },
+  "redaction_level": "default_safe"
+}

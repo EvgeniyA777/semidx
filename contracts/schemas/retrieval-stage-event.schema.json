@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semantic-code-indexing.example/contracts/schemas/retrieval-stage-event.schema.json",
+  "title": "Retrieval Stage Event",
+  "description": "Canonical telemetry event emitted for a retrieval stage transition.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_name",
+    "timestamp",
+    "trace_id",
+    "request_id",
+    "stage",
+    "status",
+    "summary",
+    "counters"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "event_name": {
+      "type": "string",
+      "pattern": "^(query_validation|candidate_generation|ranking|context_packet_assembly|raw_code_fetch|result_finalization)\\.(started|completed|degraded|failed|skipped)$"
+    },
+    "timestamp": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "trace_id": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "request_id": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "stage": {
+      "$ref": "common.schema.json#/$defs/stageName"
+    },
+    "status": {
+      "$ref": "common.schema.json#/$defs/eventStatus"
+    },
+    "summary": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "counters": {
+      "$ref": "common.schema.json#/$defs/metricMap"
+    },
+    "task_id": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "session_id": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "snapshot_id": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "query_intent": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "warning_codes": {
+      "$ref": "common.schema.json#/$defs/codeArray"
+    },
+    "degradation_codes": {
+      "$ref": "common.schema.json#/$defs/codeArray"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "budget_summary": {
+      "$ref": "common.schema.json#/$defs/metricMap"
+    },
+    "redaction_level": {
+      "type": "string",
+      "enum": ["default_safe", "strict", "debug_expanded"]
+    }
+  }
+}

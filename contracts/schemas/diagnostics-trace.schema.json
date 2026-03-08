@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semantic-code-indexing.example/contracts/schemas/diagnostics-trace.schema.json",
+  "title": "Diagnostics Trace",
+  "description": "Canonical diagnostics trace for a retrieval flow.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "trace",
+    "query",
+    "stages",
+    "result",
+    "warnings",
+    "degradations",
+    "confidence",
+    "guardrails",
+    "performance"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "trace": {
+      "type": "object",
+      "required": ["trace_id", "request_id", "timestamp_start", "timestamp_end"],
+      "additionalProperties": false,
+      "properties": {
+        "trace_id": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "request_id": {
+          "$ref": "common.schema.json#/$defs/boundedString"
+        },
+        "timestamp_start": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "timestamp_end": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "host_metadata": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "common.schema.json#/$defs/code"
+          },
+          "additionalProperties": {
+            "type": ["string", "number", "boolean"]
+          },
+          "maxProperties": 8
+        }
+      }
+    },
+    "query": {
+      "type": "object",
+      "required": [
+        "intent",
+        "targets_summary",
+        "constraints_summary",
+        "hints_summary",
+        "options_summary",
+        "validation_status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "intent": {
+          "$ref": "common.schema.json#/$defs/boundedString"
+        },
+        "targets_summary": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "constraints_summary": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "hints_summary": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "options_summary": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "validation_status": {
+          "type": "string",
+          "enum": ["accepted", "accepted_with_normalization", "rejected"]
+        }
+      }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": ["name", "status", "summary", "counters", "warnings", "degradation_flags", "duration_ms"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "$ref": "common.schema.json#/$defs/stageName"
+          },
+          "status": {
+            "$ref": "common.schema.json#/$defs/stageOutcome"
+          },
+          "summary": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "counters": {
+            "$ref": "common.schema.json#/$defs/metricMap"
+          },
+          "warnings": {
+            "$ref": "common.schema.json#/$defs/codedItemArray"
+          },
+          "degradation_flags": {
+            "$ref": "common.schema.json#/$defs/codedItemArray"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "selected_units_count",
+        "selected_files_count",
+        "raw_fetch_level_reached",
+        "packet_size_estimate",
+        "top_authority_targets",
+        "result_status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "selected_units_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selected_files_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "raw_fetch_level_reached": {
+          "$ref": "common.schema.json#/$defs/rawFetchLevel"
+        },
+        "packet_size_estimate": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "top_authority_targets": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "result_status": {
+          "type": "string",
+          "enum": ["completed", "degraded", "failed"]
+        }
+      }
+    },
+    "warnings": {
+      "$ref": "common.schema.json#/$defs/codedItemArray"
+    },
+    "degradations": {
+      "$ref": "common.schema.json#/$defs/codedItemArray"
+    },
+    "confidence": {
+      "$ref": "confidence.schema.json"
+    },
+    "guardrails": {
+      "$ref": "guardrail-assessment.schema.json"
+    },
+    "performance": {
+      "type": "object",
+      "required": ["total_duration_ms", "cache_summary", "parser_summary", "fetch_summary", "budget_summary"],
+      "additionalProperties": false,
+      "properties": {
+        "total_duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_summary": {
+          "$ref": "common.schema.json#/$defs/metricMap"
+        },
+        "parser_summary": {
+          "$ref": "common.schema.json#/$defs/metricMap"
+        },
+        "fetch_summary": {
+          "$ref": "common.schema.json#/$defs/metricMap"
+        },
+        "budget_summary": {
+          "$ref": "common.schema.json#/$defs/metricMap"
+        }
+      }
+    }
+  }
+}
+

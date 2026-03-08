@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "autonomy_posture": "autonomy_blocked",
+  "blocking_reasons": [
+    {
+      "code": "target_ambiguous",
+      "summary": "The retrieval result did not localize a single authority target."
+    },
+    {
+      "code": "confidence_low",
+      "summary": "Confidence stayed low after fallback parsing and limited graph evidence."
+    }
+  ],
+  "required_next_steps": [
+    {
+      "code": "human_review_required",
+      "summary": "Request human review before drafting or applying changes."
+    },
+    {
+      "code": "collect_stronger_evidence",
+      "summary": "Expand retrieval only after narrowing the target and validating related tests."
+    }
+  ],
+  "allowed_action_scope": {
+    "mode": "analysis_only",
+    "allow_multi_file_edit": false,
+    "allow_apply_without_human_review": false,
+    "max_raw_code_level": "local_neighborhood"
+  },
+  "risk_flags": [
+    {
+      "code": "impact_broad",
+      "summary": "The likely impact surface spans multiple files and unresolved neighbors."
+    },
+    {
+      "code": "parser_fallback",
+      "summary": "One of the target files was only available through fallback parsing."
+    }
+  ]
+}

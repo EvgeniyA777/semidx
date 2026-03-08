@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "autonomy_posture": "draft_patch_safe",
+  "blocking_reasons": [],
+  "required_next_steps": [
+    {
+      "code": "run_targeted_tests",
+      "summary": "Run the nearest targeted tests before any apply path."
+    }
+  ],
+  "allowed_action_scope": {
+    "mode": "draft_patch_on_selected_unit_only",
+    "allow_multi_file_edit": false,
+    "allow_apply_without_human_review": false,
+    "max_raw_code_level": "enclosing_unit"
+  },
+  "risk_flags": [
+    {
+      "code": "apply_requires_review",
+      "summary": "Patch drafting is allowed, but applying changes still requires host review policy."
+    }
+  ]
+}

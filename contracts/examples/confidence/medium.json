@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "level": "medium",
+  "score": 0.64,
+  "reasons": [
+    {
+      "code": "diff_overlap_direct",
+      "summary": "Changed span overlaps the selected implementation unit."
+    }
+  ],
+  "warnings": [
+    {
+      "code": "impact_surface_partial",
+      "summary": "Downstream callers and dependents may extend beyond the retrieved scope."
+    }
+  ],
+  "missing_evidence": [
+    {
+      "code": "test_adjacency_incomplete",
+      "summary": "No direct test adjacency was confirmed for one changed neighbor."
+    }
+  ]
+}

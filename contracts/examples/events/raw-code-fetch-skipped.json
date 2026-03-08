@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "event_name": "raw_code_fetch.skipped",
+  "timestamp": "2026-03-08T19:22:11Z",
+  "trace_id": "99999999-9999-4999-8999-999999999999",
+  "request_id": "req-event-raw-fetch-001",
+  "stage": "raw_code_fetch",
+  "status": "skipped",
+  "summary": "Structural evidence was sufficient; raw-code escalation was not needed.",
+  "counters": {
+    "raw_fetch_requests": 0
+  },
+  "task_id": "task-order-debug-001",
+  "query_intent": "code_understanding",
+  "warning_codes": [],
+  "degradation_codes": [],
+  "duration_ms": 0,
+  "budget_summary": {
+    "requested_tokens": 1800,
+    "estimated_tokens": 740
+  },
+  "redaction_level": "default_safe"
+}

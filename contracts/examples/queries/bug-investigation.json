@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "intent": {
+    "purpose": "bug_investigation",
+    "details": "Investigate duplicate payment submission under retry and missing idempotency checks."
+  },
+  "targets": {
+    "modules": ["my.app.checkout", "my.app.payments"],
+    "paths": ["src/my/app/checkout.clj", "src/my/app/payments.clj"],
+    "diff_summary": "Observed failure spans checkout request handling, payment gateway calls, and retry guard logic."
+  },
+  "constraints": {
+    "token_budget": 2600,
+    "snapshot_id": "repo-snapshot-20260308-001",
+    "language_allowlist": ["clojure"],
+    "allowed_path_prefixes": ["src/my/app/", "test/my/app/"],
+    "max_raw_code_level": "enclosing_unit",
+    "freshness": "allow_stale_if_flagged"
+  },
+  "hints": {
+    "preferred_paths": ["src/my/app/checkout.clj", "src/my/app/payments.clj"],
+    "preferred_modules": ["my.app.checkout", "my.app.payments"],
+    "suspected_symbols": ["my.app.checkout/submit-order", "my.app.payments/charge!"],
+    "focus_on_tests": true,
+    "prefer_definitions_over_callers": true,
+    "prefer_breadth_over_depth": true
+  },
+  "options": {
+    "include_tests": true,
+    "include_impact_hints": true,
+    "allow_raw_code_escalation": true,
+    "favor_compact_packet": false,
+    "favor_higher_recall": true
+  },
+  "trace": {
+    "trace_id": "33333333-3333-4333-8333-333333333333",
+    "request_id": "req-bug-investigation-001",
+    "task_id": "task-payment-bug-001",
+    "actor_id": "investigation_agent"
+  }
+}

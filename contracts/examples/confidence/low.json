@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "level": "low",
+  "score": 0.29,
+  "reasons": [
+    {
+      "code": "lexical_signal_present",
+      "summary": "Relevant lexical overlap exists across multiple files."
+    }
+  ],
+  "warnings": [
+    {
+      "code": "parser_fallback",
+      "summary": "Retrieval relied on fallback parsing for one of the key files."
+    },
+    {
+      "code": "target_ambiguous",
+      "summary": "Multiple candidate units remain plausible edit targets."
+    }
+  ],
+  "missing_evidence": [
+    {
+      "code": "exact_target_resolution_missing",
+      "summary": "The system could not resolve the target to a single authority definition."
+    },
+    {
+      "code": "test_adjacency_missing",
+      "summary": "No trustworthy nearby test evidence was found."
+    }
+  ]
+}

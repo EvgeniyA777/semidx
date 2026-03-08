@@ -1,0 +1,100 @@
+{
+  "schema_version": "1.0",
+  "query": {
+    "intent": "code_understanding",
+    "targets_summary": ["symbol: my.app.order/process-order", "path: src/my/app/order.clj"],
+    "constraints_summary": ["token budget 1800", "raw code max enclosing unit", "freshness current snapshot"],
+    "hints_summary": ["prefer definitions over callers", "include nearby tests"]
+  },
+  "repo_map": {
+    "focus_paths": ["src/my/app/order.clj", "test/my/app/order_test.clj"],
+    "focus_modules": ["my.app.order", "my.app.order-test"],
+    "summary": "Order processing is centered in one namespace with a small adjacent test surface."
+  },
+  "relevant_units": [
+    {
+      "unit_id": "src/my/app/order.clj::my.app.order/process-order",
+      "kind": "function",
+      "symbol": "my.app.order/process-order",
+      "path": "src/my/app/order.clj",
+      "span": {
+        "path": "src/my/app/order.clj",
+        "start_line": 52,
+        "end_line": 88
+      },
+      "rank_band": "top_authority"
+    },
+    {
+      "unit_id": "test/my/app/order_test.clj::process-order-test",
+      "kind": "test",
+      "symbol": "my.app.order-test/process-order-test",
+      "path": "test/my/app/order_test.clj",
+      "span": {
+        "path": "test/my/app/order_test.clj",
+        "start_line": 18,
+        "end_line": 41
+      },
+      "rank_band": "useful_support"
+    }
+  ],
+  "skeletons": [
+    {
+      "unit_id": "src/my/app/order.clj::my.app.order/process-order",
+      "signature": "(defn process-order [ctx order])",
+      "summary": "Public entrypoint for validation, pricing, and fulfillment handoff.",
+      "docstring_excerpt": "Validates the order and returns the persisted workflow result."
+    },
+    {
+      "unit_id": "test/my/app/order_test.clj::process-order-test",
+      "signature": "(deftest process-order-test)",
+      "summary": "Covers the happy path and invalid-order rejection.",
+      "docstring_excerpt": "Verifies successful processing and validation failure branches."
+    }
+  ],
+  "impact_hints": {
+    "callers": ["src/my/app/api.clj::submit-order-handler"],
+    "dependents": ["src/my/app/fulfillment.clj::enqueue-fulfillment"],
+    "related_tests": ["test/my/app/order_test.clj", "test/my/app/api_test.clj"],
+    "risky_neighbors": ["src/my/app/order.clj::validate-order"]
+  },
+  "evidence": {
+    "selection_reasons": [
+      {
+        "code": "exact_target_resolved",
+        "summary": "Requested symbol resolves directly to the public implementation entrypoint."
+      },
+      {
+        "code": "test_adjacency_confirmed",
+        "summary": "Nearest tests exercise the selected entrypoint directly."
+      }
+    ],
+    "hint_effects": [
+      {
+        "code": "preferred_module_boost",
+        "summary": "The preferred module hint increased ranking priority for the order namespace."
+      }
+    ]
+  },
+  "budget": {
+    "requested_tokens": 1800,
+    "estimated_tokens": 740,
+    "truncation_flags": []
+  },
+  "confidence": {
+    "schema_version": "1.0",
+    "level": "high",
+    "score": 0.92,
+    "reasons": [
+      {
+        "code": "exact_target_resolved",
+        "summary": "Target symbol resolved to the authority definition."
+      },
+      {
+        "code": "graph_agreement_strong",
+        "summary": "Definition, callers, and adjacent tests agree on the selected unit."
+      }
+    ],
+    "warnings": [],
+    "missing_evidence": []
+  }
+}

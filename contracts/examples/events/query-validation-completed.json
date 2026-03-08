@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "event_name": "query_validation.completed",
+  "timestamp": "2026-03-08T19:22:11Z",
+  "trace_id": "77777777-7777-4777-8777-777777777777",
+  "request_id": "req-event-validation-001",
+  "stage": "query_validation",
+  "status": "completed",
+  "summary": "Structured retrieval query accepted without normalization.",
+  "counters": {
+    "target_count": 2,
+    "constraint_count": 4
+  },
+  "task_id": "task-order-debug-001",
+  "query_intent": "code_understanding",
+  "warning_codes": [],
+  "degradation_codes": [],
+  "duration_ms": 2,
+  "budget_summary": {
+    "requested_tokens": 1800
+  },
+  "redaction_level": "default_safe"
+}

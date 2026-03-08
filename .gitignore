@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Clojure CLI / build outputs
+.cpcache/
+.nrepl-port
+.shadow-cljs/
+target/
+classes/
+
+# Clojure tooling caches
+.clj-kondo/
+.lsp/
+.calva/
+.cider-repl-history
+.lein-failures
+
+# Logs and temp files
+*.log
+*.tmp
+tmp/
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+*~

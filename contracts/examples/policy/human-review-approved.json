@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "review_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  "trace_id": "66666666-6666-4666-8666-666666666666",
+  "override_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "review_status": "approved",
+  "reviewer_id": "staff_engineer_oncall",
+  "timestamp": "2026-03-08T19:36:44Z",
+  "rationale": {
+    "code": "bounded_incident_patch",
+    "summary": "A draft patch is acceptable because the override remains review-gated and scoped to two units."
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semantic-code-indexing.example/contracts/schemas/human-review-record.schema.json",
+  "title": "Human Review Record",
+  "description": "Canonical record for a human review decision associated with an override or high-risk action.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "review_id",
+    "trace_id",
+    "override_id",
+    "review_status",
+    "reviewer_id",
+    "timestamp",
+    "rationale"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "review_id": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "trace_id": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "override_id": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "review_status": {
+      "type": "string",
+      "enum": ["required_pending", "approved", "rejected", "waived_by_policy"]
+    },
+    "reviewer_id": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "timestamp": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "rationale": {
+      "$ref": "common.schema.json#/$defs/codedItem"
+    }
+  }
+}

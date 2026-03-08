@@ -1,0 +1,58 @@
+{
+  "fixture_id": "retrieval_multi_file_broad_impact_001",
+  "category": "multi_file_change",
+  "purpose": "Ensure broad multi-file impact remains bounded, explainable, and review-oriented.",
+  "adr_refs": ["ADR-005", "ADR-006", "ADR-011", "ADR-014"],
+  "snapshot_ref": "seed-clojure-app@rev-004",
+  "input": {
+    "query": {
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "review_support",
+        "details": "Review a multi-file change that touches checkout, payments, and fulfillment."
+      },
+      "targets": {
+        "paths": [
+          "src/my/app/checkout.clj",
+          "src/my/app/payments.clj",
+          "src/my/app/fulfillment.clj"
+        ],
+        "diff_summary": "Change spans order submission, payment charging, and fulfillment scheduling."
+      },
+      "constraints": {
+        "token_budget": 2800,
+        "snapshot_id": "seed-clojure-app@rev-004",
+        "language_allowlist": ["clojure"],
+        "allowed_path_prefixes": ["src/my/app/", "test/my/app/"],
+        "max_raw_code_level": "local_neighborhood",
+        "freshness": "current_snapshot"
+      },
+      "hints": {
+        "preferred_paths": ["src/my/app/checkout.clj", "src/my/app/payments.clj"],
+        "preferred_modules": ["my.app.checkout", "my.app.payments", "my.app.fulfillment"],
+        "focus_on_tests": true,
+        "prefer_definitions_over_callers": false,
+        "prefer_breadth_over_depth": true
+      },
+      "options": {
+        "include_tests": true,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": true,
+        "favor_compact_packet": false,
+        "favor_higher_recall": true
+      },
+      "trace": {
+        "trace_id": "12121212-1212-4212-8212-121212121212",
+        "request_id": "fixture-multi-file-001"
+      }
+    }
+  },
+  "expected": {
+    "must_include_impact_hints": ["callers", "dependents", "related_tests", "risky_neighbors"],
+    "result_status_allowed": ["completed", "degraded"],
+    "autonomy_posture_allowed": ["plan_safe", "autonomy_blocked"],
+    "required_risk_flags": ["impact_broad"],
+    "review_required_if_posture": ["autonomy_blocked"],
+    "raw_fetch_level_ceiling": "local_neighborhood"
+  }
+}

@@ -1,0 +1,164 @@
+{
+  "schema_version": "1.0",
+  "trace": {
+    "trace_id": "55555555-5555-4555-8555-555555555555",
+    "request_id": "req-diagnostics-high-001",
+    "timestamp_start": "2026-03-08T19:22:11Z",
+    "timestamp_end": "2026-03-08T19:22:11Z",
+    "host_metadata": {
+      "host": "planner_service",
+      "priority": 1,
+      "interactive": true
+    }
+  },
+  "query": {
+    "intent": "code_understanding",
+    "targets_summary": ["symbol: my.app.order/process-order", "path: src/my/app/order.clj"],
+    "constraints_summary": ["token budget 1800", "raw code max enclosing unit"],
+    "hints_summary": ["prefer definitions", "focus on tests"],
+    "options_summary": ["include tests", "include impact hints", "favor compact packet"],
+    "validation_status": "accepted"
+  },
+  "stages": [
+    {
+      "name": "query_validation",
+      "status": "completed",
+      "summary": "Structured query accepted without normalization.",
+      "counters": {
+        "target_count": 2,
+        "constraint_count": 4
+      },
+      "warnings": [],
+      "degradation_flags": [],
+      "duration_ms": 2
+    },
+    {
+      "name": "candidate_generation",
+      "status": "completed",
+      "summary": "Generated candidates from exact symbol, path overlap, and test adjacency.",
+      "counters": {
+        "candidate_units": 6,
+        "candidate_files": 3
+      },
+      "warnings": [],
+      "degradation_flags": [],
+      "duration_ms": 8
+    },
+    {
+      "name": "ranking",
+      "status": "completed",
+      "summary": "Structural signals converged on one authority unit.",
+      "counters": {
+        "ranked_units": 6,
+        "top_authority_units": 1
+      },
+      "warnings": [],
+      "degradation_flags": [],
+      "duration_ms": 5
+    },
+    {
+      "name": "context_packet_assembly",
+      "status": "completed",
+      "summary": "Assembled a bounded packet with two units and compact evidence.",
+      "counters": {
+        "selected_units": 2,
+        "selected_files": 2
+      },
+      "warnings": [],
+      "degradation_flags": [],
+      "duration_ms": 4
+    },
+    {
+      "name": "raw_code_fetch",
+      "status": "skipped",
+      "summary": "Structural evidence was sufficient; raw-code escalation was not needed.",
+      "counters": {
+        "raw_fetch_requests": 0
+      },
+      "warnings": [],
+      "degradation_flags": [],
+      "duration_ms": 0
+    },
+    {
+      "name": "result_finalization",
+      "status": "completed",
+      "summary": "Confidence and guardrails emitted with default-safe diagnostics.",
+      "counters": {
+        "warning_count": 0,
+        "degradation_count": 0
+      },
+      "warnings": [],
+      "degradation_flags": [],
+      "duration_ms": 2
+    }
+  ],
+  "result": {
+    "selected_units_count": 2,
+    "selected_files_count": 2,
+    "raw_fetch_level_reached": "none",
+    "packet_size_estimate": 740,
+    "top_authority_targets": ["src/my/app/order.clj::my.app.order/process-order"],
+    "result_status": "completed"
+  },
+  "warnings": [],
+  "degradations": [],
+  "confidence": {
+    "schema_version": "1.0",
+    "level": "high",
+    "score": 0.92,
+    "reasons": [
+      {
+        "code": "exact_target_resolved",
+        "summary": "Target symbol resolved to the authority definition."
+      },
+      {
+        "code": "graph_agreement_strong",
+        "summary": "Definition, callers, and adjacent tests agree on the selected unit."
+      }
+    ],
+    "warnings": [],
+    "missing_evidence": []
+  },
+  "guardrails": {
+    "schema_version": "1.0",
+    "autonomy_posture": "draft_patch_safe",
+    "blocking_reasons": [],
+    "required_next_steps": [
+      {
+        "code": "run_targeted_tests",
+        "summary": "Run the nearest targeted tests before any apply path."
+      }
+    ],
+    "allowed_action_scope": {
+      "mode": "draft_patch_on_selected_unit_only",
+      "allow_multi_file_edit": false,
+      "allow_apply_without_human_review": false,
+      "max_raw_code_level": "enclosing_unit"
+    },
+    "risk_flags": [
+      {
+        "code": "apply_requires_review",
+        "summary": "Patch drafting is allowed, but applying changes still requires host review policy."
+      }
+    ]
+  },
+  "performance": {
+    "total_duration_ms": 21,
+    "cache_summary": {
+      "cache_hits": 4,
+      "cache_misses": 1
+    },
+    "parser_summary": {
+      "primary_parsers": 1,
+      "fallback_parsers": 0
+    },
+    "fetch_summary": {
+      "raw_fetch_requests": 0,
+      "raw_fetch_bytes": 0
+    },
+    "budget_summary": {
+      "requested_tokens": 1800,
+      "estimated_tokens": 740
+    }
+  }
+}

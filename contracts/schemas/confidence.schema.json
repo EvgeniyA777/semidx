@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semantic-code-indexing.example/contracts/schemas/confidence.schema.json",
+  "title": "Confidence",
+  "description": "Evidence-aware confidence contract for retrieval outputs.",
+  "type": "object",
+  "required": ["schema_version", "level", "reasons", "warnings", "missing_evidence"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "level": {
+      "$ref": "common.schema.json#/$defs/confidenceLevel"
+    },
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "reasons": {
+      "$ref": "common.schema.json#/$defs/codedItemArray"
+    },
+    "warnings": {
+      "$ref": "common.schema.json#/$defs/codedItemArray"
+    },
+    "missing_evidence": {
+      "$ref": "common.schema.json#/$defs/codedItemArray"
+    }
+  }
+}
+

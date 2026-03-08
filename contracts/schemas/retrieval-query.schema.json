@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semantic-code-indexing.example/contracts/schemas/retrieval-query.schema.json",
+  "title": "Retrieval Query",
+  "description": "Canonical host query for requesting retrieval results from the semantic indexing library.",
+  "type": "object",
+  "required": ["schema_version", "intent", "targets", "constraints", "hints", "options", "trace"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "intent": {
+      "type": "object",
+      "required": ["purpose"],
+      "additionalProperties": false,
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "code_understanding",
+            "change_impact",
+            "edit_preparation",
+            "test_targeting",
+            "review_support",
+            "bug_investigation"
+          ]
+        },
+        "details": {
+          "$ref": "common.schema.json#/$defs/boundedLongString"
+        }
+      }
+    },
+    "targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true
+        },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true
+        },
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true
+        },
+        "changed_spans": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/span"
+          },
+          "minItems": 1,
+          "maxItems": 20
+        },
+        "diff_summary": {
+          "$ref": "common.schema.json#/$defs/boundedLongString"
+        }
+      },
+      "anyOf": [
+        { "required": ["paths"] },
+        { "required": ["symbols"] },
+        { "required": ["modules"] },
+        { "required": ["tests"] },
+        { "required": ["changed_spans"] },
+        { "required": ["diff_summary"] }
+      ]
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "token_budget": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "snapshot_id": {
+          "$ref": "common.schema.json#/$defs/boundedString"
+        },
+        "language_allowlist": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "minItems": 1,
+          "maxItems": 12,
+          "uniqueItems": true
+        },
+        "allowed_path_prefixes": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true
+        },
+        "max_raw_code_level": {
+          "$ref": "common.schema.json#/$defs/rawFetchLevel"
+        },
+        "freshness": {
+          "type": "string",
+          "enum": ["current_snapshot", "allow_stale_if_flagged"]
+        }
+      }
+    },
+    "hints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preferred_paths": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "preferred_modules": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "suspected_symbols": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "focus_on_tests": {
+          "type": "boolean"
+        },
+        "prefer_definitions_over_callers": {
+          "type": "boolean"
+        },
+        "prefer_breadth_over_depth": {
+          "type": "boolean"
+        }
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "include_tests": {
+          "type": "boolean"
+        },
+        "include_impact_hints": {
+          "type": "boolean"
+        },
+        "allow_raw_code_escalation": {
+          "type": "boolean"
+        },
+        "favor_compact_packet": {
+          "type": "boolean"
+        },
+        "favor_higher_recall": {
+          "type": "boolean"
+        }
+      }
+    },
+    "trace": {
+      "$ref": "common.schema.json#/$defs/traceRef"
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "code_understanding",
+        "details": "Locate the authority implementation and the nearest callers for process-order."
+      },
+      "targets": {
+        "symbols": ["my.app.order/process-order"],
+        "paths": ["src/my/app/order.clj"]
+      },
+      "constraints": {
+        "token_budget": 1800,
+        "max_raw_code_level": "enclosing_unit",
+        "freshness": "current_snapshot"
+      },
+      "hints": {
+        "preferred_modules": ["my.app.order"],
+        "prefer_definitions_over_callers": true
+      },
+      "options": {
+        "include_tests": true,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": false,
+        "favor_compact_packet": true,
+        "favor_higher_recall": false
+      },
+      "trace": {
+        "trace_id": "11111111-1111-4111-8111-111111111111",
+        "request_id": "req-symbol-target-001",
+        "task_id": "task-order-debug-001",
+        "actor_id": "planner-agent"
+      }
+    }
+  ]
+}
+

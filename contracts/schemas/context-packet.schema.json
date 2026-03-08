@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semantic-code-indexing.example/contracts/schemas/context-packet.schema.json",
+  "title": "Context Packet",
+  "description": "Canonical context packet returned by the retrieval library before any optional raw-code escalation.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "query",
+    "repo_map",
+    "relevant_units",
+    "skeletons",
+    "impact_hints",
+    "evidence",
+    "budget",
+    "confidence"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "query": {
+      "type": "object",
+      "required": ["intent", "targets_summary", "constraints_summary", "hints_summary"],
+      "additionalProperties": false,
+      "properties": {
+        "intent": {
+          "$ref": "common.schema.json#/$defs/boundedString"
+        },
+        "targets_summary": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "constraints_summary": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "hints_summary": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        }
+      }
+    },
+    "repo_map": {
+      "type": "object",
+      "required": ["focus_paths", "focus_modules", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "focus_paths": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "focus_modules": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "summary": {
+          "$ref": "common.schema.json#/$defs/boundedLongString"
+        }
+      }
+    },
+    "relevant_units": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["unit_id", "kind", "path", "span", "rank_band"],
+        "additionalProperties": false,
+        "properties": {
+          "unit_id": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "kind": {
+            "$ref": "common.schema.json#/$defs/unitKind"
+          },
+          "symbol": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "path": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "span": {
+            "$ref": "common.schema.json#/$defs/span"
+          },
+          "rank_band": {
+            "$ref": "common.schema.json#/$defs/rankBand"
+          }
+        }
+      }
+    },
+    "skeletons": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["unit_id", "signature", "summary"],
+        "additionalProperties": false,
+        "properties": {
+          "unit_id": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "signature": {
+            "$ref": "common.schema.json#/$defs/boundedLongString"
+          },
+          "summary": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "docstring_excerpt": {
+            "$ref": "common.schema.json#/$defs/boundedLongString"
+          }
+        }
+      }
+    },
+    "impact_hints": {
+      "type": "object",
+      "required": ["callers", "dependents", "related_tests", "risky_neighbors"],
+      "additionalProperties": false,
+      "properties": {
+        "callers": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "dependents": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "related_tests": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "risky_neighbors": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["selection_reasons", "hint_effects"],
+      "additionalProperties": false,
+      "properties": {
+        "selection_reasons": {
+          "$ref": "common.schema.json#/$defs/codedItemArray"
+        },
+        "hint_effects": {
+          "$ref": "common.schema.json#/$defs/codedItemArray"
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "required": ["requested_tokens", "estimated_tokens", "truncation_flags"],
+      "additionalProperties": false,
+      "properties": {
+        "requested_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "estimated_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncation_flags": {
+          "$ref": "common.schema.json#/$defs/stringArray"
+        }
+      }
+    },
+    "confidence": {
+      "$ref": "confidence.schema.json"
+    }
+  }
+}
+

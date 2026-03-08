@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semantic-code-indexing.example/contracts/schemas/override-record.schema.json",
+  "title": "Override Record",
+  "description": "Canonical record for a host override that weakens or bypasses a library recommendation.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "override_id",
+    "trace_id",
+    "original_autonomy_posture",
+    "original_blocking_reasons",
+    "requested_action",
+    "override_reason",
+    "actor_id",
+    "human_review_status",
+    "timestamp"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "override_id": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "trace_id": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "original_autonomy_posture": {
+      "$ref": "common.schema.json#/$defs/autonomyPosture"
+    },
+    "original_blocking_reasons": {
+      "$ref": "common.schema.json#/$defs/codedItemArray"
+    },
+    "requested_action": {
+      "type": "object",
+      "required": ["action_class", "scope"],
+      "additionalProperties": false,
+      "properties": {
+        "action_class": {
+          "type": "string",
+          "enum": ["read", "plan", "draft_patch", "apply_patch"]
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/boundedString"
+        },
+        "multi_file": {
+          "type": "boolean"
+        },
+        "apply_requested": {
+          "type": "boolean"
+        }
+      }
+    },
+    "override_reason": {
+      "$ref": "common.schema.json#/$defs/codedItem"
+    },
+    "actor_id": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "human_review_status": {
+      "type": "string",
+      "enum": ["required_pending", "approved", "rejected", "waived_by_policy"]
+    },
+    "timestamp": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    }
+  }
+}
+

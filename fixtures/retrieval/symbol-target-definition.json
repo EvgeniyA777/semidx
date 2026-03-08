@@ -1,0 +1,64 @@
+{
+  "fixture_id": "retrieval_symbol_target_definition_001",
+  "category": "symbol_target",
+  "purpose": "Ensure exact symbol lookup keeps the authority definition in the top authority band.",
+  "adr_refs": ["ADR-005", "ADR-008", "ADR-014"],
+  "snapshot_ref": "seed-clojure-app@rev-001",
+  "input": {
+    "query": {
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "code_understanding",
+        "details": "Locate the authority implementation and the nearest callers for my.app.order/process-order."
+      },
+      "targets": {
+        "symbols": ["my.app.order/process-order"],
+        "paths": ["src/my/app/order.clj"]
+      },
+      "constraints": {
+        "token_budget": 1800,
+        "snapshot_id": "seed-clojure-app@rev-001",
+        "language_allowlist": ["clojure"],
+        "allowed_path_prefixes": ["src/", "test/"],
+        "max_raw_code_level": "enclosing_unit",
+        "freshness": "current_snapshot"
+      },
+      "hints": {
+        "preferred_paths": ["src/my/app/order.clj", "test/my/app/order_test.clj"],
+        "preferred_modules": ["my.app.order"],
+        "suspected_symbols": ["my.app.order/process-order"],
+        "focus_on_tests": true,
+        "prefer_definitions_over_callers": true,
+        "prefer_breadth_over_depth": false
+      },
+      "options": {
+        "include_tests": true,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": false,
+        "favor_compact_packet": true,
+        "favor_higher_recall": false
+      },
+      "trace": {
+        "trace_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "request_id": "fixture-symbol-target-001"
+      }
+    }
+  },
+  "expected": {
+    "top_authority_units": ["src/my/app/order.clj::my.app.order/process-order"],
+    "must_include_paths": ["src/my/app/order.clj", "test/my/app/order_test.clj"],
+    "rank_band_expectations": [
+      {
+        "unit_id": "src/my/app/order.clj::my.app.order/process-order",
+        "rank_band": "top_authority"
+      },
+      {
+        "unit_id": "test/my/app/order_test.clj::process-order-test",
+        "rank_band": "useful_support"
+      }
+    ],
+    "confidence_level": "high",
+    "autonomy_posture": "draft_patch_safe",
+    "diagnostic_codes_required": ["exact_target_resolved"]
+  }
+}

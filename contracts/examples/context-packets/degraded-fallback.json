@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "query": {
+    "intent": "bug_investigation",
+    "targets_summary": ["module: my.app.checkout", "module: my.app.payments"],
+    "constraints_summary": ["token budget 2600", "raw code max enclosing unit", "stale allowed if flagged"],
+    "hints_summary": ["prefer breadth over depth", "include nearby tests", "suspected charge path"]
+  },
+  "repo_map": {
+    "focus_paths": ["src/my/app/checkout.clj", "src/my/app/payments.clj", "test/my/app/payments_test.clj"],
+    "focus_modules": ["my.app.checkout", "my.app.payments", "my.app.payments-test"],
+    "summary": "Checkout and payments interact across multiple namespaces with one unresolved retry neighbor."
+  },
+  "relevant_units": [
+    {
+      "unit_id": "src/my/app/checkout.clj::my.app.checkout/submit-order",
+      "kind": "function",
+      "symbol": "my.app.checkout/submit-order",
+      "path": "src/my/app/checkout.clj",
+      "span": {
+        "path": "src/my/app/checkout.clj",
+        "start_line": 33,
+        "end_line": 79
+      },
+      "rank_band": "top_authority"
+    },
+    {
+      "unit_id": "src/my/app/payments.clj::my.app.payments/charge!",
+      "kind": "function",
+      "symbol": "my.app.payments/charge!",
+      "path": "src/my/app/payments.clj",
+      "span": {
+        "path": "src/my/app/payments.clj",
+        "start_line": 21,
+        "end_line": 65
+      },
+      "rank_band": "useful_support"
+    },
+    {
+      "unit_id": "src/my/app/payments_retry.clj::my.app.payments-retry/recover-charge",
+      "kind": "function",
+      "symbol": "my.app.payments-retry/recover-charge",
+      "path": "src/my/app/payments_retry.clj",
+      "span": {
+        "path": "src/my/app/payments_retry.clj",
+        "start_line": 10,
+        "end_line": 41
+      },
+      "rank_band": "exploratory"
+    }
+  ],
+  "skeletons": [
+    {
+      "unit_id": "src/my/app/checkout.clj::my.app.checkout/submit-order",
+      "signature": "(defn submit-order [ctx order])",
+      "summary": "Coordinates validation, payment, and persistence for checkout.",
+      "docstring_excerpt": "Creates an order and triggers the downstream payment workflow."
+    },
+    {
+      "unit_id": "src/my/app/payments.clj::my.app.payments/charge!",
+      "signature": "(defn charge! [gateway request])",
+      "summary": "Performs the external payment attempt and records its outcome.",
+      "docstring_excerpt": "Gateway-facing side effect with retry metadata."
+    },
+    {
+      "unit_id": "src/my/app/payments_retry.clj::my.app.payments-retry/recover-charge",
+      "signature": "(defn recover-charge [ctx charge-id])",
+      "summary": "Fallback retry path discovered through partial parsing.",
+      "docstring_excerpt": "Limited structure available because parser fallback was used."
+    }
+  ],
+  "impact_hints": {
+    "callers": ["src/my/app/http.clj::checkout-handler"],
+    "dependents": ["src/my/app/payments_retry.clj::schedule-retry"],
+    "related_tests": ["test/my/app/payments_test.clj"],
+    "risky_neighbors": ["src/my/app/payments_retry.clj::recover-charge", "src/my/app/orders.clj::mark-paid!"]
+  },
+  "evidence": {
+    "selection_reasons": [
+      {
+        "code": "diff_overlap_direct",
+        "summary": "Observed failure scope overlaps the checkout and payment units directly."
+      },
+      {
+        "code": "cross_module_proximity",
+        "summary": "Checkout and payment units are connected through direct call edges."
+      }
+    ],
+    "hint_effects": [
+      {
+        "code": "breadth_hint_applied",
+        "summary": "Broader recall admitted one exploratory retry unit because impact remained ambiguous."
+      }
+    ]
+  },
+  "budget": {
+    "requested_tokens": 2600,
+    "estimated_tokens": 1520,
+    "truncation_flags": ["raw_code_not_embedded", "low_rank_neighbors_truncated"]
+  },
+  "confidence": {
+    "schema_version": "1.0",
+    "level": "low",
+    "score": 0.29,
+    "reasons": [
+      {
+        "code": "lexical_signal_present",
+        "summary": "Relevant lexical overlap exists across multiple files."
+      }
+    ],
+    "warnings": [
+      {
+        "code": "parser_fallback",
+        "summary": "Retrieval relied on fallback parsing for one of the key files."
+      },
+      {
+        "code": "target_ambiguous",
+        "summary": "Multiple candidate units remain plausible edit targets."
+      }
+    ],
+    "missing_evidence": [
+      {
+        "code": "exact_target_resolution_missing",
+        "summary": "The system could not resolve the target to a single authority definition."
+      },
+      {
+        "code": "test_adjacency_missing",
+        "summary": "No trustworthy nearby test evidence was found for the retry path."
+      }
+    ]
+  }
+}

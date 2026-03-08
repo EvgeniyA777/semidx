@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semantic-code-indexing.example/contracts/schemas/common.schema.json",
+  "title": "Semantic Code Indexing Common Definitions",
+  "description": "Shared definitions for retrieval contracts and diagnostics.",
+  "$defs": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^1\\.0$",
+      "description": "Contract schema version.",
+      "examples": ["1.0"]
+    },
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "description": "RFC 4122 UUID."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp."
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "Machine-readable code."
+    },
+    "codeArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/code"
+      },
+      "maxItems": 12,
+      "uniqueItems": true,
+      "default": []
+    },
+    "boundedString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "boundedLongString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/boundedString"
+      },
+      "maxItems": 25,
+      "uniqueItems": true,
+      "default": []
+    },
+    "codedItem": {
+      "type": "object",
+      "required": ["code", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/code"
+        },
+        "summary": {
+          "$ref": "#/$defs/boundedString"
+        }
+      }
+    },
+    "codedItemArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/codedItem"
+      },
+      "maxItems": 12,
+      "default": []
+    },
+    "confidenceLevel": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "autonomyPosture": {
+      "type": "string",
+      "enum": ["read_safe", "plan_safe", "draft_patch_safe", "autonomy_blocked"]
+    },
+    "stageName": {
+      "type": "string",
+      "enum": [
+        "query_validation",
+        "candidate_generation",
+        "ranking",
+        "context_packet_assembly",
+        "raw_code_fetch",
+        "result_finalization"
+      ]
+    },
+    "stageOutcome": {
+      "type": "string",
+      "enum": ["completed", "degraded", "failed", "skipped"]
+    },
+    "eventStatus": {
+      "type": "string",
+      "enum": ["started", "completed", "degraded", "failed", "skipped"]
+    },
+    "rawFetchLevel": {
+      "type": "string",
+      "enum": ["none", "target_span", "enclosing_unit", "local_neighborhood", "whole_file"]
+    },
+    "rankBand": {
+      "type": "string",
+      "enum": ["top_authority", "useful_support", "exploratory", "below_threshold_noise"]
+    },
+    "unitKind": {
+      "type": "string",
+      "enum": [
+        "namespace",
+        "module",
+        "class",
+        "type",
+        "function",
+        "method",
+        "protocol",
+        "interface",
+        "section",
+        "block",
+        "test"
+      ]
+    },
+    "span": {
+      "type": "object",
+      "required": ["path", "start_line", "end_line"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "traceRef": {
+      "type": "object",
+      "required": ["trace_id", "request_id"],
+      "additionalProperties": false,
+      "properties": {
+        "trace_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "request_id": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "task_id": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "session_id": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/boundedString"
+        }
+      }
+    },
+    "metricMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/code"
+      },
+      "additionalProperties": {
+        "type": ["integer", "number"]
+      },
+      "maxProperties": 12,
+      "default": {}
+    }
+  }
+}
