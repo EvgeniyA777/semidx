@@ -6,6 +6,13 @@ This document describes the current MVP in-memory library API.
 
 - `semantic-code-indexing.core`
 
+## Language Coverage (MVP)
+
+- Clojure (`.clj/.cljc/.cljs`) via `clj-kondo` primary path and regex fallback
+- Java (`.java`) via lightweight regex parser
+- Elixir (`.ex/.exs`) via lightweight regex parser
+- Python (`.py`) via lightweight regex parser
+
 ## Public Functions
 
 ### `create-index`
@@ -173,7 +180,7 @@ Smoke helper:
 ## Current MVP Notes
 
 - Clojure parser pipeline is `clj-kondo` first, with regex fallback.
-- Java parser is lightweight regex-based in MVP.
+- Java, Elixir, and Python parsers are lightweight regex-based in MVP.
 - `tree-sitter` is an optional slot in parser options and not enabled in this MVP build.
 - Default retrieval skips raw-code escalation stage and returns bounded context output.
 - Ranking is structural-first and tiered, with hard ceilings when Tier1 evidence is missing.

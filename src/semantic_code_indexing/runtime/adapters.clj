@@ -20,6 +20,18 @@
   #"^\s*(?:public|private|protected|static|final|native|synchronized|abstract|default|\s)+[a-zA-Z0-9_<>,\[\]\.?\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*(?:\{|throws|;)")
 (def ^:private java-call-re #"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
+(def ^:private ex-module-re #"^\s*defmodule\s+([A-Za-z0-9_\.]+)\s+do")
+(def ^:private ex-import-re #"^\s*(?:alias|import|require|use)\s+([A-Za-z0-9_\.]+)")
+(def ^:private ex-def-re #"^\s*(defp?|defmacro|defmacrop)\s+([a-zA-Z_][a-zA-Z0-9_!?]*)")
+(def ^:private ex-test-re #"^\s*test\s+\"([^\"]+)\"\s+do")
+(def ^:private ex-call-re #"\b([a-z_][a-zA-Z0-9_!?]*)\s*\(")
+
+(def ^:private py-import-re #"^\s*import\s+([a-zA-Z0-9_\.]+)")
+(def ^:private py-from-import-re #"^\s*from\s+([a-zA-Z0-9_\.]+)\s+import\s+")
+(def ^:private py-class-re #"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)")
+(def ^:private py-def-re #"^\s*(?:async\s+def|def)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+(def ^:private py-call-re #"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+
 (def ^:private clj-call-stop
   #{"def" "defn" "defn-" "defmacro" "defmulti" "defmethod" "deftest" "ns"
     "let" "if" "when" "when-not" "cond" "case" "loop" "recur" "do" "fn"
@@ -29,12 +41,21 @@
 (def ^:private java-call-stop
   #{"if" "for" "while" "switch" "catch" "return" "throw" "new" "super" "this" "synchronized"})
 
+(def ^:private ex-call-stop
+  #{"if" "case" "cond" "with" "fn" "def" "defp" "defmacro" "defmodule" "test" "describe" "quote" "unquote"})
+
+(def ^:private py-call-stop
+  #{"if" "for" "while" "return" "yield" "lambda" "class" "def" "print"})
+
 (defn language-by-path [path]
   (cond
     (or (str/ends-with? path ".clj")
         (str/ends-with? path ".cljc")
         (str/ends-with? path ".cljs")) "clojure"
     (str/ends-with? path ".java") "java"
+    (or (str/ends-with? path ".ex")
+        (str/ends-with? path ".exs")) "elixir"
+    (str/ends-with? path ".py") "python"
     :else nil))
 
 (defn source-path? [path]
@@ -299,6 +320,148 @@
      :diagnostics []
      :parser_mode "full"}))
 
+(defn- ex-test-symbol [module test-name]
+  (let [slug (-> test-name
+                 str/lower-case
+                 (str/replace #"[^a-z0-9]+" "-")
+                 (str/replace #"^-+|-+$" ""))]
+    (str (or module "Elixir.Unknown") "/test-" (if (seq slug) slug "unnamed"))))
+
+(defn- extract-ex-calls [body]
+  (->> (re-seq ex-call-re body)
+       (map second)
+       (remove ex-call-stop)
+       distinct
+       vec))
+
+(defn- parse-elixir [path lines]
+  (let [line-count (count lines)
+        module-name (some (fn [line] (some-> (re-find ex-module-re line) second)) lines)
+        imports (->> lines
+                     (keep (fn [line] (some-> (re-find ex-import-re line) second)))
+                     distinct
+                     vec)
+        defs (->> (map-indexed vector lines)
+                  (keep (fn [[idx line]]
+                          (cond
+                            (re-find ex-test-re line)
+                            (let [[_ nm] (re-find ex-test-re line)]
+                              {:start-line (inc idx)
+                               :kind "test"
+                               :raw-symbol (ex-test-symbol module-name nm)
+                               :signature (trim-signature line)})
+
+                            (re-find ex-def-re line)
+                            (let [[_ kw nm] (re-find ex-def-re line)
+                                  kind (if (str/includes? path "/test/") "test" "function")]
+                              {:start-line (inc idx)
+                               :kind kind
+                               :raw-symbol (str (or module-name "Elixir.Unknown") "/" nm)
+                               :signature (trim-signature line)}))))
+                  vec)
+        starts (mapv :start-line defs)
+        ends (unit-end-lines starts line-count)
+        units (->> (map vector defs ends)
+                   (map (fn [[d end-line]]
+                          (let [start-line (:start-line d)
+                                body-lines (subvec lines (dec start-line) end-line)
+                                body (str/join "\n" body-lines)]
+                            {:unit_id (str path "::" (:raw-symbol d))
+                             :kind (:kind d)
+                             :symbol (:raw-symbol d)
+                             :path path
+                             :module module-name
+                             :start_line start-line
+                             :end_line end-line
+                             :signature (:signature d)
+                             :summary (str (:kind d) " " (:raw-symbol d))
+                             :docstring_excerpt nil
+                             :imports imports
+                             :calls (extract-ex-calls body)
+                             :parser_mode "full"})))
+                   vec)]
+    {:language "elixir"
+     :module module-name
+     :imports imports
+     :units units
+     :diagnostics []
+     :parser_mode "full"}))
+
+(defn- py-module-name [path]
+  (-> path
+      (str/replace #"\.py$" "")
+      (str/replace #"/" ".")
+      (str/replace #"^\.+" "")))
+
+(defn- py-kind [path fn-name]
+  (if (or (str/includes? path "/test/")
+          (str/starts-with? fn-name "test_")
+          (str/ends-with? path "_test.py")
+          (str/starts-with? (str/lower-case (or fn-name "")) "test"))
+    "test"
+    "function"))
+
+(defn- extract-py-calls [body]
+  (->> (re-seq py-call-re body)
+       (map second)
+       (remove py-call-stop)
+       distinct
+       vec))
+
+(defn- parse-python [path lines]
+  (let [line-count (count lines)
+        module (py-module-name path)
+        imports (->> lines
+                     (keep (fn [line]
+                             (or (some-> (re-find py-import-re line) second)
+                                 (some-> (re-find py-from-import-re line) second))))
+                     distinct
+                     vec)
+        defs (->> (map-indexed vector lines)
+                  (keep (fn [[idx line]]
+                          (cond
+                            (re-find py-class-re line)
+                            (let [[_ cls] (re-find py-class-re line)]
+                              {:start-line (inc idx)
+                               :kind "class"
+                               :raw-symbol (str module "." cls)
+                               :signature (trim-signature line)})
+
+                            (re-find py-def-re line)
+                            (let [[_ fn-name] (re-find py-def-re line)]
+                              {:start-line (inc idx)
+                               :kind (py-kind path fn-name)
+                               :raw-symbol (str module "/" fn-name)
+                               :signature (trim-signature line)}))))
+                  vec)
+        starts (mapv :start-line defs)
+        ends (unit-end-lines starts line-count)
+        units (->> (map vector defs ends)
+                   (map (fn [[d end-line]]
+                          (let [start-line (:start-line d)
+                                body-lines (subvec lines (dec start-line) end-line)
+                                body (str/join "\n" body-lines)]
+                            {:unit_id (str path "::" (:raw-symbol d))
+                             :kind (:kind d)
+                             :symbol (:raw-symbol d)
+                             :path path
+                             :module module
+                             :start_line start-line
+                             :end_line end-line
+                             :signature (:signature d)
+                             :summary (str (:kind d) " " (:raw-symbol d))
+                             :docstring_excerpt nil
+                             :imports imports
+                             :calls (extract-py-calls body)
+                             :parser_mode "full"})))
+                   vec)]
+    {:language "python"
+     :module module
+     :imports imports
+     :units units
+     :diagnostics []
+     :parser_mode "full"}))
+
 (defn- fallback-unit [path lines language reason]
   (let [line-count (max 1 (count lines))]
     {:language (or language "unknown")
@@ -330,6 +493,8 @@
          (case language
            "clojure" (parse-clojure root-path file-path lines parser-opts)
            "java" (parse-java file-path lines)
+           "elixir" (parse-elixir file-path lines)
+           "python" (parse-python file-path lines)
            (fallback-unit file-path lines language "unsupported_language")))
        (catch Exception _
          (let [lines (try (slurp-lines abs) (catch Exception _ []))]

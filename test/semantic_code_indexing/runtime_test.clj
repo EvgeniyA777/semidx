@@ -16,7 +16,11 @@
   (write-file! root "test/my/app/order_test.clj"
                "(ns my.app.order-test\n  (:require [clojure.test :refer [deftest is]]\n            [my.app.order :as order]))\n\n(deftest process-order-test\n  (is (map? (order/validate-order {:id 1}))))\n")
   (write-file! root "src/com/acme/CheckoutService.java"
-               "package com.acme;\n\nimport java.util.Objects;\n\npublic class CheckoutService {\n  public String processOrder(String id) {\n    return normalize(id);\n  }\n\n  private String normalize(String id) {\n    return Objects.requireNonNull(id).trim();\n  }\n}\n"))
+               "package com.acme;\n\nimport java.util.Objects;\n\npublic class CheckoutService {\n  public String processOrder(String id) {\n    return normalize(id);\n  }\n\n  private String normalize(String id) {\n    return Objects.requireNonNull(id).trim();\n  }\n}\n")
+  (write-file! root "lib/my_app/order.ex"
+               "defmodule MyApp.Order do\n  alias MyApp.Validator\n\n  def process_order(ctx, order) do\n    Validator.validate(order)\n    {:ok, order}\n  end\n\n  defp to_status(order) do\n    Map.get(order, :status, :new)\n  end\nend\n")
+  (write-file! root "app/orders.py"
+               "from app.validators import validate_order\n\nclass OrderService:\n    def process_order(self, order):\n        return validate_order(order)\n\n\ndef validate_local(order):\n    return bool(order)\n"))
 
 (def sample-query
   {:schema_version "1.0"
@@ -38,6 +42,44 @@
            :request_id "runtime-test-001"
            :actor_id "test_runner"}})
 
+(def sample-query-elixir
+  {:schema_version "1.0"
+   :intent {:purpose "code_understanding"
+            :details "Locate Elixir order process function."}
+   :targets {:symbols ["MyApp.Order/process_order"]
+             :paths ["lib/my_app/order.ex"]}
+   :constraints {:token_budget 1200
+                 :max_raw_code_level "enclosing_unit"
+                 :freshness "current_snapshot"}
+   :hints {:prefer_definitions_over_callers true}
+   :options {:include_tests false
+             :include_impact_hints true
+             :allow_raw_code_escalation false
+             :favor_compact_packet true
+             :favor_higher_recall false}
+   :trace {:trace_id "22222222-2222-4222-8222-222222222222"
+           :request_id "runtime-test-ex-001"
+           :actor_id "test_runner"}})
+
+(def sample-query-python
+  {:schema_version "1.0"
+   :intent {:purpose "code_understanding"
+            :details "Locate Python process_order function."}
+   :targets {:symbols ["app.orders/process_order"]
+             :paths ["app/orders.py"]}
+   :constraints {:token_budget 1200
+                 :max_raw_code_level "enclosing_unit"
+                 :freshness "current_snapshot"}
+   :hints {:prefer_definitions_over_callers true}
+   :options {:include_tests false
+             :include_impact_hints true
+             :allow_raw_code_escalation false
+             :favor_compact_packet true
+             :favor_higher_recall false}
+   :trace {:trace_id "33333333-3333-4333-8333-333333333333"
+           :request_id "runtime-test-py-001"
+           :actor_id "test_runner"}})
+
 (deftest end-to-end-resolve-context-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
@@ -50,6 +92,8 @@
       (is (seq (:files index)))
       (is (some #(= "clojure" (:language %)) (vals (:files index))))
       (is (some #(= "java" (:language %)) (vals (:files index))))
+      (is (some #(= "elixir" (:language %)) (vals (:files index))))
+      (is (some #(= "python" (:language %)) (vals (:files index))))
       (is (= "full" (get-in index [:files "src/my/app/order.clj" :parser_mode]))))
     (testing "context packet validates against contract"
       (is (nil? (m/explain (:example/context-packet contracts/contracts) packet))))
@@ -61,6 +105,19 @@
       (is (seq (:relevant_units packet)))
       (is (some #(= "my.app.order/process-order" (:symbol %)) (:relevant_units packet)))
       (is (= "high" (get-in packet [:confidence :level]))))))
+
+(deftest elixir-and-python-targeted-retrieval-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-lang-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        index (sci/create-index {:root_path tmp-root})
+        ex-result (sci/resolve-context index sample-query-elixir)
+        py-result (sci/resolve-context index sample-query-python)]
+    (testing "elixir symbol can be localized"
+      (is (some #(= "MyApp.Order/process_order" (:symbol %))
+                (get-in ex-result [:context_packet :relevant_units]))))
+    (testing "python symbol can be localized"
+      (is (some #(= "app.orders/process_order" (:symbol %))
+                (get-in py-result [:context_packet :relevant_units]))))))
 
 (deftest in-memory-storage-roundtrip-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-storage-test" (make-array java.nio.file.attribute.FileAttribute 0)))

@@ -16,7 +16,7 @@ The project defines how a host system should request code context, how retrieval
 - mirrors contracts in Clojure (`malli`) for runtime validation
 - provides a local and CI gate to prevent contract drift
 - provides a working in-memory MVP runtime for `create-index`, `update-index`, `repo-map`, `resolve-context`, `impact-analysis`, `skeletons`
-- includes parser adapters for `Clojure + Java` and emits diagnostics/guardrails outputs
+- includes parser adapters for `Clojure + Java + Elixir + Python` and emits diagnostics/guardrails outputs
 - supports optional snapshot persistence adapters (`in-memory`, `PostgreSQL`)
 
 ## What This Project Does Not Do (Yet)
@@ -73,6 +73,7 @@ Current scope is contract architecture plus a working MVP runtime implementation
 - Clojure validation gate implemented (`src/semantic_code_indexing/contracts`)
 - MVP runtime implemented (`src/semantic_code_indexing/core.clj`, `src/semantic_code_indexing/runtime/*`)
 - Clojure retrieval uses `clj-kondo` as primary parser with fallback path
+- Elixir and Python retrieval paths are implemented in the same runtime adapter pipeline
 - tiered structural-first ranking and non-compensating confidence model implemented
 - PostgreSQL persistence adapter implemented for optional snapshot storage
 
