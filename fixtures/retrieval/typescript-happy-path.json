@@ -1,0 +1,50 @@
+{
+  "fixture_id": "retrieval_typescript_happy_path_001",
+  "category": "typescript_onboarding",
+  "purpose": "TypeScript exact symbol targeting should keep the authority function in top_authority.",
+  "adr_refs": ["ADR-005", "ADR-008", "ADR-014", "ADR-022"],
+  "snapshot_ref": "seed-polyglot-app@rev-008",
+  "input": {
+    "query": {
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "code_understanding",
+        "details": "Locate authority implementation for processMain and nearest implementation context in TypeScript."
+      },
+      "targets": {
+        "symbols": ["src.example.main/processMain"],
+        "paths": ["src/example/main.ts"]
+      },
+      "constraints": {
+        "token_budget": 1200,
+        "language_allowlist": ["typescript"],
+        "allowed_path_prefixes": ["src/example/", "test/example/"],
+        "max_raw_code_level": "enclosing_unit",
+        "freshness": "current_snapshot"
+      },
+      "hints": {
+        "preferred_paths": ["src/example/main.ts"],
+        "preferred_modules": ["src.example.main"],
+        "prefer_definitions_over_callers": true
+      },
+      "options": {
+        "include_tests": true,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": false,
+        "favor_compact_packet": true,
+        "favor_higher_recall": false
+      },
+      "trace": {
+        "trace_id": "11111111-2222-4333-8444-555555555555",
+        "request_id": "fixture-typescript-happy-path-001"
+      }
+    }
+  },
+  "expected": {
+    "top_authority_units": ["src/example/main.ts::src.example.main/processMain"],
+    "must_include_paths": ["src/example/main.ts"],
+    "must_include_selection_reason_codes": ["exact_target_resolved"],
+    "confidence_level": "high",
+    "autonomy_posture": "draft_patch_safe"
+  }
+}

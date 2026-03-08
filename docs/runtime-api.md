@@ -12,7 +12,8 @@ This document describes the current MVP in-memory library API.
 - Java (`.java`) via lightweight regex parser
 - Elixir (`.ex/.exs`) via lightweight regex parser
 - Python (`.py`) via lightweight regex parser
-- Java/Elixir/Python call tokens are normalized for module/class-aware call graph linking
+- TypeScript (`.ts/.tsx`) via lightweight regex parser
+- Java/Elixir/Python/TypeScript call tokens are normalized for module/class-aware call graph linking
 
 ## Public Functions
 
@@ -42,6 +43,7 @@ Example with parser options:
  {:root_path "."
   :parser_opts {:clojure_engine :clj-kondo
                 :java_engine :regex
+                :typescript_engine :regex
                 :tree_sitter_enabled false}})
 ```
 
@@ -52,9 +54,11 @@ Tree-sitter extraction path (optional):
  {:root_path "."
   :parser_opts {:clojure_engine :tree-sitter
                 :java_engine :tree-sitter
+                :typescript_engine :tree-sitter
                 :tree_sitter_enabled true
                 :tree_sitter_grammars {:clojure "/opt/grammars/tree-sitter-clojure"
-                                       :java "/opt/grammars/tree-sitter-java"}}})
+                                       :java "/opt/grammars/tree-sitter-java"
+                                       :typescript "/opt/grammars/tree-sitter-typescript/typescript"}}})
 ```
 
 Bootstrap pinned grammar checkouts under `.tree-sitter-grammars/`:
@@ -308,11 +312,13 @@ Transport mapping for authz denials:
 - Tests: `clojure -M:test`
 - Benchmarks: `./scripts/run-benchmarks.sh`
 - Full MVP gates: `./scripts/run-mvp-gates.sh`
+- Language onboarding scaffold: `./scripts/new-language-adapter.sh <language> --ext .ext1,.ext2`
+- Language onboarding validator: `./scripts/validate-language-onboarding.sh <language>` (use `--skip-gates` for structural checks only)
 
 ## Current MVP Notes
 
 - Clojure parser pipeline is `clj-kondo` first, with regex fallback.
-- Java, Elixir, and Python parsers are lightweight regex-based in MVP.
+- Java, Elixir, Python, and TypeScript parsers are lightweight regex-based in MVP.
 - `tree-sitter` extraction is implemented for Clojure and Java when corresponding grammar paths are configured.
 - If tree-sitter is requested but unavailable/misconfigured, runtime falls back with diagnostics (`tree_sitter_*` codes).
 - Raw-code escalation stage is late and opt-in via query options (`allow_raw_code_escalation`) and bounded by `constraints.max_raw_code_level`.

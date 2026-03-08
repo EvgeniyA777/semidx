@@ -33,6 +33,14 @@
 (def ^:private py-def-re #"^\s*(?:async\s+def|def)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 (def ^:private py-call-re #"\b([A-Za-z_][A-Za-z0-9_\.]*)\s*\(")
 
+(def ^:private ts-import-from-re #"^\s*(?:import|export)\s+.+?\s+from\s+['\"]([^'\"]+)['\"]")
+(def ^:private ts-import-bare-re #"^\s*import\s+['\"]([^'\"]+)['\"]")
+(def ^:private ts-class-re #"^\s*(?:export\s+)?(?:default\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)")
+(def ^:private ts-function-re #"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+(def ^:private ts-arrow-re #"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>")
+(def ^:private ts-method-re #"^\s*(?:(?:public|private|protected|static|async|readonly|get|set)\s+)*([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^;]*\)\s*\{")
+(def ^:private ts-call-re #"\b([A-Za-z_$][A-Za-z0-9_$\.]*)\s*\(")
+
 (def ^:private clj-call-stop
   #{"def" "defn" "defn-" "defmacro" "defmulti" "defmethod" "deftest" "ns"
     "let" "if" "when" "when-not" "cond" "case" "loop" "recur" "do" "fn"
@@ -48,8 +56,13 @@
 (def ^:private py-call-stop
   #{"if" "for" "while" "return" "yield" "lambda" "class" "def" "print"})
 
+(def ^:private ts-call-stop
+  #{"if" "for" "while" "switch" "catch" "return" "throw" "new" "super" "this"
+    "function" "class" "import" "export" "typeof" "instanceof" "await" "delete"
+    "do" "try" "finally" "of" "in"})
+
 (def ^:private ts-line-re
-  #"^\s*(\d+):(\d+)\s*-\s*(\d+):(\d+)\s+(.+?)\s*$")
+  #"^\s*(\d+):(\d+)\s*-\s*(\d+):(\d+)(\s+)(.+?)\s*$")
 
 (defn language-by-path [path]
   (cond
@@ -60,6 +73,7 @@
     (or (str/ends-with? path ".ex")
         (str/ends-with? path ".exs")) "elixir"
     (str/ends-with? path ".py") "python"
+    (or (str/ends-with? path ".ts") (str/ends-with? path ".tsx")) "typescript"
     :else nil))
 
 (defn source-path? [path]
@@ -93,14 +107,44 @@
     (when-let [[_ imp] (re-find py-import-re line)]
       [imp])))
 
+(defn- ts-strip-ext [path]
+  (-> (str path)
+      (str/replace #"\.(ts|tsx|js|jsx|mjs|cjs)$" "")
+      (str/replace #"/index$" "")))
+
+(defn- ts-module-name [path]
+  (-> path
+      str
+      (str/replace "\\" "/")
+      ts-strip-ext
+      (str/replace #"^\./+" "")
+      (str/replace #"^/+" "")
+      (str/replace #"/" ".")
+      (str/replace #"^\.+|\.+$" "")))
+
+(defn- ts-resolve-import-path [path spec]
+  (let [spec* (str spec)]
+    (if (str/starts-with? spec* ".")
+      (let [dir (or (some-> path io/file .getParent) "")
+            joined (if (str/blank? dir) spec* (str dir "/" spec*))]
+        (-> joined io/file .toPath .normalize str (str/replace "\\" "/")))
+      (str/replace spec* "\\" "/"))))
+
+(defn- parse-typescript-import [path line]
+  (let [spec (or (some-> (re-find ts-import-from-re line) second)
+                 (some-> (re-find ts-import-bare-re line) second))]
+    (when (seq spec)
+      [(-> (ts-resolve-import-path path spec)
+           ts-module-name)])))
+
 (defonce ^:private tree-sitter-availability (atom nil))
 
 (defn- tree-sitter-available? []
   (if (some? @tree-sitter-availability)
     @tree-sitter-availability
     (let [{:keys [exit]} (try
-                          (sh/sh "tree-sitter" "--version")
-                          (catch Exception _ {:exit 127}))
+                           (sh/sh "tree-sitter" "--version")
+                           (catch Exception _ {:exit 127}))
           available? (zero? (int exit))]
       (reset! tree-sitter-availability available?)
       available?)))
@@ -112,17 +156,18 @@
       (System/getenv (case lang
                        :clojure "SCI_TREE_SITTER_CLOJURE_GRAMMAR_PATH"
                        :java "SCI_TREE_SITTER_JAVA_GRAMMAR_PATH"
+                       :typescript "SCI_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH"
                        nil))))
 
 (defn- parse-ts-line [line]
-  (when-let [[_ sr sc er ec text] (re-find ts-line-re line)]
+  (when-let [[_ sr sc er ec spacing text] (re-find ts-line-re line)]
     (let [plain (str/trim (first (str/split text #"`")))
           source (if (str/includes? plain ":")
                    (second (str/split plain #":\s*" 2))
                    plain)
           node-type (last (str/split (str/trim source) #"\s+"))
           value (some-> (re-find #"`([^`]*)`" text) second)]
-      {:indent (count (re-find #"^\s*" line))
+      {:indent (count spacing)
        :start-row (parse-long sr)
        :start-col (parse-long sc)
        :end-row (parse-long er)
@@ -146,7 +191,7 @@
        :err (or err "tree-sitter parse failed")})))
 
 (defn- add-tree-sitter-diag [parsed enabled? language]
-  (if (and enabled? (#{"clojure" "java"} language))
+  (if (and enabled? (#{"clojure" "java" "typescript"} language))
     (if (tree-sitter-available?)
       (update parsed :diagnostics conj {:code "tree_sitter_probe"
                                         :summary "tree-sitter CLI detected."})
@@ -949,6 +994,331 @@
      :diagnostics []
      :parser_mode "full"}))
 
+(defn- ts-test-path? [path]
+  (let [p (str/lower-case (str path))]
+    (or (str/includes? p "/test/")
+        (str/ends-with? p ".test.ts")
+        (str/ends-with? p ".test.tsx")
+        (str/ends-with? p ".spec.ts")
+        (str/ends-with? p ".spec.tsx")
+        (str/ends-with? p "_test.ts")
+        (str/ends-with? p "_test.tsx"))))
+
+(defn- ts-kind [path name method?]
+  (if (or (ts-test-path? path)
+          (str/starts-with? (str/lower-case (or name "")) "test"))
+    "test"
+    (if method? "method" "function")))
+
+(defn- ts-brace-delta [line]
+  (- (count (re-seq #"\{" (str line)))
+     (count (re-seq #"\}" (str line)))))
+
+(defn- ts-class-ranges [lines]
+  (let [line-count (count lines)]
+    (loop [idx 0
+           out []]
+      (if (>= idx line-count)
+        out
+        (let [line (nth lines idx)]
+          (if-let [[_ cls] (re-find ts-class-re line)]
+            (let [end-line
+                  (loop [j idx
+                         depth 0
+                         saw-open? false]
+                    (if (>= j line-count)
+                      line-count
+                      (let [ln (nth lines j)
+                            open-n (count (re-seq #"\{" ln))
+                            close-n (count (re-seq #"\}" ln))
+                            saw-open?* (or saw-open? (pos? open-n))
+                            depth* (+ depth open-n (- close-n))]
+                        (if (and saw-open?* (<= depth* 0))
+                          (inc j)
+                          (recur (inc j) depth* saw-open?*)))))
+                  range {:class cls
+                         :start-line (inc idx)
+                         :end-line (max (inc idx) end-line)}]
+              (recur (inc idx) (conj out range)))
+            (recur (inc idx) out)))))))
+
+(defn- ts-class-for-line [class-ranges line-no]
+  (->> class-ranges
+       (filter #(<= (:start-line %) line-no (:end-line %)))
+       (sort-by :start-line)
+       last))
+
+(defn- extract-ts-calls [body]
+  (->> (re-seq ts-call-re body)
+       (map second)
+       (mapcat (fn [token]
+                 (let [tail (tail-token token)]
+                   (cond-> [token]
+                     (and tail (not= tail token)) (conj tail)))))
+       (remove #(contains? ts-call-stop %))
+       distinct
+       vec))
+
+(defn- parse-typescript-regex [path lines]
+  (let [line-count (count lines)
+        module (ts-module-name path)
+        imports (->> lines
+                     (mapcat #(parse-typescript-import path %))
+                     (remove str/blank?)
+                     distinct
+                     vec)
+        class-ranges (ts-class-ranges lines)
+        defs (->> (map-indexed vector lines)
+                  (keep (fn [[idx line]]
+                          (let [line-no (inc idx)
+                                class-ctx (ts-class-for-line class-ranges line-no)]
+                            (cond
+                              (and (nil? class-ctx) (re-find ts-function-re line))
+                              (let [[_ fn-name] (re-find ts-function-re line)]
+                                {:start-line line-no
+                                 :kind (ts-kind path fn-name false)
+                                 :raw-symbol (str module "/" fn-name)
+                                 :module module
+                                 :signature (trim-signature line)})
+
+                              (and (nil? class-ctx) (re-find ts-arrow-re line))
+                              (let [[_ fn-name] (re-find ts-arrow-re line)]
+                                {:start-line line-no
+                                 :kind (ts-kind path fn-name false)
+                                 :raw-symbol (str module "/" fn-name)
+                                 :module module
+                                 :signature (trim-signature line)})
+
+                              (and class-ctx (re-find ts-method-re line))
+                              (let [[_ method-name] (re-find ts-method-re line)]
+                                (when-not (or (contains? ts-call-stop method-name)
+                                              (= "constructor" method-name))
+                                  {:start-line line-no
+                                   :kind (ts-kind path method-name true)
+                                   :raw-symbol (str module "." (:class class-ctx) "#" method-name)
+                                   :module (str module "." (:class class-ctx))
+                                   :signature (trim-signature line)}))
+
+                              :else nil))))
+                  vec)
+        starts (mapv :start-line defs)
+        ends (unit-end-lines starts line-count)
+        units (->> (map vector defs ends)
+                   (map (fn [[d end-line]]
+                          (let [start-line (:start-line d)
+                                body-lines (subvec lines (dec start-line) end-line)
+                                body (str/join "\n" body-lines)]
+                            {:unit_id (str path "::" (:raw-symbol d))
+                             :kind (:kind d)
+                             :symbol (:raw-symbol d)
+                             :path path
+                             :module (:module d)
+                             :start_line start-line
+                             :end_line end-line
+                             :signature (:signature d)
+                             :summary (str (:kind d) " " (:raw-symbol d))
+                             :docstring_excerpt nil
+                             :imports imports
+                             :calls (extract-ts-calls body)
+                             :parser_mode "full"})))
+                   vec)]
+    {:language "typescript"
+     :module module
+     :imports imports
+     :units units
+     :diagnostics []
+     :parser_mode "full"}))
+
+(defn- ts-node-type [node]
+  (let [node-type (str (:node-type node))
+        txt (str (:text node))]
+    (if (str/ends-with? node-type ":")
+      (or (some-> (re-find #":\s*([A-Za-z_][A-Za-z0-9_]*)" txt) second)
+          node-type)
+      node-type)))
+
+(defn- ts-node-values-inside [ts-lines node]
+  (->> ts-lines
+       (filter #(<= (:start-row node) (:start-row %) (:end-row node)))
+       (filter #(< (:indent node) (:indent %)))
+       (filter #(contains? #{"identifier" "property_identifier" "type_identifier"} (ts-node-type %)))
+       (keep :value)
+       (remove str/blank?)
+       vec))
+
+(defn- ts-named-value-inside [ts-lines node marker]
+  (->> ts-lines
+       (filter #(<= (:start-row node) (:start-row %) (:end-row node)))
+       (filter #(< (:indent node) (:indent %)))
+       (filter #(contains? #{"identifier" "property_identifier" "type_identifier"} (ts-node-type %)))
+       (filter #(str/includes? (:text %) marker))
+       (keep :value)
+       (remove str/blank?)
+       first))
+
+(defn- ts-call-name [ts-lines call-node]
+  (or (ts-named-value-inside ts-lines call-node "function:")
+      (ts-named-value-inside ts-lines call-node "property:")
+      (some-> (ts-node-values-inside ts-lines call-node) last)))
+
+(defn- parse-typescript-tree-sitter [root-path path src-lines parser-opts]
+  (let [grammar-path (parser-grammar-path parser-opts :typescript)
+        abs (-> (io/file root-path path) .getCanonicalPath)
+        module (ts-module-name path)
+        imports (->> src-lines
+                     (mapcat #(parse-typescript-import path %))
+                     (remove str/blank?)
+                     distinct
+                     vec)]
+    (cond
+      (not (tree-sitter-available?))
+      {:ok? false
+       :reason {:code "tree_sitter_unavailable"
+                :summary "tree-sitter CLI is unavailable for typescript tree-sitter parser."}}
+
+      (str/blank? (str grammar-path))
+      {:ok? false
+       :reason {:code "tree_sitter_missing_grammar"
+                :summary "No tree-sitter TypeScript grammar path configured."}}
+
+      :else
+      (let [{:keys [ok? lines err]} (tree-sitter-cst abs grammar-path)
+            ts-lines lines]
+        (if-not ok?
+          {:ok? false
+           :reason {:code "tree_sitter_parse_failed"
+                    :summary (str "tree-sitter parse failed: " (subs (str err) 0 (min 220 (count (str err)))))}}
+          (let [class-nodes (->> ts-lines
+                                 (filter #(= "class_declaration" (ts-node-type %)))
+                                 (map (fn [c]
+                                        (assoc c :class-name
+                                               (or (ts-named-value-inside ts-lines c "name:")
+                                                   (some-> (ts-node-values-inside ts-lines c) first)
+                                                   "UnknownClass"))))
+                                 vec)
+                class-for-row (fn [row]
+                                (->> class-nodes
+                                     (filter #(<= (:start-row %) row (:end-row %)))
+                                     (sort-by :start-row)
+                                     last))
+                fn-defs (->> ts-lines
+                             (filter #(= "function_declaration" (ts-node-type %)))
+                             (map (fn [n]
+                                    (let [nm (or (ts-named-value-inside ts-lines n "name:")
+                                                 (some-> (ts-node-values-inside ts-lines n) first)
+                                                 "unknownFunction")
+                                          calls (->> ts-lines
+                                                     (filter #(and (= "call_expression" (ts-node-type %))
+                                                                   (<= (:start-row n) (:start-row %) (:end-row n))))
+                                                     (map #(ts-call-name ts-lines %))
+                                                     (remove nil?)
+                                                     vec)]
+                                      {:start-line (inc (:start-row n))
+                                       :end-line (inc (:end-row n))
+                                       :kind (ts-kind path nm false)
+                                       :symbol (str module "/" nm)
+                                       :module module
+                                       :calls calls})))
+                             vec)
+                arrow-defs (->> ts-lines
+                                (filter #(= "variable_declarator" (ts-node-type %)))
+                                (keep (fn [n]
+                                        (let [has-arrow? (some (fn [child]
+                                                                 (and (<= (:start-row n) (:start-row child) (:end-row n))
+                                                                      (< (:indent n) (:indent child))
+                                                                      (= "arrow_function" (ts-node-type child))))
+                                                               ts-lines)]
+                                          (when has-arrow?
+                                            (let [nm (or (ts-named-value-inside ts-lines n "name:")
+                                                         (some-> (ts-node-values-inside ts-lines n) first)
+                                                         "unknownArrow")
+                                                  calls (->> ts-lines
+                                                             (filter #(and (= "call_expression" (ts-node-type %))
+                                                                           (<= (:start-row n) (:start-row %) (:end-row n))))
+                                                             (map #(ts-call-name ts-lines %))
+                                                             (remove nil?)
+                                                             vec)]
+                                              {:start-line (inc (:start-row n))
+                                               :end-line (inc (:end-row n))
+                                               :kind (ts-kind path nm false)
+                                               :symbol (str module "/" nm)
+                                               :module module
+                                               :calls calls})))))
+                                vec)
+                method-defs (->> ts-lines
+                                 (filter #(= "method_definition" (ts-node-type %)))
+                                 (keep (fn [n]
+                                         (let [class-ctx (class-for-row (:start-row n))
+                                               nm (or (ts-named-value-inside ts-lines n "name:")
+                                                      (some-> (ts-node-values-inside ts-lines n) first))]
+                                           (when (and class-ctx (seq nm) (not= "constructor" nm))
+                                             (let [calls (->> ts-lines
+                                                              (filter #(and (= "call_expression" (ts-node-type %))
+                                                                            (<= (:start-row n) (:start-row %) (:end-row n))))
+                                                              (map #(ts-call-name ts-lines %))
+                                                              (remove nil?)
+                                                              vec)]
+                                               {:start-line (inc (:start-row n))
+                                                :end-line (inc (:end-row n))
+                                                :kind (ts-kind path nm true)
+                                                :symbol (str module "." (:class-name class-ctx) "#" nm)
+                                                :module (str module "." (:class-name class-ctx))
+                                                :calls calls})))))
+                                 vec)
+                defs (->> (concat fn-defs arrow-defs method-defs)
+                          (sort-by (juxt :start-line :symbol))
+                          distinct
+                          vec)
+                units (->> defs
+                           (map (fn [{:keys [start-line end-line kind symbol module calls]}]
+                                  {:unit_id (str path "::" symbol)
+                                   :kind kind
+                                   :symbol symbol
+                                   :path path
+                                   :module module
+                                   :start_line start-line
+                                   :end_line (max start-line end-line)
+                                   :signature (safe-line src-lines start-line)
+                                   :summary (str kind " " symbol)
+                                   :docstring_excerpt nil
+                                   :imports imports
+                                   :calls (->> calls
+                                               (mapcat (fn [token]
+                                                         (let [tail (tail-token token)]
+                                                           (cond-> [token]
+                                                             (and tail (not= tail token)) (conj tail)))))
+
+                                               (remove #(contains? ts-call-stop %))
+                                               distinct
+                                               vec)
+                                   :parser_mode "full"}))
+                           vec)]
+            (if (seq units)
+              {:ok? true
+               :result {:language "typescript"
+                        :module module
+                        :imports imports
+                        :units units
+                        :diagnostics [{:code "tree_sitter_active"
+                                       :summary "TypeScript analyzed using tree-sitter CST extraction."}]
+                        :parser_mode "full"}}
+              {:ok? false
+               :reason {:code "tree_sitter_no_units"
+                        :summary "tree-sitter did not extract TypeScript units."}})))))))
+
+(defn- parse-typescript [root-path path lines {:keys [typescript_engine tree_sitter_enabled]
+                                               :or {typescript_engine :regex}
+                                               :as parser-opts}]
+  (let [engine (if (true? tree_sitter_enabled) :tree-sitter typescript_engine)
+        parsed (if (= engine :tree-sitter)
+                 (let [{:keys [ok? result reason]} (parse-typescript-tree-sitter root-path path lines parser-opts)]
+                   (if ok?
+                     result
+                     (-> (parse-typescript-regex path lines)
+                         (update :diagnostics conj reason))))
+                 (parse-typescript-regex path lines))]
+    (add-tree-sitter-diag parsed tree_sitter_enabled "typescript")))
+
 (defn- fallback-unit [path lines language reason]
   (let [line-count (max 1 (count lines))]
     {:language (or language "unknown")
@@ -982,6 +1352,7 @@
            "java" (parse-java root-path file-path lines parser-opts)
            "elixir" (parse-elixir file-path lines)
            "python" (parse-python file-path lines)
+           "typescript" (parse-typescript root-path file-path lines parser-opts)
            (fallback-unit file-path lines language "unsupported_language")))
        (catch Exception _
          (let [lines (try (slurp-lines abs) (catch Exception _ []))]

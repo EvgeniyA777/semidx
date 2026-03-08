@@ -16,7 +16,7 @@ The project defines how a host system should request code context, how retrieval
 - mirrors contracts in Clojure (`malli`) for runtime validation
 - provides a local and CI gate to prevent contract drift
 - provides a working in-memory MVP runtime for `create-index`, `update-index`, `repo-map`, `resolve-context`, `impact-analysis`, `skeletons`
-- includes parser adapters for `Clojure + Java + Elixir + Python` and emits diagnostics/guardrails outputs
+- includes parser adapters for `Clojure + Java + Elixir + Python + TypeScript` and emits diagnostics/guardrails outputs
 - supports optional persistence adapters (`in-memory`, `PostgreSQL`) with snapshot + graph projection storage for PostgreSQL
 - includes retrieval benchmark suite aligned with fixture corpus (`ADR-014`)
 
@@ -30,7 +30,7 @@ Current scope is contract architecture plus a working MVP runtime implementation
 
 ## Repository Layout
 
-- `adr/` - architecture decisions (`ADR-001` .. `ADR-021`)
+- `adr/` - architecture decisions (`ADR-001` .. `ADR-022`)
 - `docs/` - runtime API and operational docs
 - `contracts/schemas/` - JSON Schema contracts (external source of truth)
 - `contracts/examples/` - canonical examples for contract families
@@ -46,7 +46,9 @@ Current scope is contract architecture plus a working MVP runtime implementation
 ## Runtime Validation and Smoke
 
 - Unit/integration tests: `clojure -M:test`
-- Setup tree-sitter grammars (optional but reproducible): `./scripts/setup-tree-sitter-grammars.sh`
+- Setup tree-sitter grammars (optional but reproducible; Clojure/Java/TypeScript): `./scripts/setup-tree-sitter-grammars.sh`
+- Scaffold new language adapter onboarding: `./scripts/new-language-adapter.sh <language> --ext .ext1,.ext2`
+- Validate language onboarding checklist and gates: `./scripts/validate-language-onboarding.sh <language>` (`--skip-gates` for fast checks)
 - Retrieval benchmarks: `./scripts/run-benchmarks.sh`
 - Resolve context from query file: `clojure -M:runtime --root . --query contracts/examples/queries/symbol-target.json --out /tmp/sci.json`
 - Run minimal HTTP edge: `clojure -M:runtime-http --host 127.0.0.1 --port 8787`
@@ -56,7 +58,7 @@ Current scope is contract architecture plus a working MVP runtime implementation
 - gRPC edge currently uses typed protobuf `google.protobuf.Struct` payloads for unary methods.
 - Full MVP gates: `./scripts/run-mvp-gates.sh`
 - CI runtime gates: `.github/workflows/mvp-runtime.yml`
-- Runtime API docs: [docs/runtime-api.md](/Users/ae/workspaces/SemanticСodeIndexing/docs/runtime-api.md)
+- Runtime API docs: [docs/runtime-api.md](docs/runtime-api.md)
 
 ## Agent Limit Policy
 
@@ -87,8 +89,8 @@ Current scope is contract architecture plus a working MVP runtime implementation
 - Clojure validation gate implemented (`src/semantic_code_indexing/contracts`)
 - MVP runtime implemented (`src/semantic_code_indexing/core.clj`, `src/semantic_code_indexing/runtime/*`)
 - Clojure retrieval uses `clj-kondo` as primary parser with fallback path
-- Elixir and Python retrieval paths are implemented in the same runtime adapter pipeline
-- multi-language call/symbol resolution has module/class-aware normalization for Java, Elixir, Python
+- Elixir, Python, and TypeScript retrieval paths are implemented in the same runtime adapter pipeline
+- multi-language call/symbol resolution has module/class-aware normalization for Java, Elixir, Python, TypeScript
 - import-aware and owner-aware disambiguation is applied when resolving ambiguous call targets
 - optional tree-sitter extraction path is available for Clojure/Java (grammar-path configured)
 - tiered structural-first ranking and non-compensating confidence model implemented
@@ -100,4 +102,4 @@ Current scope is contract architecture plus a working MVP runtime implementation
 
 ## License
 
-Apache License 2.0. See [LICENSE](/Users/ae/workspaces/SemanticСodeIndexing/LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).

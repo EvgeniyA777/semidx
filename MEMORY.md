@@ -19,6 +19,7 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Clojure parser path supports `clj-kondo` primary with regex fallback and optional tree-sitter extraction mode.
 - Java parser path supports regex mode and optional tree-sitter extraction mode.
 - Elixir/Python parser paths are regex-based with class/module-aware symbol and call normalization.
+- TypeScript parser supports regex mode and optional tree-sitter extraction mode.
 - Elixir parser now supports alias-aware call token expansion (`alias Foo.Bar, as: Baz` -> `Baz.fn()` -> `Foo.Bar.fn` token).
 - Elixir extraction now distinguishes form operators (`def`, `defp`, `defmacro`, `defdelegate`) and uses `do/end` balancing for tighter unit boundaries.
 - Elixir alias parsing now covers brace aliases and alias-chains (`alias Foo.{Bar,Baz}`, nested alias prefixes, `as:` single-target overrides).
@@ -28,8 +29,9 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Optional persistence adapters exist: in-memory and PostgreSQL (snapshots + unit/call-edge projections + query API).
 - Retrieval benchmark suite exists and is integrated into gates (`scripts/run-benchmarks.sh`).
 - Retrieval fixtures/benchmarks now include multi-language ambiguity scenarios (Python, Java, Elixir).
+- Retrieval fixtures/benchmarks now include TypeScript baseline and ambiguity onboarding scenarios.
 - Postgres integration smoke exists in tests (enabled by `SCI_TEST_POSTGRES_URL`) and CI service job.
-- Reproducible tree-sitter grammar bootstrap script exists (`scripts/setup-tree-sitter-grammars.sh`) with pinned grammar refs.
+- Reproducible tree-sitter grammar bootstrap script exists (`scripts/setup-tree-sitter-grammars.sh`) with pinned grammar refs (Clojure/Java/TypeScript).
 - CI runtime gates now install tree-sitter CLI + grammars before running tests.
 - Minimal HTTP runtime edge exists (`clojure -M:runtime-http`) and boundary ADR is documented (`ADR-018`).
 - HTTP boundary conformance tests exist and run in standard `clojure -M:test` gates (`semantic-code-indexing.runtime-http-test`).
@@ -37,6 +39,7 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Service-mode policy boundary is documented in `ADR-019` and implemented as optional API-key + tenant gate on HTTP/gRPC edges.
 - gRPC transport migrated from JSON strings to typed protobuf `google.protobuf.Struct` messages (`ADR-020`).
 - Host-integrated authz policy contract is implemented on HTTP/gRPC edges via `:authz_check` callback and optional EDN policy adapter (`--authz-policy-file`, `ADR-021`).
+- Language onboarding automation scripts now scaffold and validate adapter integration steps (`scripts/new-language-adapter.sh`, `scripts/validate-language-onboarding.sh`, `ADR-022`).
 - Java method unit identities are signature/arity-sensitive (`...$arityN$sigXXXX`) to disambiguate overloads.
 
 ## Hard Invariants

@@ -1,0 +1,50 @@
+{
+  "fixture_id": "retrieval_typescript_ambiguity_001",
+  "category": "typescript_ambiguity",
+  "purpose": "TypeScript broad path-targeting should remain ambiguity-aware and plan-safe.",
+  "adr_refs": ["ADR-005", "ADR-008", "ADR-014", "ADR-022"],
+  "snapshot_ref": "seed-polyglot-app@rev-008",
+  "input": {
+    "query": {
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "bug_investigation",
+        "details": "Investigate ambiguous behavior between src and test TypeScript units around processMain changes."
+      },
+      "targets": {
+        "paths": ["src/example/main.ts", "test/example/main_test.ts"],
+        "diff_summary": "Changed processMain implementation and nearby test wrapper."
+      },
+      "constraints": {
+        "token_budget": 1400,
+        "language_allowlist": ["typescript"],
+        "allowed_path_prefixes": ["src/example/", "test/example/"],
+        "max_raw_code_level": "enclosing_unit",
+        "freshness": "current_snapshot"
+      },
+      "hints": {
+        "preferred_paths": ["src/example/main.ts", "test/example/main_test.ts"],
+        "preferred_modules": ["src.example.main", "test.example.main_test"],
+        "prefer_definitions_over_callers": false,
+        "prefer_breadth_over_depth": true
+      },
+      "options": {
+        "include_tests": true,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": false,
+        "favor_compact_packet": true,
+        "favor_higher_recall": true
+      },
+      "trace": {
+        "trace_id": "66666666-7777-4888-8999-000000000000",
+        "request_id": "fixture-typescript-ambiguity-001"
+      }
+    }
+  },
+  "expected": {
+    "must_include_paths": ["src/example/main.ts", "test/example/main_test.ts"],
+    "must_include_warning_codes": ["target_ambiguous"],
+    "confidence_level": "medium",
+    "autonomy_posture": "plan_safe"
+  }
+}

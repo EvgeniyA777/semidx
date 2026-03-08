@@ -50,6 +50,13 @@
     (write-file! root "app/workflow.py"
                  "from app.orders import process_order\n\n\ndef run(order):\n    return process_order(order)\n")
 
+    (write-file! root "src/example/normalize.ts"
+                 "export function normalizeOrder(orderId: string): string {\n  return (orderId || \"\").trim().toLowerCase();\n}\n")
+    (write-file! root "src/example/main.ts"
+                 "import { normalizeOrder } from \"./normalize\";\n\nexport function processMain(orderId: string): string {\n  return normalizeOrder(orderId);\n}\n\nexport class MainService {\n  processMain(orderId: string): string {\n    return processMain(orderId);\n  }\n}\n")
+    (write-file! root "test/example/main_test.ts"
+                 "import { processMain } from \"../../src/example/main\";\n\nexport function testProcessMain(): string {\n  return processMain(\"A-1\");\n}\n")
+
     (write-file! root "lib/my_app/payments/adapter.ex"
                  "defmodule MyApp.Payments.Adapter do\n  def charge(order) do\n    {:ok, order}\n  end\nend\n")
     (write-file! root "lib/my_app/order.ex"

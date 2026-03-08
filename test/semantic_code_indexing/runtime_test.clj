@@ -26,7 +26,13 @@
   (write-file! root "lib/my_app/payments/adapter_client.ex"
                "defmodule MyApp.Payments.Adapter.Client do\n  def charge(order) do\n    {:ok, order}\n  end\nend\n")
   (write-file! root "app/orders.py"
-               "from app.validators import validate_order\n\nclass OrderService:\n    def process_order(self, order):\n        return validate_order(order)\n\n\ndef validate_local(order):\n    return bool(order)\n"))
+               "from app.validators import validate_order\n\nclass OrderService:\n    def process_order(self, order):\n        return validate_order(order)\n\n\ndef validate_local(order):\n    return bool(order)\n")
+  (write-file! root "src/example/normalize.ts"
+               "export function normalizeOrder(orderId: string): string {\n  return (orderId || \"\").trim().toLowerCase();\n}\n")
+  (write-file! root "src/example/main.ts"
+               "import { normalizeOrder } from \"./normalize\";\n\nexport function processMain(orderId: string): string {\n  return normalizeOrder(orderId);\n}\n\nexport class MainService {\n  processMain(orderId: string): string {\n    return processMain(orderId);\n  }\n}\n")
+  (write-file! root "test/example/main_test.ts"
+               "import { processMain } from \"../../src/example/main\";\n\nexport function testProcessMain(): string {\n  return processMain(\"A-1\");\n}\n"))
 
 (def sample-query
   {:schema_version "1.0"
@@ -86,6 +92,25 @@
            :request_id "runtime-test-py-001"
            :actor_id "test_runner"}})
 
+(def sample-query-typescript
+  {:schema_version "1.0"
+   :intent {:purpose "code_understanding"
+            :details "Locate TypeScript processMain function."}
+   :targets {:symbols ["src.example.main/processMain"]
+             :paths ["src/example/main.ts"]}
+   :constraints {:token_budget 1200
+                 :max_raw_code_level "enclosing_unit"
+                 :freshness "current_snapshot"}
+   :hints {:prefer_definitions_over_callers true}
+   :options {:include_tests true
+             :include_impact_hints true
+             :allow_raw_code_escalation false
+             :favor_compact_packet true
+             :favor_higher_recall false}
+   :trace {:trace_id "44444444-4444-4444-8444-444444444444"
+           :request_id "runtime-test-ts-001"
+           :actor_id "test_runner"}})
+
 (deftest end-to-end-resolve-context-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
@@ -100,6 +125,7 @@
       (is (some #(= "java" (:language %)) (vals (:files index))))
       (is (some #(= "elixir" (:language %)) (vals (:files index))))
       (is (some #(= "python" (:language %)) (vals (:files index))))
+      (is (some #(= "typescript" (:language %)) (vals (:files index))))
       (is (= "full" (get-in index [:files "src/my/app/order.clj" :parser_mode]))))
     (testing "context packet validates against contract"
       (is (nil? (m/explain (:example/context-packet contracts/contracts) packet))))
@@ -117,13 +143,17 @@
         _ (create-sample-repo! tmp-root)
         index (sci/create-index {:root_path tmp-root})
         ex-result (sci/resolve-context index sample-query-elixir)
-        py-result (sci/resolve-context index sample-query-python)]
+        py-result (sci/resolve-context index sample-query-python)
+        ts-result (sci/resolve-context index sample-query-typescript)]
     (testing "elixir symbol can be localized"
       (is (some #(= "MyApp.Order/process_order" (:symbol %))
                 (get-in ex-result [:context_packet :relevant_units]))))
     (testing "python symbol can be localized"
       (is (some #(= "app.orders.OrderService/process_order" (:symbol %))
-                (get-in py-result [:context_packet :relevant_units]))))))
+                (get-in py-result [:context_packet :relevant_units]))))
+    (testing "typescript symbol can be localized"
+      (is (some #(= "src.example.main/processMain" (:symbol %))
+                (get-in ts-result [:context_packet :relevant_units]))))))
 
 (deftest elixir-alias-aware-call-resolution-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-elixir-alias-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -166,6 +196,20 @@
     (is (= 2 (count (distinct unit-ids))))
     (is (every? #(re-find #"\$arity[0-9]+" %) unit-ids))))
 
+(deftest typescript-call-resolution-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-typescript-call-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        normalize-units (sci/query-units storage tmp-root {:module "src.example.normalize" :limit 20})
+        normalize-id (some->> normalize-units
+                              (filter #(= "src.example.normalize/normalizeOrder" (:symbol %)))
+                              first
+                              :unit_id)
+        callers (sci/query-callers storage tmp-root normalize-id {:limit 20})]
+    (is normalize-id)
+    (is (some #(= "src.example.main/processMain" (:symbol %)) callers))))
+
 (deftest in-memory-storage-roundtrip-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-storage-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
@@ -194,21 +238,26 @@
 
 (deftest tree-sitter-parser-path-test
   (let [clj-grammar (System/getenv "SCI_TREE_SITTER_CLOJURE_GRAMMAR_PATH")
-        java-grammar (System/getenv "SCI_TREE_SITTER_JAVA_GRAMMAR_PATH")]
-    (if (and (seq clj-grammar) (seq java-grammar))
+        java-grammar (System/getenv "SCI_TREE_SITTER_JAVA_GRAMMAR_PATH")
+        ts-grammar (System/getenv "SCI_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH")]
+    (if (and (seq clj-grammar) (seq java-grammar) (seq ts-grammar))
       (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-tree-sitter-test" (make-array java.nio.file.attribute.FileAttribute 0)))
             _ (create-sample-repo! tmp-root)
             index (sci/create-index {:root_path tmp-root
                                      :parser_opts {:clojure_engine :tree-sitter
                                                    :java_engine :tree-sitter
+                                                   :typescript_engine :tree-sitter
                                                    :tree_sitter_enabled true
                                                    :tree_sitter_grammars {:clojure clj-grammar
-                                                                          :java java-grammar}}})
+                                                                          :java java-grammar
+                                                                          :typescript ts-grammar}}})
             clj-diags (get-in index [:files "src/my/app/order.clj" :diagnostics])
-            java-diags (get-in index [:files "src/com/acme/CheckoutService.java" :diagnostics])]
+            java-diags (get-in index [:files "src/com/acme/CheckoutService.java" :diagnostics])
+            ts-diags (get-in index [:files "src/example/main.ts" :diagnostics])]
         (is (some #(= "tree_sitter_active" (:code %)) clj-diags))
-        (is (some #(= "tree_sitter_active" (:code %)) java-diags)))
-      (is true "Tree-sitter grammar paths are not configured; skipping tree-sitter parser test."))))
+        (is (some #(= "tree_sitter_active" (:code %)) java-diags))
+        (is (some #(= "tree_sitter_active" (:code %)) ts-diags)))
+      (is true "Tree-sitter grammar paths are not configured for Clojure/Java/TypeScript; skipping tree-sitter parser test."))))
 
 (deftest postgres-storage-roundtrip-test
   (if-let [jdbc-url (System/getenv "SCI_TEST_POSTGRES_URL")]

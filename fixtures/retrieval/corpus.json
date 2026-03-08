@@ -55,6 +55,18 @@
       "category": "elixir_test_targeting",
       "path": "elixir-exunit-module-scenario.json",
       "purpose": "ExUnit-targeted retrieval should stay plan-safe and preserve test ranking metadata."
+    },
+    {
+      "fixture_id": "retrieval_typescript_happy_path_001",
+      "category": "typescript_onboarding",
+      "path": "typescript-happy-path.json",
+      "purpose": "TypeScript exact symbol targeting should keep authority units in top_authority with high confidence."
+    },
+    {
+      "fixture_id": "retrieval_typescript_ambiguity_001",
+      "category": "typescript_ambiguity",
+      "path": "typescript-ambiguity.json",
+      "purpose": "TypeScript broad path targeting should remain ambiguity-aware and plan-safe."
     }
   ]
 }
