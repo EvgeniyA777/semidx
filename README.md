@@ -111,6 +111,9 @@ Roadmap status is tracked separately in [docs/roadmap-status.md](docs/roadmap-st
 - Clojure retrieval uses `clj-kondo` as primary parser with fallback path
 - Clojure semantic-core now includes alias-aware fallback call resolution, top-level-aware fallback parsing for macro/comment wrappers, namespace-linked `related_tests` hints for test namespaces, dispatch-aware `defmethod` unit identities, dispatch-sensitive multimethod ranking, and recursive graph-level macro-generated ownership for syntax-quote, list-built, and common composed macro expansions such as `concat`, `apply list`, `into`, and conditional branches without leaking ordinary macro implementation helpers
 - Elixir, Python, and TypeScript retrieval paths are implemented in the same runtime adapter pipeline
+- Elixir semantic-core now resolves `import`/`use` targets more accurately, expands unqualified imported calls, links `defdelegate` units back to their target module functions, and surfaces ExUnit file linkage in `related_tests`
+- Java semantic-core now uses arity-aware call resolution for overloads and respects static-import/class ownership when linking method calls
+- Python semantic-core now resolves imported symbols and module aliases more accurately, links `self`/`cls` method calls back to class-owned methods, and surfaces Python test-file linkage in `related_tests`
 - multi-language call/symbol resolution has module/class-aware normalization for Java, Elixir, Python, TypeScript
 - import-aware and owner-aware disambiguation is applied when resolving ambiguous call targets
 - optional tree-sitter extraction path is available for Clojure/Java (grammar-path configured)

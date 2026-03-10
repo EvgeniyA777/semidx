@@ -183,6 +183,12 @@ Both `:context_packet` and `:diagnostics_trace` now include:
 
 For Clojure retrieval, `impact_hints.related_tests` now also links nearby test files via namespace/import relationships, not only direct caller overlap. This keeps `related_tests` useful even when a test namespace exercises a sibling var instead of the exact selected var. The Clojure fallback parser is also top-level-aware, so nested `defn` forms inside wrappers such as `comment` are no longer indexed as real units. For multimethods, `defmethod` implementations now keep dispatch-aware unit identities internally, and retrieval can boost the correct implementation when the query text strongly hints at a dispatch case such as `pickup` or `delivery`, without changing the public query symbol shape. Custom macro calls can also contribute recursive graph-level inherited caller edges for the vars they structurally inject across syntax-quoted, list-built, and common composed expansion patterns such as `concat`, `apply list`, `into`, and conditional branches, while filtering out ordinary macro implementation helpers that are not part of the generated expansion path.
 
+For Elixir retrieval, the regex adapter now resolves normalized `import` and `use` targets, expands unqualified imported calls toward imported modules, links `defdelegate` units to their delegated target functions, and adds ExUnit-oriented file linkage so `related_tests` can point back to test files such as `test/**/*_test.exs` that exercise the selected source module.
+
+For Java retrieval, overload-sensitive unit identities are now complemented by arity-aware caller/callee linking, so calls such as `normalize(id, true)` prefer the `arity=2` method target instead of all same-name overloads. Static-imported methods are also matched back to their owning class more accurately via import-aware ownership filtering.
+
+For Python retrieval, imported symbols from `from ... import ...` and module aliases from `import ... as ...` are now expanded toward the owning module during call linking, `self` / `cls` method calls are rewritten toward class-owned method identities, and Python test modules such as `*_test.py` and `tests/*` can flow into `impact_hints.related_tests`.
+
 ## Offline Policy Governance CLI
 
 The existing replay/evaluation surface under `clojure -M:eval` now supports governed policy workflows without changing the runtime request contract.

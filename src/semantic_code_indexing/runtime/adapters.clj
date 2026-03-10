@@ -17,7 +17,7 @@
   #"\[([a-zA-Z0-9\._\-]+)\s+:as\s+([a-zA-Z0-9_\-]+)\]")
 
 (def ^:private java-package-re #"^\s*package\s+([a-zA-Z0-9_\.]+)\s*;")
-(def ^:private java-import-re #"^\s*import\s+([a-zA-Z0-9_\.\*]+)\s*;")
+(def ^:private java-import-re #"^\s*import\s+(?:static\s+)?([a-zA-Z0-9_\.\*]+)\s*;")
 (def ^:private java-class-re #"^\s*(?:public\s+)?(?:class|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")
 (def ^:private java-method-re
   #"^\s*(?:(public|private|protected)\s+)?(?:(?:static|final|native|synchronized|abstract|default)\s+)*([A-Za-z0-9_<>,\[\]\.\?]+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*(?:\{|throws|;)")
@@ -25,13 +25,15 @@
 
 (def ^:private ex-module-re #"^\s*defmodule\s+([A-Za-z0-9_\.]+)\s+do")
 (def ^:private ex-import-re #"^\s*(?:import|require|use)\s+([A-Za-z0-9_\.]+)")
+(def ^:private ex-import-only-re #"^\s*import\s+([A-Za-z0-9_\.]+)")
+(def ^:private ex-use-only-re #"^\s*use\s+([A-Za-z0-9_\.]+)")
 (def ^:private ex-alias-line-re #"^\s*alias\s+(.+)$")
 (def ^:private ex-def-re #"^\s*(defdelegate|defp?|defmacro|defmacrop)\s+([a-zA-Z_][a-zA-Z0-9_!?]*)")
 (def ^:private ex-test-re #"^\s*test\s+\"([^\"]+)\"\s+do")
 (def ^:private ex-call-re #"\b([A-Za-z_][A-Za-z0-9_\.!?]*)\s*\(")
 
-(def ^:private py-import-re #"^\s*import\s+([a-zA-Z0-9_\.]+)")
-(def ^:private py-from-import-re #"^\s*from\s+([a-zA-Z0-9_\.]+)\s+import\s+([A-Za-z0-9_,\s\*]+)")
+(def ^:private py-import-re #"^\s*import\s+([a-zA-Z0-9_\.]+)(?:\s+as\s+([A-Za-z0-9_]+))?")
+(def ^:private py-from-import-re #"^\s*from\s+([a-zA-Z0-9_\.]+)\s+import\s+([A-Za-z0-9_,\s\*_]+)")
 (def ^:private py-class-re #"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)")
 (def ^:private py-def-re #"^\s*(?:async\s+def|def)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 (def ^:private py-call-re #"\b([A-Za-z_][A-Za-z0-9_\.]*)\s*\(")
@@ -157,9 +159,11 @@
                      (remove str/blank?))]
       (vec (cons from
                  (map (fn [n]
-                        (if (= n "*")
-                          from
-                          (str from "." n)))
+                        (let [[_ name _alias] (or (re-find #"^([A-Za-z0-9_\*]+)(?:\s+as\s+([A-Za-z0-9_]+))?$" n)
+                                                  [nil n nil])]
+                          (if (= name "*")
+                            from
+                            (str from "." name))))
                       parts))))
     (when-let [[_ imp] (re-find py-import-re line)]
       [imp])))
@@ -829,9 +833,133 @@
     "test"
     "method"))
 
+(defn- java-args-arity [args-text]
+  (let [text (str/trim (or args-text ""))]
+    (if (str/blank? text)
+      0
+      (loop [chars (seq text)
+             depth 0
+             in-string? false
+             escaped? false
+             commas 0]
+        (if-let [ch (first chars)]
+          (cond
+            escaped?
+            (recur (next chars) depth in-string? false commas)
+
+            in-string?
+            (cond
+              (= ch \\) (recur (next chars) depth in-string? true commas)
+              (= ch \") (recur (next chars) depth false false commas)
+              :else (recur (next chars) depth in-string? false commas))
+
+            (= ch \")
+            (recur (next chars) depth true false commas)
+
+            (#{\( \[ \< \{} ch)
+            (recur (next chars) (inc depth) in-string? false commas)
+
+            (#{\) \] \> \}} ch)
+            (recur (next chars) (max 0 (dec depth)) in-string? false commas)
+
+            (and (= ch \,) (zero? depth))
+            (recur (next chars) depth in-string? false (inc commas))
+
+            :else
+            (recur (next chars) depth in-string? false commas))
+          (inc commas))))))
+
+(defn- java-call-details [body]
+  (let [text (str body)
+        n (count text)]
+    (loop [idx 0
+           in-string? false
+           escaped? false
+           details []]
+      (if (>= idx n)
+        details
+        (let [ch (.charAt text idx)]
+          (cond
+            escaped?
+            (recur (inc idx) in-string? false details)
+
+            in-string?
+            (cond
+              (= ch \\) (recur (inc idx) in-string? true details)
+              (= ch \") (recur (inc idx) false false details)
+              :else (recur (inc idx) in-string? false details))
+
+            (= ch \")
+            (recur (inc idx) true false details)
+
+            (= ch \()
+            (let [prefix (subs text 0 idx)
+                  token (some-> (re-find #"([A-Za-z_][A-Za-z0-9_\.]*)\s*$" prefix) second)
+                  close-idx (loop [j (inc idx)
+                                   depth 1
+                                   in-string2? false
+                                   escaped2? false]
+                              (if (>= j n)
+                                n
+                                (let [ch2 (.charAt text j)]
+                                  (cond
+                                    escaped2?
+                                    (recur (inc j) depth in-string2? false)
+
+                                    in-string2?
+                                    (cond
+                                      (= ch2 \\) (recur (inc j) depth in-string2? true)
+                                      (= ch2 \") (recur (inc j) depth false false)
+                                      :else (recur (inc j) depth in-string2? false))
+
+                                    (= ch2 \")
+                                    (recur (inc j) depth true false)
+
+                                    (= ch2 \()
+                                    (recur (inc j) (inc depth) in-string2? false)
+
+                                    (= ch2 \))
+                                    (if (= depth 1)
+                                      j
+                                      (recur (inc j) (dec depth) in-string2? false))
+
+                                    :else
+                                    (recur (inc j) depth in-string2? false)))))
+                  args-text (if (< idx close-idx) (subs text (inc idx) close-idx) "")]
+              (recur (inc idx)
+                     in-string?
+                     false
+                     (if (or (str/blank? token)
+                             (contains? java-call-stop (str/lower-case token)))
+                       details
+                       (conj details {:token token
+                                      :arity (java-args-arity args-text)}))))
+
+            :else
+            (recur (inc idx) in-string? false details)))))))
+
+(defn- java-call-arity-index [call-details]
+  (reduce (fn [acc {:keys [token arity]}]
+            (let [tail (tail-token token)]
+              (cond-> acc
+                (seq token) (update token (fnil conj #{}) arity)
+                (and tail (not= tail token)) (update tail (fnil conj #{}) arity))))
+          {}
+          call-details))
+
+(defn- java-call-scan-body [lines start-line end-line]
+  (let [segment (subvec lines (dec start-line) end-line)
+        first-line (first segment)
+        stripped-first (if-let [brace-idx (some-> first-line (str/index-of "{"))]
+                         (subs first-line (inc brace-idx))
+                         "")
+        body-lines (cond-> [(or stripped-first "")]
+                     (> (count segment) 1) (into (subvec segment 1)))]
+    (str/join "\n" body-lines)))
+
 (defn- extract-java-calls [body]
-  (->> (re-seq java-call-re body)
-       (map second)
+  (->> (java-call-details body)
+       (map :token)
        (mapcat (fn [token]
                  (let [tail (tail-token token)]
                    (cond-> [token]
@@ -906,8 +1034,8 @@
                                 symbol (str (when pkg (str pkg ".")) cls "#" (:method m))
                                 {:keys [unit_id method_arity method_signature_key]}
                                 (java-method-unit-id path symbol (:params m))
-                                body (->> (subvec lines (dec start-line) end-line)
-                                          (str/join "\n"))]
+                                body (java-call-scan-body lines start-line end-line)
+                                call-details (java-call-details body)]
                             {:unit_id unit_id
                              :kind (java-kind path (:method m))
                              :symbol symbol
@@ -922,6 +1050,7 @@
                              :method_arity method_arity
                              :method_signature_key method_signature_key
                              :calls (extract-java-calls body)
+                             :call_arity_by_token (java-call-arity-index call-details)
                              :parser_mode "full"})))
                    vec)]
     {:language "java"
@@ -987,16 +1116,18 @@
                                                      (map #(node-name-inside ts-lines % "name:"))
                                                      (remove nil?)
                                                      distinct
-                                                     vec)]
+                                                     vec)
+                                          call-details (mapv (fn [token] {:token token}) calls)]
                                       {:start-line (inc (:start-row m))
                                        :end-line (inc (:end-row m))
                                        :method method-name
                                        :class (or cls "UnknownClass")
                                        :params (java-param-fragment-from-source src-lines (inc (:start-row m)))
-                                       :calls calls})))
+                                       :calls calls
+                                       :call_details call-details})))
                              vec)
                 units (->> methods
-                           (map (fn [{:keys [start-line end-line method class calls params]}]
+                           (map (fn [{:keys [start-line end-line method class calls call_details params]}]
                                   (let [symbol (str (when pkg (str pkg ".")) class "#" method)
                                         {:keys [unit_id method_arity method_signature_key]}
                                         (java-method-unit-id path symbol params)]
@@ -1021,6 +1152,7 @@
                                                  (remove #(contains? java-call-stop %))
                                                  distinct
                                                  vec)
+                                     :call_arity_by_token (java-call-arity-index call_details)
                                      :parser_mode "full"})))
                            vec)]
             (if (seq units)
@@ -1056,8 +1188,19 @@
                  (str/replace #"^-+|-+$" ""))]
     (str (or module "Elixir.Unknown") "/test-" (if (seq slug) slug "unnamed"))))
 
+(def ^:private ex-test-module-suffixes
+  ["Test"])
+
 (defn- ex-last-segment [module]
   (some-> module str (str/split #"\.") last))
+
+(defn- ex-strip-test-suffix [module]
+  (reduce (fn [acc suffix]
+            (if (str/ends-with? acc suffix)
+              (subs acc 0 (- (count acc) (count suffix)))
+              acc))
+          (str module)
+          ex-test-module-suffixes))
 
 (defn- ex-strip-comment [line]
   (first (str/split (str line) #"#" 2)))
@@ -1126,6 +1269,20 @@
    {}
    lines))
 
+(defn- ex-directive-targets [lines directive-re alias-map]
+  (->> lines
+       (keep (fn [line]
+               (some-> (re-find directive-re line)
+                       second
+                       ex-strip-comment
+                       (str/split #"," 2)
+                       first
+                       str/trim
+                       (ex-resolve-alias-ref alias-map))))
+       (remove str/blank?)
+       distinct
+       vec))
+
 (defn- ex-keyword-count [line kw]
   (count (re-seq (re-pattern (str "\\b" kw "\\b")) (str line))))
 
@@ -1154,13 +1311,34 @@
     (when (not= (str token) expanded)
       expanded)))
 
-(defn- extract-ex-calls [body alias-map]
+(defn- ex-expand-import-token [token import-modules]
+  (when-not (str/includes? (str token) ".")
+    (->> import-modules
+         (mapcat (fn [module]
+                   [(str module "." token)
+                    (str module "/" token)]))
+         distinct
+         vec)))
+
+(defn- ex-delegate-calls [body alias-map]
+  (if-let [[_ fun target] (re-find #"defdelegate\s+([a-zA-Z_][a-zA-Z0-9_!?]*)\s*(?:\([^)]*\))?\s*,\s*to:\s*([A-Za-z0-9_\.]+)" body)]
+    (let [target* (ex-resolve-alias-ref target alias-map)]
+      (->> [(str target* "." fun)
+            (str target* "/" fun)]
+           (remove str/blank?)
+           distinct
+           vec))
+    []))
+
+(defn- extract-ex-calls [body alias-map import-modules]
   (->> (re-seq ex-call-re body)
        (map second)
        (mapcat (fn [token]
-                 (let [expanded (ex-expand-alias-token token alias-map)]
+                 (let [expanded (ex-expand-alias-token token alias-map)
+                       imported (ex-expand-import-token token import-modules)]
                    (cond-> [token]
-                     (seq expanded) (conj expanded)))))
+                     (seq expanded) (conj expanded)
+                     (seq imported) (into imported)))))
        (mapcat (fn [token]
                  (let [tail (tail-token token)]
                    (cond-> [token]
@@ -1169,15 +1347,32 @@
        distinct
        vec))
 
+(defn- ex-test-target-modules [module imports uses path]
+  (let [module* (str (or module ""))
+        exunit-test? (some #{"ExUnit.Case"} uses)]
+    (if (or (str/includes? (str path) "/test/")
+            (str/ends-with? module* "Test")
+            exunit-test?)
+      (->> (concat [(ex-strip-test-suffix module*)] imports)
+           (remove #(or (str/blank? %)
+                        (= % "ExUnit.Case")))
+           distinct
+           vec)
+      [])))
+
 (defn- parse-elixir [path lines]
   (let [line-count (count lines)
         module-name (some (fn [line] (some-> (re-find ex-module-re line) second)) lines)
         alias-map (ex-alias-map lines)
+        import-modules (ex-directive-targets lines ex-import-only-re alias-map)
+        use-modules (ex-directive-targets lines ex-use-only-re alias-map)
         imports (->> (concat
-                      (keep (fn [line] (some-> (re-find ex-import-re line) second)) lines)
+                      import-modules
+                      use-modules
                       (vals alias-map))
                      distinct
                      vec)
+        test-target-modules (ex-test-target-modules module-name imports use-modules path)
         defs (->> (map-indexed vector lines)
                   (keep (fn [[idx line]]
                           (cond
@@ -1222,13 +1417,16 @@
                              :summary (str (:form d) " " (:raw-symbol d))
                              :docstring_excerpt nil
                              :imports imports
-                             :calls (extract-ex-calls body alias-map)
+                             :calls (if (= "defdelegate" (:form d))
+                                      (ex-delegate-calls body alias-map)
+                                      (extract-ex-calls body alias-map import-modules))
                              :ex_form (:form d)
                              :parser_mode "full"})))
                    vec)]
     {:language "elixir"
      :module module-name
      :imports imports
+     :test_target_modules test-target-modules
      :units units
      :diagnostics []
      :parser_mode "full"}))
@@ -1239,10 +1437,23 @@
       (str/replace #"/" ".")
       (str/replace #"^\.+" "")))
 
+(defn- py-test-path? [path]
+  (let [p (str/lower-case (str path))]
+    (or (str/includes? p "/test/")
+        (str/includes? p "/tests/")
+        (str/ends-with? p "_test.py")
+        (str/starts-with? (last (str/split p #"/")) "test_"))))
+
+(defn- py-strip-test-module [module]
+  (let [m (str module)]
+    (cond
+      (str/ends-with? m "_test") (subs m 0 (- (count m) 5))
+      (re-find #"\.test_[^.]+$" m) (str/replace m #"\.test_[^.]+$" "")
+      :else m)))
+
 (defn- py-kind [path fn-name]
-  (if (or (str/includes? path "/test/")
+  (if (or (py-test-path? path)
           (str/starts-with? fn-name "test_")
-          (str/ends-with? path "_test.py")
           (str/starts-with? (str/lower-case (or fn-name "")) "test"))
     "test"
     "function"))
@@ -1256,12 +1467,84 @@
        last
        :name))
 
-(defn- extract-py-calls [body]
+(defn- py-import-state [lines]
+  (reduce
+   (fn [{:keys [imports module-aliases symbol-aliases] :as acc} line]
+     (cond
+       (re-find py-from-import-re line)
+       (let [[_ from names] (re-find py-from-import-re line)
+             parts (->> (str/split names #",")
+                        (map str/trim)
+                        (remove str/blank?))
+             imports* (into imports [from])
+             symbol-aliases* (reduce (fn [m part]
+                                       (let [[_ name alias] (or (re-find #"^([A-Za-z0-9_\*]+)(?:\s+as\s+([A-Za-z0-9_]+))?$" part)
+                                                                [nil part nil])
+                                             local (or alias name)]
+                                         (if (= name "*")
+                                           m
+                                           (assoc m local (str from "/" name)))))
+                                     symbol-aliases
+                                     parts)]
+         {:imports imports*
+          :module-aliases module-aliases
+          :symbol-aliases symbol-aliases*})
+
+       (re-find py-import-re line)
+       (let [[_ imp alias] (re-find py-import-re line)]
+         {:imports (conj imports imp)
+          :module-aliases (cond-> module-aliases
+                            (seq alias) (assoc alias imp))
+          :symbol-aliases symbol-aliases})
+
+       :else
+       acc))
+   {:imports [] :module-aliases {} :symbol-aliases {}}
+   lines))
+
+(defn- py-expand-module-alias [token module-aliases]
+  (let [token* (str token)]
+    (if-let [[_ alias suffix] (re-matches #"([A-Za-z_][A-Za-z0-9_]*)\.(.+)" token*)]
+      (when-let [base (get module-aliases alias)]
+        (str base "." suffix))
+      nil)))
+
+(defn- py-expand-self-token [token module class-name]
+  (let [token* (str token)]
+    (if-let [[_ owner suffix] (re-matches #"(self|cls)\.(.+)" token*)]
+      (let [base (str module "." class-name)]
+        [(str base "." suffix) (str base "/" suffix)])
+      [])))
+
+(defn- py-expand-symbol-import [token symbol-aliases]
+  (when-let [resolved (get symbol-aliases (str token))]
+    [(str resolved)
+     (str/replace (str resolved) #"/" ".")]))
+
+(defn- py-test-target-modules [module imports path]
+  (if (py-test-path? path)
+    (->> (concat [(py-strip-test-module module)] imports)
+         (remove #(or (str/blank? %)
+                      (= % "unittest")
+                      (= % "pytest")))
+         distinct
+         vec)
+    []))
+
+(defn- extract-py-calls [body {:keys [module class-name module-aliases symbol-aliases]}]
   (->> (re-seq py-call-re body)
        (map second)
        (mapcat (fn [token]
-                 (let [tail (tail-token token)]
+                 (let [module-alias-token (py-expand-module-alias token module-aliases)
+                       imported-symbols (py-expand-symbol-import token symbol-aliases)
+                       self-symbols (if (and class-name module)
+                                      (py-expand-self-token token module class-name)
+                                      [])
+                       tail (tail-token token)]
                    (cond-> [token]
+                     (seq module-alias-token) (conj module-alias-token)
+                     (seq imported-symbols) (into imported-symbols)
+                     (seq self-symbols) (into self-symbols)
                      (and tail (not= tail token)) (conj tail)))))
        (remove #(contains? py-call-stop %))
        distinct
@@ -1270,20 +1553,23 @@
 (defn- parse-python [path lines]
   (let [line-count (count lines)
         module (py-module-name path)
-        imports (->> lines
-                     (mapcat parse-python-import)
-                     distinct
-                     vec)
+        {:keys [imports module-aliases symbol-aliases]} (py-import-state lines)
+        imports (->> imports distinct vec)
+        test-target-modules (py-test-target-modules module imports path)
         defs (loop [idx 0
                     class-stack []
-                    out []]
+                 out []]
                (if (>= idx line-count)
                  out
                  (let [line (nth lines idx)
                        indent (py-indent line)
-                       pruned (->> class-stack
-                                   (filter #(< (:indent %) indent))
-                                   vec)]
+                       blank-or-comment? (or (str/blank? (str/trim line))
+                                             (str/starts-with? (str/trim line) "#"))
+                       pruned (if blank-or-comment?
+                                class-stack
+                                (->> class-stack
+                                     (filter #(< (:indent %) indent))
+                                     vec))]
                    (cond
                      (re-find py-class-re line)
                      (let [[_ cls] (re-find py-class-re line)
@@ -1305,6 +1591,7 @@
                            entry {:start-line (inc idx)
                                   :kind kind
                                   :raw-symbol symbol
+                                  :class-name class-name
                                   :signature (trim-signature line)}]
                        (recur (inc idx) pruned (conj out entry)))
 
@@ -1328,12 +1615,16 @@
                              :summary (str (:kind d) " " (:raw-symbol d))
                              :docstring_excerpt nil
                              :imports imports
-                             :calls (extract-py-calls body)
+                             :calls (extract-py-calls body {:module module
+                                                           :class-name (:class-name d)
+                                                           :module-aliases module-aliases
+                                                           :symbol-aliases symbol-aliases})
                              :parser_mode "full"})))
                    vec)]
     {:language "python"
      :module module
      :imports imports
+     :test_target_modules test-target-modules
      :units units
      :diagnostics []
      :parser_mode "full"}))

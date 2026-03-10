@@ -26,9 +26,9 @@ Legend:
 - `[x]` Phase 2 protection flow: protected replay cases and promotion gates against protected regressions
 - `[x]` Runtime policy selection on library, HTTP, gRPC, and MCP via registry-backed `policy_id` / `version`
 - `[~]` Phase 3 Clojure semantic-core: namespace/var identity, test linkage, caller/callee resolution, multimethod dispatch, macro-aware ownership substantially improved, but not compiler-grade
-- `[~]` Phase 3 Elixir semantic-core: baseline alias/import handling exists, but deeper `import` / `use`, ownership, arity, and test linkage work remains
-- `[~]` Phase 3 Java semantic-core: overload-sensitive identity exists, but import/class ownership and stronger overload disambiguation remain
-- `[~]` Phase 3 Python semantic-core: baseline module/class/function normalization exists, but deeper ownership and import resolution remain
+- `[~]` Phase 3 Elixir semantic-core: alias/import handling, imported-call expansion, `defdelegate` linkage, and ExUnit test linkage now exist, but deeper `use` ownership and arity-sensitive targeting remain
+- `[~]` Phase 3 Java semantic-core: overload-sensitive identity, arity-aware call linking, and static-import/class ownership now exist, but deeper Java ownership/disambiguation work still remains
+- `[~]` Phase 3 Python semantic-core: imported symbol resolution, module-alias handling, class-owned `self` / `cls` method linking, and test-file linkage now exist, but deeper Python ownership/disambiguation work still remains
 - `[~]` Phase 3 TypeScript: compatibility and regression coverage exist, but no strategic deepening work
 - `[ ]` Capabilities extended enough to drive per-language confidence ceilings and guardrails
 - `[~]` Phase 4 runtime and MCP hardening: snapshots, usage metrics, authz, and tenant hooks exist, but TTL, stale detection, provenance, snapshot pinning, rebuild reasons, unified error taxonomy, and full SLO metrics remain

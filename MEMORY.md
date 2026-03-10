@@ -24,6 +24,9 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Elixir parser now supports alias-aware call token expansion (`alias Foo.Bar, as: Baz` -> `Baz.fn()` -> `Foo.Bar.fn` token).
 - Elixir extraction now distinguishes form operators (`def`, `defp`, `defmacro`, `defdelegate`) and uses `do/end` balancing for tighter unit boundaries.
 - Elixir alias parsing now covers brace aliases and alias-chains (`alias Foo.{Bar,Baz}`, nested alias prefixes, `as:` single-target overrides).
+- Elixir semantic-core now also expands unqualified imported calls toward imported modules, links `defdelegate` units to delegated targets, and surfaces ExUnit test-file linkage through `related_tests`.
+- Java semantic-core now uses arity-aware overload resolution for caller/callee linking and handles static-import/class ownership more accurately when matching method calls.
+- Python semantic-core now expands imported symbols and module aliases toward owning modules, rewrites `self`/`cls` calls toward class-owned methods, and surfaces Python test-file linkage through `related_tests`.
 - Retrieval uses structural-first tiered scoring with non-compensating confidence ceilings.
 - Raw-code escalation stage is implemented (opt-in, late, bounded by query constraints).
 - Semantic resolution includes import-aware and owner-aware call target disambiguation.
@@ -65,16 +68,16 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Tree-sitter path still depends on external CLI availability, though grammar bootstrap is now scripted and pinned.
 - Persistence graph queries are retrieval-oriented and not yet a full semantic graph query language.
 - Automatic replay dataset harvesting from real usage traces and feedback is not implemented yet.
-- Language-priority roadmap tail remains open after the current Clojure push: Elixir needs deeper `import/use` and ownership resolution, Java needs stronger import/class ownership plus overload targeting, and Python remains mostly baseline ownership/import resolution.
+- Language-priority roadmap tail remains open after the current Clojure, Elixir, Java, and Python pushes: TypeScript remains regression-only by design, and Elixir/Java/Python still have room for deeper ownership and targeting beyond the new slices.
 - Capabilities are not yet language-strength-aware enough to drive per-language confidence ceilings and guardrails.
 - Runtime hardening still lacks TTL/stale detection, provenance, snapshot pinning policy, unified machine-readable error taxonomy, and a complete SLO-facing operational metrics set.
 - Real self-improvement loop is not implemented beyond usage metrics and explicit feedback sinks.
 
 ## Next Execution Priorities
 
-1. Deepen semantic-core for the next roadmap language priority: Elixir first, then Java, then Python, while keeping TypeScript in no-regression coverage.
-2. Extend capabilities and retrieval calibration so language strength can influence confidence ceilings, guardrails, and governed scorecards.
-3. After language-priority work materially improves retrieval quality, implement Phase 4 runtime hardening: index lifecycle policy, unified error taxonomy, and fuller SLO-facing metrics.
+1. Extend capabilities and retrieval calibration so language strength can influence confidence ceilings, guardrails, and governed scorecards.
+2. Implement Phase 4 runtime hardening: index lifecycle policy, unified error taxonomy, and fuller SLO-facing metrics.
+3. Keep TypeScript in no-regression coverage and reserve deeper follow-up passes for Elixir/Java/Python where retrieval quality gaps remain after metrics hardening.
 
 ## Update Rule
 

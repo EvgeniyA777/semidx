@@ -23,17 +23,25 @@
   (write-file! root "src/my/app/shipping.clj"
                "(ns my.app.shipping)\n\n(defmulti route-order (fn [mode payload] mode))\n\n(defn pickup-stop [payload]\n  (:pickup payload))\n\n(defn delivery-stop [payload]\n  (:delivery payload))\n\n(defmethod route-order :pickup [_ payload]\n  (pickup-stop payload))\n\n(defmethod route-order :delivery [_ payload]\n  (delivery-stop payload))\n\n(defn plan-route [mode payload]\n  (route-order mode payload))\n")
   (write-file! root "src/com/acme/CheckoutService.java"
-               "package com.acme;\n\nimport java.util.Objects;\n\npublic class CheckoutService {\n  public String processOrder(String id) {\n    return normalize(id, true);\n  }\n\n  private String normalize(String id) {\n    return normalize(id, false);\n  }\n\n  private String normalize(String id, boolean strict) {\n    String base = Objects.requireNonNull(id).trim();\n    return strict ? base : base.toLowerCase();\n  }\n}\n")
+               "package com.acme;\n\nimport java.util.Objects;\nimport static com.acme.IdNormalizer.normalizeImported;\n\npublic class CheckoutService {\n  public String processOrder(String id) {\n    return normalize(id, true);\n  }\n\n  public String processImported(String id) {\n    return normalizeImported(id);\n  }\n\n  public String processImportedStrict(String id) {\n    return normalizeImported(id, true);\n  }\n\n  private String normalize(String id) {\n    return normalize(id, false);\n  }\n\n  private String normalize(String id, boolean strict) {\n    String base = Objects.requireNonNull(id).trim();\n    return strict ? base : base.toLowerCase();\n  }\n}\n")
+  (write-file! root "src/com/acme/IdNormalizer.java"
+               "package com.acme;\n\npublic class IdNormalizer {\n  public static String normalizeImported(String id) {\n    return id.trim();\n  }\n\n  public static String normalizeImported(String id, boolean strict) {\n    String base = id.trim();\n    return strict ? base : base.toLowerCase();\n  }\n}\n")
   (write-file! root "lib/my_app/order.ex"
-               "defmodule MyApp.Order do\n  alias MyApp.{Validator, Payments.Adapter}\n  alias Adapter.Client, as: BillingClient\n  alias Validator, as: V\n\n  def process_order(ctx, order) do\n    V.validate(order)\n    Adapter.charge(order)\n    BillingClient.charge(order)\n    {:ok, order}\n  end\n\n  defp to_status(order) do\n    Map.get(order, :status, :new)\n  end\n\n  defdelegate charge(order), to: MyApp.Validator\nend\n")
+               "defmodule MyApp.Order do\n  import MyApp.Validator\n  alias MyApp.{Validator, Payments.Adapter}\n  alias Adapter.Client, as: BillingClient\n  alias Validator, as: V\n\n  def process_order(ctx, order) do\n    validate(order)\n    Adapter.charge(order)\n    BillingClient.charge(order)\n    {:ok, order}\n  end\n\n  def process_with_alias(ctx, order) do\n    V.validate(order)\n    {:ok, order}\n  end\n\n  defp to_status(order) do\n    Map.get(order, :status, :new)\n  end\n\n  defdelegate charge(order), to: MyApp.Validator\nend\n")
   (write-file! root "lib/my_app/validator.ex"
                "defmodule MyApp.Validator do\n  def validate(order) do\n    {:ok, order}\n  end\n\n  def charge(order) do\n    {:ok, order}\n  end\nend\n")
   (write-file! root "lib/my_app/payments/adapter.ex"
                "defmodule MyApp.Payments.Adapter do\n  def charge(order) do\n    {:ok, order}\n  end\nend\n")
   (write-file! root "lib/my_app/payments/adapter_client.ex"
                "defmodule MyApp.Payments.Adapter.Client do\n  def charge(order) do\n    {:ok, order}\n  end\nend\n")
+  (write-file! root "test/my_app/order_test.exs"
+               "defmodule MyApp.OrderTest do\n  use ExUnit.Case\n  alias MyApp.Order\n\n  test \"process order stays linked to source module\" do\n    assert {:ok, %{id: 1}} = {:ok, Order.process_order(%{}, %{id: 1})}\n  end\nend\n")
   (write-file! root "app/orders.py"
-               "from app.validators import validate_order\n\nclass OrderService:\n    def process_order(self, order):\n        return validate_order(order)\n\n\ndef validate_local(order):\n    return bool(order)\n")
+               "from app.validators import validate_order\nimport app.validators as validators\n\nclass OrderService:\n    def process_order(self, order):\n        return validate_order(order)\n\n    def process_alias(self, order):\n        return validators.validate_order(order)\n\n    def process_local(self, order):\n        return self.validate_local(order)\n\n    def validate_local(self, order):\n        return bool(order)\n\n\ndef validate_local(order):\n    return bool(order)\n")
+  (write-file! root "app/validators.py"
+               "def validate_order(order):\n    return bool(order and order.get(\"id\"))\n")
+  (write-file! root "app/orders_test.py"
+               "from app.orders import OrderService\n\n\ndef test_process_order():\n    service = OrderService()\n    assert service.process_order({\"id\": 1})\n")
   (write-file! root "src/example/normalize.ts"
                "export function normalizeOrder(orderId: string): string {\n  return (orderId || \"\").trim().toLowerCase();\n}\n")
   (write-file! root "src/example/main.ts"
@@ -234,7 +242,27 @@
         validate-unit-id (some->> validator-units (filter #(= "MyApp.Validator/validate" (:symbol %))) first :unit_id)
         callers (sci/query-callers storage tmp-root validate-unit-id {:limit 20})]
     (is validate-unit-id)
-    (is (some #(= "MyApp.Order/process_order" (:symbol %)) callers))))
+    (is (some #(= "MyApp.Order/process_order" (:symbol %)) callers))
+    (is (some #(= "MyApp.Order/process_with_alias" (:symbol %)) callers))))
+
+(deftest elixir-related-tests-link-via-exunit-module-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-elixir-related-tests" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        index (sci/create-index {:root_path tmp-root})
+        result (sci/resolve-context index sample-query-elixir)
+        related-tests (get-in result [:context_packet :impact_hints :related_tests])]
+    (is (some #{"test/my_app/order_test.exs"} related-tests))))
+
+(deftest elixir-defdelegate-links-to-target-module-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-elixir-defdelegate-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        validator-units (sci/query-units storage tmp-root {:module "MyApp.Validator" :limit 20})
+        charge-unit-id (some->> validator-units (filter #(= "MyApp.Validator/charge" (:symbol %))) first :unit_id)
+        callers (sci/query-callers storage tmp-root charge-unit-id {:limit 20})]
+    (is charge-unit-id)
+    (is (some #(= "MyApp.Order/charge" (:symbol %)) callers))))
 
 (deftest elixir-brace-and-nested-alias-resolution-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-elixir-nested-alias-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -265,6 +293,82 @@
     (is (= 2 (count java-units)))
     (is (= 2 (count (distinct unit-ids))))
     (is (every? #(re-find #"\$arity[0-9]+" %) unit-ids))))
+
+(deftest java-overload-caller-resolution-prefers-matching-arity-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-java-overload-callers-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        checkout-units (sci/query-units storage tmp-root {:module "com.acme.CheckoutService" :limit 20})
+        normalize-1 (some #(when (and (= "com.acme.CheckoutService#normalize" (:symbol %))
+                                      (= 1 (:method_arity %)))
+                             %)
+                          checkout-units)
+        normalize-2 (some #(when (and (= "com.acme.CheckoutService#normalize" (:symbol %))
+                                      (= 2 (:method_arity %)))
+                             %)
+                          checkout-units)
+        callers-1 (sci/query-callers storage tmp-root (:unit_id normalize-1) {:limit 20})
+        callers-2 (sci/query-callers storage tmp-root (:unit_id normalize-2) {:limit 20})
+        process-order (some #(when (= "com.acme.CheckoutService#processOrder" (:symbol %)) %) checkout-units)
+        normalize-arity1 (some #(when (and (= "com.acme.CheckoutService#normalize" (:symbol %))
+                                           (= 1 (:method_arity %)))
+                                  %)
+                               checkout-units)]
+    (is normalize-1)
+    (is normalize-2)
+    (is (not-any? #(= "com.acme.CheckoutService#processOrder" (:symbol %)) callers-1))
+    (is (some #(= "com.acme.CheckoutService#processOrder" (:symbol %)) callers-2))
+    (is (some #(= "com.acme.CheckoutService#normalize" (:symbol %)) callers-2))
+    (is process-order)
+    (is normalize-arity1)))
+
+(deftest java-static-import-resolution-prefers-imported-class-and-arity-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-java-static-import-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        normalizer-units (sci/query-units storage tmp-root {:module "com.acme.IdNormalizer" :limit 20})
+        imported-1 (some #(when (and (= "com.acme.IdNormalizer#normalizeImported" (:symbol %))
+                                     (= 1 (:method_arity %)))
+                            %)
+                         normalizer-units)
+        imported-2 (some #(when (and (= "com.acme.IdNormalizer#normalizeImported" (:symbol %))
+                                     (= 2 (:method_arity %)))
+                            %)
+                         normalizer-units)
+        callers-1 (sci/query-callers storage tmp-root (:unit_id imported-1) {:limit 20})
+        callers-2 (sci/query-callers storage tmp-root (:unit_id imported-2) {:limit 20})]
+    (is imported-1)
+    (is imported-2)
+    (is (some #(= "com.acme.CheckoutService#processImported" (:symbol %)) callers-1))
+    (is (not-any? #(= "com.acme.CheckoutService#processImportedStrict" (:symbol %)) callers-1))
+    (is (some #(= "com.acme.CheckoutService#processImportedStrict" (:symbol %)) callers-2))))
+
+(deftest python-import-and-self-call-resolution-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-python-callers-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        validator-units (sci/query-units storage tmp-root {:module "app.validators" :limit 20})
+        validate-order-id (some->> validator-units (filter #(= "app.validators/validate_order" (:symbol %))) first :unit_id)
+        order-units (sci/query-units storage tmp-root {:module "app.orders" :limit 20})
+        validate-local-id (some->> order-units (filter #(= "app.orders.OrderService/validate_local" (:symbol %))) first :unit_id)
+        validate-callers (sci/query-callers storage tmp-root validate-order-id {:limit 20})
+        local-callers (sci/query-callers storage tmp-root validate-local-id {:limit 20})]
+    (is validate-order-id)
+    (is validate-local-id)
+    (is (some #(= "app.orders.OrderService/process_order" (:symbol %)) validate-callers))
+    (is (some #(= "app.orders.OrderService/process_alias" (:symbol %)) validate-callers))
+    (is (some #(= "app.orders.OrderService/process_local" (:symbol %)) local-callers))))
+
+(deftest python-related-tests-link-via-test-module-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-python-related-tests" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        index (sci/create-index {:root_path tmp-root})
+        result (sci/resolve-context index sample-query-python)
+        related-tests (get-in result [:context_packet :impact_hints :related_tests])]
+    (is (some #{"app/orders_test.py"} related-tests))))
 
 (deftest typescript-call-resolution-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-typescript-call-test" (make-array java.nio.file.attribute.FileAttribute 0)))

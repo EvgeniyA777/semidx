@@ -66,6 +66,9 @@
 (defn- lower [s]
   (some-> s str/lower-case))
 
+(defn- tail-token [token]
+  (some-> token str (str/split #"[\./#]") last))
+
 (defn- symbol-call-tokens [symbol]
   (let [sym (str symbol)
         tokens-a (if (str/includes? sym "/")
@@ -138,8 +141,10 @@
   (let [t (str token)]
     (cond
       (str/includes? t "#") (first (str/split t #"#" 2))
-      (str/includes? t ".") (first (str/split t #"\." 2))
       (str/includes? t "/") (first (str/split t #"/" 2))
+      (str/includes? t ".") (->> (str/split t #"\.")
+                                 butlast
+                                 (str/join "."))
       :else nil)))
 
 (defn- owner-match? [token candidate]
@@ -161,10 +166,16 @@
       (subs s 0 (- (count s) 2))
       s)))
 
+(defn- import-prefixes [imp]
+  (let [base (normalize-import-prefix imp)]
+    (cond-> #{base}
+      (re-find #"\.[A-Za-z_][A-Za-z0-9_]*$" base)
+      (conj (some-> (str/split base #"\.") butlast (->> (str/join ".")))))))
+
 (defn- import-match? [imports candidate]
   (let [scope (some-> candidate :symbol symbol-scope)
         module (:module candidate)
-        imports* (->> imports (map normalize-import-prefix) (remove str/blank?) distinct)]
+        imports* (->> imports (mapcat import-prefixes) (remove str/blank?) distinct)]
     (if (empty? imports*)
       false
       (some (fn [imp]
@@ -174,10 +185,18 @@
                   (and module (str/starts-with? module (str imp ".")))))
             imports*))))
 
+(defn- call-arities-for-token [caller token]
+  (let [m (:call_arity_by_token caller)
+        tail (some-> token tail-token)]
+    (or (get m token)
+        (when (seq tail) (get m tail))
+        #{})))
+
 (defn- narrow-targets [caller targets token units-by-id files-by-path]
   (let [by-id #(get units-by-id %)
         candidates (->> targets (map by-id) (remove nil?) vec)
-        caller-imports (get-in files-by-path [(:path caller) :imports] [])]
+        caller-imports (get-in files-by-path [(:path caller) :imports] [])
+        call-arities (call-arities-for-token caller token)]
     (cond
       (<= (count candidates) 1)
       (mapv :unit_id candidates)
@@ -186,16 +205,23 @@
       (let [owner-filtered (if (re-find #"[./#/]" (str token))
                              (filter #(owner-match? token %) candidates)
                              candidates)
+            arity-filtered (if (seq call-arities)
+                             (let [matching (filter #(or (nil? (:method_arity %))
+                                                         (contains? call-arities (:method_arity %)))
+                                                    owner-filtered)]
+                               (if (seq matching) matching owner-filtered))
+                             owner-filtered)
             import-filtered (if (seq caller-imports)
-                              (filter #(import-match? caller-imports %) owner-filtered)
-                              owner-filtered)
-            same-path (filter #(= (:path %) (:path caller)) import-filtered)
-            same-module (filter #(= (:module %) (:module caller)) import-filtered)]
+                              (filter #(import-match? caller-imports %) arity-filtered)
+                              arity-filtered)
+            candidate-pool (if (seq import-filtered) import-filtered arity-filtered)
+            same-path (filter #(= (:path %) (:path caller)) candidate-pool)
+            same-module (filter #(= (:module %) (:module caller)) candidate-pool)]
         (cond
           (seq same-path) (mapv :unit_id same-path)
           (seq same-module) (mapv :unit_id same-module)
           (seq import-filtered) (mapv :unit_id import-filtered)
-          :else (mapv :unit_id owner-filtered))))))
+          :else (mapv :unit_id arity-filtered))))))
 
 (defn- resolve-target-ids [caller token token-index units-by-id files-by-path]
   (let [target-ids (->> (expand-call-token caller token)
