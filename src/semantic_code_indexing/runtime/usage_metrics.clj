@@ -591,6 +591,11 @@
    "medium" 0.65
    "low" 0.35})
 
+(def ^:private confidence-level-rank
+  {"low" 0
+   "medium" 1
+   "high" 2})
+
 (defn- predicted-confidence [event]
   (or (get-in event [:payload :outcome_summary :confidence_score])
       (get confidence-level-score (:confidence_level event) 0.0)))
@@ -798,6 +803,7 @@
 
 (defn- feedback-summary [feedback-records]
   {:feedback_outcomes (->> feedback-records (map :feedback_outcome) distinct vec)
+   :confidence_levels (->> feedback-records (keep :confidence_level) distinct vec)
    :retrieval_issue_codes (->> feedback-records (mapcat :retrieval_issue_codes) distinct vec)
    :ground_truth_unit_ids (->> feedback-records (mapcat :ground_truth_unit_ids) distinct vec)
    :ground_truth_paths (->> feedback-records (mapcat :ground_truth_paths) distinct vec)})
@@ -860,3 +866,41 @@
                 :feedback_outcome_counts outcome-counts}
       :calibration calibration
       :entries entries})))
+
+(defn- strongest-confidence-level [levels]
+  (->> levels
+       (filter #(contains? confidence-level-rank %))
+       (sort-by confidence-level-rank >)
+       first))
+
+(defn- protected-expected [entry]
+  (let [ground-truth-unit-ids (vec (get-in entry [:feedback :ground_truth_unit_ids]))
+        ground-truth-paths (vec (get-in entry [:feedback :ground_truth_paths]))
+        query-paths (vec (get-in entry [:query :targets :paths]))
+        required-paths (vec (distinct (concat ground-truth-paths query-paths)))
+        min-confidence (or (strongest-confidence-level (get-in entry [:feedback :confidence_levels]))
+                           "medium")]
+    (cond-> {:min_confidence_level min-confidence}
+      (seq ground-truth-unit-ids) (assoc :top_authority_unit_ids ground-truth-unit-ids)
+      (seq required-paths) (assoc :required_paths required-paths))))
+
+(defn review-report->protected-replay-dataset [review-report]
+  (let [entries (->> (:entries review-report)
+                     (filter :protected_case)
+                     (filter #(map? (:query %)))
+                     vec)
+        queries (mapv (fn [entry]
+                        {:query_id (:query_id entry)
+                         :protected_case true
+                         :query (:query entry)
+                         :expected (protected-expected entry)
+                         :source_review {:trace (:trace entry)
+                                         :feedback (:feedback entry)
+                                         :outcome_summary (:outcome_summary entry)}})
+                      entries)]
+    {:schema_version "1.0"
+     :generated_at (now-iso)
+     :source_summary {:weekly_review_entries (count (:entries review-report))
+                      :protected_review_entries (count entries)
+                      :dataset_queries (count queries)}
+     :queries queries}))

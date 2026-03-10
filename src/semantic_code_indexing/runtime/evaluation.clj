@@ -436,6 +436,7 @@
           "--candidate-policy-id" (recur (assoc m :candidate_policy_id v) rest)
           "--candidate-version" (recur (assoc m :candidate_version v) rest)
           "--usage-metrics-jdbc-url" (recur (assoc m :usage_metrics_jdbc_url v) rest)
+          "--weekly-review" (recur (assoc m :weekly_review_path v) rest)
           "--surface" (recur (assoc m :surface v) rest)
           "--tenant-id" (recur (assoc m :tenant_id v) rest)
           "--since" (recur (assoc m :since v) rest)
@@ -605,6 +606,15 @@
       (print-or-write! out_path result)
       (System/exit 0))))
 
+(defn- run-protected-replay-dataset-command [{:keys [weekly_review_path out_path]}]
+  (when-not weekly_review_path
+    (println "Usage: clojure -M:eval protected-replay-dataset --weekly-review <weekly-review.json> [--out <output.json>]")
+    (System/exit 1))
+  (let [weekly-review (read-json weekly_review_path)
+        result (sci/review-report->protected-replay-dataset weekly-review)]
+    (print-or-write! out_path result)
+    (System/exit 0)))
+
 (defn -main [& args]
   (let [[command & rest-args] args]
     (case command
@@ -615,4 +625,5 @@
       "harvest-replay-dataset" (run-harvest-replay-dataset-command (parse-args rest-args))
       "calibration-report" (run-calibration-report-command (parse-args rest-args))
       "weekly-review-report" (run-weekly-review-report-command (parse-args rest-args))
+      "protected-replay-dataset" (run-protected-replay-dataset-command (parse-args rest-args))
       (run-replay-command (parse-args args)))))

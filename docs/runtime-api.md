@@ -551,6 +551,34 @@ Each entry currently links:
 - `outcome_summary`
 - `protected_case`
 
+### Protected replay dataset builder
+
+You can now turn a weekly review artifact back into a governed replay dataset.
+
+Library API:
+
+```clojure
+(def review-report (sci/weekly-review-report metrics))
+(sci/review-report->protected-replay-dataset review-report)
+```
+
+CLI:
+
+```bash
+clojure -M:eval protected-replay-dataset \
+  --weekly-review "${TMPDIR:-.tmp}/sci-weekly-review.json" \
+  --out "${TMPDIR:-.tmp}/sci-protected-replay.json"
+```
+
+Current conversion behavior:
+
+- only `protected_case` weekly review entries are included
+- output is compatible with the existing replay dataset shape used by `compare-policies` and `promote-policy`
+- `expected.top_authority_unit_ids` comes from review feedback ground truth when available
+- `expected.required_paths` comes from review feedback ground truth plus query target paths
+- `expected.min_confidence_level` uses the strongest feedback confidence level when present, otherwise defaults to `"medium"`
+- `source_review` is retained on each query entry for auditability
+
 ## Offline Replay Evaluation
 
 Replay a dataset of structured queries against the current runtime:

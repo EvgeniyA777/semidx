@@ -330,3 +330,44 @@
     (testing "report carries calibration summary too"
       (is (contains? report :calibration))
       (is (= 1 (get-in report [:calibration :total_correlated_queries]))))))
+
+(deftest review-report->protected-replay-dataset-builds-governance-ready-shape-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-protected-replay-builder" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        sink (sci/in-memory-usage-metrics)
+        query (assoc sample-query
+                     :trace {:trace_id "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+                             :request_id "protected-replay-builder-001"
+                             :session_id "protected-session-001"
+                             :task_id "protected-task-001"
+                             :actor_id "protected-builder"})
+        index (sci/create-index {:root_path tmp-root
+                                 :usage_metrics sink})
+        _result (sci/resolve-context index query)
+        _feedback (sci/record-feedback! index {:trace_id (get-in query [:trace :trace_id])
+                                               :request_id (get-in query [:trace :request_id])
+                                               :feedback_outcome "not_helpful"
+                                               :followup_action "discarded"
+                                               :confidence_level "medium"
+                                               :retrieval_issue_codes ["missing_authority"]
+                                               :ground_truth_unit_ids ["src/my/app/order.clj::my.app.order/process-order"]
+                                               :ground_truth_paths ["src/my/app/order.clj"]})
+        weekly-review (sci/weekly-review-report sink)
+        dataset (sci/review-report->protected-replay-dataset weekly-review)
+        harvested (first (:queries dataset))]
+    (testing "only protected review cases become protected replay queries"
+      (is (= "1.0" (:schema_version dataset)))
+      (is (= 1 (get-in dataset [:source_summary :protected_review_entries])))
+      (is (= 1 (count (:queries dataset))))
+      (is (true? (:protected_case harvested))))
+    (testing "expected block is governance-compatible"
+      (is (= query (:query harvested)))
+      (is (= "medium" (get-in harvested [:expected :min_confidence_level])))
+      (is (= ["src/my/app/order.clj::my.app.order/process-order"]
+             (get-in harvested [:expected :top_authority_unit_ids])))
+      (is (= ["src/my/app/order.clj"]
+             (get-in harvested [:expected :required_paths]))))
+    (testing "source review context is preserved for auditability"
+      (is (= "not_helpful" (first (get-in harvested [:source_review :feedback :feedback_outcomes]))))
+      (is (= "protected-replay-builder-001"
+             (get-in harvested [:source_review :trace :request_id]))))))

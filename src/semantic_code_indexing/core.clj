@@ -376,6 +376,11 @@
   ([usage-metrics-sink opts]
    (usage/weekly-review-report usage-metrics-sink opts)))
 
+(defn review-report->protected-replay-dataset
+  "Convert a weekly review artifact into a protected replay dataset compatible with governed policy tooling."
+  [review-report]
+  (usage/review-report->protected-replay-dataset review-report))
+
 (defn record-feedback!
   "Record explicit host feedback for a prior retrieval flow.
 
