@@ -52,8 +52,9 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Index lifecycle now emits `:index_lifecycle` metadata with TTL-aware stale detection, snapshot provenance, snapshot pinning on the library/storage path, and rebuild reasons; `resolve-context` surfaces stale snapshot state through capabilities and guardrails via `stale_index`.
 - Error handling is now taxonomy-backed across library, HTTP, gRPC, and MCP: normalized `ExceptionInfo` ex-data carries `:error_code` / `:error_category`, HTTP responses emit the same fields, gRPC emits them in trailers (`x-sci-error-code`, `x-sci-error-category`), and MCP tool errors expose them in `structuredContent.details`.
 - Usage metrics now support SLO-facing rollups through `slo-report`, covering index latency, retrieval latency, cache hit ratio, degraded rate, fallback rate, and policy version distribution for both in-memory and PostgreSQL-backed sinks.
+- HTTP/gRPC operational consistency is now tighter: both surfaces accept tenant/correlation metadata (`x-tenant-id`, `x-trace-id`, `x-request-id`, `x-session-id`, `x-task-id`, `x-actor-id`), feed that context into normalized usage events, and preserve correlation markers back to callers (`x-sci-*` headers for HTTP, `x-sci-*` trailers on gRPC errors).
 - Canonical in-repo roadmap status checklist now lives in `docs/roadmap-status.md`, with a dated rationale and status snapshot stored under `notes/`.
-- Product roadmap progress is now effectively through the main Phase 4 slices: governed quality loop, language-priority semantic-core deepening, capabilities/calibration, index lifecycle, unified error taxonomy, and SLO-facing metrics are in place; the main remaining tail is tenant/ops completeness plus Phase 5 self-improvement automation.
+- Product roadmap progress is now effectively through the main Phase 4 slices: governed quality loop, language-priority semantic-core deepening, capabilities/calibration, index lifecycle, unified error taxonomy, SLO-facing metrics, and tenant/trace consistency are in place; the next major tranche is Phase 5 self-improvement automation.
 
 ## Hard Invariants
 
@@ -74,14 +75,14 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Persistence graph queries are retrieval-oriented and not yet a full semantic graph query language.
 - Automatic replay dataset harvesting from real usage traces and feedback is not implemented yet.
 - Language-priority roadmap tail remains open after the current Clojure, Elixir, Java, and Python pushes: TypeScript remains regression-only by design, and Elixir/Java/Python still have room for deeper ownership and targeting beyond the new slices.
-- Runtime hardening is largely in place for lifecycle, error taxonomy, and SLO summaries; the remaining tail is mostly deeper tenant/ops completeness rather than missing core governance primitives.
+- Runtime hardening is now effectively complete for the main roadmap scope; any remaining ops work is incremental polish rather than a missing Phase 4 primitive.
 - Real self-improvement loop is not implemented beyond usage metrics and explicit feedback sinks.
 
 ## Next Execution Priorities
 
-1. Tighten the remaining operational tail in Phase 4 where needed: tenant-aware limits, trace correlation consistency, and any missing edge-level ops completeness.
+1. Build the Phase 5 self-improvement loop on top of usage metrics and structured feedback now that runtime hardening primitives are in place.
 2. Keep TypeScript in no-regression coverage and reserve deeper follow-up passes for Elixir/Java/Python where retrieval quality gaps remain after metrics hardening.
-3. Build the Phase 5 self-improvement loop on top of usage metrics and structured feedback now that runtime hardening primitives are in place.
+3. Limit Phase 4 follow-ups to opportunistic ops polish rather than roadmap-blocking work.
 
 ## Update Rule
 

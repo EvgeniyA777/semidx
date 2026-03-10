@@ -36,7 +36,10 @@
 (defn- request-trace-fields [query]
   {:trace_id (get-in query [:trace :trace_id])
    :request_id (get-in query [:trace :request_id])
-   :actor_id (get-in query [:trace :actor_id])})
+   :session_id (get-in query [:trace :session_id])
+   :task_id (get-in query [:trace :task_id])
+   :actor_id (or (get-in query [:trace :actor_id])
+                 (get-in query [:trace :agent_id]))})
 
 (defn- error-payload [e]
   (errors/usage-error-payload e))

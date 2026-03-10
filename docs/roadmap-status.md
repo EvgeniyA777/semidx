@@ -31,7 +31,7 @@ Legend:
 - `[~]` Phase 3 Python semantic-core: imported symbol resolution, module-alias handling, class-owned `self` / `cls` method linking, and test-file linkage now exist, but deeper Python ownership/disambiguation work still remains
 - `[~]` Phase 3 TypeScript: compatibility and regression coverage exist, but no strategic deepening work
 - `[x]` Capabilities now drive per-language confidence ceilings and guardrails, and governed replay reports `confidence_ceiling_distribution`
-- `[~]` Phase 4 runtime and MCP hardening: snapshots, usage metrics, authz, tenant hooks, index lifecycle metadata, unified machine-readable error taxonomy, and SLO-facing metrics now exist; remaining work is mainly deeper tenant/ops completeness rather than missing core governance primitives
+- `[x]` Phase 4 runtime and MCP hardening: snapshots, usage metrics, authz, tenant-aware correlation propagation, index lifecycle metadata, unified machine-readable error taxonomy, and SLO-facing metrics now exist on the main runtime surfaces
 - `[ ]` Phase 5 real self-improvement loop: automatic replay harvesting, query-to-outcome linking, difficult-case harvesting, and calibration reports against real feedback
 
 ## Canonical References

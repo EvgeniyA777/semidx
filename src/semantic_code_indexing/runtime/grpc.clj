@@ -48,17 +48,42 @@
   (Metadata$Key/of "x-api-key" Metadata/ASCII_STRING_MARSHALLER))
 (def ^:private tenant-id-header
   (Metadata$Key/of "x-tenant-id" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private trace-id-header
+  (Metadata$Key/of "x-trace-id" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private request-id-header
+  (Metadata$Key/of "x-request-id" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private session-id-header
+  (Metadata$Key/of "x-session-id" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private task-id-header
+  (Metadata$Key/of "x-task-id" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private actor-id-header
+  (Metadata$Key/of "x-actor-id" Metadata/ASCII_STRING_MARSHALLER))
 (def ^:private api-key-context (Context/key "sci-api-key"))
 (def ^:private tenant-id-context (Context/key "sci-tenant-id"))
+(def ^:private trace-id-context (Context/key "sci-trace-id"))
+(def ^:private request-id-context (Context/key "sci-request-id"))
+(def ^:private session-id-context (Context/key "sci-session-id"))
+(def ^:private task-id-context (Context/key "sci-task-id"))
+(def ^:private actor-id-context (Context/key "sci-actor-id"))
 
 (defn- metadata-context-interceptor []
   (reify ServerInterceptor
     (^ServerCall$Listener interceptCall [_ ^ServerCall call ^Metadata headers ^ServerCallHandler next]
       (let [api-key (.get headers api-key-header)
             tenant-id (.get headers tenant-id-header)
+            trace-id (.get headers trace-id-header)
+            request-id (.get headers request-id-header)
+            session-id (.get headers session-id-header)
+            task-id (.get headers task-id-header)
+            actor-id (.get headers actor-id-header)
             ctx (-> (Context/current)
                     (.withValue api-key-context api-key)
-                    (.withValue tenant-id-context tenant-id))]
+                    (.withValue tenant-id-context tenant-id)
+                    (.withValue trace-id-context trace-id)
+                    (.withValue request-id-context request-id)
+                    (.withValue session-id-context session-id)
+                    (.withValue task-id-context task-id)
+                    (.withValue actor-id-context actor-id))]
         (Contexts/interceptCall ctx call headers next)))))
 
 (defn- normalize-number [x]
@@ -82,10 +107,49 @@
   (.onNext response-observer payload)
   (.onCompleted response-observer))
 
+(def ^:private response-trace-id-header
+  (Metadata$Key/of "x-sci-trace-id" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private response-request-id-header
+  (Metadata$Key/of "x-sci-request-id" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private response-session-id-header
+  (Metadata$Key/of "x-sci-session-id" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private response-task-id-header
+  (Metadata$Key/of "x-sci-task-id" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private response-actor-id-header
+  (Metadata$Key/of "x-sci-actor-id" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private response-tenant-id-header
+  (Metadata$Key/of "x-sci-tenant-id" Metadata/ASCII_STRING_MARSHALLER))
+
+(defn- current-request-correlation []
+  (cond-> {:tenant_id (.get tenant-id-context (Context/current))
+           :trace_id (.get trace-id-context (Context/current))
+           :request_id (.get request-id-context (Context/current))
+           :session_id (.get session-id-context (Context/current))
+           :task_id (.get task-id-context (Context/current))
+           :actor_id (.get actor-id-context (Context/current))}
+    true (update-vals #(when (seq (str %)) %))
+    true (#(into {} (remove (comp nil? val) %)))))
+
+(defn- attach-correlation-trailers [^Metadata trailers]
+  (let [{:keys [trace_id request_id session_id task_id actor_id tenant_id]} (current-request-correlation)]
+    (when (seq trace_id)
+      (.put trailers response-trace-id-header trace_id))
+    (when (seq request_id)
+      (.put trailers response-request-id-header request_id))
+    (when (seq session_id)
+      (.put trailers response-session-id-header session_id))
+    (when (seq task_id)
+      (.put trailers response-task-id-header task_id))
+    (when (seq actor_id)
+      (.put trailers response-actor-id-header actor_id))
+    (when (seq tenant_id)
+      (.put trailers response-tenant-id-header tenant_id))
+    trailers))
+
 (defn- fail! [^StreamObserver response-observer e]
   (let [status (errors/grpc-status e)
         description (errors/grpc-description e)
-        trailers (errors/grpc-trailers e)]
+        trailers (attach-correlation-trailers (errors/grpc-trailers e))]
     (.onError response-observer (.asRuntimeException (.withDescription status description)
                                                      trailers))))
 
@@ -146,10 +210,13 @@
   {:status "ok"
    :service "semantic-code-indexing-runtime-grpc"})
 
-(defn- handle-create-index [policy-registry payload]
+(defn- handle-create-index [policy-registry usage-metrics payload]
   (let [index (sci/create-index {:root_path (or (:root_path payload) ".")
                                  :paths (:paths payload)
                                  :parser_opts (:parser_opts payload)
+                                 :usage_metrics usage-metrics
+                                 :usage_context (merge {:surface "grpc"}
+                                                       (current-request-correlation))
                                  :policy_registry policy-registry})]
     {:snapshot_id (:snapshot_id index)
      :indexed_at (:indexed_at index)
@@ -158,9 +225,17 @@
      :unit_count (count (:units index))
      :repo_map (sci/repo-map index)}))
 
-(defn- handle-resolve-context [policy-registry payload]
+(defn- query-trace-correlation [query]
+  (let [trace (get query :trace {})]
+    (cond-> (select-keys trace [:trace_id :request_id :session_id :task_id])
+      (or (:actor_id trace) (:agent_id trace))
+      (assoc :actor_id (or (:actor_id trace) (:agent_id trace))))))
+
+(defn- handle-resolve-context [policy-registry usage-metrics payload]
   (let [query (:query payload)
-        retrieval-policy (:retrieval_policy payload)]
+        retrieval-policy (:retrieval_policy payload)
+        correlation (merge (current-request-correlation)
+                           (query-trace-correlation query))]
     (when-not (map? query)
       (throw (ex-info "query must be an object"
                       {:type :invalid_request
@@ -172,11 +247,14 @@
     (let [index (sci/create-index {:root_path (or (:root_path payload) ".")
                                    :paths (:paths payload)
                                    :parser_opts (:parser_opts payload)
+                                   :usage_metrics usage-metrics
+                                   :usage_context (merge {:surface "grpc"} correlation)
+                                   :suppress_usage_metrics true
                                    :policy_registry policy-registry})]
       (sci/resolve-context index query {:retrieval_policy retrieval-policy
                                         :policy_registry policy-registry}))))
 
-(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry]}]
+(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry usage_metrics]}]
   (let [auth-config {:api_key api_key
                      :require_tenant require_tenant
                      :authz_check authz_check}
@@ -188,12 +266,12 @@
                                                              nil))
                     (.addMethod create-index-method (unary-handler grpc-proto/create-index-request->map
                                                                    grpc-proto/create-index-response
-                                                                   (partial handle-create-index policy_registry)
+                                                                   (partial handle-create-index policy_registry usage_metrics)
                                                                    auth-config
                                                                    :create_index))
                     (.addMethod resolve-context-method (unary-handler grpc-proto/resolve-context-request->map
                                                                       grpc-proto/resolve-context-response
-                                                                      (partial handle-resolve-context policy_registry)
+                                                                      (partial handle-resolve-context policy_registry usage_metrics)
                                                                       auth-config
                                                                       :resolve_context))
                     (.build))
@@ -212,6 +290,10 @@
         require-tenant* (or require_tenant (parse-bool (System/getenv "SCI_RUNTIME_REQUIRE_TENANT")))
         authz-policy-file* (or (not-empty authz_policy_file) (System/getenv "SCI_RUNTIME_AUTHZ_POLICY_FILE"))
         policy-registry-file* (or (not-empty policy_registry_file) (System/getenv "SCI_RUNTIME_POLICY_REGISTRY_FILE"))
+        usage-metrics* (when-let [jdbc-url (System/getenv "SCI_USAGE_METRICS_JDBC_URL")]
+                         (sci/postgres-usage-metrics {:jdbc-url jdbc-url
+                                                      :user (System/getenv "SCI_USAGE_METRICS_DB_USER")
+                                                      :password (System/getenv "SCI_USAGE_METRICS_DB_PASSWORD")}))
         authz-check* (when (seq authz-policy-file*)
                        (authz/load-policy-authorizer authz-policy-file*))
         policy-registry* (when (seq policy-registry-file*)
@@ -221,7 +303,8 @@
                                              :api_key api-key*
                                              :require_tenant require-tenant*
                                              :authz_check authz-check*
-                                             :policy_registry policy-registry*})]
+                                             :policy_registry policy-registry*
+                                             :usage_metrics usage-metrics*})]
     (println (str "runtime_grpc_server_started host=" host " port=" port))
     (flush)
     (.awaitTermination server)))

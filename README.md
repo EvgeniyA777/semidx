@@ -19,7 +19,7 @@ The project defines how a host system should request code context, how retrieval
 - includes parser adapters for `Clojure + Java + Elixir + Python + TypeScript` and emits diagnostics/guardrails outputs
 - supports versioned retrieval policy overrides plus emitted capability metadata for replayable ranking behavior
 - supports optional persistence adapters (`in-memory`, `PostgreSQL`) with snapshot + graph projection storage for PostgreSQL
-- supports optional usage metrics adapters (`in-memory`, `PostgreSQL`) for library and MCP adoption/usefulness telemetry
+- supports optional usage metrics adapters (`in-memory`, `PostgreSQL`) for library, HTTP, gRPC, and MCP adoption/usefulness telemetry
 - supports structured retrieval feedback plus offline query replay scoring for quality-loop evaluation
 - includes retrieval benchmark suite aligned with fixture corpus (`ADR-014`)
 
@@ -63,6 +63,7 @@ Current scope is contract architecture plus a working MVP runtime implementation
 - Resolve context from query file: `clojure -M:runtime --root . --query contracts/examples/queries/symbol-target.json --out "${TMPDIR:-.tmp}/sci.json"`
 - Run stdio MCP server: `SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" clojure -M:mcp`
 - Enable MCP usage metrics persistence: `SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index clojure -M:mcp`
+- Enable HTTP/gRPC usage metrics persistence: `SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index clojure -M:runtime-http` or `clojure -M:runtime-grpc`
 - If `SCI_MCP_ALLOWED_ROOTS` is missing, the MCP server now defaults the allowlist to the current `cwd` and prints a warning with explicit override examples; it does not prompt interactively because MCP uses stdio transport
 - Run minimal HTTP edge: `clojure -M:runtime-http --host 127.0.0.1 --port 8787`
 - Run minimal gRPC edge: `clojure -M:runtime-grpc --host 127.0.0.1 --port 8789`
@@ -130,10 +131,11 @@ Roadmap status is tracked separately in [docs/roadmap-status.md](docs/roadmap-st
 - replay datasets can now mark `protected_case` queries, and promotion gates reject newly failed protected cases
 - late raw-code escalation stage is implemented and controlled by query options/constraints
 - PostgreSQL persistence adapter stores snapshots plus unit/call-edge graph projections
-- optional usage metrics sinks capture `library` and `mcp` usage events plus structured feedback for relevance tracking
+- optional usage metrics sinks capture normalized `library`, `http`, `grpc`, and `mcp` usage events plus structured feedback for relevance tracking
 - queryable graph access API is available via storage adapters (`query-units`, `query-callers`, `query-callees`)
 - fixture-driven retrieval benchmarks are integrated into local and CI gates
 - HTTP/gRPC edges now support tenant-aware host authz checks via pluggable `authz_check` contract or EDN policy file
+- HTTP/gRPC now also propagate tenant and correlation context consistently: `x-trace-id`, `x-request-id`, `x-session-id`, `x-task-id`, and `x-actor-id` flow into usage events; HTTP echoes them back as `x-sci-*` response headers and gRPC attaches them on error trailers
 - stdio MCP edge is available for portable local tool-based integration with session-scoped index caching
 
 ## License

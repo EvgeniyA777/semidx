@@ -1,10 +1,12 @@
 (ns semantic-code-indexing.runtime-grpc-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
+            [semantic-code-indexing.core :as sci]
             [semantic-code-indexing.runtime.authz :as runtime-authz]
             [semantic-code-indexing.runtime.grpc-proto :as grpc-proto]
             [semantic-code-indexing.runtime.retrieval-policy :as rp]
-            [semantic-code-indexing.runtime.grpc :as runtime-grpc])
+            [semantic-code-indexing.runtime.grpc :as runtime-grpc]
+            [semantic-code-indexing.runtime.usage-metrics :as usage])
   (:import [io.grpc CallOptions ClientInterceptor ClientInterceptors ManagedChannelBuilder Metadata Metadata$Key Status StatusRuntimeException]
            [io.grpc.stub ClientCalls MetadataUtils]))
 
@@ -308,6 +310,109 @@
           (is (not= "top_authority"
                     (get-in resp [:context_packet :relevant_units 0 :rank_band])))))
 
+      (finally
+        (.shutdownNow channel)
+        (.shutdownNow server)))))
+
+(deftest runtime-grpc-tenant-trace-correlation-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-grpc-correlation-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-grpc-sample-repo! tmp-root)
+        sink (sci/in-memory-usage-metrics)
+        {:keys [server port]} (runtime-grpc/start-server {:host "127.0.0.1"
+                                                          :port 0
+                                                          :api_key "secret-token"
+                                                          :require_tenant true
+                                                          :usage_metrics sink})
+        channel (-> (ManagedChannelBuilder/forAddress "127.0.0.1" (int port))
+                    (.usePlaintext)
+                    (.build))
+        create-headers {"x-api-key" "secret-token"
+                        "x-tenant-id" "tenant-001"
+                        "x-trace-id" "04222222-2222-4222-8222-222222222222"
+                        "x-request-id" "runtime-grpc-create-trace-001"
+                        "x-session-id" "grpc-session-001"
+                        "x-task-id" "grpc-task-001"
+                        "x-actor-id" "grpc-edge-tester"}
+        query {:schema_version "1.0"
+               :intent {:purpose "code_understanding"
+                        :details "Locate authority implementation for process-order."}
+               :targets {:symbols ["my.app.order/process-order"]
+                         :paths ["src/my/app/order.clj"]}
+               :constraints {:token_budget 1200
+                             :max_raw_code_level "enclosing_unit"
+                             :freshness "current_snapshot"}
+               :hints {:prefer_definitions_over_callers true}
+               :options {:include_tests true
+                         :include_impact_hints true
+                         :allow_raw_code_escalation false
+                         :favor_compact_packet true
+                         :favor_higher_recall false}
+               :trace {:trace_id "05222222-2222-4222-8222-222222222222"
+                       :request_id "runtime-grpc-resolve-trace-001"
+                       :session_id "grpc-session-002"
+                       :task_id "grpc-task-002"
+                       :actor_id "grpc-query-runner"}}]
+    (try
+      (let [_create-resp (unary-call channel
+                                     runtime-grpc/create-index-method
+                                     (grpc-proto/create-index-request {:root_path tmp-root})
+                                     grpc-proto/create-index-response->map
+                                     create-headers)
+            _resolve-resp (unary-call channel
+                                      runtime-grpc/resolve-context-method
+                                      (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                                           :query query})
+                                      grpc-proto/resolve-context-response->map
+                                      {"x-api-key" "secret-token"
+                                       "x-tenant-id" "tenant-001"
+                                       "x-trace-id" "04222222-2222-4222-8222-222222222222"
+                                       "x-request-id" "runtime-grpc-header-fallback-001"
+                                       "x-session-id" "grpc-session-header"
+                                       "x-task-id" "grpc-task-header"
+                                       "x-actor-id" "grpc-header-actor"})
+            events (usage/emitted-events sink)
+            create-event (first (filter #(= "create_index" (:operation %)) events))
+            resolve-event (first (filter #(= "resolve_context" (:operation %)) events))]
+        (testing "usage events retain tenant and trace consistency"
+          (is (= "grpc" (:surface create-event)))
+          (is (= "tenant-001" (:tenant_id create-event)))
+          (is (= "04222222-2222-4222-8222-222222222222" (:trace_id create-event)))
+          (is (= "runtime-grpc-create-trace-001" (:request_id create-event)))
+          (is (= "grpc-session-001" (:session_id create-event)))
+          (is (= "grpc-task-001" (:task_id create-event)))
+          (is (= "grpc-edge-tester" (:actor_id create-event)))
+          (is (= "grpc" (:surface resolve-event)))
+          (is (= "tenant-001" (:tenant_id resolve-event)))
+          (is (= "05222222-2222-4222-8222-222222222222" (:trace_id resolve-event)))
+          (is (= "runtime-grpc-resolve-trace-001" (:request_id resolve-event)))
+          (is (= "grpc-session-002" (:session_id resolve-event)))
+          (is (= "grpc-task-002" (:task_id resolve-event)))
+          (is (= "grpc-query-runner" (:actor_id resolve-event)))))
+      (testing "error trailers retain correlation markers"
+        (try
+          (unary-call channel
+                      runtime-grpc/resolve-context-method
+                      (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                           :query "not-an-object"})
+                      grpc-proto/resolve-context-response->map
+                      {"x-api-key" "secret-token"
+                       "x-tenant-id" "tenant-001"
+                       "x-trace-id" "06222222-2222-4222-8222-222222222222"
+                       "x-request-id" "runtime-grpc-error-trace-001"
+                       "x-session-id" "grpc-session-error"
+                       "x-task-id" "grpc-task-error"
+                       "x-actor-id" "grpc-error-runner"})
+          (is false "expected StatusRuntimeException")
+          (catch StatusRuntimeException e
+            (is (= "06222222-2222-4222-8222-222222222222"
+                   (.get (.getTrailers e)
+                         (Metadata$Key/of "x-sci-trace-id" Metadata/ASCII_STRING_MARSHALLER))))
+            (is (= "runtime-grpc-error-trace-001"
+                   (.get (.getTrailers e)
+                         (Metadata$Key/of "x-sci-request-id" Metadata/ASCII_STRING_MARSHALLER))))
+            (is (= "tenant-001"
+                   (.get (.getTrailers e)
+                         (Metadata$Key/of "x-sci-tenant-id" Metadata/ASCII_STRING_MARSHALLER)))))))
       (finally
         (.shutdownNow channel)
         (.shutdownNow server)))))

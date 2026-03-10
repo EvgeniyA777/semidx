@@ -431,6 +431,8 @@ PostgreSQL usage metrics persist:
 
 `sci/slo-report` now provides a compact operational summary over either in-memory or PostgreSQL-backed events.
 
+When HTTP/gRPC edges are started with `SCI_USAGE_METRICS_JDBC_URL`, those surfaces emit the same normalized usage events as library/MCP, including tenant and correlation fields from headers/metadata plus query `:trace` where applicable.
+
 Current SLO-facing metrics include:
 
 - `index_latency_ms`
@@ -523,6 +525,13 @@ Optional runtime policy registry:
 clojure -M:runtime-http --policy-registry-file /path/to/policy-registry.edn
 ```
 
+Optional usage metrics persistence:
+
+```bash
+SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index \
+clojure -M:runtime-http --host 127.0.0.1 --port 8787
+```
+
 Endpoints:
 
 - `GET /health`
@@ -549,6 +558,13 @@ Optional runtime policy registry:
 clojure -M:runtime-grpc --policy-registry-file /path/to/policy-registry.edn
 ```
 
+Optional usage metrics persistence:
+
+```bash
+SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index \
+clojure -M:runtime-grpc --host 127.0.0.1 --port 8789
+```
+
 Service: `semantic_code_indexing.RuntimeService`
 
 Unary methods:
@@ -569,6 +585,13 @@ When auth boundary is enabled:
 
 - HTTP expects `x-api-key` and `x-tenant-id` headers for protected endpoints.
 - gRPC expects `x-api-key` and `x-tenant-id` metadata for protected RPC methods.
+
+Operational correlation:
+
+- HTTP and gRPC also accept optional `x-trace-id`, `x-request-id`, `x-session-id`, `x-task-id`, and `x-actor-id`.
+- For `resolve-context`, query `:trace` remains the canonical request-level source and overrides header/metadata fallbacks for those same fields.
+- HTTP echoes the effective correlation values back as `x-sci-trace-id`, `x-sci-request-id`, `x-sci-session-id`, `x-sci-task-id`, `x-sci-actor-id`, and `x-sci-tenant-id`.
+- gRPC attaches the same `x-sci-*` correlation markers on error trailers alongside `x-sci-error-code` and `x-sci-error-category`.
 
 ## Error Taxonomy
 

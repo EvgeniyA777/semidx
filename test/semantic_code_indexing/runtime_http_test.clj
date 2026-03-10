@@ -2,9 +2,11 @@
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
+            [semantic-code-indexing.core :as sci]
             [semantic-code-indexing.runtime.authz :as runtime-authz]
             [semantic-code-indexing.runtime.retrieval-policy :as rp]
-            [semantic-code-indexing.runtime.http :as runtime-http])
+            [semantic-code-indexing.runtime.http :as runtime-http]
+            [semantic-code-indexing.runtime.usage-metrics :as usage])
   (:import [java.net URI]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]))
 
@@ -37,6 +39,7 @@
         response (.send client request (HttpResponse$BodyHandlers/ofString))
         text-body (.body response)]
     {:status (.statusCode response)
+     :headers (.map (.headers response))
      :body text-body
      :json (when (seq text-body) (json/read-str text-body :key-fn keyword))})))
 
@@ -276,5 +279,83 @@
                    (get-in resp [:json :diagnostics_trace :retrieval_policy :policy_id])))
             (is (not= "top_authority"
                       (get-in resp [:json :context_packet :relevant_units 0 :rank_band]))))))
+      (finally
+        (.stop server 0)))))
+
+(deftest runtime-http-tenant-trace-correlation-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-http-correlation-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-http-sample-repo! tmp-root)
+        sink (sci/in-memory-usage-metrics)
+        server (runtime-http/start-server {:host "127.0.0.1"
+                                           :port 0
+                                           :api_key "secret-token"
+                                           :require_tenant true
+                                           :usage_metrics sink})]
+    (try
+      (let [port (-> server .getAddress .getPort)
+            base-url (str "http://127.0.0.1:" port)
+            client (HttpClient/newHttpClient)
+            _health (wait-health! client base-url)
+            create-resp (post-json client
+                                   (str base-url "/v1/index/create")
+                                   {:root_path tmp-root}
+                                   {"x-api-key" "secret-token"
+                                    "x-tenant-id" "tenant-001"
+                                    "x-trace-id" "04111111-1111-4111-8111-111111111111"
+                                    "x-request-id" "runtime-http-create-trace-001"
+                                    "x-session-id" "http-session-001"
+                                    "x-task-id" "http-task-001"
+                                    "x-actor-id" "http-edge-tester"})
+            query {:schema_version "1.0"
+                   :intent {:purpose "code_understanding"
+                            :details "Locate authority implementation for process-order."}
+                   :targets {:symbols ["my.app.order/process-order"]
+                             :paths ["src/my/app/order.clj"]}
+                   :constraints {:token_budget 1200
+                                 :max_raw_code_level "enclosing_unit"
+                                 :freshness "current_snapshot"}
+                   :hints {:prefer_definitions_over_callers true}
+                   :options {:include_tests true
+                             :include_impact_hints true
+                             :allow_raw_code_escalation false
+                             :favor_compact_packet true
+                             :favor_higher_recall false}
+                   :trace {:trace_id "05111111-1111-4111-8111-111111111111"
+                           :request_id "runtime-http-resolve-trace-001"
+                           :session_id "http-session-002"
+                           :task_id "http-task-002"
+                           :actor_id "http-query-runner"}}
+            resolve-resp (post-json client
+                                    (str base-url "/v1/retrieval/resolve-context")
+                                    {:root_path tmp-root
+                                     :query query}
+                                    {"x-api-key" "secret-token"
+                                     "x-tenant-id" "tenant-001"
+                                     "x-trace-id" "04111111-1111-4111-8111-111111111111"
+                                     "x-request-id" "runtime-http-header-fallback-001"
+                                     "x-session-id" "http-session-header"
+                                     "x-task-id" "http-task-header"
+                                     "x-actor-id" "http-header-actor"})
+            events (usage/emitted-events sink)
+            create-event (first (filter #(= "create_index" (:operation %)) events))
+            resolve-event (first (filter #(= "resolve_context" (:operation %)) events))]
+        (testing "response headers echo correlation markers"
+          (is (= "runtime-http-create-trace-001" (first (get-in create-resp [:headers "x-sci-request-id"]))))
+          (is (= "tenant-001" (first (get-in resolve-resp [:headers "x-sci-tenant-id"]))))
+          (is (= "runtime-http-resolve-trace-001" (first (get-in resolve-resp [:headers "x-sci-request-id"])))))
+        (testing "usage events retain tenant and trace consistency"
+          (is (= "http" (:surface create-event)))
+          (is (= "tenant-001" (:tenant_id create-event)))
+          (is (= "04111111-1111-4111-8111-111111111111" (:trace_id create-event)))
+          (is (= "http-session-001" (:session_id create-event)))
+          (is (= "http-task-001" (:task_id create-event)))
+          (is (= "http-edge-tester" (:actor_id create-event)))
+          (is (= "http" (:surface resolve-event)))
+          (is (= "tenant-001" (:tenant_id resolve-event)))
+          (is (= "05111111-1111-4111-8111-111111111111" (:trace_id resolve-event)))
+          (is (= "runtime-http-resolve-trace-001" (:request_id resolve-event)))
+          (is (= "http-session-002" (:session_id resolve-event)))
+          (is (= "http-task-002" (:task_id resolve-event)))
+          (is (= "http-query-runner" (:actor_id resolve-event)))))
       (finally
         (.stop server 0)))))

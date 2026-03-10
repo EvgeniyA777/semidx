@@ -30,17 +30,74 @@
 (defn- request-method [^HttpExchange exchange]
   (.toUpperCase (.getRequestMethod exchange)))
 
+(declare request-header)
+
 (defn- read-json-body [^HttpExchange exchange]
   (with-open [rdr (io/reader (.getRequestBody exchange))]
     (json/read rdr :key-fn keyword)))
 
-(defn- write-json! [^HttpExchange exchange status payload]
+(defn- write-json!
+  ([^HttpExchange exchange status payload]
+   (write-json! exchange status payload nil))
+  ([^HttpExchange exchange status payload response-headers]
   (let [bytes (.getBytes (json/write-str payload :escape-slash false) "UTF-8")]
     (doto (.getResponseHeaders exchange)
+      (#(do
+           (doseq [[header-name header-value] response-headers]
+             (when (seq (str header-value))
+               (.set % (str header-name) (str header-value))))
+           %))
       (.set "Content-Type" "application/json; charset=utf-8"))
     (.sendResponseHeaders exchange (long status) (long (count bytes)))
     (with-open [out (.getResponseBody exchange)]
-      (.write out bytes))))
+      (.write out bytes)))))
+
+(def ^:private correlation-attribute "sci-correlation")
+
+(def ^:private request-correlation-headers
+  {:trace_id "x-trace-id"
+   :request_id "x-request-id"
+   :session_id "x-session-id"
+   :task_id "x-task-id"
+   :actor_id "x-actor-id"})
+
+(def ^:private response-correlation-headers
+  {:trace_id "x-sci-trace-id"
+   :request_id "x-sci-request-id"
+   :session_id "x-sci-session-id"
+   :task_id "x-sci-task-id"
+   :actor_id "x-sci-actor-id"
+   :tenant_id "x-sci-tenant-id"})
+
+(defn- request-correlation [^HttpExchange exchange]
+  (reduce-kv (fn [acc field header-name]
+               (if-let [value (some-> (request-header exchange header-name) not-empty)]
+                 (assoc acc field value)
+                 acc))
+             {}
+             request-correlation-headers))
+
+(defn- merge-query-correlation [correlation query]
+  (merge correlation
+         (let [trace (get query :trace {})]
+           (cond-> (select-keys trace [:trace_id :request_id :session_id :task_id])
+             (or (:actor_id trace) (:agent_id trace))
+             (assoc :actor_id (or (:actor_id trace) (:agent_id trace)))))))
+
+(defn- remember-correlation! [^HttpExchange exchange correlation]
+  (.setAttribute exchange correlation-attribute correlation)
+  correlation)
+
+(defn- response-correlation [^HttpExchange exchange]
+  (or (.getAttribute exchange correlation-attribute) {}))
+
+(defn- response-correlation-header-map [^HttpExchange exchange]
+  (reduce-kv (fn [acc field header-name]
+               (if-let [value (get (response-correlation exchange) field)]
+                 (assoc acc header-name value)
+                 acc))
+             {}
+             response-correlation-headers))
 
 (defn- with-handler [f]
   (reify HttpHandler
@@ -49,7 +106,7 @@
         (f exchange)
         (catch Exception e
           (let [{:keys [status body]} (errors/http-error-body e)]
-            (write-json! exchange status body)))))))
+            (write-json! exchange status body (response-correlation-header-map exchange))))))))
 
 
 (defn- post-request? [^HttpExchange exchange]
@@ -79,7 +136,7 @@
   (let [{:keys [ok? error] :as auth} (authorize-request exchange auth-config)]
     (if ok?
       auth
-      (do (write-json! exchange (:status error) (:body error))
+      (do (write-json! exchange (:status error) (:body error) (response-correlation-header-map exchange))
           nil))))
 
 (defn- authz-denial->http [{:keys [code message]}]
@@ -91,7 +148,7 @@
     (if allowed?
       true
       (let [{:keys [status body]} (authz-denial->http decision)]
-        (write-json! exchange status body)
+        (write-json! exchange status body (response-correlation-header-map exchange))
         false))))
 
 (defn- handle-health [^HttpExchange exchange]
@@ -108,24 +165,34 @@
                                :error_code "method_not_allowed"
                                :error_category "client"
                                :allowed ["POST"]})
-    (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
-      (let [payload (read-json-body exchange)
-            root-path (or (:root_path payload) ".")
-            paths (:paths payload)]
-        (when (enforce-authz! exchange auth-config {:operation :create_index
-                                                    :tenant_id tenant_id
-                                                    :root_path root-path
-                                                    :paths paths})
-          (let [index (sci/create-index {:root_path root-path
-                                         :paths paths
-                                         :parser_opts (:parser_opts payload)
-                                         :policy_registry (:policy_registry auth-config)})]
-            (write-json! exchange 200 {:snapshot_id (:snapshot_id index)
-                                       :indexed_at (:indexed_at index)
-                                       :index_lifecycle (:index_lifecycle index)
-                                       :file_count (count (:files index))
-                                       :unit_count (count (:units index))
-                                       :repo_map (sci/repo-map index)})))))))
+    (do
+      (remember-correlation! exchange (request-correlation exchange))
+      (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
+        (let [payload (read-json-body exchange)
+              root-path (or (:root_path payload) ".")
+              paths (:paths payload)
+              correlation (remember-correlation! exchange
+                                                 (assoc (request-correlation exchange)
+                                                        :tenant_id tenant_id))]
+          (when (enforce-authz! exchange auth-config {:operation :create_index
+                                                      :tenant_id tenant_id
+                                                      :root_path root-path
+                                                      :paths paths})
+            (let [index (sci/create-index {:root_path root-path
+                                           :paths paths
+                                           :parser_opts (:parser_opts payload)
+                                           :usage_metrics (:usage_metrics auth-config)
+                                           :usage_context (merge {:surface "http"
+                                                                  :tenant_id tenant_id}
+                                                                 correlation)
+                                           :policy_registry (:policy_registry auth-config)})]
+              (write-json! exchange 200 {:snapshot_id (:snapshot_id index)
+                                         :indexed_at (:indexed_at index)
+                                         :index_lifecycle (:index_lifecycle index)
+                                         :file_count (count (:files index))
+                                         :unit_count (count (:units index))
+                                         :repo_map (sci/repo-map index)}
+                           (response-correlation-header-map exchange)))))))))
 
 (defn- handle-resolve-context [auth-config ^HttpExchange exchange]
   (if-not (post-request? exchange)
@@ -133,45 +200,57 @@
                                :error_code "method_not_allowed"
                                :error_category "client"
                                :allowed ["POST"]})
-    (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
-      (let [payload (read-json-body exchange)
-            root-path (or (:root_path payload) ".")
-            paths (:paths payload)
-            query (:query payload)
-            retrieval-policy (:retrieval_policy payload)]
-        (if-not (map? query)
-          (let [{:keys [status body]} (errors/http-error-body {:type :invalid_request
-                                                               :message "query must be an object"})]
-            (write-json! exchange status body))
-          (if (and (some? retrieval-policy) (not (map? retrieval-policy)))
+    (do
+      (remember-correlation! exchange (request-correlation exchange))
+      (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
+        (let [payload (read-json-body exchange)
+              root-path (or (:root_path payload) ".")
+              paths (:paths payload)
+              query (:query payload)
+              retrieval-policy (:retrieval_policy payload)
+              correlation (remember-correlation! exchange
+                                                 (assoc (merge-query-correlation (request-correlation exchange) query)
+                                                        :tenant_id tenant_id))]
+          (if-not (map? query)
             (let [{:keys [status body]} (errors/http-error-body {:type :invalid_request
-                                                                 :message "retrieval_policy must be an object"})]
-              (write-json! exchange status body))
-          (when (enforce-authz! exchange auth-config {:operation :resolve_context
-                                                      :tenant_id tenant_id
-                                                      :root_path root-path
-                                                      :paths paths})
-            (let [index (sci/create-index {:root_path root-path
-                                           :paths paths
-                                           :parser_opts (:parser_opts payload)
-                                           :policy_registry (:policy_registry auth-config)})
-                  result (sci/resolve-context index
-                                              query
-                                              {:retrieval_policy retrieval-policy
-                                               :policy_registry (:policy_registry auth-config)})]
-              (write-json! exchange 200 result)))))))))
+                                                                 :message "query must be an object"})]
+              (write-json! exchange status body (response-correlation-header-map exchange)))
+            (if (and (some? retrieval-policy) (not (map? retrieval-policy)))
+              (let [{:keys [status body]} (errors/http-error-body {:type :invalid_request
+                                                                   :message "retrieval_policy must be an object"})]
+                (write-json! exchange status body (response-correlation-header-map exchange)))
+              (when (enforce-authz! exchange auth-config {:operation :resolve_context
+                                                          :tenant_id tenant_id
+                                                          :root_path root-path
+                                                          :paths paths})
+                (let [index (sci/create-index {:root_path root-path
+                                               :paths paths
+                                               :parser_opts (:parser_opts payload)
+                                               :usage_metrics (:usage_metrics auth-config)
+                                               :usage_context (merge {:surface "http"
+                                                                      :tenant_id tenant_id}
+                                                                     correlation)
+                                               :suppress_usage_metrics true
+                                               :policy_registry (:policy_registry auth-config)})
+                      result (sci/resolve-context index
+                                                  query
+                                                  {:retrieval_policy retrieval-policy
+                                                   :policy_registry (:policy_registry auth-config)})]
+                  (write-json! exchange 200 result (response-correlation-header-map exchange)))))))))))
 
-(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry]}]
+(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry usage_metrics]}]
   (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)]
     (.createContext server "/health" (with-handler handle-health))
     (.createContext server "/v1/index/create" (with-handler (partial handle-create-index {:api_key api_key
                                                                                            :require_tenant require_tenant
                                                                                            :authz_check authz_check
-                                                                                           :policy_registry policy_registry})))
+                                                                                           :policy_registry policy_registry
+                                                                                           :usage_metrics usage_metrics})))
     (.createContext server "/v1/retrieval/resolve-context" (with-handler (partial handle-resolve-context {:api_key api_key
                                                                                                             :require_tenant require_tenant
                                                                                                             :authz_check authz_check
-                                                                                                            :policy_registry policy_registry})))
+                                                                                                            :policy_registry policy_registry
+                                                                                                            :usage_metrics usage_metrics})))
     (.setExecutor server nil)
     (.start server)
     server))
@@ -182,6 +261,10 @@
         require-tenant* (or require_tenant (parse-bool (System/getenv "SCI_RUNTIME_REQUIRE_TENANT")))
         authz-policy-file* (or (not-empty authz_policy_file) (System/getenv "SCI_RUNTIME_AUTHZ_POLICY_FILE"))
         policy-registry-file* (or (not-empty policy_registry_file) (System/getenv "SCI_RUNTIME_POLICY_REGISTRY_FILE"))
+        usage-metrics* (when-let [jdbc-url (System/getenv "SCI_USAGE_METRICS_JDBC_URL")]
+                         (sci/postgres-usage-metrics {:jdbc-url jdbc-url
+                                                      :user (System/getenv "SCI_USAGE_METRICS_DB_USER")
+                                                      :password (System/getenv "SCI_USAGE_METRICS_DB_PASSWORD")}))
         authz-check* (when (seq authz-policy-file*)
                        (authz/load-policy-authorizer authz-policy-file*))
         policy-registry* (when (seq policy-registry-file*)
@@ -191,7 +274,8 @@
                                :api_key api-key*
                                :require_tenant require-tenant*
                                :authz_check authz-check*
-                               :policy_registry policy-registry*})]
+                               :policy_registry policy-registry*
+                               :usage_metrics usage-metrics*})]
     (println (str "runtime_http_server_started host=" host " port=" port))
     (flush)
     @(promise)))
