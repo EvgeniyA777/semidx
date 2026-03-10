@@ -215,10 +215,14 @@
     (if allowed-root
       (.put env "SCI_MCP_ALLOWED_ROOTS" allowed-root)
       (.remove env "SCI_MCP_ALLOWED_ROOTS"))
+    (if-let [policy-registry-file (:policy-registry-file opts)]
+      (.put env "SCI_MCP_POLICY_REGISTRY_FILE" policy-registry-file)
+      (.remove env "SCI_MCP_POLICY_REGISTRY_FILE"))
     (.put env "SCI_MCP_MAX_INDEXES" "4")
     (log-step! "start-process"
                (pr-str {:directory (.getPath (io/file directory))
                         :allowed-root allowed-root
+                        :policy-registry-file (:policy-registry-file opts)
                         :user-dir (:user-dir opts)
                         :max-indexes "4"}))
     (let [proc (.start builder)
@@ -359,6 +363,54 @@
             (is (true? (:isError result)))
             (is (= "invalid_request"
                    (get-in result [:structuredContent :details :code]))))))
+      (finally
+        (destroy-process! handle)))))
+
+(deftest runtime-mcp-policy-registry-selection-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-mcp-policy-registry-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        registry-path (str (io/file tmp-root "policy-registry.edn"))
+        _ (create-sample-repo! tmp-root)
+        active-policy {:policy_id "heuristic_v1_mcp_active"
+                       :version "2026-03-11"
+                       :state "active"
+                       :policy {:policy_id "heuristic_v1_mcp_active"
+                                :version "2026-03-11"
+                                :thresholds {:top_authority_min 500}}}
+        shadow-policy {:policy_id "heuristic_v1_mcp_shadow"
+                       :version "2026-03-12"
+                       :state "shadow"
+                       :policy {:policy_id "heuristic_v1_mcp_shadow"
+                                :version "2026-03-12"
+                                :thresholds {:top_authority_min 500}}}
+        _ (spit registry-path (pr-str {:schema_version "1.0"
+                                       :policies [active-policy shadow-policy]}))
+        handle (start-mcp-process! {:directory "."
+                                    :allowed-root tmp-root
+                                    :policy-registry-file registry-path})]
+    (try
+      (initialize! handle)
+      (let [create-response (call-tool! handle 31 "create_index" {:root_path tmp-root})
+            create-data (get-in create-response [:result :structuredContent])
+            index-id (:index_id create-data)]
+        (testing "active registry policy is used when resolve_context has no override"
+          (let [resolve-response (call-tool! handle 32 "resolve_context" {:index_id index-id
+                                                                          :query sample-query})
+                resolve-data (get-in resolve-response [:result :structuredContent])]
+            (is (= "heuristic_v1_mcp_active"
+                   (get-in resolve-data [:diagnostics_trace :retrieval_policy :policy_id])))
+            (is (not= "top_authority"
+                      (get-in resolve-data [:context_packet :relevant_units 0 :rank_band])))))
+
+        (testing "selector-based override resolves from registry"
+          (let [resolve-response (call-tool! handle 33 "resolve_context" {:index_id index-id
+                                                                          :query sample-query
+                                                                          :retrieval_policy {:policy_id "heuristic_v1_mcp_shadow"
+                                                                                             :version "2026-03-12"}})
+                resolve-data (get-in resolve-response [:result :structuredContent])]
+            (is (= "heuristic_v1_mcp_shadow"
+                   (get-in resolve-data [:diagnostics_trace :retrieval_policy :policy_id])))
+            (is (not= "top_authority"
+                      (get-in resolve-data [:context_packet :relevant_units 0 :rank_band]))))))
       (finally
         (destroy-process! handle)))))
 

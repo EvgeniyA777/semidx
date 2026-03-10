@@ -3,7 +3,8 @@
             [clojure.test :refer [deftest is testing]]
             [malli.core :as m]
             [semantic-code-indexing.contracts.schemas :as contracts]
-            [semantic-code-indexing.core :as sci]))
+            [semantic-code-indexing.core :as sci]
+            [semantic-code-indexing.runtime.retrieval-policy :as rp]))
 
 (defn- write-file! [root rel-path content]
   (let [f (io/file root rel-path)]
@@ -15,6 +16,8 @@
                "(ns my.app.order\n  (:require [clojure.string :as str]))\n\n(defn process-order [ctx order]\n  (validate-order order)\n  (str/join \"-\" [\"ok\" (:id order)]))\n\n(defn validate-order [order]\n  (if (:id order)\n    order\n    (throw (ex-info \"invalid\" {}))))\n")
   (write-file! root "test/my/app/order_test.clj"
                "(ns my.app.order-test\n  (:require [clojure.test :refer [deftest is]]\n            [my.app.order :as order]))\n\n(deftest process-order-test\n  (is (map? (order/validate-order {:id 1}))))\n")
+  (write-file! root "src/my/app/macros.clj"
+               "(ns my.app.macros)\n\n(comment\n  (defn hidden-helper [order]\n    (:id order)))\n\n(defmacro with-order [order & body]\n  `(let [current-order# ~order]\n     ~@body))\n\n(defn visible-helper [order]\n  (with-order order\n    (:id order)))\n")
   (write-file! root "src/com/acme/CheckoutService.java"
                "package com.acme;\n\nimport java.util.Objects;\n\npublic class CheckoutService {\n  public String processOrder(String id) {\n    return normalize(id, true);\n  }\n\n  private String normalize(String id) {\n    return normalize(id, false);\n  }\n\n  private String normalize(String id, boolean strict) {\n    String base = Objects.requireNonNull(id).trim();\n    return strict ? base : base.toLowerCase();\n  }\n}\n")
   (write-file! root "lib/my_app/order.ex"
@@ -144,6 +147,14 @@
       (is (some #{"clojure"} (get-in packet [:capabilities :selected_languages])))
       (is (string? (get-in packet [:capabilities :index_snapshot_id]))))))
 
+(deftest clojure-related-tests-link-via-imported-test-namespace-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-clj-related-tests" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        index (sci/create-index {:root_path tmp-root})
+        result (sci/resolve-context index sample-query)
+        related-tests (get-in result [:context_packet :impact_hints :related_tests])]
+    (is (some #{"test/my/app/order_test.clj"} related-tests))))
+
 (deftest retrieval-policy-can-change-ranking-band-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-policy-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
@@ -156,6 +167,42 @@
     (is (= "top_authority" (get-in baseline [:context_packet :relevant_units 0 :rank_band])))
     (is (not= "top_authority" (get-in strict-result [:context_packet :relevant_units 0 :rank_band])))
     (is (= "heuristic_v1_strict_top" (get-in strict-result [:diagnostics_trace :retrieval_policy :policy_id])))))
+
+(deftest retrieval-policy-can-resolve-active-registry-policy-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-policy-registry-active-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        strict-active (-> (rp/default-retrieval-policy)
+                          (assoc :policy_id "heuristic_v1_active_strict")
+                          (assoc :version "2026-03-11")
+                          (assoc-in [:thresholds :top_authority_min] 500))
+        registry {:schema_version "1.0"
+                  :policies [(rp/registry-entry strict-active {:state "active"})]}
+        index (sci/create-index {:root_path tmp-root
+                                 :policy_registry registry})
+        result (sci/resolve-context index sample-query)]
+    (is (not= "top_authority" (get-in result [:context_packet :relevant_units 0 :rank_band])))
+    (is (= "heuristic_v1_active_strict"
+           (get-in result [:diagnostics_trace :retrieval_policy :policy_id])))))
+
+(deftest retrieval-policy-can-resolve-summary-from-registry-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-policy-registry-summary-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        strict-shadow (-> (rp/default-retrieval-policy)
+                          (assoc :policy_id "heuristic_v1_shadow_strict")
+                          (assoc :version "2026-03-12")
+                          (assoc-in [:thresholds :top_authority_min] 500))
+        registry {:schema_version "1.0"
+                  :policies [(rp/registry-entry (rp/default-retrieval-policy) {:state "active"})
+                             (rp/registry-entry strict-shadow {:state "shadow"})]}
+        index (sci/create-index {:root_path tmp-root
+                                 :policy_registry registry})
+        result (sci/resolve-context index
+                                    sample-query
+                                    {:retrieval_policy {:policy_id "heuristic_v1_shadow_strict"
+                                                        :version "2026-03-12"}})]
+    (is (not= "top_authority" (get-in result [:context_packet :relevant_units 0 :rank_band])))
+    (is (= "heuristic_v1_shadow_strict"
+           (get-in result [:diagnostics_trace :retrieval_policy :policy_id])))))
 
 (deftest elixir-and-python-targeted-retrieval-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-lang-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -254,6 +301,40 @@
     (is validate-unit-id)
     (is (some #(= "my.app.order/process-order" (:symbol %)) callers))
     (is (some #(= "my.app.order/validate-order" (:symbol %)) callees))))
+
+(deftest clojure-regex-fallback-alias-aware-call-resolution-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-clj-regex-callers-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        index (sci/create-index {:root_path tmp-root
+                                 :storage storage
+                                 :parser_opts {:clojure_engine :regex
+                                               :tree_sitter_enabled false}})
+        order-units (sci/query-units storage tmp-root {:module "my.app.order" :limit 20})
+        validate-unit-id (some->> order-units (filter #(= "my.app.order/validate-order" (:symbol %))) first :unit_id)
+        callers (sci/query-callers storage tmp-root validate-unit-id {:limit 20})]
+    (is (= "fallback" (get-in index [:files "test/my/app/order_test.clj" :parser_mode])))
+    (is validate-unit-id)
+    (is (some #(= "my.app.order/process-order" (:symbol %)) callers))
+    (is (some #(= "my.app.order-test/process-order-test" (:symbol %)) callers))))
+
+(deftest clojure-regex-parser-ignores-nested-comment-defs-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-clj-regex-macro-boundaries" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root
+                                  :storage storage
+                                  :parser_opts {:clojure_engine :regex
+                                                :tree_sitter_enabled false}})
+        macro-units (sci/query-units storage tmp-root {:module "my.app.macros" :limit 20})
+        symbols (set (map :symbol macro-units))
+        with-order-unit (some->> macro-units (filter #(= "my.app.macros/with-order" (:symbol %))) first)
+        visible-helper-unit (some->> macro-units (filter #(= "my.app.macros/visible-helper" (:symbol %))) first)]
+    (is (= #{"my.app.macros/with-order" "my.app.macros/visible-helper"} symbols))
+    (is (nil? (some #(= "my.app.macros/hidden-helper" (:symbol %)) macro-units)))
+    (is with-order-unit)
+    (is visible-helper-unit)
+    (is (< (:end_line with-order-unit) (:start_line visible-helper-unit)))))
 
 (deftest tree-sitter-parser-path-test
   (let [clj-grammar (System/getenv "SCI_TREE_SITTER_CLOJURE_GRAMMAR_PATH")

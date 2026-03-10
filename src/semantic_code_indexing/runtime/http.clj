@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [semantic-code-indexing.runtime.authz :as authz]
+            [semantic-code-indexing.runtime.retrieval-policy :as rp]
             [semantic-code-indexing.core :as sci])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.net InetSocketAddress]))
@@ -21,6 +22,7 @@
           "--port" (recur (assoc m :port (or (some-> v parse-long) 8787)) rest)
           "--api-key" (recur (assoc m :api_key (or v "")) rest)
           "--authz-policy-file" (recur (assoc m :authz_policy_file (or v "")) rest)
+          "--policy-registry-file" (recur (assoc m :policy_registry_file (or v "")) rest)
           "--require-tenant" (recur (assoc m :require_tenant true) (cons v rest))
           (recur m rest))))))
 
@@ -121,7 +123,8 @@
                                                     :paths paths})
           (let [index (sci/create-index {:root_path root-path
                                          :paths paths
-                                         :parser_opts (:parser_opts payload)})]
+                                         :parser_opts (:parser_opts payload)
+                                         :policy_registry (:policy_registry auth-config)})]
             (write-json! exchange 200 {:snapshot_id (:snapshot_id index)
                                        :indexed_at (:indexed_at index)
                                        :file_count (count (:files index))
@@ -136,45 +139,59 @@
       (let [payload (read-json-body exchange)
             root-path (or (:root_path payload) ".")
             paths (:paths payload)
-            query (:query payload)]
+            query (:query payload)
+            retrieval-policy (:retrieval_policy payload)]
         (if-not (map? query)
           (write-json! exchange 400 {:error "invalid_request"
                                      :message "query must be an object"})
+          (if (and (some? retrieval-policy) (not (map? retrieval-policy)))
+            (write-json! exchange 400 {:error "invalid_request"
+                                       :message "retrieval_policy must be an object"})
           (when (enforce-authz! exchange auth-config {:operation :resolve_context
                                                       :tenant_id tenant_id
                                                       :root_path root-path
                                                       :paths paths})
             (let [index (sci/create-index {:root_path root-path
                                            :paths paths
-                                           :parser_opts (:parser_opts payload)})
-                  result (sci/resolve-context index query)]
-              (write-json! exchange 200 result))))))))
+                                           :parser_opts (:parser_opts payload)
+                                           :policy_registry (:policy_registry auth-config)})
+                  result (sci/resolve-context index
+                                              query
+                                              {:retrieval_policy retrieval-policy
+                                               :policy_registry (:policy_registry auth-config)})]
+              (write-json! exchange 200 result)))))))))
 
-(defn start-server [{:keys [host port api_key require_tenant authz_check]}]
+(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry]}]
   (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)]
     (.createContext server "/health" (with-handler handle-health))
     (.createContext server "/v1/index/create" (with-handler (partial handle-create-index {:api_key api_key
                                                                                            :require_tenant require_tenant
-                                                                                           :authz_check authz_check})))
+                                                                                           :authz_check authz_check
+                                                                                           :policy_registry policy_registry})))
     (.createContext server "/v1/retrieval/resolve-context" (with-handler (partial handle-resolve-context {:api_key api_key
                                                                                                             :require_tenant require_tenant
-                                                                                                            :authz_check authz_check})))
+                                                                                                            :authz_check authz_check
+                                                                                                            :policy_registry policy_registry})))
     (.setExecutor server nil)
     (.start server)
     server))
 
 (defn -main [& args]
-  (let [{:keys [host port api_key require_tenant authz_policy_file]} (parse-args args)
+  (let [{:keys [host port api_key require_tenant authz_policy_file policy_registry_file]} (parse-args args)
         api-key* (or (not-empty api_key) (System/getenv "SCI_RUNTIME_API_KEY"))
         require-tenant* (or require_tenant (parse-bool (System/getenv "SCI_RUNTIME_REQUIRE_TENANT")))
         authz-policy-file* (or (not-empty authz_policy_file) (System/getenv "SCI_RUNTIME_AUTHZ_POLICY_FILE"))
+        policy-registry-file* (or (not-empty policy_registry_file) (System/getenv "SCI_RUNTIME_POLICY_REGISTRY_FILE"))
         authz-check* (when (seq authz-policy-file*)
                        (authz/load-policy-authorizer authz-policy-file*))
+        policy-registry* (when (seq policy-registry-file*)
+                           (rp/load-registry policy-registry-file*))
         _server (start-server {:host host
                                :port port
                                :api_key api-key*
                                :require_tenant require-tenant*
-                               :authz_check authz-check*})]
+                               :authz_check authz-check*
+                               :policy_registry policy-registry*})]
     (println (str "runtime_http_server_started host=" host " port=" port))
     (flush)
     @(promise)))

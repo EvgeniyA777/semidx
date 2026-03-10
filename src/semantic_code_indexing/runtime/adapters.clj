@@ -13,6 +13,9 @@
 (def ^:private clj-require-re
   #"\[([a-zA-Z0-9\._\-]+)(?:\s+:as\s+[a-zA-Z0-9_\-]+)?\]")
 
+(def ^:private clj-require-alias-re
+  #"\[([a-zA-Z0-9\._\-]+)\s+:as\s+([a-zA-Z0-9_\-]+)\]")
+
 (def ^:private java-package-re #"^\s*package\s+([a-zA-Z0-9_\.]+)\s*;")
 (def ^:private java-import-re #"^\s*import\s+([a-zA-Z0-9_\.\*]+)\s*;")
 (def ^:private java-class-re #"^\s*(?:public\s+)?(?:class|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")
@@ -92,6 +95,60 @@
 
 (defn- tail-token [token]
   (some-> token str (str/split #"[\./#]") last))
+
+(defn- clj-scan-line [{:keys [depth in-string] :as state} line]
+  (loop [chars (seq (str line))
+         depth* (or depth 0)
+         in-string* (true? in-string)
+         escaped? false]
+    (if-let [ch (first chars)]
+      (cond
+        escaped?
+        (recur (next chars) depth* in-string* false)
+
+        in-string*
+        (cond
+          (= ch \\) (recur (next chars) depth* in-string* true)
+          (= ch \") (recur (next chars) depth* false false)
+          :else (recur (next chars) depth* in-string* false))
+
+        (= ch \;)
+        {:depth depth* :in-string in-string*}
+
+        (= ch \")
+        (recur (next chars) depth* true false)
+
+        (#{\( \[ \{} ch)
+        (recur (next chars) (inc depth*) in-string* false)
+
+        (#{\) \] \}} ch)
+        (recur (next chars) (max 0 (dec depth*)) in-string* false)
+
+        :else
+        (recur (next chars) depth* in-string* false))
+      {:depth depth* :in-string in-string*})))
+
+(defn- clj-line-start-depths [lines]
+  (loop [remaining lines
+         state {:depth 0 :in-string false}
+         depths []]
+    (if-let [line (first remaining)]
+      (recur (rest remaining)
+             (clj-scan-line state line)
+             (conj depths (:depth state)))
+      depths)))
+
+(defn- clj-form-end-line [lines start-line]
+  (let [line-count (count lines)
+        start-idx (max 0 (dec start-line))]
+    (loop [idx start-idx
+           state {:depth 0 :in-string false}]
+      (if (>= idx line-count)
+        line-count
+        (let [next-state (clj-scan-line state (nth lines idx))]
+          (if (zero? (:depth next-state))
+            (inc idx)
+            (recur (inc idx) next-state)))))))
 
 (defn- parse-python-import [line]
   (if-let [[_ from names] (re-find py-from-import-re line)]
@@ -208,29 +265,94 @@
     (= kw "def") "section"
     :else (if (str/includes? path "/test/") "test" "function")))
 
-(defn- extract-clj-calls [body]
-  (->> (re-seq clj-call-re body)
-       (map second)
-       (remove clj-call-stop)
-       distinct
-       vec))
+(defn- clj-require-alias-map [lines]
+  (reduce (fn [acc line]
+            (reduce (fn [m [_ ns-name alias]]
+                      (assoc m alias ns-name))
+                    acc
+                    (re-seq clj-require-alias-re line)))
+          {}
+          lines))
+
+(defn- rewrite-clj-call-token [token alias-map]
+  (let [token* (str token)]
+    (if-let [[_ alias suffix] (re-matches #"([A-Za-z0-9_\-]+)/(.*)" token*)]
+      (if-let [ns-name (get alias-map alias)]
+        (str ns-name "/" suffix)
+        token*)
+      token*)))
+
+(defn- expand-clj-call-token [token alias-map]
+  (let [rewritten (rewrite-clj-call-token token alias-map)]
+    (if (= (str token) rewritten)
+      [(str token)]
+      [(str token) rewritten])))
+
+(def ^:private clj-test-module-suffixes
+  ["-test" "-spec"])
+
+(defn- clj-test-module? [module path]
+  (let [module* (str (or module ""))]
+    (or (str/includes? (str path) "/test/")
+        (some #(str/ends-with? module* %) clj-test-module-suffixes))))
+
+(defn- strip-clj-test-suffix [module]
+  (reduce (fn [acc suffix]
+            (if (str/ends-with? acc suffix)
+              (subs acc 0 (- (count acc) (count suffix)))
+              acc))
+          (str module)
+          clj-test-module-suffixes))
+
+(defn- clj-test-target-modules [module imports path]
+  (if (clj-test-module? module path)
+    (->> (concat [(strip-clj-test-suffix module)] imports)
+         (remove #(or (str/blank? %)
+                      (= % "clojure.test")))
+         distinct
+         vec)
+    []))
+
+(defn- extract-clj-calls
+  ([body]
+   (extract-clj-calls body {}))
+  ([body alias-map]
+   (->> (re-seq clj-call-re body)
+        (map second)
+        (remove clj-call-stop)
+        (mapcat #(expand-clj-call-token % alias-map))
+        distinct
+        vec)))
+
+(defn- usage-source-keys [usage]
+  (let [from-var (:from-var usage)
+        from-ns (some-> (:from usage) str)]
+    (cond-> #{}
+      from-var (conj (str from-var))
+      (and from-ns from-var) (conj (str from-ns "/" from-var)))))
 
 (defn- parse-clojure-regex [path lines]
   (let [line-count (count lines)
+        line-start-depths (clj-line-start-depths lines)
         ns-name (some (fn [line] (some-> (re-find #"^\s*\(ns\s+([^\s\)]+).*" line) second)) lines)
+        alias-map (clj-require-alias-map lines)
         imports (->> lines
                      (mapcat #(map second (re-seq clj-require-re %)))
                      distinct
                      vec)
+        test-target-modules (clj-test-target-modules ns-name imports path)
         defs (->> (map-indexed vector lines)
                   (keep (fn [[idx line]]
-                          (when-let [[_ kw raw-sym] (re-find clj-def-re line)]
-                            {:start-line (inc idx)
-                             :kind (clj-kind kw path)
-                             :raw-symbol raw-sym
-                             :signature (trim-signature line)}))))
+                          (when (zero? (nth line-start-depths idx 1))
+                            (when-let [[_ kw raw-sym] (re-find clj-def-re line)]
+                              {:start-line (inc idx)
+                               :kind (clj-kind kw path)
+                               :raw-symbol raw-sym
+                               :signature (trim-signature line)})))))
         starts (mapv :start-line defs)
-        ends (unit-end-lines starts line-count)
+        ends (if (seq starts)
+               (mapv #(clj-form-end-line lines %) starts)
+               (unit-end-lines starts line-count))
         units (->> (map vector defs ends)
                    (map (fn [[d end-line]]
                           (let [start-line (:start-line d)
@@ -252,12 +374,13 @@
                              :summary (str (:kind d) " " symbol)
                              :docstring_excerpt nil
                              :imports imports
-                             :calls (extract-clj-calls body)
+                             :calls (extract-clj-calls body alias-map)
                              :parser_mode "fallback"})))
                    vec)]
     {:language "clojure"
      :module ns-name
      :imports imports
+     :test_target_modules test-target-modules
      :units units
      :diagnostics [{:code "parser_fallback" :summary "Clojure analyzed via regex fallback."}]
      :parser_mode "fallback"}))
@@ -301,14 +424,16 @@
         ns-usages (->> (:namespace-usages analysis) (filter #(same-file? abs (:filename %))) vec)
         var-usages (->> (:var-usages analysis) (filter #(same-file? abs (:filename %))) vec)
         imports (->> ns-usages (keep :to) (map str) distinct vec)
+        test-target-modules (clj-test-target-modules (some-> var-defs first :ns str) imports path)
         calls-by-var
         (reduce (fn [acc u]
-                  (if-let [from-var (:from-var u)]
-                    (if-let [token (usage->call-token u)]
-                      (if (contains? clj-call-stop token)
-                        acc
-                        (update acc (str from-var) (fnil conj #{}) token))
-                      acc)
+                  (if-let [token (usage->call-token u)]
+                    (if (contains? clj-call-stop token)
+                      acc
+                      (reduce (fn [m source-key]
+                                (update m source-key (fnil conj #{}) token))
+                              acc
+                              (usage-source-keys u)))
                     acc))
                 {}
                 var-usages)
@@ -318,20 +443,25 @@
                     (let [ns-name (str (:ns d))
                           nm (str (:name d))
                           sym (str ns-name "/" nm)
+                          kind (kondo-defined-kind (:defined-by d) path)
                           start (max 1 (int (or (:name-row d) (:row d) 1)))
                           end (max start (int (or (:end-row d) start)))]
                       {:unit_id (str path "::" sym)
-                       :kind (kondo-defined-kind (:defined-by d) path)
+                       :kind kind
                        :symbol sym
                        :path path
                        :module ns-name
                        :start_line start
                        :end_line end
                        :signature (safe-line lines start)
-                       :summary (str "function " sym)
+                       :summary (str kind " " sym)
                        :docstring_excerpt nil
                        :imports imports
-                       :calls (->> (get calls-by-var nm #{}) sort vec)
+                       :calls (->> (concat (get calls-by-var sym #{})
+                                           (get calls-by-var nm #{}))
+                                   distinct
+                                   sort
+                                   vec)
                        :parser_mode "full"})))
              vec)
         findings
@@ -346,6 +476,7 @@
       {:language "clojure"
        :module (some-> units first :module)
        :imports imports
+       :test_target_modules test-target-modules
        :units units
        :diagnostics findings
        :parser_mode "full"}
@@ -393,8 +524,10 @@
 (defn- parse-clojure-tree-sitter [root-path path src-lines parser-opts]
   (let [grammar-path (parser-grammar-path parser-opts :clojure)
         abs (-> (io/file root-path path) .getCanonicalPath)
+        alias-map (clj-require-alias-map src-lines)
         imports (->> src-lines (mapcat #(map second (re-seq clj-require-re %))) distinct vec)
-        ns-name (some (fn [line] (some-> (re-find #"^\s*\(ns\s+([^\s\)]+).*" line) second)) src-lines)]
+        ns-name (some (fn [line] (some-> (re-find #"^\s*\(ns\s+([^\s\)]+).*" line) second)) src-lines)
+        test-target-modules (clj-test-target-modules ns-name imports path)]
     (cond
       (not (tree-sitter-available?))
       {:ok? false
@@ -426,6 +559,7 @@
                                        :raw-symbol raw-name
                                        :calls (->> (drop 2 syms)
                                                    (remove clj-call-stop)
+                                                   (mapcat #(expand-clj-call-token % alias-map))
                                                    distinct
                                                    vec)}))))
                           vec)
@@ -453,6 +587,7 @@
                :result {:language "clojure"
                         :module ns-name
                         :imports imports
+                        :test_target_modules test-target-modules
                         :units units
                         :diagnostics [{:code "tree_sitter_active"
                                        :summary "Clojure analyzed using tree-sitter CST extraction."}]

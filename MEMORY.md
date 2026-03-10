@@ -17,6 +17,7 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Clojure-side contract mirror is implemented with `malli`.
 - MVP runtime is implemented with public API in `semantic-code-indexing.core`.
 - Clojure parser path supports `clj-kondo` primary with regex fallback and optional tree-sitter extraction mode.
+- Clojure fallback parsing now rewrites alias-qualified calls (`order/validate-order` -> `my.app.order/validate-order`), ignores nested defs inside wrapper forms such as `comment`, and links test namespaces back to source namespaces for stronger `related_tests` hints.
 - Java parser path supports regex mode and optional tree-sitter extraction mode.
 - Elixir/Python parser paths are regex-based with class/module-aware symbol and call normalization.
 - TypeScript parser supports regex mode and optional tree-sitter extraction mode.
@@ -37,10 +38,13 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - HTTP boundary conformance tests exist and run in standard `clojure -M:test` gates (`semantic-code-indexing.runtime-http-test`).
 - Minimal gRPC runtime edge exists (`clojure -M:runtime-grpc`) with parity tests in standard `clojure -M:test` gates (`semantic-code-indexing.runtime-grpc-test`).
 - Service-mode policy boundary is documented in `ADR-019` and implemented as optional API-key + tenant gate on HTTP/gRPC edges.
-- gRPC transport migrated from JSON strings to typed protobuf `google.protobuf.Struct` messages (`ADR-020`).
+- gRPC transport now uses dedicated runtime protobuf envelope messages defined in `proto/semantic_code_indexing/runtime/grpc/v1/runtime.proto`.
 - Host-integrated authz policy contract is implemented on HTTP/gRPC edges via `:authz_check` callback and optional EDN policy adapter (`--authz-policy-file`, `ADR-021`).
 - Language onboarding automation scripts now scaffold and validate adapter integration steps (`scripts/new-language-adapter.sh`, `scripts/validate-language-onboarding.sh`, `ADR-022`).
 - Java method unit identities are signature/arity-sensitive (`...$arityN$sigXXXX`) to disambiguate overloads.
+- Offline policy governance now supports registry lifecycle states (`draft`, `shadow`, `active`, `retired`), replay scorecards, side-by-side policy comparison, and promotion gates via `clojure -M:eval`.
+- Replay datasets can now mark `protected_case` queries, and promotion gates reject candidate policies that introduce newly failed protected cases.
+- Shadow-vs-active operational workflow now exists via `shadow-review`, which evaluates all `shadow` policies against the current `active` registry policy and can persist `:shadow_review` metadata back into the registry.
 
 ## Hard Invariants
 
@@ -53,16 +57,18 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 ## Known Gaps
 
 - No deep compiler-grade semantic resolution yet.
-- gRPC still does not use dedicated domain-specific generated proto messages; it uses typed `Struct` as an intermediate step.
+- gRPC message classes are still descriptor-built at runtime; generated Java/Kotlin stubs are not wired yet.
 - No dynamic external policy backend integration yet (current authz adapter is local file/callback based).
+- HTTP/gRPC/MCP surfaces now support server-configured registries and selector-based `resolve_context` policy lookup, but broader online policy-management/control-plane APIs are still intentionally absent.
 - Rate limiting is delegated to ingress/proxy/host layer and not implemented in runtime edges.
 - Tree-sitter path still depends on external CLI availability, though grammar bootstrap is now scripted and pinned.
 - Persistence graph queries are retrieval-oriented and not yet a full semantic graph query language.
+- Automatic replay dataset harvesting from real usage traces and feedback is not implemented yet.
 
 ## Next Execution Priorities
 
-1. Design dedicated domain proto messages for runtime gRPC contracts beyond generic `Struct`.
-2. Add reference integration for dynamic external authz backend (tenant policy service/PDP) using the `:authz_check` contract.
+1. Continue Clojure semantic-core deepening: namespace/var identity, more precise caller/callee resolution, and macro-aware structural handling beyond top-level fallback parsing.
+2. After the next Clojure slice, extend governed quality loop with a more explicit policy-management control plane across runtime surfaces and richer protected dataset curation workflows.
 
 ## Update Rule
 

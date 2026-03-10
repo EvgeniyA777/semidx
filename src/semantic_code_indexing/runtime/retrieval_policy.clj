@@ -1,5 +1,7 @@
 (ns semantic-code-indexing.runtime.retrieval-policy
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
             [semantic-code-indexing.runtime.index :as idx]))
 
 (def ^:private default-policy
@@ -26,18 +28,178 @@
                        :low 0.30}
    :raw_fetch {:medium_upgrade_min_snippets 2}})
 
+(def ^:private lifecycle-states
+  #{"draft" "shadow" "active" "retired"})
+
+(def ^:private policy-tuning-keys
+  #{:weights :caps :thresholds :confidence_scores :raw_fetch})
+
+(def ^:private registry-metadata-keys
+  [:notes :created_at :updated_at :activated_at :retired_at :shadow_review])
+
 (defn default-retrieval-policy []
   default-policy)
 
+(declare normalize-policy)
+
+(defn lifecycle-state? [state]
+  (contains? lifecycle-states (str/lower-case (str (or state "")))))
+
+(defn normalize-lifecycle-state [state]
+  (let [normalized (str/lower-case (str (or state "draft")))]
+    (if (lifecycle-state? normalized)
+      normalized
+      (throw (ex-info (str "unsupported retrieval policy lifecycle state " state)
+                      {:type :invalid_request
+                       :message (str "unsupported retrieval policy lifecycle state " state)})))))
+
+(defn registry-entry? [value]
+  (and (map? value)
+       (map? (:policy value))
+       (string? (:policy_id value))
+       (string? (:version value))))
+
+(defn registry-entry
+  ([policy] (registry-entry policy {}))
+  ([policy {:keys [state] :as metadata}]
+   (let [normalized (normalize-policy policy)]
+     (cond-> {:policy_id (:policy_id normalized)
+              :version (:version normalized)
+              :state (normalize-lifecycle-state state)
+              :policy normalized}
+       true (merge (select-keys metadata registry-metadata-keys))))))
+
 (defn normalize-policy [policy]
-  (let [policy* (or policy {})]
+  (let [policy* (or policy {})
+        policy-source (if (registry-entry? policy*)
+                        (merge (:policy policy*)
+                               (select-keys policy* [:policy_id :version]))
+                        policy*)]
     (-> default-policy
-        (merge (select-keys policy* [:policy_id :version]))
-        (update :weights merge (:weights policy*))
-        (update :caps merge (:caps policy*))
-        (update :thresholds merge (:thresholds policy*))
-        (update :confidence_scores merge (:confidence_scores policy*))
-        (update :raw_fetch merge (:raw_fetch policy*)))))
+        (merge (select-keys policy-source [:policy_id :version]))
+        (update :weights merge (:weights policy-source))
+        (update :caps merge (:caps policy-source))
+        (update :thresholds merge (:thresholds policy-source))
+        (update :confidence_scores merge (:confidence_scores policy-source))
+        (update :raw_fetch merge (:raw_fetch policy-source)))))
+
+(defn empty-registry []
+  {:schema_version "1.0"
+   :policies []})
+
+(defn normalize-registry [registry]
+  (let [registry* (or registry {})
+        policies (->> (:policies registry*)
+                      (mapv (fn [entry]
+                              (registry-entry (or (:policy entry) entry)
+                                              (merge {:state (:state entry)}
+                                                     (select-keys entry registry-metadata-keys))))))]
+    {:schema_version (or (:schema_version registry*) "1.0")
+     :policies policies}))
+
+(defn load-registry [path]
+  (with-open [rdr (java.io.PushbackReader. (io/reader path))]
+    (normalize-registry (edn/read rdr))))
+
+(defn write-registry! [path registry]
+  (spit path (pr-str (normalize-registry registry))))
+
+(defn resolve-registry-source [value]
+  (cond
+    (nil? value) nil
+    (string? value) (load-registry value)
+    (map? value) (normalize-registry value)
+    :else
+    (throw (ex-info "unsupported policy registry source"
+                    {:type :invalid_request
+                     :message "unsupported policy registry source"}))))
+
+(defn list-registry-entries [registry]
+  (:policies (normalize-registry registry)))
+
+(defn resolve-registry-entry
+  ([registry policy-id]
+   (resolve-registry-entry registry policy-id nil))
+  ([registry policy-id version]
+   (->> (list-registry-entries registry)
+        (filter #(= (str policy-id) (:policy_id %)))
+        (filter #(if version
+                   (= (str version) (:version %))
+                   true))
+        first)))
+
+(defn active-registry-entry [registry]
+  (->> (list-registry-entries registry)
+       (filter #(= "active" (:state %)))
+       first))
+
+(defn policy-from-entry [entry]
+  (when entry
+    (normalize-policy entry)))
+
+(defn- policy-selector-map? [policy]
+  (and (map? policy)
+       (contains? policy :policy_id)
+       (not-any? policy policy-tuning-keys)))
+
+(defn resolve-policy
+  ([policy]
+   (resolve-policy policy nil))
+  ([policy registry]
+   (let [registry* (resolve-registry-source registry)]
+     (cond
+       (registry-entry? policy)
+       (policy-from-entry policy)
+
+       (and (nil? policy) registry*)
+       (or (some-> (active-registry-entry registry*) policy-from-entry)
+           (default-retrieval-policy))
+
+       (policy-selector-map? policy)
+       (if registry*
+         (or (some-> (resolve-registry-entry registry*
+                                             (:policy_id policy)
+                                             (:version policy))
+                     policy-from-entry)
+             (throw (ex-info "retrieval policy not found in registry"
+                             {:type :invalid_request
+                              :message "retrieval policy not found in registry"})))
+         (normalize-policy policy))
+
+       (map? policy)
+       (normalize-policy policy)
+
+       :else
+       (default-retrieval-policy)))))
+
+(defn upsert-registry-entry [registry entry]
+  (let [entry* (registry-entry entry (merge {:state (:state entry)}
+                                           (select-keys entry registry-metadata-keys)))
+        entries (list-registry-entries registry)
+        replaced? (volatile! false)
+        policies (mapv (fn [existing]
+                         (if (and (= (:policy_id existing) (:policy_id entry*))
+                                  (= (:version existing) (:version entry*)))
+                           (do (vreset! replaced? true)
+                               (merge existing entry*))
+                           existing))
+                       entries)]
+    (assoc (normalize-registry registry)
+           :policies (if @replaced?
+                       policies
+                       (conj policies entry*)))))
+
+(defn set-entry-state [registry policy-id version next-state]
+  (let [state* (normalize-lifecycle-state next-state)]
+    (update (normalize-registry registry)
+            :policies
+            (fn [entries]
+              (mapv (fn [entry]
+                      (if (and (= (:policy_id entry) (str policy-id))
+                               (= (:version entry) (str version)))
+                        (assoc entry :state state*)
+                        entry))
+                    entries)))))
 
 (defn policy-summary [policy]
   (let [policy* (normalize-policy policy)]

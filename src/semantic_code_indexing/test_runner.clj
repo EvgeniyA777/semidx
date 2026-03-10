@@ -2,6 +2,7 @@
   (:require [clojure.test :as t]
             [semantic-code-indexing.evaluation-test]
             [semantic-code-indexing.mcp-server-test]
+            [semantic-code-indexing.policy-governance-test]
             [semantic-code-indexing.runtime-grpc-test]
             [semantic-code-indexing.runtime-http-test]
             [semantic-code-indexing.typescript-onboarding-test]
@@ -11,6 +12,7 @@
 (defn -main [& _]
   (let [result (t/run-tests 'semantic-code-indexing.mcp-server-test
                             'semantic-code-indexing.evaluation-test
+                            'semantic-code-indexing.policy-governance-test
                             'semantic-code-indexing.runtime-test
                             'semantic-code-indexing.runtime-grpc-test
                             'semantic-code-indexing.runtime-http-test

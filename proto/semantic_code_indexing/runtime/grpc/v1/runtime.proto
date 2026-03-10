@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package semantic_code_indexing.runtime.grpc.v1;
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string service = 2;
+}
+
+message CreateIndexRequest {
+  string root_path = 1;
+  repeated string paths = 2;
+  string parser_opts_json = 3;
+}
+
+message CreateIndexResponse {
+  string snapshot_id = 1;
+  string indexed_at = 2;
+  int32 file_count = 3;
+  int32 unit_count = 4;
+  string repo_map_json = 5;
+}
+
+message ResolveContextRequest {
+  string root_path = 1;
+  repeated string paths = 2;
+  string parser_opts_json = 3;
+  string query_json = 4;
+  string retrieval_policy_json = 5;
+}
+
+message ResolveContextResponse {
+  string context_packet_json = 1;
+  string guardrail_assessment_json = 2;
+  string diagnostics_trace_json = 3;
+  string stage_events_json = 4;
+}

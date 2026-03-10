@@ -52,6 +52,7 @@
                      :language (:language parsed)
                      :module (:module parsed)
                      :imports (:imports parsed)
+                     :test_target_modules (:test_target_modules parsed)
                      :parser_mode (:parser_mode parsed)
                      :diagnostics (:diagnostics parsed)}]
        (-> acc
@@ -228,6 +229,16 @@
    {}
    (vals files)))
 
+(defn- build-test-target-index [files]
+  (reduce-kv
+   (fn [acc path {:keys [test_target_modules]}]
+     (reduce (fn [a module]
+               (update a module (fnil conj #{}) path))
+             acc
+             test_target_modules))
+   {}
+   files))
+
 (defn- build-index-state [root-path files-data]
   (let [units (:units files-data)
         units-by-id (into {} (map (juxt :unit_id identity) units))]
@@ -242,7 +253,8 @@
      :path_index (index-by :path units)
      :module_index (index-by :module units)
      :callers_index (build-callers-index units (:files files-data))
-     :module_dependents (build-module-dependents (:files files-data))}))
+     :module_dependents (build-module-dependents (:files files-data))
+     :test_target_index (build-test-target-index (:files files-data))}))
 
 (defn- maybe-load-latest [storage-adapter root-path load-latest?]
   (when (and storage-adapter load-latest?)

@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [semantic-code-indexing.core :as sci]
+            [semantic-code-indexing.runtime.retrieval-policy :as rp]
             [semantic-code-indexing.runtime.usage-metrics :as usage])
   (:import [java.io ByteArrayOutputStream InputStream OutputStream PushbackInputStream]
            [java.util UUID]))
@@ -115,6 +116,7 @@
           "--max-indexes" (recur (assoc m :max_indexes (or (some-> v parse-long)
                                                            default-max-indexes))
                                  rest)
+          "--policy-registry-file" (recur (assoc m :policy_registry_file v) rest)
           (recur m rest))))))
 
 (defn- normalize-rel-path [path]
@@ -314,6 +316,7 @@
       (let [index (sci/create-index {:root_path root-path
                                      :paths paths
                                      :parser_opts parser-opts
+                                     :policy_registry (:policy_registry @state)
                                      :usage_metrics (:usage_metrics @state)
                                      :usage_context (tool-usage-context state)
                                      :suppress_usage_metrics true})
@@ -352,10 +355,15 @@
   (when-not (map? args)
     (invalid-request "resolve_context arguments must be an object"))
   (let [entry (resolve-entry! state args)
-        query (ensure-map-or-nil (:query args) "query")]
+        query (ensure-map-or-nil (:query args) "query")
+        retrieval-policy (ensure-map-or-nil (:retrieval_policy args) "retrieval_policy")]
     (when-not query
       (invalid-request "query is required"))
-    (let [result (assoc (sci/resolve-context (:index entry) query {:suppress_usage_metrics true})
+    (let [result (assoc (sci/resolve-context (:index entry)
+                                             query
+                                             {:suppress_usage_metrics true
+                                              :retrieval_policy retrieval-policy
+                                              :policy_registry (:policy_registry @state)})
                         :index_id (:index_id entry))]
       (with-usage-event
         result
@@ -434,7 +442,8 @@
     :description "Find the most relevant files, symbols, and code context for a coding task or question, and return diagnostics and guardrails for downstream agent use."
     :inputSchema {:type "object"
                   :properties {"index_id" {:type "string"}
-                               "query" {:type "object"}}
+                               "query" {:type "object"}
+                               "retrieval_policy" {:type "object"}}
                   :required ["index_id" "query"]
                   :additionalProperties false}}
    {:name "impact_analysis"
@@ -706,12 +715,13 @@
         (when (contains? message :id)
           (send-message! output-stream transport-format (jsonrpc-error id -32601 (str "method not found: " method))))))))
 
-(defn start-server-loop! [{:keys [allowed-roots max-indexes usage_metrics]
+(defn start-server-loop! [{:keys [allowed-roots max-indexes usage_metrics policy_registry]
                            :or {max-indexes default-max-indexes}}]
   (let [state (atom {:initialized? false
                      :transport-format nil
                      :allowed-roots allowed-roots
                      :max-indexes max-indexes
+                     :policy_registry policy_registry
                      :session_id (str (UUID/randomUUID))
                      :usage_metrics usage_metrics
                      :indexes-by-id {}
@@ -741,11 +751,15 @@
           (recur))))))
 
 (defn -main [& args]
-  (let [{:keys [allowed_roots max_indexes]} (parse-args args)
+  (let [{:keys [allowed_roots max_indexes policy_registry_file]} (parse-args args)
         allowed-roots (resolve-allowed-roots allowed_roots)
         max-indexes (or max_indexes
                         (some-> (System/getenv "SCI_MCP_MAX_INDEXES") parse-long)
                         default-max-indexes)
+        policy-registry-file* (or policy_registry_file
+                                  (System/getenv "SCI_MCP_POLICY_REGISTRY_FILE"))
+        policy-registry (when (seq policy-registry-file*)
+                          (rp/load-registry policy-registry-file*))
         usage-metrics (when-let [jdbc-url (System/getenv "SCI_USAGE_METRICS_JDBC_URL")]
                         (sci/postgres-usage-metrics {:jdbc-url jdbc-url
                                                      :user (System/getenv "SCI_USAGE_METRICS_DB_USER")
@@ -760,4 +774,5 @@
                                                          :max_indexes max-indexes}}))
     (start-server-loop! {:allowed-roots allowed-roots
                          :max-indexes max-indexes
+                         :policy_registry policy-registry
                          :usage_metrics usage-metrics})))

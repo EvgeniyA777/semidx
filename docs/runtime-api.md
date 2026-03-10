@@ -103,6 +103,8 @@ Runs retrieval pipeline and returns:
 Optional opts:
 
 - `:retrieval_policy` - versioned ranking policy override map for replay/tuning
+- `:policy_registry` - optional registry map for active-policy defaults or selector-based lookup
+- `:policy_registry_path` - optional EDN registry file path
 
 ```clojure
 (def query
@@ -141,10 +143,122 @@ Example with policy override:
    :thresholds {:top_authority_min 160}}})
 ```
 
+Example with registry-backed selection:
+
+```clojure
+(def registry
+  {:schema_version "1.0"
+   :policies
+   [{:policy_id "heuristic_v1"
+     :version "2026-03-10"
+     :state "active"
+     :policy {:policy_id "heuristic_v1"
+              :version "2026-03-10"}}
+    {:policy_id "heuristic_v1_strict_top"
+     :version "2026-03-11"
+     :state "shadow"
+     :policy {:policy_id "heuristic_v1_strict_top"
+              :version "2026-03-11"
+              :thresholds {:top_authority_min 160}}}]})
+
+(def index
+  (sci/create-index {:root_path "."
+                     :policy_registry registry}))
+
+;; Uses the active registry policy when no override is passed.
+(sci/resolve-context index query)
+
+;; Resolves a specific registry entry by policy_id/version.
+(sci/resolve-context
+ index
+ query
+ {:retrieval_policy {:policy_id "heuristic_v1_strict_top"
+                     :version "2026-03-11"}})
+```
+
 Both `:context_packet` and `:diagnostics_trace` now include:
 
 - `:retrieval_policy` - `{ :policy_id ... :version ... }`
 - `:capabilities` - selected-language and parser-coverage summary
+
+For Clojure retrieval, `impact_hints.related_tests` now also links nearby test files via namespace/import relationships, not only direct caller overlap. This keeps `related_tests` useful even when a test namespace exercises a sibling var instead of the exact selected var. The Clojure fallback parser is also top-level-aware, so nested `defn` forms inside wrappers such as `comment` are no longer indexed as real units.
+
+## Offline Policy Governance CLI
+
+The existing replay/evaluation surface under `clojure -M:eval` now supports governed policy workflows without changing the runtime request contract.
+
+Subcommands:
+
+- `score-policy`
+- `compare-policies`
+- `shadow-review`
+- `promote-policy`
+
+Examples:
+
+```bash
+clojure -M:eval score-policy \
+  --root . \
+  --dataset fixtures/retrieval/corpus.json \
+  --policy-file /tmp/policy.edn
+```
+
+```bash
+clojure -M:eval compare-policies \
+  --root . \
+  --dataset /tmp/replay.json \
+  --baseline-policy-file /tmp/baseline.edn \
+  --candidate-policy-file /tmp/candidate.edn
+```
+
+```bash
+clojure -M:eval shadow-review \
+  --root . \
+  --dataset /tmp/replay.json \
+  --registry /tmp/policy-registry.edn \
+  --write-registry
+```
+
+```bash
+clojure -M:eval promote-policy \
+  --root . \
+  --dataset /tmp/replay.json \
+  --registry /tmp/policy-registry.edn \
+  --candidate-policy-id heuristic_v1_candidate \
+  --candidate-version 2026-03-11 \
+  --dry-run
+```
+
+Registry shape (EDN):
+
+```clojure
+{:schema_version "1.0"
+ :policies
+ [{:policy_id "heuristic_v1"
+   :version "2026-03-10"
+   :state "active"
+   :policy {:policy_id "heuristic_v1"
+            :version "2026-03-10"}}
+  {:policy_id "heuristic_v1_candidate"
+   :version "2026-03-11"
+   :state "shadow"
+   :policy {:policy_id "heuristic_v1_candidate"
+            :version "2026-03-11"
+            :thresholds {:top_authority_min 140}}}]}
+```
+
+Fixed scorecard metrics currently emitted for governed replay:
+
+- `top_authority_hit_rate`
+- `required_path_hit_rate`
+- `minimum_confidence_pass_rate`
+- `degraded_rate`
+- `fallback_rate`
+- `confidence_calibration.mean_absolute_error`
+
+Promotion gates currently reject activation when any protected metric regresses versus the baseline policy.
+
+`shadow-review` treats the current `active` registry entry as the baseline, evaluates every `shadow` policy against it, reports `ready_for_promotion` vs `blocked`, and can persist per-policy `:shadow_review` metadata such as `:reviewed_at`, `:eligible_for_promotion`, `:failed_checks`, and protected-case summaries.
 
 ### `impact-analysis`
 
@@ -283,6 +397,7 @@ Dataset shape:
   "queries": [
     {
       "query_id": "order-authority",
+      "protected_case": true,
       "query": { "...": "retrieval query contract" },
       "expected": {
         "top_authority_unit_ids": ["src/my/app/order.clj::my.app.order/process-order"],
@@ -293,6 +408,8 @@ Dataset shape:
   ]
 }
 ```
+
+`protected_case` is optional. When present and `true`, governed comparison and promotion gates treat that replay case as protected and reject candidate policies that introduce newly failed protected queries.
 
 ### `skeletons`
 
@@ -335,11 +452,17 @@ Optional auth boundary:
 clojure -M:runtime-http --host 127.0.0.1 --port 8787 --api-key secret-token --require-tenant
 ```
 
+Optional runtime policy registry:
+
+```bash
+clojure -M:runtime-http --policy-registry-file /path/to/policy-registry.edn
+```
+
 Endpoints:
 
 - `GET /health`
 - `POST /v1/index/create` with JSON body: `root_path`, optional `paths`, optional `parser_opts`
-- `POST /v1/retrieval/resolve-context` with JSON body: `root_path`, optional `paths`, optional `parser_opts`, required `query`
+- `POST /v1/retrieval/resolve-context` with JSON body: `root_path`, optional `paths`, optional `parser_opts`, required `query`, optional `retrieval_policy`
 
 ## Minimal gRPC Edge
 
@@ -355,15 +478,27 @@ Optional auth boundary:
 clojure -M:runtime-grpc --host 127.0.0.1 --port 8789 --api-key secret-token --require-tenant
 ```
 
+Optional runtime policy registry:
+
+```bash
+clojure -M:runtime-grpc --policy-registry-file /path/to/policy-registry.edn
+```
+
 Service: `semantic_code_indexing.RuntimeService`
 
 Unary methods:
 
-- `Health` (`google.protobuf.Struct` -> `google.protobuf.Struct`)
-- `CreateIndex` (`google.protobuf.Struct` -> `google.protobuf.Struct`)
-- `ResolveContext` (`google.protobuf.Struct` -> `google.protobuf.Struct`)
+- `Health` (`HealthRequest` -> `HealthResponse`)
+- `CreateIndex` (`CreateIndexRequest` -> `CreateIndexResponse`)
+- `ResolveContext` (`ResolveContextRequest` -> `ResolveContextResponse`)
 
-Current gRPC transport uses typed protobuf messages (`google.protobuf.Struct`) while preserving runtime payload semantics compatible with HTTP/library contracts.
+Proto schema source: `proto/semantic_code_indexing/runtime/grpc/v1/runtime.proto`
+
+Current gRPC transport uses dedicated runtime protobuf envelope messages while preserving HTTP/library semantics:
+
+- request scalar fields stay typed (`root_path`, `paths`, counters)
+- complex nested runtime payloads are carried in explicit `*_json` string fields during this migration step
+- the server currently materializes these messages from protobuf descriptors at runtime rather than generated Java classes
 
 When auth boundary is enabled:
 

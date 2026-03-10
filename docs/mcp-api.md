@@ -13,6 +13,7 @@ Environment:
 
 - `SCI_MCP_ALLOWED_ROOTS` - optional allowlist of canonical repository roots; use the platform path separator (`:` on macOS/Linux, `;` on Windows)
 - `SCI_MCP_MAX_INDEXES` - optional in-memory LRU cache size; default `8`
+- `SCI_MCP_POLICY_REGISTRY_FILE` - optional EDN policy registry file used for active-policy defaults and selector-based `resolve_context` lookup
 - `SCI_USAGE_METRICS_JDBC_URL` - optional PostgreSQL JDBC URL for MCP usage metrics
 - `SCI_USAGE_METRICS_DB_USER` - optional PostgreSQL username for MCP usage metrics
 - `SCI_USAGE_METRICS_DB_PASSWORD` - optional PostgreSQL password for MCP usage metrics
@@ -33,6 +34,8 @@ If `SCI_USAGE_METRICS_JDBC_URL` is configured, the server records:
 - cache-hit/cache-miss behavior for `create_index`
 - cache eviction events
 - correlation fields such as `session_id`, `trace_id`, and `request_id` where available
+
+If `SCI_MCP_POLICY_REGISTRY_FILE` is configured, newly created cached indexes inherit that registry and `resolve_context` accepts an optional `retrieval_policy` object for selector-based lookup.
 
 ## Recommended Client Description
 
@@ -91,6 +94,7 @@ Inputs:
 
 - `index_id`
 - `query`
+- `retrieval_policy` - optional registry-backed selector object such as `{ "policy_id": "...", "version": "..." }`
 
 Returns the existing runtime retrieval payload plus `index_id`:
 

@@ -182,11 +182,17 @@
                         distinct
                         (take 12)
                         vec)
+        linked-test-paths (->> selected-modules
+                               (mapcat #(get (:test_target_index index) % #{}))
+                               distinct
+                               (take 12)
+                               vec)
         related-tests (->> (idx/all-units index)
                            (filter #(or (= "test" (:kind %))
                                         (str/includes? (:path %) "/test/")))
                            (filter (fn [u]
                                      (or (contains? selected-ids (:unit_id u))
+                                         (contains? (set linked-test-paths) (:path u))
                                          (some #(= (:module u) %) selected-modules)
                                          (contains? (set callers) (str (:path u) "::" (:symbol u))))))
                            (map :path)
@@ -425,7 +431,7 @@
    (resolve-context index query {}))
   ([index query opts]
    (validate-query! query)
-   (let [policy (rp/normalize-policy (:retrieval_policy opts))
+   (let [policy (rp/resolve-policy (:retrieval_policy opts) (:policy_registry opts))
          trace-id (get-in query [:trace :trace_id] (str (java.util.UUID/randomUUID)))
          request-id (get-in query [:trace :request_id] (str "req-" (subs trace-id 0 8)))
          summary (summarize-query query)

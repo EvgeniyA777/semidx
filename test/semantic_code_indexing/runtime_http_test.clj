@@ -3,6 +3,7 @@
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [semantic-code-indexing.runtime.authz :as runtime-authz]
+            [semantic-code-indexing.runtime.retrieval-policy :as rp]
             [semantic-code-indexing.runtime.http :as runtime-http])
   (:import [java.net URI]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]))
@@ -200,5 +201,70 @@
                                 {"x-api-key" "secret-token"
                                  "x-tenant-id" "tenant-999"})]
             (is (= 403 (:status resp))))))
+      (finally
+        (.stop server 0)))))
+
+(deftest runtime-http-policy-registry-selection-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-http-policy-registry-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-http-sample-repo! tmp-root)
+        active-policy (-> (rp/default-retrieval-policy)
+                          (assoc :policy_id "heuristic_v1_http_active")
+                          (assoc :version "2026-03-11")
+                          (assoc-in [:thresholds :top_authority_min] 500))
+        shadow-policy (-> (rp/default-retrieval-policy)
+                          (assoc :policy_id "heuristic_v1_http_shadow")
+                          (assoc :version "2026-03-12")
+                          (assoc-in [:thresholds :top_authority_min] 500))
+        registry {:schema_version "1.0"
+                  :policies [(rp/registry-entry active-policy {:state "active"})
+                             (rp/registry-entry shadow-policy {:state "shadow"})]}
+        server (runtime-http/start-server {:host "127.0.0.1"
+                                           :port 0
+                                           :policy_registry registry})]
+    (try
+      (let [port (-> server .getAddress .getPort)
+            base-url (str "http://127.0.0.1:" port)
+            client (HttpClient/newHttpClient)
+            _health (wait-health! client base-url)
+            query {:schema_version "1.0"
+                   :intent {:purpose "code_understanding"
+                            :details "Locate authority implementation for process-order."}
+                   :targets {:symbols ["my.app.order/process-order"]
+                             :paths ["src/my/app/order.clj"]}
+                   :constraints {:token_budget 1200
+                                 :max_raw_code_level "enclosing_unit"
+                                 :freshness "current_snapshot"}
+                   :hints {:prefer_definitions_over_callers true}
+                   :options {:include_tests true
+                             :include_impact_hints true
+                             :allow_raw_code_escalation false
+                             :favor_compact_packet true
+                             :favor_higher_recall false}
+                   :trace {:trace_id "03111111-1111-4111-8111-111111111111"
+                           :request_id "runtime-http-policy-registry-test-001"
+                           :actor_id "test_runner"}}]
+        (testing "active registry policy is used when no override is passed"
+          (let [resp (post-json client
+                                (str base-url "/v1/retrieval/resolve-context")
+                                {:root_path tmp-root
+                                 :query query})]
+            (is (= 200 (:status resp)))
+            (is (= "heuristic_v1_http_active"
+                   (get-in resp [:json :diagnostics_trace :retrieval_policy :policy_id])))
+            (is (not= "top_authority"
+                      (get-in resp [:json :context_packet :relevant_units 0 :rank_band])))))
+
+        (testing "selector-based override resolves from registry"
+          (let [resp (post-json client
+                                (str base-url "/v1/retrieval/resolve-context")
+                                {:root_path tmp-root
+                                 :query query
+                                 :retrieval_policy {:policy_id "heuristic_v1_http_shadow"
+                                                    :version "2026-03-12"}})]
+            (is (= 200 (:status resp)))
+            (is (= "heuristic_v1_http_shadow"
+                   (get-in resp [:json :diagnostics_trace :retrieval_policy :policy_id])))
+            (is (not= "top_authority"
+                      (get-in resp [:json :context_packet :relevant_units 0 :rank_band]))))))
       (finally
         (.stop server 0)))))

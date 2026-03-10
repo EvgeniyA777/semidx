@@ -1,17 +1,19 @@
 (ns semantic-code-indexing.core
   (:require [semantic-code-indexing.runtime.index :as idx]
             [semantic-code-indexing.runtime.retrieval :as retrieval]
+            [semantic-code-indexing.runtime.retrieval-policy :as rp]
             [semantic-code-indexing.runtime.storage :as storage]
             [semantic-code-indexing.runtime.usage-metrics :as usage]))
 
 (defn- now-ms []
   (System/currentTimeMillis))
 
-(defn- attach-runtime-context [index usage-metrics usage-context]
+(defn- attach-runtime-context [index usage-metrics usage-context policy-registry]
   (with-meta index
     (merge (meta index)
            {:usage_metrics usage-metrics
-            :usage_context (merge {:surface "library"} usage-context)})))
+            :usage_context (merge {:surface "library"} usage-context)
+            :policy_registry policy-registry})))
 
 (defn- resolve-usage-metrics [index opts]
   (or (:usage_metrics opts)
@@ -21,6 +23,11 @@
   (merge {:surface "library"}
          (:usage_context (meta index))
          (:usage_context opts)))
+
+(defn- resolve-policy-registry [index opts]
+  (or (:policy_registry opts)
+      (some-> (:policy_registry_path opts) rp/resolve-registry-source)
+      (:policy_registry (meta index))))
 
 (defn- should-record-usage? [sink opts]
   (and sink (not (:suppress_usage_metrics opts))))
@@ -43,11 +50,12 @@
   [opts]
   (let [sink (:usage_metrics opts)
         usage-context (resolve-usage-context nil opts)
+        policy-registry (resolve-policy-registry nil opts)
         root-path (or (:root_path opts) ".")
         start-ms (now-ms)]
     (try
       (let [index (idx/create-index opts)
-            index* (attach-runtime-context index sink usage-context)]
+            index* (attach-runtime-context index sink usage-context policy-registry)]
         (when (should-record-usage? sink opts)
           (usage/safe-record-event!
            sink
@@ -84,10 +92,11 @@
   [index opts]
   (let [sink (resolve-usage-metrics index opts)
         usage-context (resolve-usage-context index opts)
+        policy-registry (resolve-policy-registry index opts)
         start-ms (now-ms)]
     (try
       (let [updated (idx/update-index index opts)
-            updated* (attach-runtime-context updated sink usage-context)]
+            updated* (attach-runtime-context updated sink usage-context policy-registry)]
         (when (should-record-usage? sink opts)
           (usage/safe-record-event!
            sink
@@ -157,9 +166,10 @@
   ([index query opts]
    (let [sink (resolve-usage-metrics index opts)
          usage-context (resolve-usage-context index opts)
+         policy-registry (resolve-policy-registry index opts)
          start-ms (now-ms)]
      (try
-       (let [result (retrieval/resolve-context index query opts)
+       (let [result (retrieval/resolve-context index query (assoc opts :policy_registry policy-registry))
              diagnostics (:diagnostics_trace result)
              packet (:context_packet result)
              guardrails (:guardrail_assessment result)]

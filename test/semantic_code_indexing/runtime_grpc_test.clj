@@ -1,13 +1,12 @@
 (ns semantic-code-indexing.runtime-grpc-test
-  (:require [clojure.data.json :as json]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [semantic-code-indexing.runtime.authz :as runtime-authz]
+            [semantic-code-indexing.runtime.grpc-proto :as grpc-proto]
+            [semantic-code-indexing.runtime.retrieval-policy :as rp]
             [semantic-code-indexing.runtime.grpc :as runtime-grpc])
   (:import [io.grpc CallOptions ClientInterceptor ClientInterceptors ManagedChannelBuilder Metadata Metadata$Key Status StatusRuntimeException]
-           [io.grpc.stub ClientCalls MetadataUtils]
-           [com.google.protobuf Struct]
-           [com.google.protobuf.util JsonFormat]))
+           [io.grpc.stub ClientCalls MetadataUtils]))
 
 (defn- write-file! [root rel-path content]
   (let [f (io/file root rel-path)]
@@ -33,26 +32,13 @@
                                     (into-array ClientInterceptor
                                                 [(MetadataUtils/newAttachHeadersInterceptor metadata)])))))
 
-(defn- map->struct [m]
-  (let [b (Struct/newBuilder)
-        parser (JsonFormat/parser)
-        payload (json/write-str (or m {}) :escape-slash false)]
-    (.merge parser payload b)
-    (.build b)))
-
-(defn- struct->map [^Struct value]
-  (let [printer (JsonFormat/printer)
-        json-str (.print printer value)]
-    (json/read-str json-str :key-fn keyword)))
-
 (defn- unary-call
-  ([channel method payload]
-   (unary-call channel method payload {}))
-  ([channel method payload headers]
-  (let [request (map->struct payload)
-        channel* (with-headers channel headers)
+  ([channel method request response->map]
+   (unary-call channel method request response->map {}))
+  ([channel method request response->map headers]
+  (let [channel* (with-headers channel headers)
         response (ClientCalls/blockingUnaryCall channel* method CallOptions/DEFAULT request)]
-    (struct->map response))))
+    (response->map response))))
 
 (deftest runtime-grpc-edge-conformance-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-grpc-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -63,11 +49,17 @@
                     (.build))]
     (try
       (testing "health rpc"
-        (let [resp (unary-call channel runtime-grpc/health-method {})]
+        (let [resp (unary-call channel
+                               runtime-grpc/health-method
+                               (grpc-proto/health-request)
+                               grpc-proto/health-response->map)]
           (is (= "ok" (:status resp)))))
 
       (testing "create-index rpc"
-        (let [resp (unary-call channel runtime-grpc/create-index-method {:root_path tmp-root})]
+        (let [resp (unary-call channel
+                               runtime-grpc/create-index-method
+                               (grpc-proto/create-index-request {:root_path tmp-root})
+                               grpc-proto/create-index-response->map)]
           (is (string? (:snapshot_id resp)))
           (is (pos? (long (:file_count resp))))
           (is (pos? (long (:unit_count resp))))))
@@ -90,8 +82,11 @@
                      :trace {:trace_id "02222222-2222-4222-8222-222222222222"
                              :request_id "runtime-grpc-test-001"
                              :actor_id "test_runner"}}
-              resp (unary-call channel runtime-grpc/resolve-context-method {:root_path tmp-root
-                                                                            :query query})]
+              resp (unary-call channel
+                               runtime-grpc/resolve-context-method
+                               (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                                    :query query})
+                               grpc-proto/resolve-context-response->map)]
           (is (map? (:context_packet resp)))
           (is (map? (:diagnostics_trace resp)))
           (is (map? (:guardrail_assessment resp)))
@@ -101,8 +96,11 @@
 
       (testing "invalid payload returns INVALID_ARGUMENT"
         (try
-          (unary-call channel runtime-grpc/resolve-context-method {:root_path tmp-root
-                                                                   :query "not-an-object"})
+          (unary-call channel
+                      runtime-grpc/resolve-context-method
+                      (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                           :query "not-an-object"})
+                      grpc-proto/resolve-context-response->map)
           (is false "expected StatusRuntimeException")
           (catch StatusRuntimeException e
             (is (= (.getCode Status/INVALID_ARGUMENT)
@@ -125,7 +123,10 @@
     (try
       (testing "missing api key -> UNAUTHENTICATED"
         (try
-          (unary-call channel runtime-grpc/create-index-method {:root_path tmp-root})
+          (unary-call channel
+                      runtime-grpc/create-index-method
+                      (grpc-proto/create-index-request {:root_path tmp-root})
+                      grpc-proto/create-index-response->map)
           (is false "expected StatusRuntimeException")
           (catch StatusRuntimeException e
             (is (= (.getCode Status/UNAUTHENTICATED)
@@ -133,7 +134,10 @@
 
       (testing "api key without tenant -> INVALID_ARGUMENT"
         (try
-          (unary-call channel runtime-grpc/create-index-method {:root_path tmp-root}
+          (unary-call channel
+                      runtime-grpc/create-index-method
+                      (grpc-proto/create-index-request {:root_path tmp-root})
+                      grpc-proto/create-index-response->map
                       {"x-api-key" "secret-token"})
           (is false "expected StatusRuntimeException")
           (catch StatusRuntimeException e
@@ -141,7 +145,10 @@
                    (.getCode (.getStatus e)))))))
 
       (testing "api key + tenant -> success"
-        (let [resp (unary-call channel runtime-grpc/create-index-method {:root_path tmp-root}
+        (let [resp (unary-call channel
+                               runtime-grpc/create-index-method
+                               (grpc-proto/create-index-request {:root_path tmp-root})
+                               grpc-proto/create-index-response->map
                                {"x-api-key" "secret-token"
                                 "x-tenant-id" "tenant-001"})]
           (is (string? (:snapshot_id resp)))
@@ -172,25 +179,35 @@
     (try
       (testing "tenant with path restrictions must send explicit paths"
         (try
-          (unary-call channel runtime-grpc/create-index-method {:root_path tmp-root} headers)
+          (unary-call channel
+                      runtime-grpc/create-index-method
+                      (grpc-proto/create-index-request {:root_path tmp-root})
+                      grpc-proto/create-index-response->map
+                      headers)
           (is false "expected StatusRuntimeException")
           (catch StatusRuntimeException e
             (is (= (.getCode Status/PERMISSION_DENIED)
                    (.getCode (.getStatus e)))))))
 
       (testing "allowed path prefix passes"
-        (let [resp (unary-call channel runtime-grpc/create-index-method
-                               {:root_path tmp-root
-                                :paths ["src/my/app/order.clj"]}
+        (let [resp (unary-call channel
+                               runtime-grpc/create-index-method
+                               (grpc-proto/create-index-request
+                                {:root_path tmp-root
+                                 :paths ["src/my/app/order.clj"]})
+                               grpc-proto/create-index-response->map
                                headers)]
           (is (string? (:snapshot_id resp)))
           (is (pos? (long (:file_count resp))))))
 
       (testing "disallowed path prefix denied"
         (try
-          (unary-call channel runtime-grpc/create-index-method
-                      {:root_path tmp-root
-                       :paths ["test/my/app/order_test.clj"]}
+          (unary-call channel
+                      runtime-grpc/create-index-method
+                      (grpc-proto/create-index-request
+                       {:root_path tmp-root
+                        :paths ["test/my/app/order_test.clj"]})
+                      grpc-proto/create-index-response->map
                       headers)
           (is false "expected StatusRuntimeException")
           (catch StatusRuntimeException e
@@ -199,15 +216,84 @@
 
       (testing "unknown tenant denied"
         (try
-          (unary-call channel runtime-grpc/create-index-method
-                      {:root_path tmp-root
-                       :paths ["src/my/app/order.clj"]}
+          (unary-call channel
+                      runtime-grpc/create-index-method
+                      (grpc-proto/create-index-request
+                       {:root_path tmp-root
+                        :paths ["src/my/app/order.clj"]})
+                      grpc-proto/create-index-response->map
                       {"x-api-key" "secret-token"
                        "x-tenant-id" "tenant-999"})
           (is false "expected StatusRuntimeException")
           (catch StatusRuntimeException e
             (is (= (.getCode Status/PERMISSION_DENIED)
                    (.getCode (.getStatus e)))))))
+
+      (finally
+        (.shutdownNow channel)
+        (.shutdownNow server)))))
+
+(deftest runtime-grpc-policy-registry-selection-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-grpc-policy-registry-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-grpc-sample-repo! tmp-root)
+        active-policy (-> (rp/default-retrieval-policy)
+                          (assoc :policy_id "heuristic_v1_grpc_active")
+                          (assoc :version "2026-03-11")
+                          (assoc-in [:thresholds :top_authority_min] 500))
+        shadow-policy (-> (rp/default-retrieval-policy)
+                          (assoc :policy_id "heuristic_v1_grpc_shadow")
+                          (assoc :version "2026-03-12")
+                          (assoc-in [:thresholds :top_authority_min] 500))
+        registry {:schema_version "1.0"
+                  :policies [(rp/registry-entry active-policy {:state "active"})
+                             (rp/registry-entry shadow-policy {:state "shadow"})]}
+        {:keys [server port]} (runtime-grpc/start-server {:host "127.0.0.1"
+                                                          :port 0
+                                                          :policy_registry registry})
+        channel (-> (ManagedChannelBuilder/forAddress "127.0.0.1" (int port))
+                    (.usePlaintext)
+                    (.build))
+        query {:schema_version "1.0"
+               :intent {:purpose "code_understanding"
+                        :details "Locate authority implementation for process-order."}
+               :targets {:symbols ["my.app.order/process-order"]
+                         :paths ["src/my/app/order.clj"]}
+               :constraints {:token_budget 1200
+                             :max_raw_code_level "enclosing_unit"
+                             :freshness "current_snapshot"}
+               :hints {:prefer_definitions_over_callers true}
+               :options {:include_tests true
+                         :include_impact_hints true
+                         :allow_raw_code_escalation false
+                         :favor_compact_packet true
+                         :favor_higher_recall false}
+               :trace {:trace_id "03222222-2222-4222-8222-222222222222"
+                       :request_id "runtime-grpc-policy-registry-test-001"
+                       :actor_id "test_runner"}}]
+    (try
+      (testing "active registry policy is used when no override is passed"
+        (let [resp (unary-call channel
+                               runtime-grpc/resolve-context-method
+                               (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                                    :query query})
+                               grpc-proto/resolve-context-response->map)]
+          (is (= "heuristic_v1_grpc_active"
+                 (get-in resp [:diagnostics_trace :retrieval_policy :policy_id])))
+          (is (not= "top_authority"
+                    (get-in resp [:context_packet :relevant_units 0 :rank_band])))))
+
+      (testing "selector-based override resolves from registry"
+        (let [resp (unary-call channel
+                               runtime-grpc/resolve-context-method
+                               (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                                    :query query
+                                                                    :retrieval_policy {:policy_id "heuristic_v1_grpc_shadow"
+                                                                                       :version "2026-03-12"}})
+                               grpc-proto/resolve-context-response->map)]
+          (is (= "heuristic_v1_grpc_shadow"
+                 (get-in resp [:diagnostics_trace :retrieval_policy :policy_id])))
+          (is (not= "top_authority"
+                    (get-in resp [:context_packet :relevant_units 0 :rank_band])))))
 
       (finally
         (.shutdownNow channel)
