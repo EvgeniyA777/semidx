@@ -703,6 +703,10 @@
     (catch Exception _
       nil)))
 
+(defn- clj-form-operator [form]
+  (when (or (seq? form) (vector? form))
+    (some-> form first str)))
+
 (defn- generated-call-form-texts [form-text]
   (let [text (str form-text)
         n (count text)
@@ -1034,7 +1038,7 @@
   [{:keys [path ns-name raw-symbol operator kind start-line end-line signature imports calls parser-mode alias-map helper-generated-calls]}
    form-text]
   (let [form (clj-read-form form-text)
-        operator* (or operator (some-> form first str))
+        operator* (or operator (clj-form-operator form))
         kind* (or kind (clj-kind operator* path))
         symbol (clj-qualified-symbol ns-name raw-symbol)
         dispatch-value (when (= "defmethod" operator*)
@@ -1206,7 +1210,7 @@
                           start (max 1 (int (or (:name-row d) (:row d) 1)))
                           end (max start (int (or (:end-row d) start)))
                           form-text (str/join "\n" (subvec lines (dec start) end))
-                          operator (some-> form-text clj-read-form first str)]
+                          operator (some-> form-text clj-read-form clj-form-operator)]
                       {:ns-name ns-name
                        :raw-symbol nm
                        :kind (kondo-defined-kind (:defined-by d) path)
@@ -3095,5 +3099,7 @@
               (semantic-ir/finalize-parsed-file file-path language)))
        (catch Exception _
          (let [lines (try (slurp-lines abs) (catch Exception _ []))]
-           (-> (fallback-unit file-path lines language "parse_exception")
-               (semantic-ir/finalize-parsed-file file-path language))))))))
+           (semantic-ir/finalize-parsed-file
+            file-path
+            language
+            (fallback-unit file-path lines language "parse_exception"))))))))

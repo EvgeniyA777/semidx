@@ -5,6 +5,7 @@
             [malli.core :as m]
             [semantic-code-indexing.contracts.schemas :as contracts]
             [semantic-code-indexing.core :as sci]
+            [semantic-code-indexing.runtime.adapters :as adapters]
             [semantic-code-indexing.runtime.languages.clojure :as clj-language]
             [semantic-code-indexing.runtime.languages.elixir :as ex-language]
             [semantic-code-indexing.runtime.languages.java :as java-language]
@@ -1706,6 +1707,38 @@
     (is (= "java" (:language java-parsed)))
     (is (= "elixir" (:language ex-parsed)))
     (is (= "python" (:language py-parsed)))))
+
+(deftest current-repo-create-index-does-not-crash-test
+  (let [root-path (-> (io/file ".") .getCanonicalPath)
+        index (sci/create-index {:root_path root-path})]
+    (is (string? (:snapshot_id index)))
+    (is (seq (:files index)))
+    (is (seq (:units index)))))
+
+(deftest evaluation-file-parses-without-cast-crash-test
+  (let [root-path (-> (io/file ".") .getCanonicalPath)
+        rel-path "src/semantic_code_indexing/runtime/evaluation.clj"
+        parsed (adapters/parse-file root-path rel-path {})]
+    (is (map? parsed))
+    (is (= "clojure" (:language parsed)))
+    (is (vector? (:units parsed)))
+    (is (vector? (:diagnostics parsed)))
+    (is (every? map? (:diagnostics parsed)))))
+
+(deftest parse-file-fallback-finalizes-parse-exceptions-test
+  (let [root-path (-> (io/file ".") .getCanonicalPath)
+        rel-path "src/semantic_code_indexing/runtime/evaluation.clj"
+        parsed (with-redefs [adapters/parse-clojure-file (fn [& _]
+                                                           (throw (ex-info "boom" {})))]
+                 (adapters/parse-file root-path rel-path {}))]
+    (is (map? parsed))
+    (is (= "clojure" (:language parsed)))
+    (is (= "fallback" (:parser_mode parsed)))
+    (is (vector? (:units parsed)))
+    (is (vector? (:diagnostics parsed)))
+    (is (some #(and (= "parser_fallback" (:code %))
+                    (= "parse_exception" (:summary %)))
+              (:diagnostics parsed)))))
 
 (deftest create-index-no-supported-languages-guidance-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-no-lang" (make-array java.nio.file.attribute.FileAttribute 0)))

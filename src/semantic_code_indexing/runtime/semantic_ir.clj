@@ -29,11 +29,20 @@
       (update :call_tokens #(normalize-string-vec (or % [])))))
 
 (defn finalize-parsed-file [file-path language parsed]
-  (let [parser-mode (or (:parser_mode parsed) "fallback")
-        units (mapv #(normalize-unit file-path parser-mode %) (:units parsed))
-        imports (distinct-vec (:imports parsed))
-        diagnostics (vec (or (:diagnostics parsed) []))]
-    (-> parsed
+  (let [parsed* (if (map? parsed)
+                  parsed
+                  {:diagnostics [{:code "invalid_parsed_file"
+                                  :severity "error"
+                                  :message "Parser returned a non-map result; coercing to fallback shape."
+                                  :path file-path
+                                  :language (or language "unknown")}]
+                   :imports []
+                   :units []})
+        parser-mode (or (:parser_mode parsed*) "fallback")
+        units (mapv #(normalize-unit file-path parser-mode %) (:units parsed*))
+        imports (distinct-vec (:imports parsed*))
+        diagnostics (vec (or (:diagnostics parsed*) []))]
+    (-> parsed*
         (assoc :language (or (:language parsed) language "unknown")
                :module (:module parsed)
                :imports imports
