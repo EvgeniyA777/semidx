@@ -73,6 +73,12 @@
                "defmodule MyApp.ImplicitUseClient do\n  use MyApp.OrderCase\n\n  def process_implicit(order) do\n    validate(order)\n  end\nend\n")
   (write-file! root "lib/my_app/overloads.ex"
                "defmodule MyApp.Overloads do\n  def normalize(order) do\n    normalize(order, :default)\n  end\n\n  def normalize(order, mode) do\n    {order, mode}\n  end\n\n  def call_one(order) do\n    normalize(order)\n  end\n\n  def call_two(order) do\n    normalize(order, :strict)\n  end\nend\n")
+  (write-file! root "lib/my_app/pipeline_formatter.ex"
+               "defmodule MyApp.PipelineFormatter do\n  use MyApp.Formatter\n\n  def normalize(order) do\n    {:local, order}\n  end\n\n  def process_pipeline(order) do\n    order\n    |> normalize()\n  end\n\n  def process_with(order) do\n    with normalized <- normalize(order) do\n      normalized\n    end\n  end\n\n  def process_capture(order) do\n    formatter = &normalize/1\n    formatter.(order)\n  end\nend\n")
+  (write-file! root "lib/my_app/nested_client.ex"
+               "defmodule MyApp.NestedClient do\n  def process_nested(order) do\n    __MODULE__.Nested.normalize(order)\n  end\nend\n")
+  (write-file! root "lib/my_app/nested_client/nested.ex"
+               "defmodule MyApp.NestedClient.Nested do\n  def normalize(order) do\n    {:nested, order}\n  end\nend\n")
   (write-file! root "test/my_app/order_test.exs"
                "defmodule MyApp.OrderTest do\n  use ExUnit.Case\n  alias MyApp.Order\n\n  test \"process order stays linked to source module\" do\n    assert {:ok, %{id: 1}} = {:ok, Order.process_order(%{}, %{id: 1})}\n  end\nend\n")
   (write-file! root "app/orders.py"
@@ -467,6 +473,44 @@
     (is (not-any? #(= "MyApp.Overloads/call_two" (:symbol %)) callers-1))
     (is (some #(= "MyApp.Overloads/call_two" (:symbol %)) callers-2))
     (is (some #(= "MyApp.Overloads/normalize" (:symbol %)) callers-2))))
+
+(deftest elixir-pipeline-with-and-capture-resolution-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-elixir-pipeline-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        local-units (sci/query-units storage tmp-root {:module "MyApp.PipelineFormatter" :limit 20})
+        formatter-units (sci/query-units storage tmp-root {:module "MyApp.Formatter" :limit 20})
+        local-normalize-id (some->> local-units
+                                    (filter #(= "MyApp.PipelineFormatter/normalize" (:symbol %)))
+                                    first
+                                    :unit_id)
+        imported-normalize-id (some->> formatter-units
+                                       (filter #(= "MyApp.Formatter/normalize" (:symbol %)))
+                                       first
+                                       :unit_id)
+        local-callers (sci/query-callers storage tmp-root local-normalize-id {:limit 20})
+        imported-callers (sci/query-callers storage tmp-root imported-normalize-id {:limit 20})]
+    (is local-normalize-id)
+    (is imported-normalize-id)
+    (is (some #(= "MyApp.PipelineFormatter/process_pipeline" (:symbol %)) local-callers))
+    (is (some #(= "MyApp.PipelineFormatter/process_with" (:symbol %)) local-callers))
+    (is (some #(= "MyApp.PipelineFormatter/process_capture" (:symbol %)) local-callers))
+    (is (not-any? #(= "MyApp.PipelineFormatter/process_capture" (:symbol %)) imported-callers))))
+
+(deftest elixir-module-self-qualified-nested-module-call-links-to-nested-target-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-elixir-nested-module-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        nested-units (sci/query-units storage tmp-root {:module "MyApp.NestedClient.Nested" :limit 20})
+        nested-normalize-id (some->> nested-units
+                                     (filter #(= "MyApp.NestedClient.Nested/normalize" (:symbol %)))
+                                     first
+                                     :unit_id)
+        callers (sci/query-callers storage tmp-root nested-normalize-id {:limit 20})]
+    (is nested-normalize-id)
+    (is (some #(= "MyApp.NestedClient/process_nested" (:symbol %)) callers))))
 
 (deftest java-overload-unit-identity-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-java-overload-test" (make-array java.nio.file.attribute.FileAttribute 0)))

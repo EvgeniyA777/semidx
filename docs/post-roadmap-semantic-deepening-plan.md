@@ -12,7 +12,7 @@ Push the language adapters beyond the delivered roadmap scope toward more compil
 - `[x]` Stage 2 Clojure multimethod / protocol / dispatch deepening
 - `[x]` Stage 3 Java inheritance / lambda / method-reference deepening
 - `[x]` Stage 4 Python decorator / class-scope deepening
-- `[ ]` Stage 5 Elixir pipelines / `with` / nested-module deepening
+- `[x]` Stage 5 Elixir pipelines / `with` / nested-module deepening
 - `[ ]` Stage 6 TypeScript parser-strengthening tranche
 - `[ ]` Stage 7 Cross-language confidence recalibration
 - `[ ]` Stage 8 Post-roadmap closure
@@ -31,7 +31,7 @@ No batching of multiple stages into one commit.
 
 ## Current Active Stage
 
-`Stage 5` is now the active slice.
+`Stage 6` is now the active slice.
 
 ## Stage Notes
 
@@ -72,9 +72,18 @@ Delivered scope:
 
 ### Stage 5
 
+Delivered scope:
+
+- Elixir call-arity indexing is now pipeline-aware, so `|> normalize()` is treated as an arity-preserving call onto `normalize/1` instead of falling back to the zero-arg shape.
+- `with` blocks and local function captures such as `&normalize/1` now reuse the same local/import-aware resolution path, which keeps locally owned functions from leaking onto imported targets.
+- `__MODULE__.Nested.foo(...)` local qualification now has regression coverage proving nested-module calls link onto the nested module target.
+- Regression coverage now proves pipeline, `with`, function-capture, and nested-module behavior without regressing existing local-vs-import precedence.
+
+### Stage 6
+
 Planned scope:
 
-- pipeline-aware caller ownership
-- `with` block target preservation
-- nested module reference normalization
-- anonymous function local ownership where statically provable
+- tighten tree-sitter TypeScript extraction parity with regex path
+- object-literal methods and default-export indirection
+- re-export chains where directly provable
+- class field arrow method ownership

@@ -35,6 +35,8 @@
 (def ^:private ex-test-re #"^\s*test\s+\"([^\"]+)\"\s+do")
 (def ^:private ex-call-re #"\b([A-Za-z_][A-Za-z0-9_\.!?]*)\s*\(")
 (def ^:private ex-call-with-args-re #"\b([A-Za-z_][A-Za-z0-9_\.!?]*)\s*\(([^)]*)\)")
+(def ^:private ex-capture-re #"&([A-Za-z_][A-Za-z0-9_\.!?]*)/([0-9]+)")
+(def ^:private ex-pipeline-call-re #"\|>\s*([A-Za-z_][A-Za-z0-9_\.!?]*)\s*\(([^)]*)\)")
 
 (def ^:private py-import-re #"^\s*import\s+([a-zA-Z0-9_\.]+)(?:\s+as\s+([A-Za-z0-9_]+))?")
 (def ^:private py-from-import-re #"^\s*from\s+([a-zA-Z0-9_\.]+)\s+import\s+([A-Za-z0-9_,\s\*_]+)")
@@ -2027,14 +2029,25 @@
       (ex-args-arity args))))
 
 (defn- ex-call-arity-index [body]
-  (reduce (fn [acc [_ token args]]
-            (let [arity (ex-args-arity args)
-                  tail (tail-token token)]
+  (reduce (fn [acc {:keys [token arity]}]
+            (let [tail (tail-token token)]
               (cond-> acc
                 (seq token) (update token (fnil conj #{}) arity)
                 (and tail (not= tail token)) (update tail (fnil conj #{}) arity))))
           {}
-          (re-seq ex-call-with-args-re body)))
+          (concat
+           (map (fn [[_ token args]]
+                  {:token token
+                   :arity (ex-args-arity args)})
+                (re-seq ex-call-with-args-re body))
+           (map (fn [[_ token arity]]
+                  {:token token
+                   :arity (Long/parseLong arity)})
+                (re-seq ex-capture-re body))
+           (map (fn [[_ token args]]
+                  {:token token
+                   :arity (inc (ex-args-arity args))})
+                (re-seq ex-pipeline-call-re body)))))
 
 (defn- ex-delegate-calls [body alias-map]
   (if-let [[_ fun target] (re-find #"defdelegate\s+([a-zA-Z_][a-zA-Z0-9_!?]*)\s*(?:\([^)]*\))?\s*,\s*to:\s*([A-Za-z0-9_\.]+)" body)]
@@ -2052,9 +2065,15 @@
        distinct
        vec))
 
-(defn- extract-ex-calls [body module-name alias-map import-modules local-call-arities call-arity-index]
-  (->> (re-seq ex-call-re body)
+(defn- ex-capture-tokens [body]
+  (->> (re-seq ex-capture-re body)
        (map second)
+       distinct
+       vec))
+
+(defn- extract-ex-calls [body module-name alias-map import-modules local-call-arities call-arity-index]
+  (->> (concat (map second (re-seq ex-call-re body))
+               (ex-capture-tokens body))
        (mapcat (fn [token]
                  (let [expanded (ex-expand-alias-token token alias-map)
                        module-self (ex-expand-module-self-token token module-name)
