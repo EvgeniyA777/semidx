@@ -30,7 +30,7 @@ The MCP server exposes only `tools` capability in v1 and keeps cached indexes in
 
 If `SCI_USAGE_METRICS_JDBC_URL` is configured, the server records:
 
-- tool usage events by operation (`create_index`, `repo_map`, `resolve_context`, `impact_analysis`, `skeletons`)
+- tool usage events by operation (`create_index`, `repo_map`, `resolve_context`, `expand_context`, `fetch_context_detail`, `impact_analysis`, `skeletons`)
 - cache-hit/cache-miss behavior for `create_index`
 - cache eviction events
 - normalized correlation fields such as `session_id`, `task_id`, `trace_id`, `request_id`, and `actor_id` where available
@@ -56,6 +56,15 @@ Shorter version for clients with tight field limits:
 ```
 
 ## Tools
+
+Canonical MCP retrieval flow is:
+
+1. `create_index`
+2. `resolve_context`
+3. optional `expand_context`
+4. optional `fetch_context_detail`
+
+`resolve_context` returns a compact selection artifact. Rich retrieval detail is intentionally delayed to `fetch_context_detail`.
 
 ### `create_index`
 
@@ -95,7 +104,7 @@ Returns the existing runtime `repo-map` payload plus `index_id`.
 
 ### `resolve_context`
 
-Find the most relevant files, symbols, and code context for a coding task or question.
+Find the most relevant files and symbols for a coding task or question and return a compact staged selection.
 
 Inputs:
 
@@ -103,19 +112,21 @@ Inputs:
 - `query`
 - `retrieval_policy` - optional registry-backed selector object such as `{ "policy_id": "...", "version": "..." }`
 
-Returns the existing runtime retrieval payload plus `index_id`:
+Returns:
 
-- `context_packet`
-- `guardrail_assessment`
-- `diagnostics_trace`
-- `stage_events`
+- `index_id`
+- `api_version`
+- `selection_id`
+- `snapshot_id`
+- `result_status`
+- `confidence_level`
+- `budget_summary`
+- `focus`
+- `next_step`
 
-The returned `context_packet` and `diagnostics_trace` now include:
+`next_step` tells the client whether it should stay compact, expand the structural view, or fetch rich detail.
 
-- `retrieval_policy` - versioned ranking policy summary used for this retrieval
-- `capabilities` - parser/language coverage summary for the selected authority/support evidence set, including per-language strength and a derived `confidence_ceiling`
-
-Because MCP uses the same core retrieval runtime as the library and service edges, recent semantic-core improvements also flow through `resolve_context` here:
+Because MCP uses the same core retrieval runtime as the library and service edges, recent semantic-core improvements still flow through `resolve_context` here:
 
 - Clojure: stronger namespace/test linkage, multimethod targeting, macro-generated ownership across helper/composed expansion patterns, and conservative branch-sensitive handling for conflicting generated forms
 - Elixir: better `import` / `use` normalization, implicit imports propagated from `__using__/1`, arity-aware local shadowing, `defdelegate` linkage, and ExUnit `related_tests`
@@ -123,6 +134,58 @@ Because MCP uses the same core retrieval runtime as the library and service edge
 - Python: imported-symbol and module-alias resolution, `self` / `cls` and local class-qualified method ownership, explicit module-alias preservation, and Python test-file linkage
 
 Because the capability summary is now language-strength-aware, MCP `resolve_context` responses may also carry a capability-limited confidence outcome even when symbol resolution is exact. Today that effectively means Clojure can reach `high`, Elixir/Java/Python currently ceiling at `medium`, and TypeScript remains `low`-ceiling compatibility coverage.
+
+### `expand_context`
+
+Expand a retained selection artifact with bounded structural detail.
+
+Inputs:
+
+- `index_id`
+- `selection_id`
+- `snapshot_id`
+- `unit_ids` - optional subset of the selected units
+- `include_impact_hints` - optional boolean, defaults to `true`
+
+Returns:
+
+- `index_id`
+- `api_version`
+- `selection_id`
+- `snapshot_id`
+- `result_status`
+- `budget_summary`
+- `skeletons`
+- optional `impact_hints`
+
+### `fetch_context_detail`
+
+Fetch the rich detail payload for a retained selection artifact.
+
+Inputs:
+
+- `index_id`
+- `selection_id`
+- `snapshot_id`
+- `unit_ids` - optional subset of the selected units
+- `detail_level` - optional raw-code escalation bound
+
+Returns:
+
+- `index_id`
+- `api_version`
+- `selection_id`
+- `snapshot_id`
+- `raw_context`
+- `context_packet`
+- `guardrail_assessment`
+- `diagnostics_trace`
+- `stage_events`
+
+The returned `context_packet` and `diagnostics_trace` include:
+
+- `retrieval_policy` - versioned ranking policy summary used for this retrieval
+- `capabilities` - parser/language coverage summary for the selected authority/support evidence set, including per-language strength and a derived `confidence_ceiling`
 
 ### `impact_analysis`
 
@@ -158,4 +221,7 @@ Returns:
 - `paths` must be relative and must not contain traversal segments such as `..`.
 - Cached indexes are evicted by LRU when the process exceeds `SCI_MCP_MAX_INDEXES`.
 - If an `index_id` is evicted or unknown, the server returns an `index_not_found` tool error and the client should call `create_index` again.
+- `selection_id` artifacts are snapshot-bound. Reusing a selection with the wrong `snapshot_id` returns `snapshot_mismatch`.
+- If a retained selection artifact is missing or evicted, the server returns `selection_not_found` or `selection_evicted`.
+- `resolve_context` defaults missing `api_version` to `"1.0"` and rejects unsupported values with `unsupported_api_version`.
 - MCP tool errors now carry canonical taxonomy fields in `structuredContent.details`: `code` and `category`.

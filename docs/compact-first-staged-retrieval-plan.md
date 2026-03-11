@@ -18,6 +18,7 @@ Bring the repository fully in line with the intended role of a large-repo contex
 
 - The staged API shape already exists on library, HTTP, gRPC, and MCP surfaces.
 - Compact selection, structured `next_step`, and separate `expand_context` / `fetch_context_detail` flows are already implemented.
+- Iteration 4 alignment is now landed: `ADR-024` exists and `README`, runtime docs, MCP docs, and canonical example metadata all describe staged retrieval as the public default flow.
 - The remaining gap is hardening and cleanup, not greenfield API design.
 
 ## Prioritized Work
@@ -111,6 +112,7 @@ This finalizes the refactor as the canonical line rather than a partial implemen
 ### Iteration 4
 
 - ADR, examples, and full documentation alignment
+- Delivered on 2026-03-10
 
 ## Definition of Done
 

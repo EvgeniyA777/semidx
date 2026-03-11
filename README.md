@@ -15,7 +15,7 @@ The project defines how a host system should request code context, how retrieval
 - defines retrieval fixture corpus for behavior-based validation
 - mirrors contracts in Clojure (`malli`) for runtime validation
 - provides a local and CI gate to prevent contract drift
-- provides a working in-memory MVP runtime for `create-index`, `update-index`, `repo-map`, `resolve-context`, `impact-analysis`, `skeletons`
+- provides a working in-memory MVP runtime for `create-index`, `update-index`, `repo-map`, `resolve-context`, `expand-context`, `fetch-context-detail`, `resolve-context-detail`, `impact-analysis`, `skeletons`
 - includes parser adapters for `Clojure + Java + Elixir + Python + TypeScript` and emits diagnostics/guardrails outputs
 - supports versioned retrieval policy overrides plus emitted capability metadata for replayable ranking behavior
 - supports optional persistence adapters (`in-memory`, `PostgreSQL`) with snapshot + graph projection storage for PostgreSQL
@@ -33,7 +33,7 @@ Current scope is contract architecture plus a working MVP runtime implementation
 
 ## Repository Layout
 
-- `adr/` - architecture decisions (`ADR-001` .. `ADR-022`)
+- `adr/` - architecture decisions (`ADR-001` .. `ADR-024`)
 - `docs/` - runtime API and operational docs
 - `docs/roadmap-status.md` - canonical in-repo roadmap status checklist
 - `contracts/schemas/` - JSON Schema contracts (external source of truth)
@@ -50,6 +50,12 @@ Current scope is contract architecture plus a working MVP runtime implementation
 
 ## Runtime Validation and Smoke
 
+Canonical retrieval flow is compact-first staged retrieval:
+
+- `resolve_context` returns a compact selection artifact (`selection_id`, `snapshot_id`, `focus`, `next_step`)
+- `expand_context` widens that selection with skeletons and optional impact hints
+- `fetch_context_detail` produces the rich detail payload on the exact retained selection artifact
+- `resolve-context-detail` remains a convenience helper for callers that still need a one-shot rich result
 - Unit/integration tests: `clojure -M:test`
 - Setup tree-sitter grammars (optional but reproducible; Clojure/Java/TypeScript): `./scripts/setup-tree-sitter-grammars.sh`
 - Scaffold new language adapter onboarding: `./scripts/new-language-adapter.sh <language> --ext .ext1,.ext2`
@@ -108,6 +114,7 @@ Current scope is contract architecture plus a working MVP runtime implementation
 1. `JSON Schema` is the external contract source of truth.
 2. `malli` is the Clojure-side runtime mirror.
 3. `examples/fixtures` are shared verification artifacts across languages.
+4. Staged retrieval is the canonical public contract line: compact selection first, detail later (`ADR-024`).
 
 ## Status
 

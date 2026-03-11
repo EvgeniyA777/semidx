@@ -42,36 +42,36 @@
       "contract_family": "context_packet",
       "path": "context-packets/high-confidence.json",
       "schema": "../schemas/context-packet.schema.json",
-      "adr_refs": ["ADR-002", "ADR-008", "ADR-016"],
-      "purpose": "High-confidence context packet with compact repo map and bounded evidence.",
-      "expected_interpretation": "Represents a retrieval result ready for patch drafting on a localized target."
+      "adr_refs": ["ADR-002", "ADR-008", "ADR-016", "ADR-024"],
+      "purpose": "High-confidence context packet emitted by the rich detail stage after compact selection has already happened.",
+      "expected_interpretation": "Represents the `fetch_context_detail` payload that is ready for patch drafting on a localized target."
     },
     {
       "example_id": "context_packet_degraded_fallback_001",
       "contract_family": "context_packet",
       "path": "context-packets/degraded-fallback.json",
       "schema": "../schemas/context-packet.schema.json",
-      "adr_refs": ["ADR-002", "ADR-008", "ADR-016"],
-      "purpose": "Degraded context packet under partial parser coverage and broader impact ambiguity.",
-      "expected_interpretation": "Shows bounded output even when confidence remains low and raw-code escalation was necessary."
+      "adr_refs": ["ADR-002", "ADR-008", "ADR-016", "ADR-024"],
+      "purpose": "Degraded context packet emitted by the rich detail stage under partial parser coverage and broader ambiguity.",
+      "expected_interpretation": "Shows bounded `fetch_context_detail` output even when confidence remains low and raw-code escalation was necessary."
     },
     {
       "example_id": "diagnostics_high_confidence_trace_001",
       "contract_family": "diagnostics_trace",
       "path": "diagnostics/high-confidence-trace.json",
       "schema": "../schemas/diagnostics-trace.schema.json",
-      "adr_refs": ["ADR-010", "ADR-013", "ADR-016"],
-      "purpose": "Complete successful trace with stage summaries and default-safe redaction.",
-      "expected_interpretation": "Shows the happy path where structural evidence and bounded scope agree."
+      "adr_refs": ["ADR-010", "ADR-013", "ADR-016", "ADR-024"],
+      "purpose": "Complete successful diagnostics trace for the rich detail stage with stage summaries and default-safe redaction.",
+      "expected_interpretation": "Shows the `fetch_context_detail` happy path where compact selection, bounded scope, and detail assembly agree."
     },
     {
       "example_id": "diagnostics_degraded_trace_001",
       "contract_family": "diagnostics_trace",
       "path": "diagnostics/degraded-trace.json",
       "schema": "../schemas/diagnostics-trace.schema.json",
-      "adr_refs": ["ADR-010", "ADR-013", "ADR-016"],
-      "purpose": "Degraded trace with parser fallback and ambiguity warnings.",
-      "expected_interpretation": "Shows how degradations, confidence, and guardrails remain explicit under partial evidence."
+      "adr_refs": ["ADR-010", "ADR-013", "ADR-016", "ADR-024"],
+      "purpose": "Degraded diagnostics trace for the rich detail stage with parser fallback and ambiguity warnings.",
+      "expected_interpretation": "Shows how `fetch_context_detail` keeps degradations, confidence, and guardrails explicit under partial evidence."
     },
     {
       "example_id": "event_query_validation_completed_001",
@@ -114,9 +114,27 @@
       "contract_family": "usage_event",
       "path": "usage-events/library-resolve-context-success.json",
       "schema": "../schemas/usage-event.schema.json",
-      "adr_refs": ["ADR-023"],
-      "purpose": "Library usage event for a successful resolve-context flow with bounded usefulness summaries.",
-      "expected_interpretation": "Captures retrieval adoption and bounded quality signals without exposing raw queries or raw code."
+      "adr_refs": ["ADR-023", "ADR-024"],
+      "purpose": "Library usage event for a successful compact resolve-context selection stage.",
+      "expected_interpretation": "Captures staged retrieval adoption and bounded selection-stage quality signals without exposing raw queries or raw code."
+    },
+    {
+      "example_id": "usage_event_library_expand_context_success_001",
+      "contract_family": "usage_event",
+      "path": "usage-events/library-expand-context-success.json",
+      "schema": "../schemas/usage-event.schema.json",
+      "adr_refs": ["ADR-023", "ADR-024"],
+      "purpose": "Library usage event for the bounded expansion stage of staged retrieval.",
+      "expected_interpretation": "Shows that staged telemetry records expand-stage budget and impact-hint behavior separately from compact selection."
+    },
+    {
+      "example_id": "usage_event_library_fetch_context_detail_success_001",
+      "contract_family": "usage_event",
+      "path": "usage-events/library-fetch-context-detail-success.json",
+      "schema": "../schemas/usage-event.schema.json",
+      "adr_refs": ["ADR-023", "ADR-024"],
+      "purpose": "Library usage event for the rich detail stage of staged retrieval.",
+      "expected_interpretation": "Shows that raw-fetch, warning, degradation, and policy summaries belong to the detail stage rather than the compact selection stage."
     },
     {
       "example_id": "usage_event_mcp_create_index_cache_hit_001",

@@ -113,12 +113,13 @@ Returns compact map-level view of indexed repository.
 
 ### `resolve-context`
 
-Runs retrieval pipeline and returns:
+Canonical public retrieval starts here.
 
-- `:context_packet`
-- `:guardrail_assessment`
-- `:diagnostics_trace`
-- `:stage_events`
+`resolve-context` returns a compact selection artifact, not the rich detail payload. The intended public flow is:
+
+1. `resolve-context`
+2. optional `expand-context`
+3. optional `fetch-context-detail`
 
 Optional opts:
 
@@ -150,6 +151,17 @@ Optional opts:
 (def result
   (sci/resolve-context index query))
 ```
+
+Returned keys:
+
+- `:api_version`
+- `:selection_id`
+- `:snapshot_id`
+- `:result_status`
+- `:confidence_level`
+- `:budget_summary`
+- `:focus`
+- `:next_step`
 
 Example with policy override:
 
@@ -196,20 +208,105 @@ Example with registry-backed selection:
                      :version "2026-03-11"}})
 ```
 
-Both `:context_packet` and `:diagnostics_trace` now include:
+`result_status` is one of:
+
+- `completed`
+- `insufficient_evidence`
+- `budget_exhausted_at_selection`
+
+`next_step` is the canonical hand-off contract for later stages. It includes:
+
+- `:recommended_action`
+- `:available_actions`
+- `:reason`
+- `:target_unit_ids`
+
+Example follow-up:
+
+```clojure
+(def selection
+  (sci/resolve-context index query))
+
+(def expansion
+  (sci/expand-context index {:selection_id (:selection_id selection)
+                             :snapshot_id (:snapshot_id selection)
+                             :include_impact_hints true}))
+
+(def detail
+  (sci/fetch-context-detail index {:selection_id (:selection_id selection)
+                                   :snapshot_id (:snapshot_id selection)
+                                   :detail_level "enclosing_unit"}))
+```
+
+Selection artifacts are snapshot-bound. Reusing a `selection_id` with the wrong `:snapshot_id` fails with `snapshot_mismatch`. Missing or evicted selections fail with `selection_not_found` or `selection_evicted`.
+
+### `expand-context`
+
+Expands a prior compact selection with bounded structural detail.
+
+Selector keys:
+
+- `:selection_id` - required
+- `:snapshot_id` - required
+- `:unit_ids` - optional subset of the selected units
+- `:include_impact_hints` - optional boolean, defaults to `true`
+
+Returns:
+
+- `:api_version`
+- `:selection_id`
+- `:snapshot_id`
+- `:result_status`
+- `:budget_summary`
+- `:skeletons`
+- optional `:impact_hints`
+
+`budget_summary` includes:
+
+- `:reserved_tokens`
+- `:estimated_tokens`
+- `:returned_tokens`
+- `:within_budget`
+- `:truncation_flags`
+
+### `fetch-context-detail`
+
+Fetches the rich retrieval result for a retained selection artifact.
+
+Selector keys:
+
+- `:selection_id` - required
+- `:snapshot_id` - required
+- `:detail_level` - optional raw-code escalation bound; defaults to the query constraint
+- `:unit_ids` - optional subset of the selected units
+
+Returns:
+
+- `:api_version`
+- `:selection_id`
+- `:snapshot_id`
+- `:raw_context`
+- `:context_packet`
+- `:guardrail_assessment`
+- `:diagnostics_trace`
+- `:stage_events`
+
+Both `:context_packet` and `:diagnostics_trace` include:
 
 - `:retrieval_policy` - `{ :policy_id ... :version ... }`
 - `:capabilities` - selected-language and parser-coverage summary, including per-language strength and a derived `:confidence_ceiling`
 
-For Clojure retrieval, `impact_hints.related_tests` now also links nearby test files via namespace/import relationships, not only direct caller overlap. That linkage now survives one helper-namespace hop inside `test/`, so support namespaces that wrap source calls can still lead retrieval back to the higher-level test file. The Clojure fallback parser is also top-level-aware, so nested `defn` forms inside wrappers such as `comment` are no longer indexed as real units. For multimethods, `defmethod` implementations now keep dispatch-aware unit identities internally, and retrieval can boost the correct implementation when the query text strongly hints at a dispatch case such as `pickup` or `delivery`, without changing the public query symbol shape. Custom macro calls can also contribute recursive graph-level inherited caller edges for the vars they structurally inject across syntax-quoted, list-built, top-level helper-generated, and common composed expansion patterns such as `concat`, `apply list`, `into`, and conditional branches, while filtering out ordinary macro implementation helpers that are not part of the generated expansion path. Conditional generated forms are now handled conservatively: when branch-only generated calls disagree, the runtime keeps those inherited ownership edges out instead of unioning both sides.
+While the selection artifact is retained, repeated `fetch-context-detail` calls with the same selector are idempotent.
 
-For Clojure retrieval, local `letfn` helpers that structurally emit generated forms can now contribute inherited caller edges when they are actually used inside the generated expansion path, while helper calls that run only as macro implementation side effects are filtered out.
+### `resolve-context-detail`
 
-For Elixir retrieval, the regex adapter now resolves normalized `import` and `use` targets, expands unqualified imported calls toward imported modules, records per-function arity so same-name definitions keep distinct internal identities, narrows caller/callee links by observed call arity when enough evidence exists, propagates implicit imports emitted by `__using__/1` macros into the using module, prefers same-module local definitions over imported or `use`-expanded collisions, and now applies that local shadowing with arity awareness so a local `normalize/2` does not suppress an imported `normalize/1`. It also links `defdelegate` units to their delegated target functions and adds ExUnit-oriented file linkage so `related_tests` can point back to test files such as `test/**/*_test.exs` that exercise the selected source module.
+Convenience helper for internal callers that still need the old one-shot rich retrieval behavior.
 
-For Java retrieval, overload-sensitive unit identities are now complemented by arity-aware caller/callee linking, so calls such as `normalize(id, true)` prefer the `arity=2` method target instead of all same-name overloads. Static-imported methods are also matched back to their owning class more accurately via import-aware ownership filtering, explicit owner-qualified calls no longer leak false same-name edges onto local methods in the caller class, and `this.` / `super.` owner-qualified calls now stay local to the caller class instead of degrading into unresolved or imported targets.
+```clojure
+(sci/resolve-context-detail index query)
+```
 
-For Python retrieval, imported symbols from `from ... import ...` and module aliases from `import ... as ...` are now expanded toward the owning module during call linking, `self` / `cls` method calls are rewritten toward class-owned method identities, local class-qualified calls such as `OrderService.handle(...)` can also stay inside the owning module/class, local same-name module or class definitions win over imported-symbol collisions, explicit module-alias calls still keep their imported ownership, and Python test modules such as `*_test.py` and `tests/*` can flow into `impact_hints.related_tests`.
+It is intentionally not the canonical public flow. External integrations should prefer the explicit staged API so selection stability and later-stage budgets remain visible.
 
 The capability layer is now language-strength-aware. Runtime retrieval emits `:selected_language_strengths` and `:confidence_ceiling` inside `:capabilities`, then caps the final confidence level to that ceiling after late raw-fetch upgrades. This means:
 
