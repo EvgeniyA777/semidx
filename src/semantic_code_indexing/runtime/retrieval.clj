@@ -189,6 +189,69 @@
        (reduce + 0)
        (#(int (Math/ceil (/ (double %) 4.0))))))
 
+(defn- estimate-skeleton-tokens [u]
+  (->> [(or (:signature u) "")
+        (or (:summary u) "")
+        (or (:docstring_excerpt u) "")]
+       (map count)
+       (reduce + 0)
+       (#(int (Math/ceil (/ (double %) 4.0))))))
+
+(defn- estimate-impact-hints-tokens [impact]
+  (if (map? impact)
+    (->> impact
+         vals
+         (mapcat identity)
+         (map #(count (str %)))
+         (reduce + 0)
+         (+ (* 12 (count (keys impact))))
+         (#(int (Math/ceil (/ (double %) 4.0)))))
+    0))
+
+(defn- estimate-raw-context-tokens [raw-context]
+  (->> raw-context
+       (map (fn [{:keys [content]}]
+              (count (str content))))
+       (reduce + 0)
+       (#(int (Math/ceil (/ (double %) 4.0))))))
+
+(defn- fit-items-to-budget [items estimate-fn budget]
+  (let [budget* (max 0 (int (or budget 0)))]
+    (loop [remaining items
+           chosen []
+           used 0
+           truncated? false]
+      (if (empty? remaining)
+        {:items chosen
+         :used_tokens used
+         :truncated? truncated?}
+        (let [item (first remaining)
+              item-tokens (max 0 (int (estimate-fn item)))
+              next-used (+ used item-tokens)]
+          (if (<= next-used budget*)
+            (recur (rest remaining)
+                   (conj chosen item)
+                   next-used
+                   truncated?)
+            {:items chosen
+             :used_tokens used
+             :truncated? true}))))))
+
+(defn- stage-result-status [source-items kept-items truncation-flags]
+  (cond
+    (and (seq source-items) (empty? kept-items)) "budget_exhausted"
+    (seq truncation-flags) "truncated"
+    :else "completed"))
+
+(defn- detail-structure-budget [detail-budget raw-level]
+  (let [budget* (max 0 (int (or detail-budget 0)))]
+    (cond
+      (zero? budget*) 0
+      (= "none" raw-level) budget*
+      (< budget* 160) budget*
+      :else (min budget*
+                 (max 120 (int (Math/floor (* 0.35 budget*))))))))
+
 (defn- top-reasons [selected]
   (->> selected
        (mapcat :selection_reasons)
@@ -271,6 +334,12 @@
      :dependents dependents
      :related_tests related-tests
      :risky_neighbors risky-neighbors}))
+
+(defn- empty-impact-hints []
+  {:callers []
+   :dependents []
+   :related_tests []
+   :risky_neighbors []})
 
 (defn- build-confidence [selected query policy]
   (let [top (first selected)
@@ -457,72 +526,81 @@
        :bytes 0
        :warnings []
        :degradations []}
-      (let [max-units 6
+      (if (<= (long (or requested-token-budget 0)) 0)
+        {:status "skipped"
+         :level level
+         :requests 0
+         :snippets 0
+         :raw_context []
+         :bytes 0
+         :warnings [(coded "raw_fetch_budget_exhausted" "No budget remained for late raw-code fetch.")]
+         :degradations []}
+        (let [max-units 6
             max-bytes (* 4 (max 200 requested-token-budget))
             chosen (take max-units selected)]
-        (loop [units chosen
-               requests 0
-               snippets 0
-               raw-context []
-               bytes 0
-               warnings []
-               degradations []
-               truncated? false]
-          (if (empty? units)
-            (let [status (if (or (seq degradations) truncated?) "degraded" "completed")
-                  status* (if (zero? snippets) "degraded" status)
-                  warnings* (cond-> warnings
-                              truncated? (conj (coded "raw_fetch_budget_limited" "Raw fetch was truncated by budget limits.")))
-                  degradations* (cond-> degradations
-                                  (zero? snippets) (conj (coded "raw_fetch_empty" "Raw-code escalation produced no snippets.")))]
-              {:status status*
-               :level level
-               :requests requests
-               :snippets snippets
-               :raw_context raw-context
-               :bytes bytes
-               :warnings (vec (take 10 warnings*))
-               :degradations (vec (take 10 degradations*))})
-            (let [u (first units)
-                  lines (selection-file-lines selection (:path u))]
-              (if-not (seq lines)
-                (recur (rest units)
-                       (inc requests)
-                       snippets
-                       raw-context
-                       bytes
-                       warnings
-                       (conj degradations (coded "raw_fetch_file_missing" (str "Unable to read " (:path u) " for raw fetch.")))
-                       truncated?)
-                (let [span (bounded-span u level (count lines))]
-                  (if-not span
-                    (recur (rest units)
-                           (inc requests)
-                           snippets
-                           raw-context
-                           bytes
-                           warnings
-                           (conj degradations (coded "raw_fetch_level_invalid" "Unknown raw-code fetch level requested."))
-                           truncated?)
-                    (let [chunk (->> (subvec lines (dec (:start span)) (:end span))
-                                     (str/join "\n"))
-                          chunk-bytes (snippet-bytes chunk)
-                          next-bytes (+ bytes chunk-bytes)]
-                      (if (> next-bytes max-bytes)
-                        (recur [] requests snippets raw-context bytes warnings degradations true)
-                        (recur (rest units)
-                               (inc requests)
-                               (inc snippets)
-                               (conj raw-context
-                                     {:unit_id (:unit_id u)
-                                      :path (:path u)
-                                      :start_line (:start span)
-                                      :end_line (:end span)
-                                      :content chunk})
-                               next-bytes
-                               warnings
-                               degradations
-                               truncated?)))))))))))))
+          (loop [units chosen
+                 requests 0
+                 snippets 0
+                 raw-context []
+                 bytes 0
+                 warnings []
+                 degradations []
+                 truncated? false]
+            (if (empty? units)
+              (let [status (if (or (seq degradations) truncated?) "degraded" "completed")
+                    status* (if (zero? snippets) "degraded" status)
+                    warnings* (cond-> warnings
+                                truncated? (conj (coded "raw_fetch_budget_limited" "Raw fetch was truncated by budget limits.")))
+                    degradations* (cond-> degradations
+                                    (zero? snippets) (conj (coded "raw_fetch_empty" "Raw-code escalation produced no snippets.")))]
+                {:status status*
+                 :level level
+                 :requests requests
+                 :snippets snippets
+                 :raw_context raw-context
+                 :bytes bytes
+                 :warnings (vec (take 10 warnings*))
+                 :degradations (vec (take 10 degradations*))})
+              (let [u (first units)
+                    lines (selection-file-lines selection (:path u))]
+                (if-not (seq lines)
+                  (recur (rest units)
+                         (inc requests)
+                         snippets
+                         raw-context
+                         bytes
+                         warnings
+                         (conj degradations (coded "raw_fetch_file_missing" (str "Unable to read " (:path u) " for raw fetch.")))
+                         truncated?)
+                  (let [span (bounded-span u level (count lines))]
+                    (if-not span
+                      (recur (rest units)
+                             (inc requests)
+                             snippets
+                             raw-context
+                             bytes
+                             warnings
+                             (conj degradations (coded "raw_fetch_level_invalid" "Unknown raw-code fetch level requested."))
+                             truncated?)
+                      (let [chunk (->> (subvec lines (dec (:start span)) (:end span))
+                                       (str/join "\n"))
+                            chunk-bytes (snippet-bytes chunk)
+                            next-bytes (+ bytes chunk-bytes)]
+                        (if (> next-bytes max-bytes)
+                          (recur [] requests snippets raw-context bytes warnings degradations true)
+                          (recur (rest units)
+                                 (inc requests)
+                                 (inc snippets)
+                                 (conj raw-context
+                                       {:unit_id (:unit_id u)
+                                        :path (:path u)
+                                        :start_line (:start span)
+                                        :end_line (:end span)
+                                        :content chunk})
+                                 next-bytes
+                                 warnings
+                                 degradations
+                                 truncated?))))))))))))))
 
 (def ^:private default-api-version "1.0")
 (def ^:private default-selection-cache-max-entries 128)
@@ -793,28 +871,57 @@
         trace-id (get-in query [:trace :trace_id] (str (java.util.UUID/randomUUID)))
         request-id (get-in query [:trace :request_id] (str "req-" (subs trace-id 0 8)))
         summary (summarize-query query)
-        selected (if-let [unit-ids (seq (:unit_ids selector))]
-                   (->> (:selected selection)
-                        (filter #(contains? (set unit-ids) (:unit_id %)))
-                        vec)
-                   (:selected selection))
+        selected-source (if-let [unit-ids (seq (:unit_ids selector))]
+                          (->> (:selected selection)
+                               (filter #(contains? (set unit-ids) (:unit_id %)))
+                               vec)
+                          (:selected selection))
         requested (get-in query [:constraints :token_budget] 1800)
+        detail-budget (get-in selection [:budget :reserved_budget :detail_tokens] requested)
         detail-level (or (:detail_level selector)
                          (get-in query [:constraints :max_raw_code_level])
                          "enclosing_unit")
         query* (-> query
                    (assoc-in [:options :allow_raw_code_escalation] true)
                    (assoc-in [:constraints :max_raw_code_level] detail-level))
+        structure-budget (detail-structure-budget detail-budget (raw-escalation-level query*))
+        selected-fit (fit-items-to-budget selected-source compact-item-estimate structure-budget)
+        selected (vec (:items selected-fit))
+        selected-structure-tokens (:used_tokens selected-fit)
+        raw-budget (max 0 (- detail-budget selected-structure-tokens))
         stage-query (build-stage "query_validation" "completed" "Structured query accepted." {:target_count (count (:targets_summary summary)) :constraint_count (count (:constraints_summary summary))} [] [] 2)
         stage-candidates (build-stage "candidate_generation" "completed" "Generated retrieval candidates from structural signals." {:candidate_units (count (:selected selection)) :candidate_files (count (distinct (map :path (:selected selection))))} [] [] 7)
-        stage-ranking (build-stage "ranking" "completed" "Ranked candidates using structural-first signals." {:ranked_units (count (:selected selection)) :top_authority_units (count (filter #(= "top_authority" (:rank_band %)) selected))} [] [] 4)
-        estimated (estimate-tokens selected)
-        truncation (cond-> [] (> estimated requested) (conj "budget_restricted"))
-        budget {:requested_tokens requested :estimated_tokens estimated :truncation_flags truncation}
-        impact (build-impact-hints index selected)
+        stage-ranking (build-stage "ranking" "completed" "Ranked candidates using structural-first signals." {:ranked_units (count (:selected selection)) :top_authority_units (count (filter #(= "top_authority" (:rank_band %)) selected-source))} [] [] 4)
+        impact-full (build-impact-hints index selected)
+        impact-tokens (estimate-impact-hints-tokens impact-full)
+        include-impact? (and (seq selected)
+                             (<= impact-tokens raw-budget))
+        impact (if include-impact? impact-full (empty-impact-hints))
+        raw-budget* (max 0 (- raw-budget (if include-impact? impact-tokens 0)))
+        structure-estimated (estimate-tokens selected-source)
+        truncation (cond-> []
+                     (:truncated? selected-fit) (conj "selected_units_truncated")
+                     (and (seq selected) (not include-impact?)) (conj "impact_hints_omitted")
+                     (zero? detail-budget) (conj "detail_budget_exhausted"))
         capabilities (rp/capability-summary index (capability-units selected))
         base-confidence (build-confidence selected query* policy)
-        raw-fetch (perform-raw-fetch index selection selected query* requested)
+        raw-fetch (perform-raw-fetch index selection selected query* raw-budget*)
+        raw-fetch-tokens (estimate-raw-context-tokens (:raw_context raw-fetch))
+        budget (cond-> {:requested_tokens requested
+                        :reserved_tokens detail-budget
+                        :estimated_tokens (+ structure-estimated
+                                             (if include-impact? impact-tokens 0)
+                                             raw-fetch-tokens)
+                        :returned_tokens (+ selected-structure-tokens
+                                            (if include-impact? impact-tokens 0)
+                                            raw-fetch-tokens)
+                        :truncation_flags (cond-> truncation
+                                            (and (pos? (count selected))
+                                                 (= "skipped" (:status raw-fetch))
+                                                 (pos? (count (:warnings raw-fetch))))
+                                            (into (map :code (:warnings raw-fetch))))}
+                 true (assoc :stage_result_status
+                             (stage-result-status selected-source selected truncation)))
         fallback-selected? (some #(= "parser_fallback" (:code %)) (:warnings base-confidence))
         confidence-a (cond-> base-confidence
                        (and (not= "none" (:level raw-fetch))
@@ -859,13 +966,26 @@
                         :budget budget
                         :confidence confidence}
         packet-status (if (or (= "low" (:level confidence))
-                              (= "degraded" (:status raw-fetch)))
+                              (= "degraded" (:status raw-fetch))
+                              (seq truncation))
                         "degraded"
                         "completed")
         packet-warns (cond-> []
                        (= "low" (:level confidence)) (conj (coded "confidence_low" "Context packet confidence is low."))
-                       (= "degraded" (:status raw-fetch)) (conj (coded "raw_fetch_degraded" "Raw-code fetch was executed in degraded mode.")))
-        stage-packet (build-stage "context_packet_assembly" packet-status "Assembled bounded context packet." {:selected_units (count selected) :selected_files (count focus-paths)} packet-warns [] 5)
+                       (= "degraded" (:status raw-fetch)) (conj (coded "raw_fetch_degraded" "Raw-code fetch was executed in degraded mode."))
+                       (:truncated? selected-fit) (conj (coded "detail_budget_limited" "Detail packet selected units were truncated to fit the reserved stage budget."))
+                       (and (seq selected) (not include-impact?)) (conj (coded "impact_hints_omitted" "Impact hints were omitted to keep detail payload within the reserved stage budget.")))
+        stage-packet (build-stage "context_packet_assembly"
+                                  packet-status
+                                  "Assembled bounded context packet."
+                                  {:selected_units (count selected)
+                                   :selected_files (count focus-paths)
+                                   :reserved_tokens detail-budget
+                                   :returned_tokens (+ selected-structure-tokens
+                                                       (if include-impact? impact-tokens 0))}
+                                  packet-warns
+                                  []
+                                  5)
         stage-fetch (build-stage "raw_code_fetch"
                                  (:status raw-fetch)
                                  (case (:status raw-fetch)
@@ -875,7 +995,9 @@
                                    "Late raw-code fetch stage completed.")
                                  {:raw_fetch_requests (:requests raw-fetch)
                                   :raw_fetch_snippets (:snippets raw-fetch)
-                                  :raw_fetch_bytes (:bytes raw-fetch)}
+                                  :raw_fetch_bytes (:bytes raw-fetch)
+                                  :reserved_tokens raw-budget*
+                                  :returned_tokens raw-fetch-tokens}
                                  (:warnings raw-fetch)
                                  (:degradations raw-fetch)
                                  (if (= "skipped" (:status raw-fetch)) 0 3))
@@ -884,7 +1006,8 @@
                             fallback-selected? (conj (coded "parser_fallback" "Fallback parser evidence contributed to selected units.")))
         diagnostics-degradations (vec (take 10 (concat base-degradations (:degradations raw-fetch))))
         stage-final-status (if (or (= "low" (:level confidence))
-                                   (seq diagnostics-degradations))
+                                   (seq diagnostics-degradations)
+                                   (seq truncation))
                              "degraded"
                              "completed")
         stage-final (build-stage "result_finalization"
@@ -912,10 +1035,11 @@
                      :result {:selected_units_count (count selected)
                               :selected_files_count (count focus-paths)
                               :raw_fetch_level_reached (:level raw-fetch)
-                              :packet_size_estimate estimated
+                              :packet_size_estimate (:estimated_tokens budget)
                               :top_authority_targets (->> selected (filter #(= "top_authority" (:rank_band %))) (map :unit_id) (take 10) vec)
                               :result_status (if (or (= "low" (:level confidence))
-                                                     (= "degraded" (:status raw-fetch)))
+                                                     (= "degraded" (:status raw-fetch))
+                                                     (seq truncation))
                                                "degraded"
                                                "completed")}
                      :warnings (vec (take 10 (concat (:warnings confidence) (:warnings raw-fetch))))
@@ -929,8 +1053,17 @@
                                    :fetch_summary {:raw_fetch_requests (:requests raw-fetch)
                                                    :raw_fetch_snippets (:snippets raw-fetch)
                                                    :raw_fetch_bytes (:bytes raw-fetch)}
-                                   :budget_summary {:requested_tokens requested :estimated_tokens estimated}}}
-        events (build-stage-events trace-id request-id (get-in query [:intent :purpose] "unknown") stages {:requested_tokens requested :estimated_tokens estimated})]
+                                   :budget_summary {:requested_tokens requested
+                                                    :reserved_tokens detail-budget
+                                                    :structure_budget_tokens structure-budget
+                                                    :raw_fetch_budget_tokens raw-budget*
+                                                    :estimated_tokens (:estimated_tokens budget)
+                                                    :returned_tokens (:returned_tokens budget)
+                                                    :raw_fetch_returned_tokens raw-fetch-tokens}}}
+        events (build-stage-events trace-id request-id (get-in query [:intent :purpose] "unknown") stages {:requested_tokens requested
+                                                                                                           :reserved_tokens detail-budget
+                                                                                                           :estimated_tokens (:estimated_tokens budget)
+                                                                                                           :returned_tokens (:returned_tokens budget)})]
     (when-let [explain (m/explain (:example/context-packet contracts/contracts) context-packet)]
       (throw (ex-info "invalid context packet generated" {:type :internal_contract_error :errors (me/humanize explain)})))
     (when-let [explain (m/explain (:example/diagnostics-trace contracts/contracts) diagnostics)]
@@ -965,24 +1098,40 @@
   ([index {:keys [selection_id snapshot_id unit_ids include_impact_hints] :as _selector} _opts]
    (let [selection (ensure-selection! index selection_id snapshot_id)
          bound-index (:bound_index selection)
-         selected (if (seq unit_ids)
-                    (->> (:selected selection)
-                         (filter #(contains? (set unit_ids) (:unit_id %)))
-                         vec)
-                    (:focus selection))
+         selected-source (if (seq unit_ids)
+                           (->> (:selected selection)
+                                (filter #(contains? (set unit_ids) (:unit_id %)))
+                                vec)
+                           (:focus selection))
          impact? (if (some? include_impact_hints)
                    (boolean include_impact_hints)
                    true)
-         impact (when impact? (build-impact-hints bound-index selected))
          expansion-budget (get-in selection [:budget :reserved_budget :expansion_tokens] 0)
-         estimated (+ (estimate-tokens selected)
-                      (if impact? 40 0))]
+         skeleton-fit (fit-items-to-budget selected-source estimate-skeleton-tokens expansion-budget)
+         selected (vec (:items skeleton-fit))
+         impact-full (when impact? (build-impact-hints bound-index selected))
+         impact-tokens (estimate-impact-hints-tokens impact-full)
+         remaining-budget (max 0 (- expansion-budget (:used_tokens skeleton-fit)))
+         include-impact? (and impact? (<= impact-tokens remaining-budget))
+         impact (when include-impact? impact-full)
+         truncation-flags (cond-> []
+                            (:truncated? skeleton-fit) (conj "skeletons_truncated")
+                            (and impact? (seq impact-full) (not include-impact?)) (conj "impact_hints_omitted")
+                            (and (seq selected-source) (zero? expansion-budget)) (conj "expansion_budget_exhausted"))
+         estimated (+ (reduce + 0 (map estimate-skeleton-tokens selected-source))
+                      (if impact? impact-tokens 0))
+         returned (+ (:used_tokens skeleton-fit)
+                     (if include-impact? impact-tokens 0))
+         result-status (stage-result-status selected-source selected truncation-flags)]
      {:api_version default-api-version
       :selection_id selection_id
       :snapshot_id snapshot_id
+      :result_status result-status
       :budget_summary {:reserved_tokens expansion-budget
                        :estimated_tokens estimated
-                       :within_budget (<= estimated expansion-budget)}
+                       :returned_tokens returned
+                       :within_budget (<= estimated expansion-budget)
+                       :truncation_flags truncation-flags}
       :skeletons (mapv compact-skeleton selected)
       :impact_hints impact})))
 

@@ -94,6 +94,8 @@
         "update_index",
         "repo_map",
         "resolve_context",
+        "expand_context",
+        "fetch_context_detail",
         "impact_analysis",
         "skeletons",
         "cache_eviction"

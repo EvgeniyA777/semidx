@@ -247,11 +247,14 @@
    [:api_version bounded-string]
    [:selection_id bounded-string]
    [:snapshot_id bounded-string]
+   [:result_status [:enum "completed" "truncated" "budget_exhausted"]]
    [:budget_summary
     [:map {:closed true}
      [:reserved_tokens nat-int?]
      [:estimated_tokens nat-int?]
-     [:within_budget boolean?]]]
+     [:returned_tokens nat-int?]
+     [:within_budget boolean?]
+     [:truncation_flags string-array]]]
    [:skeletons [:vector {:max 20} skeleton]]
    [:impact_hints {:optional true}
     [:map {:closed true}
@@ -276,8 +279,8 @@
      [:focus_paths string-array]
      [:focus_modules string-array]
      [:summary bounded-long-string]]]
-   [:relevant_units [:vector {:min 1 :max 20} relevant-unit]]
-   [:skeletons [:vector {:min 1 :max 20} skeleton]]
+   [:relevant_units [:vector {:max 20} relevant-unit]]
+   [:skeletons [:vector {:max 20} skeleton]]
    [:impact_hints
     [:map {:closed true}
      [:callers string-array]
@@ -291,7 +294,10 @@
    [:budget
     [:map {:closed true}
      [:requested_tokens pos-int?]
+     [:reserved_tokens {:optional true} nat-int?]
      [:estimated_tokens nat-int?]
+     [:returned_tokens {:optional true} nat-int?]
+     [:stage_result_status {:optional true} bounded-string]
      [:truncation_flags string-array]]]
    [:confidence confidence]])
 

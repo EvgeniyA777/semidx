@@ -714,6 +714,32 @@
         (is (= "2.0" (get-in (ex-data e) [:details :provided_api_version])))
         (is (= ["1.0"] (get-in (ex-data e) [:details :supported_api_versions])))))))
 
+(deftest staged-detail-fetch-enforces-reserved-budget-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-detail-budget-enforcement" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        index (sci/create-index {:root_path tmp-root})
+        low-budget-query (assoc-in sample-query [:constraints :token_budget] 240)
+        selection (sci/resolve-context index low-budget-query)
+        expansion (sci/expand-context index {:selection_id (:selection_id selection)
+                                             :snapshot_id (:snapshot_id selection)
+                                             :include_impact_hints true})
+        detail (sci/fetch-context-detail index {:selection_id (:selection_id selection)
+                                                :snapshot_id (:snapshot_id selection)
+                                                :detail_level "enclosing_unit"})]
+    (testing "expand stage never exceeds its reserved budget"
+      (is (<= (get-in expansion [:budget_summary :returned_tokens])
+              (get-in expansion [:budget_summary :reserved_tokens]))))
+    (testing "detail stage is shaped down to the reserved budget"
+      (is (= 0 (get-in detail [:context_packet :budget :reserved_tokens])))
+      (is (empty? (:raw_context detail)))
+      (is (empty? (get-in detail [:context_packet :relevant_units])))
+      (is (= "budget_exhausted" (get-in detail [:context_packet :budget :stage_result_status])))
+      (is (some #{"detail_budget_exhausted"}
+                (get-in detail [:context_packet :budget :truncation_flags])))
+      (is (<= (get-in detail [:context_packet :budget :returned_tokens])
+              (get-in detail [:context_packet :budget :reserved_tokens])))
+      (is (= "degraded" (get-in detail [:diagnostics_trace :result :result_status]))))))
+
 (deftest library-surface-emits-normalized-error-taxonomy-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-library-error-taxonomy-test" (make-array java.nio.file.attribute.FileAttribute 0)))]
     (try

@@ -46,6 +46,11 @@
                                                  :actor_id "library-agent"}})
         _repo-map (sci/repo-map index)
         result (sci/resolve-context index sample-query)
+        _expand (sci/expand-context index {:selection_id (:selection_id result)
+                                           :snapshot_id (:snapshot_id result)
+                                           :include_impact_hints true})
+        _detail (sci/fetch-context-detail index {:selection_id (:selection_id result)
+                                                 :snapshot_id (:snapshot_id result)})
         _impact (sci/impact-analysis index sample-query)
         _skeletons (sci/skeletons index {:paths ["src/my/app/order.clj"]})
         _feedback (sci/record-feedback! index {:trace_id (get-in sample-query [:trace :trace_id])
@@ -59,7 +64,9 @@
         events (usage/emitted-events sink)
         feedback (usage/emitted-feedback sink)
         create-event (first events)
-        resolve-event (last (filter #(= "resolve_context" (:operation %)) events))]
+        resolve-event (last (filter #(= "resolve_context" (:operation %)) events))
+        expand-event (last (filter #(= "expand_context" (:operation %)) events))
+        detail-event (last (filter #(= "fetch_context_detail" (:operation %)) events))]
     (testing "library events inherit sink and context from index"
       (is (>= (count events) 4))
       (is (= "library" (:surface create-event)))
@@ -75,7 +82,17 @@
       (is (pos-int? (:selected_units_count resolve-event)))
       (is (string? (:root_path_hash resolve-event)))
       (is (= "heuristic_v1" (get-in resolve-event [:payload :policy_id])))
-      (is (= "2026-03-10" (get-in resolve-event [:payload :policy_version]))))
+      (is (= "2026-03-10" (get-in resolve-event [:payload :policy_version])))
+      (is (= "selection" (get-in resolve-event [:payload :stage_name]))))
+    (testing "expand/detail stages emit stage-aware token and budget payloads"
+      (is (= "expand_context" (:operation expand-event)))
+      (is (= "expand" (get-in expand-event [:payload :stage_name])))
+      (is (<= (get-in expand-event [:payload :returned_tokens])
+              (get-in expand-event [:payload :reserved_tokens])))
+      (is (= "fetch_context_detail" (:operation detail-event)))
+      (is (= "detail" (get-in detail-event [:payload :stage_name])))
+      (is (<= (get-in detail-event [:payload :returned_tokens])
+              (get-in detail-event [:payload :reserved_tokens]))))
     (testing "explicit host feedback is recorded separately"
       (is (= 1 (count feedback)))
       (is (= "helpful" (:feedback_outcome (first feedback))))
@@ -142,7 +159,12 @@
         index (sci/create-index {:root_path tmp-root
                                  :usage_metrics sink
                                  :usage_context {:session_id "session-slo"}})
-        _result (sci/resolve-context index sample-query)
+        selection (sci/resolve-context index sample-query)
+        _expand (sci/expand-context index {:selection_id (:selection_id selection)
+                                           :snapshot_id (:snapshot_id selection)
+                                           :include_impact_hints true})
+        _detail (sci/fetch-context-detail index {:selection_id (:selection_id selection)
+                                                 :snapshot_id (:snapshot_id selection)})
         state (atom {:allowed-roots [allowed-root]
                      :max-indexes 4
                      :session_id "mcp-slo-session"
@@ -163,6 +185,12 @@
       (is (contains? report :cache_hit_ratio))
       (is (contains? report :degraded_rate))
       (is (contains? report :fallback_rate))
+      (is (contains? report :stage_latency_ms))
+      (is (contains? report :stage_token_footprint))
+      (is (contains? report :stage_budget_outcomes))
+      (is (contains? (:stage_latency_ms report) "selection"))
+      (is (contains? (:stage_latency_ms report) "expand"))
+      (is (contains? (:stage_latency_ms report) "detail"))
       (is (= {"heuristic_v1@2026-03-10" 1}
              (:policy_version_distribution retrieval-only))))
     (testing "cache-hit ratio observes create_index cache hits"
@@ -170,7 +198,8 @@
       (is (= 0.5 (:cache_hit_ratio report))))
     (testing "latency summaries include counts"
       (is (pos? (get-in report [:index_latency_ms :count])))
-      (is (pos? (get-in retrieval-only [:retrieval_latency_ms :count]))))))
+      (is (pos? (get-in retrieval-only [:retrieval_latency_ms :count])))
+      (is (pos? (get-in report [:stage_token_footprint "detail" :returned_tokens :count]))))))
 
 (deftest harvest-replay-dataset-builds-query-expected-shape-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-usage-metrics-harvest" (make-array java.nio.file.attribute.FileAttribute 0)))

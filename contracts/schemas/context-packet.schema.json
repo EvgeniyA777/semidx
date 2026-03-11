@@ -63,7 +63,6 @@
     },
     "relevant_units": {
       "type": "array",
-      "minItems": 1,
       "maxItems": 20,
       "items": {
         "type": "object",
@@ -93,7 +92,6 @@
     },
     "skeletons": {
       "type": "array",
-      "minItems": 1,
       "maxItems": 20,
       "items": {
         "type": "object",
@@ -156,9 +154,21 @@
           "type": "integer",
           "minimum": 1
         },
+        "reserved_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
         "estimated_tokens": {
           "type": "integer",
           "minimum": 0
+        },
+        "returned_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stage_result_status": {
+          "type": "string",
+          "enum": ["completed", "truncated", "budget_exhausted"]
         },
         "truncation_flags": {
           "$ref": "common.schema.json#/$defs/stringArray"

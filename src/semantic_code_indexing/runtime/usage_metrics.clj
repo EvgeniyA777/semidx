@@ -593,6 +593,41 @@
        frequencies
        (into (sorted-map))))
 
+(defn- operation-stage-name [event]
+  (or (get-in event [:payload :stage_name])
+      (case (:operation event)
+        "resolve_context" "selection"
+        "expand_context" "expand"
+        "fetch_context_detail" "detail"
+        nil)))
+
+(defn- stage-token-summary [events]
+  (let [reserved (->> events (keep #(some-> (get-in % [:payload :reserved_tokens]) long)) vec)
+        estimated (->> events (keep #(some-> (get-in % [:payload :estimated_tokens]) long)) vec)
+        returned (->> events (keep #(some-> (get-in % [:payload :returned_tokens]) long)) vec)
+        summary (fn [values]
+                  {:count (count values)
+                   :mean (if (seq values)
+                           (/ (reduce + 0 values) (double (count values)))
+                           0.0)
+                   :max (if (seq values) (apply max values) 0)})]
+    {:count (count events)
+     :reserved_tokens (summary reserved)
+     :estimated_tokens (summary estimated)
+     :returned_tokens (summary returned)}))
+
+(defn- stage-budget-summary [events]
+  (let [total (count events)
+        truncated-count (count (filter #(pos? (long (or (get-in % [:payload :truncation_count]) 0)))
+                                       events))
+        within-budget-count (count (filter #(true? (get-in % [:payload :within_budget])) events))
+        budget-exhausted-count (count (filter #(= "budget_exhausted" (get-in % [:payload :stage_result_status]))
+                                              events))]
+    {:count total
+     :within_budget_rate (rate within-budget-count total)
+     :truncated_rate (rate truncated-count total)
+     :budget_exhausted_rate (rate budget-exhausted-count total)}))
+
 (def ^:private calibration-feedback-score
   {"helpful" 1.0
    "partially_helpful" 0.5
@@ -684,6 +719,11 @@
          retrieval-events (->> events
                                (filter #(= "resolve_context" (:operation %)))
                                vec)
+         stage-events (->> events
+                           (filter #(contains? #{"resolve_context" "expand_context" "fetch_context_detail"}
+                                                (:operation %)))
+                           vec)
+         stage-groups (group-by operation-stage-name stage-events)
          cache-events (->> events
                            (filter #(and (= "create_index" (:operation %))
                                          (boolean? (:cache_hit %))))
@@ -705,6 +745,15 @@
       :cache_hit_ratio (rate (count (filter :cache_hit cache-events)) (count cache-events))
       :degraded_rate (rate degraded-count (count retrieval-events))
       :fallback_rate (rate fallback-count (count retrieval-events))
+      :stage_latency_ms (into (sorted-map)
+                              (for [[stage stage-group] stage-groups]
+                                [stage (latency-summary stage-group)]))
+      :stage_token_footprint (into (sorted-map)
+                                   (for [[stage stage-group] stage-groups]
+                                     [stage (stage-token-summary stage-group)]))
+      :stage_budget_outcomes (into (sorted-map)
+                                   (for [[stage stage-group] stage-groups]
+                                     [stage (stage-budget-summary stage-group)]))
       :policy_version_distribution (policy-version-distribution retrieval-events)})))
 
 (defn- correlation-key [record]
