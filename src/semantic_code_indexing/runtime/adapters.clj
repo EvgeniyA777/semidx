@@ -22,6 +22,8 @@
 (def ^:private java-class-re #"^\s*(?:public\s+)?(?:class|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")
 (def ^:private java-method-re
   #"^\s*(?:(public|private|protected)\s+)?(?:(?:static|final|native|synchronized|abstract|default)\s+)*([A-Za-z0-9_<>,\[\]\.\?]+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*(?:\{|throws|;)")
+(def ^:private java-constructor-re
+  #"^\s*(?:(public|private|protected)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*(?:\{|throws)")
 (def ^:private java-call-re #"\b([A-Za-z_][A-Za-z0-9_\.]*)\s*\(")
 
 (def ^:private ex-module-re #"^\s*defmodule\s+([A-Za-z0-9_\.]+)\s+do")
@@ -1025,12 +1027,17 @@
                  (parse-clojure-kondo root-path path lines))]
     (add-tree-sitter-diag parsed tree_sitter_enabled "clojure")))
 
-(defn- java-kind [path method-name]
-  (if (or (str/includes? (str/lower-case path) "/test/")
-          (str/ends-with? method-name "Test")
-          (str/starts-with? method-name "test"))
-    "test"
-    "method"))
+(defn- java-kind
+  ([path method-name]
+   (java-kind path method-name nil))
+  ([path method-name explicit-kind]
+   (if explicit-kind
+     explicit-kind
+     (if (or (str/includes? (str/lower-case path) "/test/")
+             (str/ends-with? method-name "Test")
+             (str/starts-with? method-name "test"))
+       "test"
+       "method"))))
 
 (defn- java-args-arity [args-text]
   (let [text (str/trim (or args-text ""))]
@@ -1215,16 +1222,32 @@
                          vec)
         methods (->> (map-indexed vector lines)
                      (keep (fn [[idx line]]
-                             (when-let [[_ _visibility return-type m params] (re-find java-method-re line)]
-                               (when-not (contains? java-call-stop (str/lower-case (str return-type)))
-                                 {:start-line (inc idx)
-                                  :method m
-                                  :params params
-                                  :class (->> class-spots
-                                              (filter #(<= (:line %) (inc idx)))
-                                              last
-                                              :class)
-                                  :signature (trim-signature line)}))))
+                             (let [class-name (->> class-spots
+                                                   (filter #(<= (:line %) (inc idx)))
+                                                   last
+                                                   :class)
+                                   method-match (re-find java-method-re line)
+                                   constructor-match (re-find java-constructor-re line)]
+                               (cond
+                                 constructor-match
+                                 (let [[_ _visibility ctor-name params] constructor-match]
+                                   (when (= ctor-name class-name)
+                                     {:start-line (inc idx)
+                                      :method ctor-name
+                                      :params params
+                                      :class class-name
+                                      :signature (trim-signature line)
+                                      :kind "constructor"}))
+
+                                 method-match
+                                 (let [[_ _visibility return-type m params] method-match]
+                                   (when-not (contains? java-call-stop (str/lower-case (str return-type)))
+                                     {:start-line (inc idx)
+                                      :method m
+                                      :params params
+                                      :class class-name
+                                      :signature (trim-signature line)
+                                      :kind nil}))))))
                      vec)
         starts (mapv :start-line methods)
         ends (unit-end-lines starts line-count)
@@ -1238,7 +1261,7 @@
                                 body (java-call-scan-body lines start-line end-line)
                                 call-details (java-call-details body)]
                             {:unit_id unit_id
-                             :kind (java-kind path (:method m))
+                             :kind (java-kind path (:method m) (:kind m))
                              :symbol symbol
                              :path path
                              :module (if pkg (str pkg "." cls) cls)
@@ -1303,14 +1326,17 @@
                              (map (fn [c] (assoc c :class-name (or (node-name-inside ts-lines c "name:") "UnknownClass"))))
                              vec)
                 methods (->> ts-lines
-                             (filter #(= "method_declaration" (:node-type %)))
+                             (filter #(contains? #{"method_declaration" "constructor_declaration"} (:node-type %)))
                              (map (fn [m]
-                                    (let [method-name (or (node-name-inside ts-lines m "name:") "unknownMethod")
-                                          cls (->> classes
+                                    (let [cls (->> classes
                                                    (filter #(<= (:start-row %) (:start-row m) (:end-row %)))
                                                    (sort-by :start-row)
                                                    last
                                                    :class-name)
+                                          constructor? (= "constructor_declaration" (:node-type m))
+                                          method-name (if constructor?
+                                                        (or cls "UnknownClass")
+                                                        (or (node-name-inside ts-lines m "name:") "unknownMethod"))
                                           calls (->> ts-lines
                                                      (filter #(and (= "method_invocation" (:node-type %))
                                                                    (<= (:start-row m) (:start-row %) (:end-row m))))
@@ -1322,18 +1348,19 @@
                                       {:start-line (inc (:start-row m))
                                        :end-line (inc (:end-row m))
                                        :method method-name
+                                       :kind (when constructor? "constructor")
                                        :class (or cls "UnknownClass")
                                        :params (java-param-fragment-from-source src-lines (inc (:start-row m)))
                                        :calls calls
                                        :call_details call-details})))
                              vec)
                 units (->> methods
-                           (map (fn [{:keys [start-line end-line method class calls call_details params]}]
+                           (map (fn [{:keys [start-line end-line method kind class calls call_details params]}]
                                   (let [symbol (str (when pkg (str pkg ".")) class "#" method)
                                         {:keys [unit_id method_arity method_signature_key]}
                                         (java-method-unit-id path symbol params)]
                                     {:unit_id unit_id
-                                     :kind (java-kind path method)
+                                     :kind (java-kind path method kind)
                                      :symbol symbol
                                      :path path
                                      :module (if pkg (str pkg "." class) class)

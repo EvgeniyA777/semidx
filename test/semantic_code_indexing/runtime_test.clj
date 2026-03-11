@@ -32,7 +32,9 @@
   (write-file! root "src/my/app/shipping.clj"
                "(ns my.app.shipping)\n\n(defmulti route-order (fn [mode payload] mode))\n\n(defn pickup-stop [payload]\n  (:pickup payload))\n\n(defn delivery-stop [payload]\n  (:delivery payload))\n\n(defmethod route-order :pickup [_ payload]\n  (pickup-stop payload))\n\n(defmethod route-order :delivery [_ payload]\n  (delivery-stop payload))\n\n(defn plan-route [mode payload]\n  (route-order mode payload))\n")
   (write-file! root "src/com/acme/CheckoutService.java"
-               "package com.acme;\n\nimport java.util.Objects;\nimport static com.acme.IdNormalizer.normalizeImported;\n\npublic class CheckoutService {\n  public String processOrder(String id) {\n    return normalize(id, true);\n  }\n\n  public String processImported(String id) {\n    return normalizeImported(id);\n  }\n\n  public String processImportedStrict(String id) {\n    return normalizeImported(id, true);\n  }\n\n  private String normalize(String id) {\n    return normalize(id, false);\n  }\n\n  private String normalize(String id, boolean strict) {\n    String base = Objects.requireNonNull(id).trim();\n    return strict ? base : base.toLowerCase();\n  }\n}\n")
+               "package com.acme;\n\nimport java.util.Objects;\nimport static com.acme.IdNormalizer.normalizeImported;\n\npublic class CheckoutService {\n  public CheckoutService() {\n    this(\"default\");\n  }\n\n  public CheckoutService(String id) {\n    normalize(id, true);\n  }\n\n  public String processOrder(String id) {\n    return normalize(id, true);\n  }\n\n  public String processImported(String id) {\n    return normalizeImported(id);\n  }\n\n  public String processImportedStrict(String id) {\n    return normalizeImported(id, true);\n  }\n\n  private String normalize(String id) {\n    return normalize(id, false);\n  }\n\n  private String normalize(String id, boolean strict) {\n    String base = Objects.requireNonNull(id).trim();\n    return strict ? base : base.toLowerCase();\n  }\n}\n")
+  (write-file! root "src/com/acme/CheckoutFactory.java"
+               "package com.acme;\n\npublic class CheckoutFactory {\n  public CheckoutService buildDefault() {\n    return new CheckoutService();\n  }\n\n  public CheckoutService buildConfigured(String id) {\n    return new CheckoutService(id);\n  }\n}\n")
   (write-file! root "src/com/acme/IdNormalizer.java"
                "package com.acme;\n\npublic class IdNormalizer {\n  public static String normalizeImported(String id) {\n    return id.trim();\n  }\n\n  public static String normalizeImported(String id, boolean strict) {\n    String base = id.trim();\n    return strict ? base : base.toLowerCase();\n  }\n}\n")
   (write-file! root "src/com/acme/AuditService.java"
@@ -460,6 +462,43 @@
     (is (some #(= "com.acme.CheckoutService#normalize" (:symbol %)) callers-2))
     (is process-order)
     (is normalize-arity1)))
+
+(deftest java-constructor-unit-identity-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-java-constructor-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        index (sci/create-index {:root_path tmp-root})
+        java-units (->> (:unit_order index)
+                        (map #(get (:units index) %))
+                        (filter #(= "src/com/acme/CheckoutService.java" (:path %)))
+                        (filter #(= "com.acme.CheckoutService#CheckoutService" (:symbol %)))
+                        vec)
+        unit-ids (mapv :unit_id java-units)]
+    (is (= 2 (count java-units)))
+    (is (= #{"constructor"} (set (map :kind java-units))))
+    (is (= 2 (count (distinct unit-ids))))
+    (is (= #{0 1} (set (map :method_arity java-units))))))
+
+(deftest java-constructor-caller-resolution-prefers-matching-arity-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-java-constructor-callers-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        checkout-units (sci/query-units storage tmp-root {:module "com.acme.CheckoutService" :limit 20})
+        constructor-0 (some #(when (and (= "com.acme.CheckoutService#CheckoutService" (:symbol %))
+                                        (= 0 (:method_arity %)))
+                               %)
+                            checkout-units)
+        constructor-1 (some #(when (and (= "com.acme.CheckoutService#CheckoutService" (:symbol %))
+                                        (= 1 (:method_arity %)))
+                               %)
+                            checkout-units)
+        callers-0 (sci/query-callers storage tmp-root (:unit_id constructor-0) {:limit 20})
+        callers-1 (sci/query-callers storage tmp-root (:unit_id constructor-1) {:limit 20})]
+    (is constructor-0)
+    (is constructor-1)
+    (is (some #(= "com.acme.CheckoutFactory#buildDefault" (:symbol %)) callers-0))
+    (is (not-any? #(= "com.acme.CheckoutFactory#buildConfigured" (:symbol %)) callers-0))
+    (is (some #(= "com.acme.CheckoutFactory#buildConfigured" (:symbol %)) callers-1))))
 
 (deftest java-static-import-resolution-prefers-imported-class-and-arity-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-java-static-import-test" (make-array java.nio.file.attribute.FileAttribute 0)))
