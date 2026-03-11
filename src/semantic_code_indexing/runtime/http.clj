@@ -311,9 +311,9 @@
                            (merge api-version-header
                                   (response-correlation-header-map exchange))))))))))
 
-(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry usage_metrics]}]
+(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry usage_metrics selection_cache]}]
   (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)
-        selection-cache (atom {})]
+        selection-cache (or selection_cache (atom {:max_entries 128}))]
     (.createContext server "/health" (with-handler handle-health))
     (.createContext server "/v1/index/create" (with-handler (partial handle-create-index {:api_key api_key
                                                                                           :require_tenant require_tenant

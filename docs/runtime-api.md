@@ -122,13 +122,15 @@ Runs retrieval pipeline and returns:
 
 Optional opts:
 
+- `:api_version` - optional client-facing request version switch; defaults to `"1.0"` and rejects unsupported values with `unsupported_api_version`
 - `:retrieval_policy` - versioned ranking policy override map for replay/tuning
 - `:policy_registry` - optional registry map for active-policy defaults or selector-based lookup
 - `:policy_registry_path` - optional EDN registry file path
 
 ```clojure
 (def query
-  {:schema_version "1.0"
+  {:api_version "1.0"
+   :schema_version "1.0"
    :intent {:purpose "code_understanding"
             :details "Locate authority implementation for process-order."}
    :targets {:symbols ["my.app.order/process-order"]
@@ -140,9 +142,7 @@ Optional opts:
            :prefer_definitions_over_callers true}
    :options {:include_tests true
              :include_impact_hints true
-             :allow_raw_code_escalation false
-             :favor_compact_packet true
-             :favor_higher_recall false}
+             :allow_raw_code_escalation false}
    :trace {:trace_id "11111111-1111-4111-8111-111111111111"
            :request_id "req-example-001"
            :actor_id "planner_agent"}})

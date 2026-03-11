@@ -258,6 +258,7 @@ FIXTURE_HAPPY_CONTENT="$(cat <<EOF
   "snapshot_ref": "seed-polyglot-app@rev-scaffold",
   "input": {
     "query": {
+      "api_version": "1.0",
       "schema_version": "1.0",
       "intent": {
         "purpose": "code_understanding",
@@ -278,9 +279,7 @@ FIXTURE_HAPPY_CONTENT="$(cat <<EOF
       "options": {
         "include_tests": false,
         "include_impact_hints": true,
-        "allow_raw_code_escalation": false,
-        "favor_compact_packet": true,
-        "favor_higher_recall": false
+        "allow_raw_code_escalation": false
       },
       "trace": {
         "trace_id": "11111111-2222-4333-8444-555555555555",
@@ -303,6 +302,7 @@ FIXTURE_AMBIG_CONTENT="$(cat <<EOF
   "snapshot_ref": "seed-polyglot-app@rev-scaffold",
   "input": {
     "query": {
+      "api_version": "1.0",
       "schema_version": "1.0",
       "intent": {
         "purpose": "bug_investigation",
@@ -325,9 +325,7 @@ FIXTURE_AMBIG_CONTENT="$(cat <<EOF
       "options": {
         "include_tests": true,
         "include_impact_hints": true,
-        "allow_raw_code_escalation": false,
-        "favor_compact_packet": true,
-        "favor_higher_recall": true
+        "allow_raw_code_escalation": false
       },
       "trace": {
         "trace_id": "66666666-7777-4888-8999-000000000000",

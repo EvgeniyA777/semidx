@@ -40,3 +40,15 @@ Legend:
 - Kubernetes Enhancements tracking repository: <https://github.com/kubernetes/enhancements>
 - Go issue tracker milestones: <https://github.com/golang/go/milestones>
 - Rust tracking issue guidance: <https://forge.rust-lang.org/feature-tracking.html>
+
+## Current Refactor Plan
+
+The current near-term execution plan is captured in [docs/compact-first-staged-retrieval-plan.md](/Users/ae/workspaces/SemanticCodeIndexing/docs/compact-first-staged-retrieval-plan.md).
+
+It prioritizes:
+
+- strict snapshot-bound `selection_id` semantics across staged retrieval
+- bounded retention and eviction behavior for selection artifacts
+- idempotent `fetch_context_detail` behavior while artifacts are retained
+- clean-break `api_version` routing and legacy contract cleanup
+- real per-stage budget enforcement and stage-aware metrics

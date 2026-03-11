@@ -12,6 +12,9 @@
       (.withNano 0)
       (.format java.time.format.DateTimeFormatter/ISO_INSTANT)))
 
+(defn- now-ms []
+  (System/currentTimeMillis))
+
 (defn- coded [code summary]
   {:code code :summary summary})
 
@@ -425,6 +428,10 @@
     (when (.exists f)
       (-> f slurp str/split-lines vec))))
 
+(defn- selection-file-lines [selection path]
+  (or (get-in selection [:file_snapshots path])
+      []))
+
 (defn- bounded-span [unit level total-lines]
   (let [start (:start_line unit)
         end (:end_line unit)
@@ -439,7 +446,7 @@
 (defn- snippet-bytes [s]
   (count (.getBytes (str s) java.nio.charset.StandardCharsets/UTF_8)))
 
-(defn- perform-raw-fetch [index selected query requested-token-budget]
+(defn- perform-raw-fetch [index selection selected query requested-token-budget]
   (let [level (raw-escalation-level query)]
     (if (= level "none")
       {:status "skipped"
@@ -477,7 +484,7 @@
                :warnings (vec (take 10 warnings*))
                :degradations (vec (take 10 degradations*))})
             (let [u (first units)
-                  lines (read-file-lines index (:path u))]
+                  lines (selection-file-lines selection (:path u))]
               (if-not (seq lines)
                 (recur (rest units)
                        (inc requests)
@@ -518,6 +525,8 @@
                                truncated?)))))))))))))
 
 (def ^:private default-api-version "1.0")
+(def ^:private default-selection-cache-max-entries 128)
+(def ^:private default-evicted-selection-memory 512)
 
 (defn- query-api-version [query]
   (or (:api_version query) default-api-version))
@@ -526,8 +535,10 @@
   (let [version (query-api-version query)]
     (when-not (= default-api-version (str version))
       (throw (ex-info "unsupported api_version"
-                      {:type :invalid_request
-                       :message "unsupported api_version"})))))
+                      {:type :unsupported_api_version
+                       :message "unsupported api_version"
+                       :details {:provided_api_version (str version)
+                                 :supported_api_versions [default-api-version]}})))))
 
 (defn- enforce-query-constraints! [index query]
   (when-let [requested-snapshot (get-in query [:constraints :snapshot_id])]
@@ -539,27 +550,127 @@
 (defn- selection-cache [index]
   (:selection_cache (meta index)))
 
+(defn- normalized-selection-cache-state [state]
+  (let [entries (cond
+                  (map? (:entries state)) (:entries state)
+                  (map? state) (dissoc state :entries :order :evicted :evicted_order :max_entries :max_evicted)
+                  :else {})
+        order-seen (set (or (:order state) []))
+        order (vec (concat (filter #(contains? entries %) (or (:order state) []))
+                           (remove order-seen (keys entries))))
+        evicted (or (:evicted state) {})
+        evicted-order-seen (set (or (:evicted_order state) []))
+        evicted-order (vec (concat (filter #(contains? evicted %) (or (:evicted_order state) []))
+                                   (remove evicted-order-seen (keys evicted))))]
+    {:entries entries
+     :order order
+     :evicted evicted
+     :evicted_order evicted-order
+     :max_entries (max 1 (int (or (:max_entries state) default-selection-cache-max-entries)))
+     :max_evicted (max 1 (int (or (:max_evicted state) default-evicted-selection-memory)))}))
+
+(defn- snapshot-bound-index [index]
+  (with-meta index
+    (apply dissoc (meta index) [:selection_cache :usage_metrics :usage_context])))
+
+(defn- snapshot-file-lines [index paths]
+  (reduce (fn [acc path]
+            (assoc acc path (or (read-file-lines index path) [])))
+          {}
+          paths))
+
 (defn- put-selection! [index selection]
   (when-let [cache (selection-cache index)]
-    (swap! cache assoc (:selection_id selection) selection))
+    (swap! cache
+           (fn [state]
+             (let [{:keys [entries order evicted evicted_order max_entries max_evicted]}
+                   (normalized-selection-cache-state state)
+                   selection-id (:selection_id selection)
+                   prior-order (vec (remove #(= selection-id %) order))
+                   next-entries (assoc entries selection-id selection)
+                   next-order (conj prior-order selection-id)
+                   overflow (max 0 (- (count next-order) max_entries))
+                   evicted-ids (vec (take overflow next-order))
+                   retained-order (vec (drop overflow next-order))
+                   retained-entries (apply dissoc next-entries evicted-ids)
+                   evicted-at (now-ms)
+                   evicted-meta (reduce (fn [acc sid]
+                                          (let [entry (get next-entries sid)]
+                                            (assoc acc sid {:selection_id sid
+                                                            :snapshot_id (:snapshot_id entry)
+                                                            :evicted_at evicted-at})))
+                                        evicted
+                                        evicted-ids)
+                   next-evicted-order (vec (concat evicted_order evicted-ids))
+                   overflow-evicted (max 0 (- (count next-evicted-order) max_evicted))
+                   trimmed-evicted-ids (vec (take overflow-evicted next-evicted-order))
+                   retained-evicted-order (vec (drop overflow-evicted next-evicted-order))
+                   retained-evicted-meta (apply dissoc evicted-meta trimmed-evicted-ids)]
+               {:entries retained-entries
+                :order retained-order
+                :evicted retained-evicted-meta
+                :evicted_order retained-evicted-order
+                :max_entries max_entries
+                :max_evicted max_evicted}))))
   selection)
 
 (defn- get-selection [index selection-id]
   (when-let [cache (selection-cache index)]
-    (get @cache selection-id)))
+    (get-in (normalized-selection-cache-state @cache) [:entries selection-id])))
+
+(defn- selection-evicted [index selection-id]
+  (when-let [cache (selection-cache index)]
+    (get-in (normalized-selection-cache-state @cache) [:evicted selection-id])))
+
+(defn- detail-cache-key [{:keys [unit_ids detail_level]}]
+  {:unit_ids (->> unit_ids (remove nil?) distinct sort vec)
+   :detail_level (or detail_level "enclosing_unit")})
+
+(defn- cached-detail-result [index selection-id cache-key]
+  (when-let [cache (selection-cache index)]
+    (get-in (normalized-selection-cache-state @cache)
+            [:entries selection-id :detail_cache cache-key])))
+
+(defn- cache-detail-result! [index selection-id cache-key result]
+  (when-let [cache (selection-cache index)]
+    (swap! cache
+           (fn [state]
+             (let [{:keys [entries order evicted evicted_order max_entries max_evicted]}
+                   (normalized-selection-cache-state state)]
+               {:entries (if (contains? entries selection-id)
+                           (assoc-in entries [selection-id :detail_cache cache-key] result)
+                           entries)
+                :order order
+                :evicted evicted
+                :evicted_order evicted_order
+                :max_entries max_entries
+                :max_evicted max_evicted}))))
+  result)
 
 (defn- ensure-selection! [index selection-id snapshot-id]
   (let [selection (get-selection index selection-id)]
     (cond
+      (some? (selection-evicted index selection-id))
+      (throw (ex-info "selection_id was evicted"
+                      {:type :selection_evicted
+                       :message "selection_id was evicted"
+                       :details {:selection_id selection-id
+                                 :snapshot_id snapshot-id}}))
+
       (nil? selection)
       (throw (ex-info "selection_id not found"
-                      {:type :invalid_request
-                       :message "selection_id not found"}))
+                      {:type :selection_not_found
+                       :message "selection_id not found"
+                       :details {:selection_id selection-id
+                                 :snapshot_id snapshot-id}}))
 
       (not= (str snapshot-id) (str (:snapshot_id selection)))
       (throw (ex-info "snapshot_id does not match selection"
-                      {:type :invalid_request
-                       :message "snapshot_id does not match selection"}))
+                      {:type :snapshot_mismatch
+                       :message "snapshot_id does not match selection"
+                       :details {:selection_id selection-id
+                                 :expected_snapshot_id (:snapshot_id selection)
+                                 :provided_snapshot_id snapshot-id}}))
 
       :else
       selection)))
@@ -649,6 +760,9 @@
                    :snapshot_id (:snapshot_id index)
                    :query query
                    :policy policy
+                   :created_at_ms (now-ms)
+                   :bound_index (snapshot-bound-index index)
+                   :file_snapshots (snapshot-file-lines index (->> selected (map :path) distinct vec))
                    :selected selected
                    :focus focus
                    :confidence confidence
@@ -700,7 +814,7 @@
         impact (build-impact-hints index selected)
         capabilities (rp/capability-summary index (capability-units selected))
         base-confidence (build-confidence selected query* policy)
-        raw-fetch (perform-raw-fetch index selected query* requested)
+        raw-fetch (perform-raw-fetch index selection selected query* requested)
         fallback-selected? (some #(= "parser_fallback" (:code %)) (:warnings base-confidence))
         confidence-a (cond-> base-confidence
                        (and (not= "none" (:level raw-fetch))
@@ -850,6 +964,7 @@
    (expand-context index selector {}))
   ([index {:keys [selection_id snapshot_id unit_ids include_impact_hints] :as _selector} _opts]
    (let [selection (ensure-selection! index selection_id snapshot_id)
+         bound-index (:bound_index selection)
          selected (if (seq unit_ids)
                     (->> (:selected selection)
                          (filter #(contains? (set unit_ids) (:unit_id %)))
@@ -858,7 +973,7 @@
          impact? (if (some? include_impact_hints)
                    (boolean include_impact_hints)
                    true)
-         impact (when impact? (build-impact-hints index selected))
+         impact (when impact? (build-impact-hints bound-index selected))
          expansion-budget (get-in selection [:budget :reserved_budget :expansion_tokens] 0)
          estimated (+ (estimate-tokens selected)
                       (if impact? 40 0))]
@@ -874,9 +989,16 @@
 (defn fetch-context-detail
   ([index selector]
    (fetch-context-detail index selector {}))
-  ([index {:keys [selection_id snapshot_id] :as selector} _opts]
-   (let [selection (ensure-selection! index selection_id snapshot_id)]
-     (build-detail-response index selection selector))))
+  ([index {:keys [selection_id snapshot_id detail_level unit_ids] :as selector} _opts]
+   (let [selection (ensure-selection! index selection_id snapshot_id)
+         bound-index (:bound_index selection)
+         cache-key (detail-cache-key {:unit_ids unit_ids
+                                      :detail_level (or detail_level
+                                                       (get-in selection [:query :constraints :max_raw_code_level])
+                                                       "enclosing_unit")})]
+     (or (cached-detail-result index selection_id cache-key)
+         (->> (build-detail-response bound-index selection selector)
+              (cache-detail-result! index selection_id cache-key))))))
 
 (defn impact-analysis
   ([index query]

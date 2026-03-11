@@ -17,7 +17,8 @@
                "(ns my.app.order-test\n  (:require [clojure.test :refer [deftest is]]\n            [my.app.order :as order]))\n\n(deftest process-order-test\n  (is (map? (order/validate-order {:id 1}))))\n"))
 
 (def sample-query
-  {:schema_version "1.0"
+  {:api_version "1.0"
+   :schema_version "1.0"
    :intent {:purpose "code_understanding"
             :details "Locate process-order authority and close tests."}
    :targets {:symbols ["my.app.order/process-order"]
@@ -29,9 +30,7 @@
            :prefer_definitions_over_callers true}
    :options {:include_tests true
              :include_impact_hints true
-             :allow_raw_code_escalation false
-             :favor_compact_packet true
-             :favor_higher_recall false}
+             :allow_raw_code_escalation false}
    :trace {:trace_id "77777777-7777-4777-8777-777777777777"
            :request_id "usage-metrics-test-001"
            :actor_id "test_runner"}})

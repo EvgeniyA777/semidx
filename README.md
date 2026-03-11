@@ -86,6 +86,7 @@ Current scope is contract architecture plus a working MVP runtime implementation
 - Runtime API docs: [docs/runtime-api.md](docs/runtime-api.md)
 - MCP docs: [docs/mcp-api.md](docs/mcp-api.md)
 - Roadmap status checklist: [docs/roadmap-status.md](docs/roadmap-status.md)
+- Compact-first staged retrieval execution plan: [docs/compact-first-staged-retrieval-plan.md](docs/compact-first-staged-retrieval-plan.md)
 
 ## Agent Limit Policy
 

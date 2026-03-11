@@ -6,6 +6,7 @@
   "snapshot_ref": "seed-polyglot-app@rev-006",
   "input": {
     "query": {
+      "api_version": "1.0",
       "schema_version": "1.0",
       "intent": {
         "purpose": "review_support",
@@ -32,9 +33,7 @@
       "options": {
         "include_tests": false,
         "include_impact_hints": true,
-        "allow_raw_code_escalation": false,
-        "favor_compact_packet": true,
-        "favor_higher_recall": true
+        "allow_raw_code_escalation": false
       },
       "trace": {
         "trace_id": "6445d625-e5bd-41ed-a0b4-8d8068bb664f",

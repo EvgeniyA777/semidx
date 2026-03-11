@@ -6,6 +6,7 @@
   "snapshot_ref": "seed-clojure-app@rev-002",
   "input": {
     "query": {
+      "api_version": "1.0",
       "schema_version": "1.0",
       "intent": {
         "purpose": "change_impact",
@@ -41,9 +42,7 @@
       "options": {
         "include_tests": true,
         "include_impact_hints": true,
-        "allow_raw_code_escalation": true,
-        "favor_compact_packet": false,
-        "favor_higher_recall": true
+        "allow_raw_code_escalation": true
       },
       "trace": {
         "trace_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",

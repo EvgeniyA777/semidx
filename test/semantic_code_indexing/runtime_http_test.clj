@@ -81,7 +81,8 @@
             (is (pos-int? (get-in resp [:json :unit_count])))))
 
         (testing "resolve-context endpoint"
-          (let [query {:schema_version "1.0"
+          (let [query {:api_version "1.0"
+                       :schema_version "1.0"
                        :intent {:purpose "code_understanding"
                                 :details "Locate authority implementation for process-order."}
                        :targets {:symbols ["my.app.order/process-order"]
@@ -92,9 +93,7 @@
                        :hints {:prefer_definitions_over_callers true}
                        :options {:include_tests true
                                  :include_impact_hints true
-                                 :allow_raw_code_escalation false
-                                 :favor_compact_packet true
-                                 :favor_higher_recall false}
+                                 :allow_raw_code_escalation false}
                        :trace {:trace_id "01111111-1111-4111-8111-111111111111"
                                :request_id "runtime-http-test-001"
                                :actor_id "test_runner"}}
@@ -114,7 +113,8 @@
                    (get-in resp [:json :next_step :available_actions])))))
 
         (testing "expand-context and fetch-context-detail endpoints"
-          (let [query {:schema_version "1.0"
+          (let [query {:api_version "1.0"
+                       :schema_version "1.0"
                        :intent {:purpose "code_understanding"
                                 :details "Locate authority implementation for process-order."}
                        :targets {:symbols ["my.app.order/process-order"]
@@ -285,7 +285,8 @@
             base-url (str "http://127.0.0.1:" port)
             client (HttpClient/newHttpClient)
             _health (wait-health! client base-url)
-            query {:schema_version "1.0"
+            query {:api_version "1.0"
+                   :schema_version "1.0"
                    :intent {:purpose "code_understanding"
                             :details "Locate authority implementation for process-order."}
                    :targets {:symbols ["my.app.order/process-order"]
@@ -296,9 +297,7 @@
                    :hints {:prefer_definitions_over_callers true}
                    :options {:include_tests true
                              :include_impact_hints true
-                             :allow_raw_code_escalation false
-                             :favor_compact_packet true
-                             :favor_higher_recall false}
+                             :allow_raw_code_escalation false}
                    :trace {:trace_id "03111111-1111-4111-8111-111111111111"
                            :request_id "runtime-http-policy-registry-test-001"
                            :actor_id "test_runner"}}]
@@ -338,6 +337,59 @@
       (finally
         (.stop server 0)))))
 
+(deftest runtime-http-staged-selection-error-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-http-selection-errors" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-http-sample-repo! tmp-root)
+        selection-cache (atom {:max_entries 1})
+        server (runtime-http/start-server {:host "127.0.0.1"
+                                           :port 0
+                                           :selection_cache selection-cache})]
+    (try
+      (let [port (-> server .getAddress .getPort)
+            base-url (str "http://127.0.0.1:" port)
+            client (HttpClient/newHttpClient)
+            _health (wait-health! client base-url)
+            query {:api_version "1.0"
+                   :schema_version "1.0"
+                   :intent {:purpose "code_understanding"
+                            :details "Locate authority implementation for process-order."}
+                   :targets {:symbols ["my.app.order/process-order"]
+                             :paths ["src/my/app/order.clj"]}
+                   :constraints {:token_budget 1200
+                                 :max_raw_code_level "enclosing_unit"
+                                 :freshness "current_snapshot"}
+                   :hints {:prefer_definitions_over_callers true}
+                   :options {:include_tests true
+                             :include_impact_hints true
+                             :allow_raw_code_escalation false}
+                   :trace {:trace_id "07111111-1111-4111-8111-111111111111"
+                           :request_id "runtime-http-selection-errors-001"
+                           :actor_id "test_runner"}}
+            selection-a (post-json client
+                                   (str base-url "/v1/retrieval/resolve-context")
+                                   {:root_path tmp-root
+                                    :query query})
+            mismatch-resp (post-json client
+                                     (str base-url "/v1/retrieval/fetch-context-detail")
+                                     {:root_path tmp-root
+                                      :selection_id (get-in selection-a [:json :selection_id])
+                                      :snapshot_id "wrong-snapshot"})
+            _selection-b (post-json client
+                                    (str base-url "/v1/retrieval/resolve-context")
+                                    {:root_path tmp-root
+                                     :query query})
+            evicted-resp (post-json client
+                                    (str base-url "/v1/retrieval/fetch-context-detail")
+                                    {:root_path tmp-root
+                                     :selection_id (get-in selection-a [:json :selection_id])
+                                     :snapshot_id (get-in selection-a [:json :snapshot_id])})]
+        (is (= 409 (:status mismatch-resp)))
+        (is (= "snapshot_mismatch" (get-in mismatch-resp [:json :error_code])))
+        (is (= 410 (:status evicted-resp)))
+        (is (= "selection_evicted" (get-in evicted-resp [:json :error_code]))))
+      (finally
+        (.stop server 0)))))
+
 (deftest runtime-http-tenant-trace-correlation-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-http-correlation-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-http-sample-repo! tmp-root)
@@ -362,7 +414,8 @@
                                     "x-session-id" "http-session-001"
                                     "x-task-id" "http-task-001"
                                     "x-actor-id" "http-edge-tester"})
-            query {:schema_version "1.0"
+            query {:api_version "1.0"
+                   :schema_version "1.0"
                    :intent {:purpose "code_understanding"
                             :details "Locate authority implementation for process-order."}
                    :targets {:symbols ["my.app.order/process-order"]
@@ -373,9 +426,7 @@
                    :hints {:prefer_definitions_over_callers true}
                    :options {:include_tests true
                              :include_impact_hints true
-                             :allow_raw_code_escalation false
-                             :favor_compact_packet true
-                             :favor_higher_recall false}
+                             :allow_raw_code_escalation false}
                    :trace {:trace_id "05111111-1111-4111-8111-111111111111"
                            :request_id "runtime-http-resolve-trace-001"
                            :session_id "http-session-002"
@@ -413,5 +464,39 @@
           (is (= "http-session-002" (:session_id resolve-event)))
           (is (= "http-task-002" (:task_id resolve-event)))
           (is (= "http-query-runner" (:actor_id resolve-event)))))
+      (finally
+        (.stop server 0)))))
+(deftest runtime-http-unsupported-api-version-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-http-unsupported-api-version" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-http-sample-repo! tmp-root)
+        server (runtime-http/start-server {:host "127.0.0.1" :port 0})]
+    (try
+      (let [port (-> server .getAddress .getPort)
+            base-url (str "http://127.0.0.1:" port)
+            client (HttpClient/newHttpClient)
+            _health (wait-health! client base-url)
+            resp (post-json client
+                            (str base-url "/v1/retrieval/resolve-context")
+                            {:root_path tmp-root
+                             :query {:api_version "2.0"
+                                     :schema_version "1.0"
+                                     :intent {:purpose "code_understanding"
+                                              :details "Locate authority implementation for process-order."}
+                                     :targets {:symbols ["my.app.order/process-order"]
+                                               :paths ["src/my/app/order.clj"]}
+                                     :constraints {:token_budget 1200
+                                                   :max_raw_code_level "enclosing_unit"
+                                                   :freshness "current_snapshot"}
+                                     :hints {:prefer_definitions_over_callers true}
+                                     :options {:include_tests true
+                                               :include_impact_hints true
+                                               :allow_raw_code_escalation false}
+                                     :trace {:trace_id "06111111-1111-4111-8111-111111111111"
+                                             :request_id "runtime-http-unsupported-api-version-001"
+                                             :actor_id "test_runner"}}})]
+        (is (= 400 (:status resp)))
+        (is (= "unsupported_api_version" (get-in resp [:json :error_code])))
+        (is (= "2.0" (get-in resp [:json :details :provided_api_version])))
+        (is (= ["1.0"] (get-in resp [:json :details :supported_api_versions]))))
       (finally
         (.stop server 0)))))

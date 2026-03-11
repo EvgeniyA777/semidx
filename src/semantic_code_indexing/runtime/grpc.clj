@@ -280,11 +280,11 @@
                                  :policy_registry policy-registry})]
     (sci/fetch-context-detail index (select-keys payload [:selection_id :snapshot_id :unit_ids :detail_level]))))
 
-(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry usage_metrics]}]
+(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry usage_metrics selection_cache]}]
   (let [auth-config {:api_key api_key
                      :require_tenant require_tenant
                      :authz_check authz_check}
-        selection-cache (atom {})
+        selection-cache (or selection_cache (atom {:max_entries 128}))
         service (-> (ServerServiceDefinition/builder service-name)
                     (.addMethod health-method (unary-handler (constantly {})
                                                              grpc-proto/health-response

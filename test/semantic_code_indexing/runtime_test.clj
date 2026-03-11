@@ -1,5 +1,6 @@
 (ns semantic-code-indexing.runtime-test
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [malli.core :as m]
             [semantic-code-indexing.contracts.schemas :as contracts]
@@ -76,7 +77,8 @@
                "import { processMain } from \"../../src/example/main\";\n\nexport function testProcessMain(): string {\n  return processMain(\"A-1\");\n}\n"))
 
 (def sample-query
-  {:schema_version "1.0"
+  {:api_version "1.0"
+   :schema_version "1.0"
    :intent {:purpose "code_understanding"
             :details "Locate process-order authority and close tests."}
    :targets {:symbols ["my.app.order/process-order"]
@@ -88,15 +90,14 @@
            :prefer_definitions_over_callers true}
    :options {:include_tests true
              :include_impact_hints true
-             :allow_raw_code_escalation false
-             :favor_compact_packet true
-             :favor_higher_recall false}
+             :allow_raw_code_escalation false}
    :trace {:trace_id "11111111-1111-4111-8111-111111111111"
            :request_id "runtime-test-001"
            :actor_id "test_runner"}})
 
 (def sample-query-elixir
-  {:schema_version "1.0"
+  {:api_version "1.0"
+   :schema_version "1.0"
    :intent {:purpose "code_understanding"
             :details "Locate Elixir order process function."}
    :targets {:symbols ["MyApp.Order/process_order"]
@@ -107,15 +108,14 @@
    :hints {:prefer_definitions_over_callers true}
    :options {:include_tests false
              :include_impact_hints true
-             :allow_raw_code_escalation false
-             :favor_compact_packet true
-             :favor_higher_recall false}
+             :allow_raw_code_escalation false}
    :trace {:trace_id "22222222-2222-4222-8222-222222222222"
            :request_id "runtime-test-ex-001"
            :actor_id "test_runner"}})
 
 (def sample-query-python
-  {:schema_version "1.0"
+  {:api_version "1.0"
+   :schema_version "1.0"
    :intent {:purpose "code_understanding"
             :details "Locate Python process_order function."}
    :targets {:symbols ["app.orders.OrderService/process_order"]
@@ -126,15 +126,14 @@
    :hints {:prefer_definitions_over_callers true}
    :options {:include_tests false
              :include_impact_hints true
-             :allow_raw_code_escalation false
-             :favor_compact_packet true
-             :favor_higher_recall false}
+             :allow_raw_code_escalation false}
    :trace {:trace_id "33333333-3333-4333-8333-333333333333"
            :request_id "runtime-test-py-001"
            :actor_id "test_runner"}})
 
 (def sample-query-typescript
-  {:schema_version "1.0"
+  {:api_version "1.0"
+   :schema_version "1.0"
    :intent {:purpose "code_understanding"
             :details "Locate TypeScript processMain function."}
    :targets {:symbols ["src.example.main/processMain"]
@@ -145,9 +144,7 @@
    :hints {:prefer_definitions_over_callers true}
    :options {:include_tests true
              :include_impact_hints true
-             :allow_raw_code_escalation false
-             :favor_compact_packet true
-             :favor_higher_recall false}
+             :allow_raw_code_escalation false}
    :trace {:trace_id "44444444-4444-4444-8444-444444444444"
            :request_id "runtime-test-ts-001"
            :actor_id "test_runner"}})
@@ -646,6 +643,77 @@
       (is (some #(= "stale_index" (:code %))
                 (get-in result [:guardrail_assessment :blocking_reasons]))))))
 
+(deftest staged-selection-stays-snapshot-bound-and-detail-fetch-is-idempotent-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-staged-snapshot-bound" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        selection-cache (atom {:max_entries 8})
+        index-a (sci/create-index {:root_path tmp-root
+                                   :selection_cache selection-cache})
+        selection (sci/resolve-context index-a sample-query)
+        _ (write-file! tmp-root
+                       "src/my/app/order.clj"
+                       "(ns my.app.order)\n\n(defn process-order [ctx order]\n  :mutated)\n\n(defn validate-order [order]\n  :mutated)\n")
+        index-b (sci/create-index {:root_path tmp-root
+                                   :selection_cache selection-cache})
+        detail-1 (sci/fetch-context-detail index-b {:selection_id (:selection_id selection)
+                                                    :snapshot_id (:snapshot_id selection)
+                                                    :detail_level "enclosing_unit"})
+        detail-2 (sci/fetch-context-detail index-b {:selection_id (:selection_id selection)
+                                                    :snapshot_id (:snapshot_id selection)
+                                                    :detail_level "enclosing_unit"})
+        raw-content (str/join "\n" (map :content (:raw_context detail-1)))]
+    (is (str/includes? raw-content "str/join"))
+    (is (not (str/includes? raw-content ":mutated")))
+    (is (= detail-1 detail-2))))
+
+(deftest selection-cache-eviction-surfaces-explicit-error-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-selection-eviction" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        selection-cache (atom {:max_entries 1})
+        index (sci/create-index {:root_path tmp-root
+                                 :selection_cache selection-cache})
+        selection-a (sci/resolve-context index sample-query)
+        selection-b (sci/resolve-context index sample-query-python)]
+    (is (string? (:selection_id selection-b)))
+    (try
+      (sci/fetch-context-detail index {:selection_id (:selection_id selection-a)
+                                       :snapshot_id (:snapshot_id selection-a)})
+      (is false "expected selection eviction")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :selection_evicted (:type (ex-data e))))
+        (is (= "selection_evicted" (:error_code (ex-data e))))
+        (is (= "not_found" (:error_category (ex-data e))))))))
+
+(deftest snapshot-mismatch-surfaces-explicit-error-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-selection-snapshot-mismatch" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        selection-cache (atom {:max_entries 8})
+        index (sci/create-index {:root_path tmp-root
+                                 :selection_cache selection-cache})
+        selection (sci/resolve-context index sample-query)]
+    (try
+      (sci/fetch-context-detail index {:selection_id (:selection_id selection)
+                                       :snapshot_id "wrong-snapshot"})
+      (is false "expected snapshot mismatch")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :snapshot_mismatch (:type (ex-data e))))
+        (is (= "snapshot_mismatch" (:error_code (ex-data e))))
+        (is (= "conflict" (:error_category (ex-data e))))))))
+
+(deftest unsupported-api-version-surfaces-explicit-error-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-unsupported-api-version" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        index (sci/create-index {:root_path tmp-root})]
+    (try
+      (sci/resolve-context index (assoc sample-query :api_version "2.0"))
+      (is false "expected unsupported api_version")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :unsupported_api_version (:type (ex-data e))))
+        (is (= "unsupported_api_version" (:error_code (ex-data e))))
+        (is (= "client" (:error_category (ex-data e))))
+        (is (= "2.0" (get-in (ex-data e) [:details :provided_api_version])))
+        (is (= ["1.0"] (get-in (ex-data e) [:details :supported_api_versions])))))))
+
 (deftest library-surface-emits-normalized-error-taxonomy-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-library-error-taxonomy-test" (make-array java.nio.file.attribute.FileAttribute 0)))]
     (try
@@ -903,6 +971,7 @@
         shipping-units (sci/query-units storage tmp-root {:module "my.app.shipping" :limit 20})
         pickup-method (some #(when (= ":pickup" (:dispatch_value %)) %) shipping-units)
         query {:schema_version "1.0"
+               :api_version "1.0"
                :intent {:purpose "code_understanding"
                         :details "Locate the pickup route-order implementation."}
                :targets {:symbols ["my.app.shipping/route-order"]
@@ -913,9 +982,7 @@
                :hints {:prefer_definitions_over_callers true}
                :options {:include_tests false
                          :include_impact_hints true
-                         :allow_raw_code_escalation false
-                         :favor_compact_packet true
-                         :favor_higher_recall false}
+                         :allow_raw_code_escalation false}
                :trace {:trace_id "55555555-5555-4555-8555-555555555555"
                        :request_id "runtime-test-clj-dispatch-001"
                        :actor_id "test_runner"}}

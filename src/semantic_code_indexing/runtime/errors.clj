@@ -6,6 +6,14 @@
                      :error_category "client"
                      :http_status 400
                      :grpc_status Status/INVALID_ARGUMENT}
+   :unsupported_api_version {:error_code "unsupported_api_version"
+                             :error_category "client"
+                             :http_status 400
+                             :grpc_status Status/INVALID_ARGUMENT}
+   :snapshot_mismatch {:error_code "snapshot_mismatch"
+                       :error_category "conflict"
+                       :http_status 409
+                       :grpc_status Status/FAILED_PRECONDITION}
    :invalid_query {:error_code "invalid_query"
                    :error_category "client"
                    :http_status 400
@@ -26,6 +34,14 @@
                      :error_category "not_found"
                      :http_status 404
                      :grpc_status Status/NOT_FOUND}
+   :selection_not_found {:error_code "selection_not_found"
+                         :error_category "not_found"
+                         :http_status 404
+                         :grpc_status Status/NOT_FOUND}
+   :selection_evicted {:error_code "selection_evicted"
+                       :error_category "not_found"
+                       :http_status 410
+                       :grpc_status Status/FAILED_PRECONDITION}
    :protocol_error {:error_code "protocol_error"
                     :error_category "protocol"
                     :http_status 400

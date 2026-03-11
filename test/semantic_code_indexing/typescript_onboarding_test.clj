@@ -16,7 +16,8 @@
                        "import { normalizeOrder } from \"./normalize\";\n\nexport function processMain(orderId: string): string {\n  return normalizeOrder(orderId);\n}\n")
         index (sci/create-index {:root_path tmp-root})
         result (sci/resolve-context-detail index
-                                    {:schema_version "1.0"
+                                    {:api_version "1.0"
+                                     :schema_version "1.0"
                                      :intent {:purpose "code_understanding"
                                               :details "Locate TypeScript processMain function."}
                                      :targets {:symbols ["src.example.main/processMain"]
@@ -27,9 +28,7 @@
                                      :hints {:prefer_definitions_over_callers true}
                                      :options {:include_tests false
                                                :include_impact_hints true
-                                               :allow_raw_code_escalation false
-                                               :favor_compact_packet true
-                                               :favor_higher_recall false}
+                                               :allow_raw_code_escalation false}
                                      :trace {:trace_id "55555555-5555-4555-8555-555555555555"
                                              :request_id "typescript-onboarding-test-001"
                                              :actor_id "test_runner"}})]

@@ -181,12 +181,10 @@
      [:prefer_definitions_over_callers {:optional true} boolean?]
      [:prefer_breadth_over_depth {:optional true} boolean?]]]
    [:options
-    [:map {:closed true}
+   [:map {:closed true}
      [:include_tests {:optional true} boolean?]
      [:include_impact_hints {:optional true} boolean?]
-     [:allow_raw_code_escalation {:optional true} boolean?]
-     [:favor_compact_packet {:optional true} boolean?]
-     [:favor_higher_recall {:optional true} boolean?]]]
+     [:allow_raw_code_escalation {:optional true} boolean?]]]
    [:trace trace-ref]])
 
 (def compact-focus-unit

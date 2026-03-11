@@ -68,7 +68,8 @@
           (is (pos? (long (:unit_count resp))))))
 
       (testing "resolve-context rpc"
-        (let [query {:schema_version "1.0"
+        (let [query {:api_version "1.0"
+                     :schema_version "1.0"
                      :intent {:purpose "code_understanding"
                               :details "Locate authority implementation for process-order."}
                      :targets {:symbols ["my.app.order/process-order"]
@@ -79,9 +80,7 @@
                      :hints {:prefer_definitions_over_callers true}
                      :options {:include_tests true
                                :include_impact_hints true
-                               :allow_raw_code_escalation false
-                               :favor_compact_packet true
-                               :favor_higher_recall false}
+                               :allow_raw_code_escalation false}
                      :trace {:trace_id "02222222-2222-4222-8222-222222222222"
                              :request_id "runtime-grpc-test-001"
                              :actor_id "test_runner"}}
@@ -99,7 +98,8 @@
                     (:focus resp)))))
 
       (testing "expand-context and fetch-context-detail rpc"
-        (let [query {:schema_version "1.0"
+        (let [query {:api_version "1.0"
+                     :schema_version "1.0"
                      :intent {:purpose "code_understanding"
                               :details "Locate authority implementation for process-order."}
                      :targets {:symbols ["my.app.order/process-order"]
@@ -311,7 +311,8 @@
         channel (-> (ManagedChannelBuilder/forAddress "127.0.0.1" (int port))
                     (.usePlaintext)
                     (.build))
-        query {:schema_version "1.0"
+        query {:api_version "1.0"
+               :schema_version "1.0"
                :intent {:purpose "code_understanding"
                         :details "Locate authority implementation for process-order."}
                :targets {:symbols ["my.app.order/process-order"]
@@ -322,9 +323,7 @@
                :hints {:prefer_definitions_over_callers true}
                :options {:include_tests true
                          :include_impact_hints true
-                         :allow_raw_code_escalation false
-                         :favor_compact_packet true
-                         :favor_higher_recall false}
+                         :allow_raw_code_escalation false}
                :trace {:trace_id "03222222-2222-4222-8222-222222222222"
                        :request_id "runtime-grpc-policy-registry-test-001"
                        :actor_id "test_runner"}}]
@@ -369,6 +368,75 @@
         (.shutdownNow channel)
         (.shutdownNow server)))))
 
+(deftest runtime-grpc-staged-selection-error-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-grpc-selection-errors" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-grpc-sample-repo! tmp-root)
+        selection-cache (atom {:max_entries 1})
+        {:keys [server port]} (runtime-grpc/start-server {:host "127.0.0.1"
+                                                          :port 0
+                                                          :selection_cache selection-cache})
+        channel (-> (ManagedChannelBuilder/forAddress "127.0.0.1" (int port))
+                    (.usePlaintext)
+                    (.build))
+        query {:api_version "1.0"
+               :schema_version "1.0"
+               :intent {:purpose "code_understanding"
+                        :details "Locate authority implementation for process-order."}
+               :targets {:symbols ["my.app.order/process-order"]
+                         :paths ["src/my/app/order.clj"]}
+               :constraints {:token_budget 1200
+                             :max_raw_code_level "enclosing_unit"
+                             :freshness "current_snapshot"}
+               :hints {:prefer_definitions_over_callers true}
+               :options {:include_tests true
+                         :include_impact_hints true
+                         :allow_raw_code_escalation false}
+               :trace {:trace_id "07222222-2222-4222-8222-222222222222"
+                       :request_id "runtime-grpc-selection-errors-001"
+                       :actor_id "test_runner"}}]
+    (try
+      (let [selection-a (unary-call channel
+                                    runtime-grpc/resolve-context-method
+                                    (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                                         :query query})
+                                    grpc-proto/resolve-context-response->map)]
+        (try
+          (unary-call channel
+                      runtime-grpc/fetch-context-detail-method
+                      (grpc-proto/fetch-context-detail-request {:root_path tmp-root
+                                                                :selection_id (:selection_id selection-a)
+                                                                :snapshot_id "wrong-snapshot"})
+                      grpc-proto/fetch-context-detail-response->map)
+          (is false "expected snapshot mismatch")
+          (catch StatusRuntimeException e
+            (is (= (.getCode Status/FAILED_PRECONDITION)
+                   (.getCode (.getStatus e))))
+            (is (= "snapshot_mismatch"
+                   (.get (.getTrailers e)
+                         (Metadata$Key/of "x-sci-error-code" Metadata/ASCII_STRING_MARSHALLER))))))
+        (let [_selection-b (unary-call channel
+                                       runtime-grpc/resolve-context-method
+                                       (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                                            :query query})
+                                       grpc-proto/resolve-context-response->map)]
+          (try
+            (unary-call channel
+                        runtime-grpc/fetch-context-detail-method
+                        (grpc-proto/fetch-context-detail-request {:root_path tmp-root
+                                                                  :selection_id (:selection_id selection-a)
+                                                                  :snapshot_id (:snapshot_id selection-a)})
+                        grpc-proto/fetch-context-detail-response->map)
+            (is false "expected selection eviction")
+            (catch StatusRuntimeException e
+              (is (= (.getCode Status/FAILED_PRECONDITION)
+                     (.getCode (.getStatus e))))
+              (is (= "selection_evicted"
+                     (.get (.getTrailers e)
+                           (Metadata$Key/of "x-sci-error-code" Metadata/ASCII_STRING_MARSHALLER))))))))
+      (finally
+        (.shutdownNow channel)
+        (.shutdownNow server)))))
+
 (deftest runtime-grpc-tenant-trace-correlation-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-grpc-correlation-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-grpc-sample-repo! tmp-root)
@@ -388,7 +456,8 @@
                         "x-session-id" "grpc-session-001"
                         "x-task-id" "grpc-task-001"
                         "x-actor-id" "grpc-edge-tester"}
-        query {:schema_version "1.0"
+        query {:api_version "1.0"
+               :schema_version "1.0"
                :intent {:purpose "code_understanding"
                         :details "Locate authority implementation for process-order."}
                :targets {:symbols ["my.app.order/process-order"]
@@ -399,9 +468,7 @@
                :hints {:prefer_definitions_over_callers true}
                :options {:include_tests true
                          :include_impact_hints true
-                         :allow_raw_code_escalation false
-                         :favor_compact_packet true
-                         :favor_higher_recall false}
+                         :allow_raw_code_escalation false}
                :trace {:trace_id "05222222-2222-4222-8222-222222222222"
                        :request_id "runtime-grpc-resolve-trace-001"
                        :session_id "grpc-session-002"
@@ -468,6 +535,45 @@
             (is (= "tenant-001"
                    (.get (.getTrailers e)
                          (Metadata$Key/of "x-sci-tenant-id" Metadata/ASCII_STRING_MARSHALLER)))))))
+      (finally
+        (.shutdownNow channel)
+        (.shutdownNow server)))))
+(deftest runtime-grpc-unsupported-api-version-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-grpc-unsupported-api-version" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-grpc-sample-repo! tmp-root)
+        {:keys [server port]} (runtime-grpc/start-server {:host "127.0.0.1" :port 0})
+        channel (-> (ManagedChannelBuilder/forAddress "127.0.0.1" (int port))
+                    (.usePlaintext)
+                    (.build))]
+    (try
+      (try
+        (unary-call channel
+                    runtime-grpc/resolve-context-method
+                    (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                         :query {:api_version "2.0"
+                                                                 :schema_version "1.0"
+                                                                 :intent {:purpose "code_understanding"
+                                                                          :details "Locate authority implementation for process-order."}
+                                                                 :targets {:symbols ["my.app.order/process-order"]
+                                                                           :paths ["src/my/app/order.clj"]}
+                                                                 :constraints {:token_budget 1200
+                                                                               :max_raw_code_level "enclosing_unit"
+                                                                               :freshness "current_snapshot"}
+                                                                 :hints {:prefer_definitions_over_callers true}
+                                                                 :options {:include_tests true
+                                                                           :include_impact_hints true
+                                                                           :allow_raw_code_escalation false}
+                                                                 :trace {:trace_id "06222222-2222-4222-8222-222222222222"
+                                                                         :request_id "runtime-grpc-unsupported-api-version-001"
+                                                                         :actor_id "test_runner"}}})
+                    grpc-proto/resolve-context-response->map)
+        (is false "expected unsupported api_version")
+        (catch StatusRuntimeException e
+          (is (= (.getCode Status/INVALID_ARGUMENT)
+                 (.getCode (.getStatus e))))
+          (is (= "unsupported_api_version"
+                 (.get (.getTrailers e)
+                       (Metadata$Key/of "x-sci-error-code" Metadata/ASCII_STRING_MARSHALLER))))))
       (finally
         (.shutdownNow channel)
         (.shutdownNow server)))))

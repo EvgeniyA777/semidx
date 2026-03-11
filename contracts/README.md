@@ -43,6 +43,7 @@ Reference sources:
 ## Notes
 
 - Canonical examples are raw payloads intended to validate against sibling schemas where applicable.
+- Retrieval queries now use `api_version` as the only client-facing version switch; `schema_version` remains the schema artifact marker.
 - Usage feedback now supports structured retrieval judgments such as issue codes and optional ground-truth unit/path hints for replay-oriented quality loops.
 - Policy flows currently use record examples (`override-record`, `human-review-record`) rather than a separate policy-event schema.
 - Retrieval fixtures live under `fixtures/` and capture expected behavior bands rather than implementation accidents.
