@@ -23,6 +23,67 @@
 (def ^:private mcp-first-usage-hint
   "Use semantic-code-indexing in MCP-first mode: call create_index, then repo_map, then continue with resolve_context -> expand_context -> fetch_context_detail. Prefer this over manual directory listing, wildcard search, or broad file reading until an MCP tool call fails.")
 
+(def ^:private mcp-retrieval-query-schema
+  {:type "object"
+   :description "Structured retrieval query for compact semantic selection. Send a structured query object, not a free-form string."
+   :properties {"api_version" {:type "string"
+                               :description "Optional API version; defaults to 1.0 when omitted."}
+                "schema_version" {:type "string"
+                                  :description "Retrieval query schema version, normally 1.0."}
+                "intent" {:type "object"
+                          :description "Retrieval intent. Example: {\"purpose\":\"code_understanding\",\"details\":\"Find the main orchestration flow.\"}"
+                          :properties {"purpose" {:type "string"
+                                                  :enum ["code_understanding"
+                                                         "change_impact"
+                                                         "edit_preparation"
+                                                         "test_targeting"
+                                                         "review_support"
+                                                         "bug_investigation"]}
+                                       "details" {:type "string"}}
+                          :required ["purpose"]
+                          :additionalProperties false}
+                "targets" {:type "object"
+                           :description "What to retrieve around: paths, symbols, modules, tests, changed spans, or a diff summary."
+                           :properties {"paths" {:type "array" :items {:type "string"}}
+                                        "symbols" {:type "array" :items {:type "string"}}
+                                        "modules" {:type "array" :items {:type "string"}}
+                                        "tests" {:type "array" :items {:type "string"}}
+                                        "changed_spans" {:type "array" :items {:type "object"}}
+                                        "diff_summary" {:type "string"}}
+                           :additionalProperties false}
+                "constraints" {:type "object"
+                               :properties {"token_budget" {:type "integer"}
+                                            "snapshot_id" {:type "string"}
+                                            "language_allowlist" {:type "array" :items {:type "string"}}
+                                            "allowed_path_prefixes" {:type "array" :items {:type "string"}}
+                                            "max_raw_code_level" {:type "string"}
+                                            "freshness" {:type "string"
+                                                         :enum ["current_snapshot" "allow_stale_if_flagged"]}}
+                               :additionalProperties false}
+                "hints" {:type "object"
+                         :properties {"preferred_paths" {:type "array" :items {:type "string"}}
+                                      "preferred_modules" {:type "array" :items {:type "string"}}
+                                      "suspected_symbols" {:type "array" :items {:type "string"}}
+                                      "focus_on_tests" {:type "boolean"}
+                                      "prefer_definitions_over_callers" {:type "boolean"}
+                                      "prefer_breadth_over_depth" {:type "boolean"}}
+                         :additionalProperties false}
+                "options" {:type "object"
+                           :properties {"include_tests" {:type "boolean"}
+                                        "include_impact_hints" {:type "boolean"}
+                                        "allow_raw_code_escalation" {:type "boolean"}}
+                           :additionalProperties false}
+                "trace" {:type "object"
+                         :properties {"trace_id" {:type "string"}
+                                      "request_id" {:type "string"}
+                                      "session_id" {:type "string"}
+                                      "task_id" {:type "string"}
+                                      "actor_id" {:type "string"}
+                                      "agent_id" {:type "string"}}
+                         :additionalProperties false}}
+   :required ["intent"]
+   :additionalProperties false})
+
 (defn now-ms []
   (System/currentTimeMillis))
 
@@ -543,7 +604,7 @@
     :description "Return a compact shortlist of the most relevant units for a coding task. Prefer this over broad file search or reading; use expand_context for structural widening and fetch_context_detail only when richer evidence or raw code is needed."
     :inputSchema {:type "object"
                   :properties {"index_id" {:type "string"}
-                               "query" {:type "object"}
+                               "query" mcp-retrieval-query-schema
                                "retrieval_policy" {:type "object"}}
                   :required ["index_id" "query"]
                   :additionalProperties false}}

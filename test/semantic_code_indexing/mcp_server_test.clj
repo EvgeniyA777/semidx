@@ -281,6 +281,7 @@
         (send-message! handle {:jsonrpc "2.0" :id 2 :method "tools/list" :params {}})
         (let [tools-response (wait-for-response handle 2 response-timeout-ms)
               tools (get-in tools-response [:result :tools])
+              resolve-tool (some #(when (= "resolve_context" (:name %)) %) tools)
               tool-names (->> tools
                               (map :name)
                               set)]
@@ -300,7 +301,11 @@
                                       (filter #(= "resolve_context" (:name %)))
                                       first
                                       :description)
-                             "Prefer this over broad file search"))))
+                             "Prefer this over broad file search"))
+          (is (= "object" (get-in resolve-tool [:inputSchema :properties :query :type])))
+          (is (= ["intent"] (get-in resolve-tool [:inputSchema :properties :query :required])))
+          (is (= ["purpose"] (get-in resolve-tool [:inputSchema :properties :query :properties :intent :required])))
+          (is (= "object" (get-in resolve-tool [:inputSchema :properties :query :properties :targets :type])))))
 
       (let [create-response (call-tool! handle 3 "create_index" {:root_path tmp-root})
             create-data (get-in create-response [:result :structuredContent])
