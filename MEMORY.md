@@ -63,7 +63,7 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Phase 5 orchestration now also maintains retained review/governance indexes plus derived `phase5-review-queue` and `phase5-status-report` outputs, so operators can see pending review work and recent loop state without scanning raw retained artifacts by hand.
 - Phase 5 now also has a top-level retained orchestration command, `scheduled-phase5-cycle`, which snapshots the current governance run, queue state, and aggregate status into one first-class artifact stream plus `phase5-run-index.json`.
 - Canonical in-repo roadmap status checklist now lives in `docs/roadmap-status.md`, with a dated rationale and status snapshot stored under `notes/`.
-- Product roadmap progress is now effectively through the main Phase 4 slices: governed quality loop, language-priority semantic-core deepening, capabilities/calibration, index lifecycle, unified error taxonomy, SLO-facing metrics, tenant/trace consistency, and governance-tier enforcement are in place; the next major tranche is Phase 5 self-improvement automation plus any deeper compiler-grade semantic follow-up.
+- Product roadmap progress is now effectively through the main Phase 5 slices: governed quality loop, language-priority semantic-core deepening, capabilities/calibration, index lifecycle, unified error taxonomy, SLO-facing metrics, tenant/trace consistency, governance-tier enforcement, and retained self-improvement orchestration are in place; the next major tranche is post-roadmap deeper compiler-grade semantic follow-up.
 
 ## Hard Invariants
 
@@ -75,22 +75,22 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 
 ## Known Gaps
 
-- No deep compiler-grade semantic resolution yet.
+- No full compiler-grade interprocedural semantic resolution across all supported languages yet.
 - gRPC message classes are still descriptor-built at runtime; generated Java/Kotlin stubs are not wired yet.
 - No dynamic external policy backend integration yet (current authz adapter is local file/callback based).
 - HTTP/gRPC/MCP surfaces now support server-configured registries and selector-based `resolve_context` policy lookup, but broader online policy-management/control-plane APIs are still intentionally absent.
 - Rate limiting is delegated to ingress/proxy/host layer and not implemented in runtime edges.
 - Tree-sitter path still depends on external CLI availability, though grammar bootstrap is now scripted and pinned.
 - Persistence graph queries are retrieval-oriented and not yet a full semantic graph query language.
-- Language-priority roadmap tail remains open after the current Clojure, Elixir, Java, Python, and TypeScript pushes: the strategic slices are now in place across all five lanes, but the final roadmap closure pass still needs to normalize status/docs wording into one completed Phase 3 view.
+- Phase 3 roadmap closure is now complete across Clojure, Elixir, Java, Python, and TypeScript; remaining semantic work is post-roadmap deepening rather than an open roadmap tail.
 - Runtime hardening is now effectively complete for the main roadmap scope; any remaining ops work is incremental polish rather than a missing Phase 4 primitive.
 - Real self-improvement loop is now operationally complete for the current roadmap scope: replay harvesting, difficult-case capture, calibration reports, weekly review artifacts, protected replay dataset conversion, retained review/governance runs, queue/status reporting, and top-level retained Phase 5 orchestration all exist.
 - Compact-first staged retrieval is now fully aligned as the canonical public flow: `resolve_context` is compact-first, `expand_context` / `fetch_context_detail` are the explicit later stages, selection artifacts are snapshot-bound, and the implementation/docs/examples line is captured by `ADR-024` plus the completed `docs/compact-first-staged-retrieval-plan.md`.
 
 ## Next Execution Priorities
 
-1. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
-2. Put the next serious engineering pass into genuinely deeper compiler-grade semantic-core tails rather than more Phase 5 infrastructure.
+1. Put the next serious engineering pass into genuinely deeper compiler-grade semantic-core work rather than more roadmap closure.
+2. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
 3. Treat further runtime/ops work as incremental polish unless a concrete production gap appears.
 
 ## Update Rule

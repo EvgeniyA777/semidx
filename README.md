@@ -137,7 +137,7 @@ Roadmap status is tracked separately in [docs/roadmap-status.md](docs/roadmap-st
 - TypeScript semantic-core now resolves named, namespace, and default-import ownership more accurately, preserves local `this.` and class-qualified method targeting, and recognizes exported function-expression bindings alongside named functions and arrow bindings while still keeping a conservative `low` confidence ceiling
 - multi-language call/symbol resolution has module/class-aware normalization for Java, Elixir, Python, TypeScript
 - import-aware and owner-aware disambiguation is applied when resolving ambiguous call targets
-- optional tree-sitter extraction path is available for Clojure/Java (grammar-path configured)
+- optional tree-sitter extraction path is available for Clojure/Java/TypeScript (grammar-path configured)
 - tiered structural-first ranking and non-compensating confidence model implemented
 - capabilities now emit per-language strength plus a capability-driven `confidence_ceiling`, and guardrails/scorecards account for that ceiling during retrieval evaluation
 - index lifecycle metadata now emits TTL/staleness/provenance signals (`index_lifecycle`, stale pinned snapshots, rebuild reasons) across library/runtime surfaces

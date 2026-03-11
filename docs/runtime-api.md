@@ -312,7 +312,7 @@ The capability layer is now language-strength-aware. Runtime retrieval emits `:s
 
 - Clojure can still reach `high` when structural evidence is strong
 - Elixir, Java, and Python currently top out at `medium`
-- TypeScript remains compatibility-grade and currently tops out at `low`
+- TypeScript now has strategic import/method coverage but still intentionally tops out at `low`
 
 Guardrails now also surface `capability_ceiling` risk/blocking signals when language strength prevents a higher-autonomy posture.
 
@@ -1104,8 +1104,8 @@ Transport mapping for authz denials:
 ## Current MVP Notes
 
 - Clojure parser pipeline is `clj-kondo` first, with regex fallback.
-- Java, Elixir, Python, and TypeScript parsers are lightweight regex-based in MVP.
-- `tree-sitter` extraction is implemented for Clojure and Java when corresponding grammar paths are configured.
+- Java, Elixir, and Python parsers are lightweight regex-based in MVP; TypeScript is regex-first with an optional tree-sitter path.
+- `tree-sitter` extraction is implemented for Clojure, Java, and TypeScript when corresponding grammar paths are configured.
 - If tree-sitter is requested but unavailable/misconfigured, runtime falls back with diagnostics (`tree_sitter_*` codes).
 - Raw-code escalation stage is late and opt-in via query options (`allow_raw_code_escalation`) and bounded by `constraints.max_raw_code_level`.
 - Ranking is structural-first and tiered, with hard ceilings when Tier1 evidence is missing.
