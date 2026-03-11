@@ -1,15 +1,22 @@
 # MCP API
 
-`Semantic Code Indexing` can run as a local stdio MCP server over the same core library API.
+`Semantic Code Indexing` can run as a local MCP server over the same core library API via:
+
+- stdio
+- Streamable HTTP
+- legacy-style SSE (`GET /mcp/sse` + `POST /mcp/messages`)
 
 ## Start
 
 ```bash
 SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" \
 clojure -M:mcp
+
+SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" \
+clojure -M:mcp-http --host 127.0.0.1 --port 8791 --transport-mode dual
 ```
 
-Environment:
+Environment and flags:
 
 - `SCI_MCP_ALLOWED_ROOTS` - optional allowlist of canonical repository roots; use the platform path separator (`:` on macOS/Linux, `;` on Windows)
 - `SCI_MCP_MAX_INDEXES` - optional in-memory LRU cache size; default `8`
@@ -17,6 +24,8 @@ Environment:
 - `SCI_USAGE_METRICS_JDBC_URL` - optional PostgreSQL JDBC URL for MCP usage metrics
 - `SCI_USAGE_METRICS_DB_USER` - optional PostgreSQL username for MCP usage metrics
 - `SCI_USAGE_METRICS_DB_PASSWORD` - optional PostgreSQL password for MCP usage metrics
+- `--host` / `--port` - only for `clojure -M:mcp-http`; defaults `127.0.0.1:8791`
+- `--transport-mode dual|streamable|sse` - only for `clojure -M:mcp-http`; default `dual`
 
 If `SCI_MCP_ALLOWED_ROOTS` is missing, the server defaults the allowlist to the current working directory of the MCP process and prints a warning with:
 
@@ -26,7 +35,46 @@ If `SCI_MCP_ALLOWED_ROOTS` is missing, the server defaults the allowlist to the 
 
 The server does not prompt interactively for this choice because `stdin`/`stdout` are reserved for MCP transport.
 
-The MCP server exposes only `tools` capability in v1 and keeps cached indexes in-process for the lifetime of the server.
+The MCP server exposes only `tools` capability in v1 and keeps cached indexes in-process for the lifetime of the server/session.
+
+`stdio` stays session-scoped to the local process. `mcp-http` adds in-memory sessions with:
+
+- `Mcp-Session-Id` for Streamable HTTP after `initialize`
+- one active SSE stream per session
+- lazy in-memory session cleanup after 30 minutes of inactivity
+- no persistent session store and no built-in authn/authz in v1
+- transport-level session errors for missing/expired sessions instead of silent implicit recreation outside `initialize`
+
+The HTTP MCP transport is local-only by default because `mcp-http` binds to `127.0.0.1` unless overridden explicitly.
+
+## Transport Shapes
+
+### Streamable HTTP
+
+- `POST /mcp`
+- `GET /health`
+
+Flow:
+
+1. `initialize` without `Mcp-Session-Id` creates a session and returns the same JSON-RPC result shape as stdio plus the `Mcp-Session-Id` response header.
+2. Subsequent JSON-RPC calls reuse that session via `Mcp-Session-Id`.
+3. Missing sessions return `missing_session`; expired or unknown sessions return `unknown_session`.
+4. Tool-level errors still come back inside the normal MCP `tools/call` result payload.
+
+### SSE
+
+- `GET /mcp/sse`
+- `POST /mcp/messages?session_id=<id>`
+
+Flow:
+
+1. `GET /mcp/sse` creates or reconnects an SSE session and immediately emits an `endpoint` event containing `session_id` and the canonical message POST endpoint.
+2. Client posts JSON-RPC requests to `/mcp/messages`.
+3. Responses are emitted back on the SSE stream as `event: message`.
+4. Reconnecting the same session replaces the previous SSE stream.
+5. Posting to `/mcp/messages` without an active SSE stream returns `sse_session_not_connected`.
+
+Both HTTP transports reuse the same tool/session core as stdio, so `initialize`, `ping`, `tools/list`, and `tools/call` return the same structured MCP payloads across transports.
 
 If `SCI_USAGE_METRICS_JDBC_URL` is configured, the server records:
 
@@ -245,3 +293,5 @@ Returns:
 - MCP tool errors now carry canonical taxonomy fields in `structuredContent.details`: `code` and `category`.
 - `no_supported_languages_found` errors also carry `supported_languages`, `selection_hint`, and optional `recommended_core_language` in `structuredContent.details.details`.
 - `language_refresh_required` indicates that the request references a supported language outside the current active lane set; the client should rerun `create_index`.
+- Streamable HTTP session bootstrap is explicit: only `initialize` creates a new session. Other methods must reuse `Mcp-Session-Id`.
+- SSE sessions also expire after inactivity; clients should reconnect and reinitialize if they receive `unknown_session`.

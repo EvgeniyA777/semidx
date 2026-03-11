@@ -41,7 +41,7 @@ Current scope is contract architecture plus a working MVP runtime implementation
 - `docs/semantic-stabilization-plan.md` - next internal semantic architecture tranche
 - `fixtures/retrieval/` - retrieval fixture corpus (behavior bands)
 - `src/semantic_code_indexing/contracts/` - Clojure `malli` mirror and validator CLI
-- `src/semantic_code_indexing/mcp/` - stdio MCP server over the core library API
+- `src/semantic_code_indexing/mcp/` - MCP core plus stdio and HTTP transports over the core library API
 - `scripts/` - local validation entrypoints
 
 ## Contract Validation
@@ -80,9 +80,11 @@ Canonical retrieval flow is compact-first staged retrieval:
 - Emit the aggregate Phase 5 status report over retained review, governance, and queue artifacts: `clojure -M:eval phase5-status-report --artifacts-dir "${TMPDIR:-.tmp}/policy-review" --limit 20 --out "${TMPDIR:-.tmp}/sci-phase5-status-report.json"`
 - Resolve context from query file: `clojure -M:runtime --root . --query contracts/examples/queries/symbol-target.json --out "${TMPDIR:-.tmp}/sci.json"`
 - Run stdio MCP server: `SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" clojure -M:mcp`
+- Run MCP over local Streamable HTTP + SSE: `SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" clojure -M:mcp-http --host 127.0.0.1 --port 8791`
 - Enable MCP usage metrics persistence: `SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index clojure -M:mcp`
 - Enable HTTP/gRPC usage metrics persistence: `SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index clojure -M:runtime-http` or `clojure -M:runtime-grpc`
 - If `SCI_MCP_ALLOWED_ROOTS` is missing, the MCP server now defaults the allowlist to the current `cwd` and prints a warning with explicit override examples; it does not prompt interactively because MCP uses stdio transport
+- MCP HTTP server defaults to `127.0.0.1` and supports `--transport-mode dual|streamable|sse`; Streamable HTTP uses `POST /mcp` with `Mcp-Session-Id`, while legacy SSE uses `GET /mcp/sse` plus `POST /mcp/messages`
 - Run minimal HTTP edge: `clojure -M:runtime-http --host 127.0.0.1 --port 8787`
 - Run minimal gRPC edge: `clojure -M:runtime-grpc --host 127.0.0.1 --port 8789`
 - Optional service auth boundary flags: `--api-key <token> --require-tenant` (or env `SCI_RUNTIME_API_KEY`, `SCI_RUNTIME_REQUIRE_TENANT=true`)
@@ -167,7 +169,7 @@ Roadmap status is tracked separately in [docs/roadmap-status.md](docs/roadmap-st
 - HTTP/gRPC now also propagate tenant and correlation context consistently: `x-trace-id`, `x-request-id`, `x-session-id`, `x-task-id`, and `x-actor-id` flow into usage events; HTTP echoes them back as `x-sci-*` response headers and gRPC attaches them on error trailers
 - HTTP/gRPC keep isolated project contexts per canonical `root_path` (tenant-qualified when a tenant is present), support optional server-level `language_policy`, and return `project_context` activation metadata alongside create/retrieval responses
 - when a project activation is already rebuilding, HTTP/gRPC now return transient `language_activation_in_progress` guidance with retry metadata instead of silently starting duplicate builds
-- stdio MCP edge is available for portable local tool-based integration with session-scoped index caching
+- MCP now shares one transport-agnostic core across stdio, Streamable HTTP, and SSE, with session-scoped index caching and consistent tool payloads across transports
 
 ## License
 

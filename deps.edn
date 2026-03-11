@@ -15,6 +15,8 @@
   {:main-opts ["-m" "semantic-code-indexing.runtime.cli"]}
   :mcp
   {:main-opts ["-m" "semantic-code-indexing.mcp.server"]}
+  :mcp-http
+  {:main-opts ["-m" "semantic-code-indexing.mcp.http-server"]}
   :runtime-http
   {:main-opts ["-m" "semantic-code-indexing.runtime.http"]}
   :runtime-grpc

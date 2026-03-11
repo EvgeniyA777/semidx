@@ -1,0 +1,181 @@
+(ns semantic-code-indexing.mcp-http-server-test
+  (:require [clojure.data.json :as json]
+            [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing]]
+            [semantic-code-indexing.mcp.http-server :as mcp-http])
+  (:import [java.io BufferedReader InputStreamReader OutputStreamWriter]
+           [java.net HttpURLConnection URL]
+           [java.nio.charset StandardCharsets]))
+
+(defn- write-file! [root rel-path content]
+  (let [f (io/file root rel-path)]
+    (.mkdirs (.getParentFile f))
+    (spit f content)))
+
+(defn- create-sample-repo! [root]
+  (write-file! root "src/my/app/order.clj"
+               "(ns my.app.order)\n\n(defn process-order [ctx order]\n  (validate-order order))\n\n(defn validate-order [order]\n  order)\n"))
+
+(defn- request!
+  ([method url]
+   (request! method url nil nil))
+  ([method url payload headers]
+   (let [^HttpURLConnection conn (.openConnection (URL. url))]
+     (.setRequestMethod conn method)
+     (.setRequestProperty conn "Accept" "application/json")
+     (doseq [[header-name header-value] headers]
+       (.setRequestProperty conn (str header-name) (str header-value)))
+     (when payload
+       (.setDoOutput conn true)
+       (.setRequestProperty conn "Content-Type" "application/json")
+     (with-open [w (OutputStreamWriter. (.getOutputStream conn) StandardCharsets/UTF_8)]
+         (.write w (json/write-str payload :escape-slash false))))
+     (let [status (.getResponseCode conn)
+           stream (try
+                    (.getInputStream conn)
+                    (catch Exception _
+                      (.getErrorStream conn)))
+           body (when stream
+                  (with-open [rdr (io/reader stream)]
+                    (slurp rdr)))
+           payload* (when (seq body)
+                      (json/read-str body :key-fn keyword))]
+       {:status status
+        :headers {"Mcp-Session-Id" (.getHeaderField conn "Mcp-Session-Id")}
+        :body payload*}))))
+
+(defn- open-sse! [url]
+  (let [^HttpURLConnection conn (.openConnection (URL. url))]
+    (.setRequestMethod conn "GET")
+    (.setRequestProperty conn "Accept" "text/event-stream")
+    (.connect conn)
+    {:conn conn
+     :reader (BufferedReader. (InputStreamReader. (.getInputStream conn) StandardCharsets/UTF_8))
+     :session-id (.getHeaderField conn "Mcp-Session-Id")}))
+
+(defn- read-sse-event! [{:keys [^BufferedReader reader]} timeout-ms]
+  (deref
+   (future
+     (loop [event-name nil
+            data nil]
+       (let [line (.readLine reader)]
+         (cond
+           (nil? line) nil
+           (= "" line) {:event event-name :payload (some-> data (json/read-str :key-fn keyword))}
+           (.startsWith line "event: ") (recur (subs line 7) data)
+           (.startsWith line "data: ") (recur event-name (subs line 6))
+           :else (recur event-name data)))))
+   timeout-ms
+   ::timeout))
+
+(defn- close-sse! [{:keys [^HttpURLConnection conn ^BufferedReader reader]}]
+  (when reader
+    (.close reader))
+  (when conn
+    (.disconnect conn)))
+
+(deftest mcp-streamable-http-session-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-mcp-http-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        server (mcp-http/start-http-server! {:host "127.0.0.1"
+                                             :port 0
+                                             :allowed-roots [tmp-root]
+                                             :transport-mode "dual"})
+        base-url (str "http://127.0.0.1:" (:port server))]
+    (try
+      (let [init-response (request! "POST"
+                                    (str base-url "/mcp")
+                                    {:jsonrpc "2.0"
+                                     :id 1
+                                     :method "initialize"
+                                     :params {:protocolVersion "2024-11-05"
+                                              :capabilities {}
+                                              :clientInfo {:name "http-test"
+                                                           :version "1.0"}}}
+                                    nil)
+            session-id (get-in init-response [:headers "Mcp-Session-Id"])]
+        (testing "initialize creates an HTTP MCP session"
+          (is (= 200 (:status init-response)))
+          (is (string? session-id))
+          (is (= "semantic-code-indexing-mcp"
+                 (get-in init-response [:body :result :serverInfo :name]))))
+        (testing "tools/list works over the same session"
+          (let [list-response (request! "POST"
+                                        (str base-url "/mcp")
+                                        {:jsonrpc "2.0"
+                                         :id 2
+                                         :method "tools/list"}
+                                        {"Mcp-Session-Id" session-id})]
+            (is (= 200 (:status list-response)))
+            (is (seq (get-in list-response [:body :result :tools])))))
+        (testing "tools/call create_index works over streamable HTTP"
+          (let [create-response (request! "POST"
+                                          (str base-url "/mcp")
+                                          {:jsonrpc "2.0"
+                                           :id 3
+                                           :method "tools/call"
+                                           :params {:name "create_index"
+                                                    :arguments {:root_path tmp-root}}}
+                                          {"Mcp-Session-Id" session-id})]
+            (is (= 200 (:status create-response)))
+            (is (string? (get-in create-response [:body :result :structuredContent :snapshot_id])))))
+        (testing "missing session is rejected for non-initialize calls"
+          (let [missing-session (request! "POST"
+                                          (str base-url "/mcp")
+                                          {:jsonrpc "2.0"
+                                           :id 4
+                                           :method "tools/list"}
+                                          nil)]
+            (is (= 400 (:status missing-session)))
+            (is (= "missing MCP session"
+                   (get-in missing-session [:body :error :message]))))))
+      (finally
+        (mcp-http/stop-http-server! server)))))
+
+(deftest mcp-sse-roundtrip-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-mcp-sse-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        server (mcp-http/start-http-server! {:host "127.0.0.1"
+                                             :port 0
+                                             :allowed-roots [tmp-root]
+                                             :transport-mode "dual"})
+        base-url (str "http://127.0.0.1:" (:port server))
+        sse (open-sse! (str base-url "/mcp/sse"))]
+    (try
+      (let [endpoint-event (read-sse-event! sse 5000)
+            session-id (or (:session-id sse)
+                           (get-in endpoint-event [:payload :session_id]))]
+        (testing "SSE connect yields endpoint metadata"
+          (is (= "endpoint" (:event endpoint-event)))
+          (is (= session-id (get-in endpoint-event [:payload :session_id]))))
+        (let [initialize-response (request! "POST"
+                                            (str base-url "/mcp/messages?session_id=" session-id)
+                                            {:jsonrpc "2.0"
+                                             :id 1
+                                             :method "initialize"
+                                             :params {:protocolVersion "2024-11-05"
+                                                      :capabilities {}
+                                                      :clientInfo {:name "sse-test"
+                                                                   :version "1.0"}}}
+                                            nil)
+              initialize-event (read-sse-event! sse 5000)]
+          (testing "POST /mcp/messages accepts initialize and emits JSON-RPC over SSE"
+            (is (= 202 (:status initialize-response)))
+            (is (= "message" (:event initialize-event)))
+            (is (= 1 (get-in initialize-event [:payload :id])))
+            (is (= "semantic-code-indexing-mcp"
+                   (get-in initialize-event [:payload :result :serverInfo :name])))))
+        (let [list-response (request! "POST"
+                                      (str base-url "/mcp/messages?session_id=" session-id)
+                                      {:jsonrpc "2.0"
+                                       :id 2
+                                       :method "tools/list"}
+                                      nil)
+              list-event (read-sse-event! sse 5000)]
+          (testing "tools/list round-trips over SSE"
+            (is (= 202 (:status list-response)))
+            (is (= "message" (:event list-event)))
+            (is (seq (get-in list-event [:payload :result :tools]))))))
+      (finally
+        (close-sse! sse)
+        (mcp-http/stop-http-server! server)))))
