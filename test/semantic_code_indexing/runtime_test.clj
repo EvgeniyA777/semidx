@@ -43,6 +43,12 @@
                "package com.acme;\n\npublic class IdNormalizer {\n  public static String normalizeImported(String id) {\n    return id.trim();\n  }\n\n  public static String normalizeImported(String id, boolean strict) {\n    String base = id.trim();\n    return strict ? base : base.toLowerCase();\n  }\n}\n")
   (write-file! root "src/com/acme/AuditService.java"
                "package com.acme;\n\nimport static com.acme.IdNormalizer.normalizeImported;\n\npublic class AuditService {\n  public String processLocalCollision(String id) {\n    return normalizeImported(id);\n  }\n\n  public String processThisCollision(String id) {\n    return this.normalizeImported(id);\n  }\n\n  public String processImportedCollision(String id) {\n    return IdNormalizer.normalizeImported(id);\n  }\n\n  private String normalizeImported(String id) {\n    return \"[\" + id.trim() + \"]\";\n  }\n}\n")
+  (write-file! root "src/com/acme/BaseNormalizer.java"
+               "package com.acme;\n\npublic class BaseNormalizer {\n  protected String normalizeBase(String id) {\n    return id.trim().toLowerCase();\n  }\n}\n")
+  (write-file! root "src/com/acme/InheritedNormalizer.java"
+               "package com.acme;\n\npublic class InheritedNormalizer extends BaseNormalizer {\n  public String processInherited(String id) {\n    return normalizeBase(id);\n  }\n\n  public String processInheritedLambda(String id) {\n    java.util.function.Function<String, String> fn = value -> normalizeBase(value);\n    return fn.apply(id);\n  }\n}\n")
+  (write-file! root "src/com/acme/OverridingNormalizer.java"
+               "package com.acme;\n\npublic class OverridingNormalizer extends BaseNormalizer {\n  @Override\n  protected String normalizeBase(String id) {\n    return \"[\" + id.trim() + \"]\";\n  }\n\n  public String processSuper(String id) {\n    return super.normalizeBase(id);\n  }\n\n  public String processLocal(String id) {\n    return normalizeBase(id);\n  }\n\n  public String processSuperMethodReference(String id) {\n    java.util.function.Function<String, String> fn = super::normalizeBase;\n    return fn.apply(id);\n  }\n}\n")
   (write-file! root "lib/my_app/order.ex"
                "defmodule MyApp.Order do\n  import MyApp.Validator\n  alias MyApp.{Validator, Payments.Adapter}\n  alias Adapter.Client, as: BillingClient\n  alias Validator, as: V\n\n  def process_order(ctx, order) do\n    validate(order)\n    Adapter.charge(order)\n    BillingClient.charge(order)\n    {:ok, order}\n  end\n\n  def process_with_alias(ctx, order) do\n    V.validate(order)\n    {:ok, order}\n  end\n\n  defp to_status(order) do\n    Map.get(order, :status, :new)\n  end\n\n  defdelegate charge(order), to: MyApp.Validator\nend\n")
   (write-file! root "lib/my_app/validator.ex"
@@ -587,6 +593,46 @@
     (is (not-any? #(= "com.acme.AuditService#processImportedCollision" (:symbol %)) local-callers))
     (is (some #(= "com.acme.AuditService#processImportedCollision" (:symbol %)) imported-callers))
     (is (not-any? #(= "com.acme.AuditService#processLocalCollision" (:symbol %)) imported-callers))))
+
+(deftest java-super-call-and-method-reference-prefer-parent-implementation-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-java-super-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        base-units (sci/query-units storage tmp-root {:module "com.acme.BaseNormalizer" :limit 20})
+        overriding-units (sci/query-units storage tmp-root {:module "com.acme.OverridingNormalizer" :limit 20})
+        base-normalize-id (some->> base-units
+                                   (filter #(= "com.acme.BaseNormalizer#normalizeBase" (:symbol %)))
+                                   first
+                                   :unit_id)
+        overriding-normalize-id (some->> overriding-units
+                                         (filter #(= "com.acme.OverridingNormalizer#normalizeBase" (:symbol %)))
+                                         first
+                                         :unit_id)
+        base-callers (sci/query-callers storage tmp-root base-normalize-id {:limit 20})
+        overriding-callers (sci/query-callers storage tmp-root overriding-normalize-id {:limit 20})]
+    (is base-normalize-id)
+    (is overriding-normalize-id)
+    (is (some #(= "com.acme.OverridingNormalizer#processSuper" (:symbol %)) base-callers))
+    (is (some #(= "com.acme.OverridingNormalizer#processSuperMethodReference" (:symbol %)) base-callers))
+    (is (not-any? #(= "com.acme.OverridingNormalizer#processLocal" (:symbol %)) base-callers))
+    (is (some #(= "com.acme.OverridingNormalizer#processLocal" (:symbol %)) overriding-callers))
+    (is (not-any? #(= "com.acme.OverridingNormalizer#processSuper" (:symbol %)) overriding-callers))))
+
+(deftest java-inherited-unqualified-call-and-lambda-link-to-parent-method-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-java-inherited-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        base-units (sci/query-units storage tmp-root {:module "com.acme.BaseNormalizer" :limit 20})
+        base-normalize-id (some->> base-units
+                                   (filter #(= "com.acme.BaseNormalizer#normalizeBase" (:symbol %)))
+                                   first
+                                   :unit_id)
+        base-callers (sci/query-callers storage tmp-root base-normalize-id {:limit 20})]
+    (is base-normalize-id)
+    (is (some #(= "com.acme.InheritedNormalizer#processInherited" (:symbol %)) base-callers))
+    (is (some #(= "com.acme.InheritedNormalizer#processInheritedLambda" (:symbol %)) base-callers))))
 
 (deftest python-import-and-self-call-resolution-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-python-callers-test" (make-array java.nio.file.attribute.FileAttribute 0)))

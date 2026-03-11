@@ -19,7 +19,7 @@
 
 (def ^:private java-package-re #"^\s*package\s+([a-zA-Z0-9_\.]+)\s*;")
 (def ^:private java-import-re #"^\s*import\s+(?:static\s+)?([a-zA-Z0-9_\.\*]+)\s*;")
-(def ^:private java-class-re #"^\s*(?:public\s+)?(?:class|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")
+(def ^:private java-class-re #"^\s*(?:public\s+)?(?:class|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+extends\s+([A-Za-z0-9_\.]+))?")
 (def ^:private java-method-re
   #"^\s*(?:(public|private|protected)\s+)?(?:(?:static|final|native|synchronized|abstract|default)\s+)*([A-Za-z0-9_<>,\[\]\.\?]+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*(?:\{|throws|;)")
 (def ^:private java-constructor-re
@@ -1473,6 +1473,22 @@
             (= ch \")
             (recur (inc idx) true false details)
 
+            (and (= ch \:) (< (inc idx) n) (= (.charAt text (inc idx)) \:))
+            (let [prefix (subs text 0 idx)
+                  suffix (subs text (+ idx 2))
+                  owner (some-> (re-find #"([A-Za-z_][A-Za-z0-9_\.]*)\s*$" prefix) second)
+                  method-name (some-> (re-find #"^\s*([A-Za-z_][A-Za-z0-9_]*)" suffix) second)]
+              (recur (+ idx 2)
+                     in-string?
+                     false
+                     (if (or (str/blank? owner)
+                             (str/blank? method-name)
+                             (contains? java-call-stop (str/lower-case method-name)))
+                       details
+                       (conj details {:token (str owner "#" method-name)
+                                      :arity nil
+                                      :method_reference true}))))
+
             (= ch \()
             (let [prefix (subs text 0 idx)
                   token (some-> (re-find #"([A-Za-z_][A-Za-z0-9_\.]*)\s*$" prefix) second)
@@ -1523,10 +1539,23 @@
   (reduce (fn [acc {:keys [token arity]}]
             (let [tail (tail-token token)]
               (cond-> acc
-                (seq token) (update token (fnil conj #{}) arity)
-                (and tail (not= tail token)) (update tail (fnil conj #{}) arity))))
+                (and (seq token) (number? arity)) (update token (fnil conj #{}) arity)
+                (and (seq tail) (not= tail token) (number? arity)) (update tail (fnil conj #{}) arity))))
           {}
           call-details))
+
+(defn- java-call-tokens [call-details]
+  (->> call-details
+       (map :token)
+       (mapcat (fn [token]
+                 (if (re-find #"[.#]" (str token))
+                   [token]
+                   (let [tail (tail-token token)]
+                     (cond-> [token]
+                       (and tail (not= tail token)) (conj tail))))))
+       (remove #(contains? java-call-stop %))
+       distinct
+       vec))
 
 (defn- java-call-scan-body [lines start-line end-line]
   (let [segment (subvec lines (dec start-line) end-line)
@@ -1539,16 +1568,32 @@
     (str/join "\n" body-lines)))
 
 (defn- extract-java-calls [body]
-  (->> (java-call-details body)
-       (map :token)
-       (mapcat (fn [token]
-                 (if (re-find #"[.#]" (str token))
-                   [token]
-                   (let [tail (tail-token token)]
-                     (cond-> [token]
-                       (and tail (not= tail token)) (conj tail))))))
-       (remove #(contains? java-call-stop %))
-       distinct
+  (java-call-tokens (java-call-details body)))
+
+(defn- java-resolve-class-name [pkg imports class-name]
+  (let [nm (str/trim (str class-name))]
+    (cond
+      (str/blank? nm) nil
+      (str/includes? nm ".") nm
+      :else
+      (or (some (fn [imp]
+                  (let [candidate (str imp)]
+                    (cond
+                      (= candidate nm) candidate
+                      (str/ends-with? candidate (str "." nm)) candidate
+                      (str/ends-with? candidate ".*") (str (subs candidate 0 (- (count candidate) 2)) "." nm)
+                      :else nil)))
+                imports)
+          (when (seq pkg) (str pkg "." nm))
+          nm))))
+
+(defn- java-class-spots [pkg imports lines]
+  (->> (map-indexed vector lines)
+       (keep (fn [[idx line]]
+               (when-let [[_ class-name super-name] (re-find java-class-re line)]
+                 {:line (inc idx)
+                  :class class-name
+                  :superclass_module (java-resolve-class-name pkg imports super-name)})))
        vec))
 
 (defn- java-normalized-params [params]
@@ -1590,17 +1635,17 @@
                      (keep (fn [line] (some-> (re-find java-import-re line) second)))
                      distinct
                      vec)
-        class-spots (->> (map-indexed vector lines)
-                         (keep (fn [[idx line]]
-                                 (when-let [[_ c] (re-find java-class-re line)]
-                                   {:line (inc idx) :class c})))
-                         vec)
+        class-spots (java-class-spots pkg imports lines)
         methods (->> (map-indexed vector lines)
                      (keep (fn [[idx line]]
                              (let [class-name (->> class-spots
                                                    (filter #(<= (:line %) (inc idx)))
                                                    last
                                                    :class)
+                                   super-module (->> class-spots
+                                                     (filter #(<= (:line %) (inc idx)))
+                                                     last
+                                                     :superclass_module)
                                    method-match (re-find java-method-re line)
                                    constructor-match (re-find java-constructor-re line)]
                                (cond
@@ -1611,6 +1656,7 @@
                                       :method ctor-name
                                       :params params
                                       :class class-name
+                                      :superclass_module super-module
                                       :signature (trim-signature line)
                                       :kind "constructor"}))
 
@@ -1621,6 +1667,7 @@
                                       :method m
                                       :params params
                                       :class class-name
+                                      :superclass_module super-module
                                       :signature (trim-signature line)
                                       :kind nil}))))))
                      vec)
@@ -1640,6 +1687,8 @@
                              :symbol symbol
                              :path path
                              :module (if pkg (str pkg "." cls) cls)
+                             :class_name cls
+                             :superclass_module (:superclass_module m)
                              :start_line start-line
                              :end_line end-line
                              :signature (:signature m)
@@ -1648,7 +1697,7 @@
                              :imports imports
                              :method_arity method_arity
                              :method_signature_key method_signature_key
-                             :calls (extract-java-calls body)
+                             :calls (java-call-tokens call-details)
                              :call_arity_by_token (java-call-arity-index call-details)
                              :parser_mode "full"})))
                    vec)]
@@ -1677,7 +1726,8 @@
         imports (->> src-lines
                      (keep (fn [line] (some-> (re-find java-import-re line) second)))
                      distinct
-                     vec)]
+                     vec)
+        class-spots (java-class-spots pkg imports src-lines)]
     (cond
       (not (tree-sitter-available?))
       {:ok? false
@@ -1708,29 +1758,27 @@
                                                    (sort-by :start-row)
                                                    last
                                                    :class-name)
+                                          class-spot (->> class-spots
+                                                          (filter #(and (= cls (:class %))
+                                                                        (<= (:line %) (inc (:start-row m)))))
+                                                          last)
                                           constructor? (= "constructor_declaration" (:node-type m))
                                           method-name (if constructor?
                                                         (or cls "UnknownClass")
                                                         (or (node-name-inside ts-lines m "name:") "unknownMethod"))
-                                          calls (->> ts-lines
-                                                     (filter #(and (= "method_invocation" (:node-type %))
-                                                                   (<= (:start-row m) (:start-row %) (:end-row m))))
-                                                     (map #(node-name-inside ts-lines % "name:"))
-                                                     (remove nil?)
-                                                     distinct
-                                                     vec)
-                                          call-details (mapv (fn [token] {:token token}) calls)]
+                                          body (java-call-scan-body src-lines (inc (:start-row m)) (inc (:end-row m)))
+                                          call-details (java-call-details body)]
                                       {:start-line (inc (:start-row m))
                                        :end-line (inc (:end-row m))
                                        :method method-name
                                        :kind (when constructor? "constructor")
                                        :class (or cls "UnknownClass")
                                        :params (java-param-fragment-from-source src-lines (inc (:start-row m)))
-                                       :calls calls
+                                       :superclass_module (:superclass_module class-spot)
                                        :call_details call-details})))
                              vec)
                 units (->> methods
-                           (map (fn [{:keys [start-line end-line method kind class calls call_details params]}]
+                           (map (fn [{:keys [start-line end-line method kind class call_details params superclass_module]}]
                                   (let [symbol (str (when pkg (str pkg ".")) class "#" method)
                                         {:keys [unit_id method_arity method_signature_key]}
                                         (java-method-unit-id path symbol params)]
@@ -1739,6 +1787,8 @@
                                      :symbol symbol
                                      :path path
                                      :module (if pkg (str pkg "." class) class)
+                                     :class_name class
+                                     :superclass_module superclass_module
                                      :start_line start-line
                                      :end_line end-line
                                      :signature (safe-line src-lines start-line)
@@ -1747,14 +1797,7 @@
                                      :imports imports
                                      :method_arity method_arity
                                      :method_signature_key method_signature_key
-                                     :calls (->> calls
-                                                 (mapcat (fn [token]
-                                                           (let [tail (tail-token token)]
-                                                             (cond-> [token]
-                                                               (and tail (not= tail token)) (conj tail)))))
-                                                 (remove #(contains? java-call-stop %))
-                                                 distinct
-                                                 vec)
+                                     :calls (java-call-tokens call_details)
                                      :call_arity_by_token (java-call-arity-index call_details)
                                      :parser_mode "full"})))
                            vec)]

@@ -10,7 +10,7 @@ Push the language adapters beyond the delivered roadmap scope toward more compil
 
 - `[x]` Stage 1 Clojure lexical + destructuring deepening
 - `[x]` Stage 2 Clojure multimethod / protocol / dispatch deepening
-- `[ ]` Stage 3 Java inheritance / lambda / method-reference deepening
+- `[x]` Stage 3 Java inheritance / lambda / method-reference deepening
 - `[ ]` Stage 4 Python decorator / class-scope deepening
 - `[ ]` Stage 5 Elixir pipelines / `with` / nested-module deepening
 - `[ ]` Stage 6 TypeScript parser-strengthening tranche
@@ -31,7 +31,7 @@ No batching of multiple stages into one commit.
 
 ## Current Active Stage
 
-`Stage 3` is now the active slice.
+`Stage 4` is now the active slice.
 
 ## Stage Notes
 
@@ -54,10 +54,18 @@ Delivered scope:
 
 ### Stage 3
 
+Delivered scope:
+
+- Java units now retain direct superclass metadata so resolver-side targeting can prefer inherited owners when the caller lives in a subclass.
+- `super.method(...)` and `super::method` now resolve onto the parent implementation instead of collapsing back onto same-name overrides in the current class.
+- Unqualified inherited calls inside subclass methods and lambda bodies now keep linking to the parent method when no local override should win.
+- Regression coverage now proves `super.` precedence, inherited unqualified calls, lambda-owned inherited calls, and `super::method` references without regressing the local-override case.
+
+### Stage 4
+
 Planned scope:
 
-- `super.` vs local method precedence
-- inherited owner matching
-- lambda-body caller ownership
-- method-reference linkage
-- conservative fallback when owner class is uncertain
+- tighter handling for `@classmethod`, `@staticmethod`, and `@property`
+- decorator-wrapped local methods and nested class/function scopes
+- import ownership under local class/member collisions
+- conservative fallback for dynamic decorator indirection

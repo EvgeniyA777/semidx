@@ -250,6 +250,16 @@
         (when (seq tail) (get m tail))
         #{})))
 
+(defn- superclass-target? [caller candidate]
+  (let [super-module (some-> caller :superclass_module lower)
+        candidate-scope (some-> candidate :symbol symbol-scope lower)
+        candidate-module (some-> candidate :module lower)]
+    (and (seq super-module)
+         (or (= super-module candidate-scope)
+             (= super-module candidate-module)
+             (and candidate-scope (str/ends-with? candidate-scope (str "." super-module)))
+             (and candidate-module (str/ends-with? candidate-module (str "." super-module)))))))
+
 (defn- narrow-targets [caller targets token units-by-id files-by-path]
   (let [by-id #(get units-by-id %)
         candidates (->> targets (map by-id) (remove nil?) vec)
@@ -266,9 +276,11 @@
                                (cond
                                  (seq matching) matching
                                  (contains? #{"this" "super"} owner)
-                                 (let [local-matching (filter #(or (= (:path %) (:path caller))
-                                                                   (= (:module %) (:module caller)))
-                                                              candidates)]
+                                 (let [local-matching (if (= "super" owner)
+                                                        (filter #(superclass-target? caller %) candidates)
+                                                        (filter #(or (= (:path %) (:path caller))
+                                                                     (= (:module %) (:module caller)))
+                                                                candidates))]
                                    (if (seq local-matching) local-matching candidates))
                                  :else candidates))
                              candidates)
@@ -280,6 +292,7 @@
                              owner-filtered)
             same-path (filter #(= (:path %) (:path caller)) arity-filtered)
             same-module (filter #(= (:module %) (:module caller)) arity-filtered)
+            same-superclass (filter #(superclass-target? caller %) arity-filtered)
             import-filtered (if (seq caller-imports)
                               (filter #(import-match? caller-imports %) arity-filtered)
                               arity-filtered)
@@ -287,6 +300,7 @@
         (cond
           (seq same-path) (mapv :unit_id same-path)
           (seq same-module) (mapv :unit_id same-module)
+          (seq same-superclass) (mapv :unit_id same-superclass)
           (seq import-filtered) (mapv :unit_id import-filtered)
           :else (mapv :unit_id arity-filtered))))))
 
