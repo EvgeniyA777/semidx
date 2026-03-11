@@ -108,6 +108,10 @@
              {}
              response-correlation-headers))
 
+(defn- error-response-headers [^HttpExchange exchange error]
+  (merge (response-correlation-header-map exchange)
+         (errors/http-error-headers error)))
+
 (defn- with-handler [f]
   (reify HttpHandler
     (handle [_ exchange]
@@ -115,7 +119,7 @@
         (f exchange)
         (catch Exception e
           (let [{:keys [status body]} (errors/http-error-body e)]
-            (write-json! exchange status body (response-correlation-header-map exchange))))))))
+            (write-json! exchange status body (error-response-headers exchange e))))))))
 
 (defn- post-request? [^HttpExchange exchange]
   (= "POST" (request-method exchange)))
@@ -153,19 +157,22 @@
 
 (defn- project-context-summary [entry]
   (select-keys entry [:root_path
+                      :tenant_id
                       :snapshot_id
                       :detected_languages
                       :active_languages
                       :supported_languages
                       :language_fingerprint
                       :activation_state
+                      :activation_started_at
+                      :retry_after_seconds
                       :selection_hint
                       :manual_language_selection]))
 
-(defn- build-project-index [auth-config root-path paths parser-opts tenant-id correlation language-policy suppress-usage?]
+(defn- build-project-index [auth-config canonical-root-path paths parser-opts tenant-id correlation language-policy suppress-usage?]
   (let [effective-language-policy (project-context/merge-language-policy (:language_policy auth-config)
                                                                          language-policy)]
-    (sci/create-index {:root_path root-path
+    (sci/create-index {:root_path canonical-root-path
                        :paths paths
                        :parser_opts parser-opts
                        :usage_metrics (:usage_metrics auth-config)
@@ -178,29 +185,31 @@
                        :language_policy effective-language-policy})))
 
 (defn- refresh-project-entry! [auth-config root-path paths parser-opts tenant-id correlation language-policy]
-  (project-context/refresh-project-index! (:project_registry auth-config)
-                                          root-path
+  (let [scope (project-context/project-scope root-path tenant-id)]
+    (project-context/refresh-project-index! (:project_registry auth-config)
+                                          scope
                                           #(build-project-index auth-config
-                                                                root-path
+                                                                (:root_path scope)
                                                                 paths
                                                                 parser-opts
                                                                 tenant-id
                                                                 correlation
                                                                 language-policy
-                                                                false)))
+                                                                false))))
 
 (defn- ensure-project-entry! [auth-config root-path paths parser-opts tenant-id correlation language-policy request]
-  (project-context/ensure-project-index! (:project_registry auth-config)
-                                         root-path
+  (let [scope (project-context/project-scope root-path tenant-id)]
+    (project-context/ensure-project-index! (:project_registry auth-config)
+                                         scope
                                          request
                                          #(build-project-index auth-config
-                                                               root-path
+                                                               (:root_path scope)
                                                                paths
                                                                parser-opts
                                                                tenant-id
                                                                correlation
                                                                language-policy
-                                                               true)))
+                                                               true))))
 
 (defn- enforce-authz! [^HttpExchange exchange auth-config request]
   (let [{:keys [allowed?] :as decision} (authz/evaluate (:authz_check auth-config) request)]

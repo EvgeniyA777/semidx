@@ -89,6 +89,7 @@ Current lifecycle behavior:
 Current language activation behavior:
 
 - `create-index` runs a cheap supported-language discovery pass before parsing/indexing
+- that discovery pass and the main indexer share the same ignored shadow roots: `.git`, `node_modules`, `.venv`, `venv`, `target`, `dist`, and `build`
 - if no supported source language is detected, the runtime raises `:no_supported_languages_found` with structured guidance and a `:selection_hint`
 - callers may bootstrap an empty or early-stage repo explicitly with `:language_policy {:allow_languages ["python"]}` or another supported core lane
 - newly added supported languages are not activated implicitly during retrieval; callers must run an explicit refresh/create step to activate the new lane
@@ -996,7 +997,7 @@ Endpoints:
 - `POST /v1/index/create` with JSON body: `root_path`, optional `paths`, optional `parser_opts`, optional `language_policy`
 - `POST /v1/retrieval/resolve-context` with JSON body: `root_path`, optional `paths`, optional `parser_opts`, required `query`, optional `retrieval_policy`, optional `language_policy`
 
-HTTP create/retrieval responses now also include additive `project_context` metadata summarizing the current per-root activation state.
+HTTP create/retrieval responses now also include additive `project_context` metadata summarizing the current canonical per-root activation state. If activation is already in progress, HTTP returns `409 language_activation_in_progress` and a `Retry-After` header.
 
 ## Minimal gRPC Edge
 
@@ -1103,7 +1104,7 @@ For the language-activation flow specifically:
 
 - `no_supported_languages_found` returns structured guidance and `supported_languages` so clients can prompt for a core lane
 - `language_refresh_required` indicates that a newly referenced supported language is not active in the current project context
-- `language_activation_in_progress` is returned when another activation/refresh is already rebuilding the same `root_path`
+- `language_activation_in_progress` is returned when another activation/refresh is already rebuilding the same canonical project scope, and now includes `retry_after_seconds`, `activation_started_at`, and `recommended_action`
 
 Optional host-integrated authz policy:
 

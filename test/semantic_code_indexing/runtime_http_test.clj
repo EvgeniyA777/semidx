@@ -4,6 +4,7 @@
             [clojure.test :refer [deftest is testing]]
             [semantic-code-indexing.core :as sci]
             [semantic-code-indexing.runtime.authz :as runtime-authz]
+            [semantic-code-indexing.runtime.project-context :as project-context]
             [semantic-code-indexing.runtime.retrieval-policy :as rp]
             [semantic-code-indexing.runtime.http :as runtime-http]
             [semantic-code-indexing.runtime.usage-metrics :as usage])
@@ -222,6 +223,34 @@
         (is (= "awaiting_language_selection" (get-in resp [:json :details :activation_state])))
         (is (= ["clojure" "java" "elixir" "python" "typescript"]
                (get-in resp [:json :details :supported_languages]))))
+      (finally
+        (.stop server 0)))))
+
+(deftest runtime-http-language-activation-in-progress-retry-header-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-http-lock" (make-array java.nio.file.attribute.FileAttribute 0)))
+        project-registry (project-context/project-registry)
+        scope (project-context/project-scope tmp-root nil)
+        _ (swap! project-registry assoc
+                 (:registry_key scope)
+                 {:root_path (:root_path scope)
+                  :activation_state "activation_in_progress"
+                  :activation_started_at (str (java.time.Instant/now))
+                  :retry_after_seconds 2
+                  :active_languages ["python"]
+                  :detected_languages ["python"]})
+        server (runtime-http/start-server {:host "127.0.0.1" :port 0 :project_registry project-registry})]
+    (try
+      (let [port (-> server .getAddress .getPort)
+            base-url (str "http://127.0.0.1:" port)
+            client (HttpClient/newHttpClient)
+            _health (wait-health! client base-url)
+            resp (post-json client
+                            (str base-url "/v1/index/create")
+                            {:root_path tmp-root})]
+        (is (= 409 (:status resp)))
+        (is (= "language_activation_in_progress" (get-in resp [:json :error_code])))
+        (is (= ["2"] (get (:headers resp) "Retry-After")))
+        (is (= "retry_same_request" (get-in resp [:json :details :recommended_action]))))
       (finally
         (.stop server 0)))))
 

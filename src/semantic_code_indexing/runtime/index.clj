@@ -26,22 +26,6 @@
   (and (some? max-snapshot-age-seconds)
        (> age-seconds (long max-snapshot-age-seconds))))
 
-(defn- relative-path [root file]
-  (let [root-path (.toPath (io/file root))
-        file-path (.toPath (io/file file))]
-    (-> (.relativize root-path file-path)
-        (.normalize)
-        (str))))
-
-(defn- discover-source-files [root-path]
-  (->> (file-seq (io/file root-path))
-       (filter #(.isFile ^java.io.File %))
-       (map #(.getPath ^java.io.File %))
-       (map #(relative-path root-path %))
-       (filter adapters/source-path?)
-       sort
-       vec))
-
 (defn- normalize-paths [paths]
   (->> paths
        (map #(str/replace (str %) "\\\\" "/"))

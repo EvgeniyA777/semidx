@@ -99,6 +99,7 @@ Returns:
 Language activation behavior for MCP:
 
 - `create_index` runs a cheap supported-language discovery pass before indexing
+- that discovery pass shares the same ignored shadow roots as the main indexer: `.git`, `node_modules`, `.venv`, `venv`, `target`, `dist`, and `build`
 - if no supported source language is detected, the tool returns `no_supported_languages_found` with structured guidance so the client can ask the user for a core language
 - empty or early-stage repos can be bootstrapped explicitly with `language_policy.allow_languages`, for example `{ "allow_languages": ["python"] }`
 - later retrieval requests do not auto-activate newly added supported languages; the client must call `create_index` again to refresh activation

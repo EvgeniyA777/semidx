@@ -222,14 +222,17 @@
 (declare build-project-index project-context-summary)
 
 (defn- handle-create-index [policy-registry usage-metrics selection-cache project-registry server-language-policy payload]
-  (let [entry (project-context/refresh-project-index! project-registry
-                                                      (or (:root_path payload) ".")
+  (let [scope (project-context/project-scope (or (:root_path payload) ".")
+                                             (current-tenant-id))
+        entry (project-context/refresh-project-index! project-registry
+                                                      scope
                                                       #(build-project-index policy-registry
                                                                             usage-metrics
                                                                             selection-cache
                                                                             server-language-policy
                                                                             payload
                                                                             (current-request-correlation)
+                                                                            (:root_path scope)
                                                                             false))
         index (:index entry)]
     {:snapshot_id (:snapshot_id index)
@@ -248,19 +251,22 @@
 
 (defn- project-context-summary [entry]
   (select-keys entry [:root_path
+                      :tenant_id
                       :snapshot_id
                       :detected_languages
                       :active_languages
                       :supported_languages
                       :language_fingerprint
                       :activation_state
+                      :activation_started_at
+                      :retry_after_seconds
                       :selection_hint
                       :manual_language_selection]))
 
-(defn- build-project-index [policy-registry usage-metrics selection-cache server-language-policy payload correlation suppress-usage?]
+(defn- build-project-index [policy-registry usage-metrics selection-cache server-language-policy payload correlation canonical-root-path suppress-usage?]
   (let [effective-language-policy (project-context/merge-language-policy server-language-policy
                                                                          (:language_policy payload))]
-    (sci/create-index {:root_path (or (:root_path payload) ".")
+    (sci/create-index {:root_path canonical-root-path
                        :paths (:paths payload)
                        :parser_opts (:parser_opts payload)
                        :usage_metrics usage-metrics
@@ -284,8 +290,9 @@
                       {:type :invalid_request
                        :message "retrieval_policy must be an object"})))
     (let [root-path (or (:root_path payload) ".")
+          scope (project-context/project-scope root-path (current-tenant-id))
           entry (project-context/ensure-project-index! project-registry
-                                                       root-path
+                                                       scope
                                                        {:paths (:paths payload)
                                                         :query query}
                                                        #(build-project-index policy-registry
@@ -294,6 +301,7 @@
                                                                              server-language-policy
                                                                              payload
                                                                              correlation
+                                                                             (:root_path scope)
                                                                              true))
           index (:index entry)]
       (assoc (sci/resolve-context index query {:retrieval_policy retrieval-policy
@@ -301,8 +309,10 @@
              :project_context (project-context-summary entry)))))
 
 (defn- handle-expand-context [policy-registry usage-metrics selection-cache project-registry server-language-policy payload]
-  (let [entry (project-context/ensure-project-index! project-registry
-                                                     (or (:root_path payload) ".")
+  (let [scope (project-context/project-scope (or (:root_path payload) ".")
+                                             (current-tenant-id))
+        entry (project-context/ensure-project-index! project-registry
+                                                     scope
                                                      {:paths (:paths payload)}
                                                      #(build-project-index policy-registry
                                                                            usage-metrics
@@ -310,14 +320,17 @@
                                                                            server-language-policy
                                                                            payload
                                                                            (merge {:surface "grpc"} (current-request-correlation))
+                                                                           (:root_path scope)
                                                                            true))
         index (:index entry)]
     (assoc (sci/expand-context index (select-keys payload [:selection_id :snapshot_id :unit_ids :include_impact_hints]))
            :project_context (project-context-summary entry))))
 
 (defn- handle-fetch-context-detail [policy-registry usage-metrics selection-cache project-registry server-language-policy payload]
-  (let [entry (project-context/ensure-project-index! project-registry
-                                                     (or (:root_path payload) ".")
+  (let [scope (project-context/project-scope (or (:root_path payload) ".")
+                                             (current-tenant-id))
+        entry (project-context/ensure-project-index! project-registry
+                                                     scope
                                                      {:paths (:paths payload)}
                                                      #(build-project-index policy-registry
                                                                            usage-metrics
@@ -325,6 +338,7 @@
                                                                            server-language-policy
                                                                            payload
                                                                            (merge {:surface "grpc"} (current-request-correlation))
+                                                                           (:root_path scope)
                                                                            true))
         index (:index entry)]
     (assoc (sci/fetch-context-detail index (select-keys payload [:selection_id :snapshot_id :unit_ids :detail_level]))

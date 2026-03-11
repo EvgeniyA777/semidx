@@ -23,8 +23,14 @@
 (def ^:private selection-hint-text
   "Choose a core project language from the supported list. Additional languages can be activated later via refresh or prewarm.")
 
+(def ^:private ignored-directory-names
+  #{".git" "node_modules" ".venv" "venv" "target" "dist" "build"})
+
 (defn supported-languages []
   supported-language-order)
+
+(defn canonical-root-path [root-path]
+  (-> root-path io/file .getCanonicalPath))
 
 (defn- relative-path [root file]
   (let [root-path (.toPath (io/file root))
@@ -32,6 +38,37 @@
     (-> (.relativize root-path file-path)
         (.normalize)
         str)))
+
+(defn- ignored-relative-path? [relative-path]
+  (let [segments (->> (str/split (str relative-path) #"/+")
+                      (remove str/blank?))]
+    (boolean (some ignored-directory-names segments))))
+
+(defn source-files [root-path]
+  (let [root* (canonical-root-path root-path)
+        root-file (io/file root*)]
+    (letfn [(walk [^java.io.File dir relative-dir]
+              (when-not (ignored-relative-path? relative-dir)
+                (->> (or (.listFiles dir) [])
+                     (sort-by #(.getName ^java.io.File %))
+                     (mapcat (fn [^java.io.File child]
+                               (let [child-rel (relative-path root* (.getPath child))]
+                                 (cond
+                                   (and (.isDirectory child)
+                                        (not (ignored-relative-path? child-rel)))
+                                   (walk child child-rel)
+
+                                   (and (.isFile child)
+                                        (not (ignored-relative-path? child-rel))
+                                        (adapters/source-path? child-rel))
+                                   [child-rel]
+
+                                   :else
+                                   []))))
+                     vec)))]
+      (if (.exists root-file)
+        (walk root-file "")
+        []))))
 
 (defn normalize-language-policy [policy]
   (let [supported (set supported-language-order)
@@ -89,12 +126,7 @@
        vec))
 
 (defn discover-languages [root-path]
-  (let [source-paths (->> (file-seq (io/file root-path))
-                          (filter #(.isFile ^java.io.File %))
-                          (map #(.getPath ^java.io.File %))
-                          (map #(relative-path root-path %))
-                          (filter adapters/source-path?)
-                          vec)
+  (let [source-paths (source-files root-path)
         detected-language-set (->> source-paths
                                    (keep adapters/language-by-path)
                                    distinct

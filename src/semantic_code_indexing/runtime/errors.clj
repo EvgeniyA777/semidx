@@ -79,6 +79,12 @@
   (Metadata$Key/of "x-sci-error-code" Metadata/ASCII_STRING_MARSHALLER))
 (def ^:private grpc-error-category-key
   (Metadata$Key/of "x-sci-error-category" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private grpc-retry-after-key
+  (Metadata$Key/of "x-sci-retry-after-seconds" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private grpc-activation-started-key
+  (Metadata$Key/of "x-sci-activation-started-at" Metadata/ASCII_STRING_MARSHALLER))
+(def ^:private grpc-recommended-action-key
+  (Metadata$Key/of "x-sci-recommended-action" Metadata/ASCII_STRING_MARSHALLER))
 
 (defn error-info
   ([e]
@@ -131,6 +137,12 @@
               (:details info) (assoc :details (:details info))
               (:errors info) (assoc :errors (:errors info)))})))
 
+(defn http-error-headers [e]
+  (let [info (error-info e)
+        retry-after (get-in info [:details :retry_after_seconds])]
+    (cond-> {}
+      (some? retry-after) (assoc "Retry-After" (str retry-after)))))
+
 (defn grpc-status [e]
   (:grpc_status (error-info e)))
 
@@ -143,6 +155,12 @@
         metadata (Metadata.)]
     (.put metadata grpc-error-code-key (:error_code info))
     (.put metadata grpc-error-category-key (:error_category info))
+    (when-let [retry-after (get-in info [:details :retry_after_seconds])]
+      (.put metadata grpc-retry-after-key (str retry-after)))
+    (when-let [activation-started-at (get-in info [:details :activation_started_at])]
+      (.put metadata grpc-activation-started-key (str activation-started-at)))
+    (when-let [recommended-action (get-in info [:details :recommended_action])]
+      (.put metadata grpc-recommended-action-key (str recommended-action)))
     metadata))
 
 (defn mcp-error-details [e]

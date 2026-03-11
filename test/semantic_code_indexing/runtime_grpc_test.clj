@@ -4,6 +4,7 @@
             [semantic-code-indexing.core :as sci]
             [semantic-code-indexing.runtime.authz :as runtime-authz]
             [semantic-code-indexing.runtime.grpc-proto :as grpc-proto]
+            [semantic-code-indexing.runtime.project-context :as project-context]
             [semantic-code-indexing.runtime.retrieval-policy :as rp]
             [semantic-code-indexing.runtime.grpc :as runtime-grpc]
             [semantic-code-indexing.runtime.usage-metrics :as usage])
@@ -236,6 +237,46 @@
           (is (= "no_supported_languages_found"
                  (.get (.getTrailers e)
                        (Metadata$Key/of "x-sci-error-code" Metadata/ASCII_STRING_MARSHALLER))))))
+      (finally
+        (.shutdownNow channel)
+        (.shutdownNow server)))))
+
+(deftest runtime-grpc-language-activation-in-progress-retry-trailers-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-grpc-lock" (make-array java.nio.file.attribute.FileAttribute 0)))
+        project-registry (project-context/project-registry)
+        scope (project-context/project-scope tmp-root nil)
+        _ (swap! project-registry assoc
+                 (:registry_key scope)
+                 {:root_path (:root_path scope)
+                  :activation_state "activation_in_progress"
+                  :activation_started_at (str (java.time.Instant/now))
+                  :retry_after_seconds 2
+                  :active_languages ["python"]
+                  :detected_languages ["python"]})
+        {:keys [server port]} (runtime-grpc/start-server {:host "127.0.0.1" :port 0
+                                                          :project_registry project-registry})
+        channel (-> (ManagedChannelBuilder/forAddress "127.0.0.1" (int port))
+                    (.usePlaintext)
+                    (.build))]
+    (try
+      (try
+        (unary-call channel
+                    runtime-grpc/create-index-method
+                    (grpc-proto/create-index-request {:root_path tmp-root})
+                    grpc-proto/create-index-response->map)
+        (is false "expected StatusRuntimeException")
+        (catch StatusRuntimeException e
+          (is (= (.getCode Status/FAILED_PRECONDITION)
+                 (.getCode (.getStatus e))))
+          (is (= "language_activation_in_progress"
+                 (.get (.getTrailers e)
+                       (Metadata$Key/of "x-sci-error-code" Metadata/ASCII_STRING_MARSHALLER))))
+          (is (= "2"
+                 (.get (.getTrailers e)
+                       (Metadata$Key/of "x-sci-retry-after-seconds" Metadata/ASCII_STRING_MARSHALLER))))
+          (is (= "retry_same_request"
+                 (.get (.getTrailers e)
+                       (Metadata$Key/of "x-sci-recommended-action" Metadata/ASCII_STRING_MARSHALLER))))))
       (finally
         (.shutdownNow channel)
         (.shutdownNow server)))))
