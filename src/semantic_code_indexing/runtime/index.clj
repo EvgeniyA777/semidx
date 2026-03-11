@@ -149,9 +149,17 @@
   (reduce
    (fn [acc u]
      (if-let [sym (:symbol u)]
-       (reduce (fn [a token] (update a token (fnil conj #{}) (:unit_id u)))
-               acc
-               (symbol-call-tokens sym))
+       (let [symbol-tokens (symbol-call-tokens sym)
+             alias-tokens (->> (:call_tokens u)
+                               (mapcat (fn [token]
+                                         (if-let [l (lower token)]
+                                           [token l]
+                                           [token])))
+                               (remove str/blank?)
+                               set)]
+         (reduce (fn [a token] (update a token (fnil conj #{}) (:unit_id u)))
+                 acc
+                 (concat symbol-tokens alias-tokens)))
        acc))
    {}
    units))

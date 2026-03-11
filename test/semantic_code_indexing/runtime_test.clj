@@ -79,8 +79,16 @@
                "from app.orders import OrderService\n\n\ndef test_process_order():\n    service = OrderService()\n    assert service.process_order({\"id\": 1})\n")
   (write-file! root "src/example/normalize.ts"
                "export function normalizeOrder(orderId: string): string {\n  return (orderId || \"\").trim().toLowerCase();\n}\n")
+  (write-file! root "src/example/default_normalize.ts"
+               "export default function normalizeDefault(orderId: string): string {\n  return (orderId || \"\").trim().toUpperCase();\n}\n")
+  (write-file! root "src/example/helpers.ts"
+               "export function normalizeHelper(orderId: string): string {\n  return (orderId || \"\").trim();\n}\n")
   (write-file! root "src/example/main.ts"
                "import { normalizeOrder } from \"./normalize\";\n\nexport function processMain(orderId: string): string {\n  return normalizeOrder(orderId);\n}\n\nexport class MainService {\n  processMain(orderId: string): string {\n    return processMain(orderId);\n  }\n}\n")
+  (write-file! root "src/example/import_modes.ts"
+               "import normalizeDefault from \"./default_normalize\";\nimport { normalizeHelper as namedNormalize } from \"./helpers\";\nimport * as helperNs from \"./helpers\";\n\nexport function processImports(orderId: string): string {\n  namedNormalize(orderId);\n  return normalizeDefault(orderId);\n}\n\nexport const normalizeExpr = function(orderId: string): string {\n  return namedNormalize(orderId);\n};\n\nexport class ImportService {\n  processThis(orderId: string): string {\n    return this.normalizeLocal(orderId);\n  }\n\n  processNamespace(orderId: string): string {\n    return helperNs.normalizeHelper(orderId);\n  }\n\n  static processStaticCall(orderId: string): string {\n    return ImportService.normalizeStatic(orderId);\n  }\n\n  normalizeLocal(orderId: string): string {\n    return namedNormalize(orderId);\n  }\n\n  static normalizeStatic(orderId: string): string {\n    return normalizeDefault(orderId);\n  }\n}\n")
+  (write-file! root "src/example/collision_modes.ts"
+               "import * as helperNs from \"./helpers\";\n\nexport class CollisionService {\n  normalizeHelper(orderId: string): string {\n    return `local:${orderId}`;\n  }\n\n  processThis(orderId: string): string {\n    return this.normalizeHelper(orderId);\n  }\n\n  processNamespace(orderId: string): string {\n    return helperNs.normalizeHelper(orderId);\n  }\n}\n")
   (write-file! root "test/example/main_test.ts"
                "import { processMain } from \"../../src/example/main\";\n\nexport function testProcessMain(): string {\n  return processMain(\"A-1\");\n}\n"))
 
@@ -684,6 +692,75 @@
         callers (sci/query-callers storage tmp-root normalize-id {:limit 20})]
     (is normalize-id)
     (is (some #(= "src.example.main/processMain" (:symbol %)) callers))))
+
+(deftest typescript-import-modes-and-function-expression-resolution-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-typescript-import-modes" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        helper-units (sci/query-units storage tmp-root {:module "src.example.helpers" :limit 20})
+        default-units (sci/query-units storage tmp-root {:module "src.example.default_normalize" :limit 20})
+        import-mode-units (sci/query-units storage tmp-root {:module "src.example.import_modes" :limit 20})
+        helper-id (some->> helper-units
+                           (filter #(= "src.example.helpers/normalizeHelper" (:symbol %)))
+                           first
+                           :unit_id)
+        default-id (some->> default-units
+                            (filter #(= "src.example.default_normalize/normalizeDefault" (:symbol %)))
+                            first
+                            :unit_id)
+        expr-id (some->> import-mode-units
+                         (filter #(= "src.example.import_modes/normalizeExpr" (:symbol %)))
+                         first
+                         :unit_id)
+        helper-callers (sci/query-callers storage tmp-root helper-id {:limit 20})
+        default-callers (sci/query-callers storage tmp-root default-id {:limit 20})]
+    (is helper-id)
+    (is default-id)
+    (is expr-id)
+    (is (some #(= "src.example.import_modes/processImports" (:symbol %)) helper-callers))
+    (is (some #(= "src.example.import_modes.ImportService#processNamespace" (:symbol %)) helper-callers))
+    (is (some #(= "src.example.import_modes/normalizeExpr" (:symbol %)) helper-callers))
+    (is (some #(= "src.example.import_modes/processImports" (:symbol %)) default-callers))
+    (is (some #(= "src.example.import_modes.ImportService#normalizeStatic" (:symbol %)) default-callers))))
+
+(deftest typescript-this-and-class-qualified-calls-stay-local-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-typescript-local-ownership" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        import-mode-units (sci/query-units storage tmp-root {:module "src.example.import_modes.ImportService" :limit 20})
+        collision-units (sci/query-units storage tmp-root {:module "src.example.collision_modes.CollisionService" :limit 20})
+        helper-units (sci/query-units storage tmp-root {:module "src.example.helpers" :limit 20})
+        local-method-id (some->> import-mode-units
+                                 (filter #(= "src.example.import_modes.ImportService#normalizeLocal" (:symbol %)))
+                                 first
+                                 :unit_id)
+        static-method-id (some->> import-mode-units
+                                  (filter #(= "src.example.import_modes.ImportService#normalizeStatic" (:symbol %)))
+                                  first
+                                  :unit_id)
+        collision-local-id (some->> collision-units
+                                    (filter #(= "src.example.collision_modes.CollisionService#normalizeHelper" (:symbol %)))
+                                    first
+                                    :unit_id)
+        helper-id (some->> helper-units
+                           (filter #(= "src.example.helpers/normalizeHelper" (:symbol %)))
+                           first
+                           :unit_id)
+        local-callers (sci/query-callers storage tmp-root local-method-id {:limit 20})
+        static-callers (sci/query-callers storage tmp-root static-method-id {:limit 20})
+        collision-local-callers (sci/query-callers storage tmp-root collision-local-id {:limit 20})
+        helper-callers (sci/query-callers storage tmp-root helper-id {:limit 20})]
+    (is local-method-id)
+    (is static-method-id)
+    (is collision-local-id)
+    (is helper-id)
+    (is (some #(= "src.example.import_modes.ImportService#processThis" (:symbol %)) local-callers))
+    (is (some #(= "src.example.import_modes.ImportService#processStaticCall" (:symbol %)) static-callers))
+    (is (some #(= "src.example.collision_modes.CollisionService#processThis" (:symbol %)) collision-local-callers))
+    (is (some #(= "src.example.collision_modes.CollisionService#processNamespace" (:symbol %)) helper-callers))
+    (is (not-any? #(= "src.example.collision_modes.CollisionService#processThis" (:symbol %)) helper-callers))))
 
 (deftest in-memory-storage-roundtrip-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-storage-test" (make-array java.nio.file.attribute.FileAttribute 0)))
