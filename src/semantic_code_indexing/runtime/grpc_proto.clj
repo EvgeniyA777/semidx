@@ -48,10 +48,35 @@
 
    :resolve-context-response
    {:proto-name "ResolveContextResponse"
-    :fields [{:key :context_packet_json :proto-name "context_packet_json" :number 1 :type :string}
-             {:key :guardrail_assessment_json :proto-name "guardrail_assessment_json" :number 2 :type :string}
-             {:key :diagnostics_trace_json :proto-name "diagnostics_trace_json" :number 3 :type :string}
-             {:key :stage_events_json :proto-name "stage_events_json" :number 4 :type :string}]}})
+    :fields [{:key :selection_result_json :proto-name "selection_result_json" :number 1 :type :string}]}
+
+   :expand-context-request
+   {:proto-name "ExpandContextRequest"
+    :fields [{:key :root_path :proto-name "root_path" :number 1 :type :string}
+             {:key :paths :proto-name "paths" :number 2 :type :string :repeated? true}
+             {:key :parser_opts_json :proto-name "parser_opts_json" :number 3 :type :string}
+             {:key :selection_id :proto-name "selection_id" :number 4 :type :string}
+             {:key :snapshot_id :proto-name "snapshot_id" :number 5 :type :string}
+             {:key :unit_ids :proto-name "unit_ids" :number 6 :type :string :repeated? true}
+             {:key :include_impact_hints :proto-name "include_impact_hints" :number 7 :type :string}]}
+
+   :expand-context-response
+   {:proto-name "ExpandContextResponse"
+    :fields [{:key :expansion_result_json :proto-name "expansion_result_json" :number 1 :type :string}]}
+
+   :fetch-context-detail-request
+   {:proto-name "FetchContextDetailRequest"
+    :fields [{:key :root_path :proto-name "root_path" :number 1 :type :string}
+             {:key :paths :proto-name "paths" :number 2 :type :string :repeated? true}
+             {:key :parser_opts_json :proto-name "parser_opts_json" :number 3 :type :string}
+             {:key :selection_id :proto-name "selection_id" :number 4 :type :string}
+             {:key :snapshot_id :proto-name "snapshot_id" :number 5 :type :string}
+             {:key :unit_ids :proto-name "unit_ids" :number 6 :type :string :repeated? true}
+             {:key :detail_level :proto-name "detail_level" :number 7 :type :string}]}
+
+   :fetch-context-detail-response
+   {:proto-name "FetchContextDetailResponse"
+    :fields [{:key :detail_result_json :proto-name "detail_result_json" :number 1 :type :string}]}})
 
 (defn- require-definition [message-key]
   (or (get message-definitions message-key)
@@ -227,23 +252,71 @@
    :retrieval_policy (json-field "retrieval_policy_json"
                                  (string-field :resolve-context-request message :retrieval_policy_json))})
 
-(defn resolve-context-response [{:keys [context_packet guardrail_assessment diagnostics_trace stage_events]}]
+(defn resolve-context-response [{:keys [selection_result] :as payload}]
   (build-message :resolve-context-response
-                 {:context_packet_json (json-string context_packet)
-                  :guardrail_assessment_json (json-string guardrail_assessment)
-                  :diagnostics_trace_json (json-string diagnostics_trace)
-                  :stage_events_json (json-string stage_events)}))
+                 {:selection_result_json (json-string (or selection_result payload))}))
 
 (defn resolve-context-response->map [message]
-  {:context_packet (or (json-field "context_packet_json"
-                                   (string-field :resolve-context-response message :context_packet_json))
-                       {})
-   :guardrail_assessment (or (json-field "guardrail_assessment_json"
-                                         (string-field :resolve-context-response message :guardrail_assessment_json))
-                             {})
-   :diagnostics_trace (or (json-field "diagnostics_trace_json"
-                                      (string-field :resolve-context-response message :diagnostics_trace_json))
-                          {})
-   :stage_events (or (json-field "stage_events_json"
-                                 (string-field :resolve-context-response message :stage_events_json))
-                     [])})
+  (or (json-field "selection_result_json"
+                  (string-field :resolve-context-response message :selection_result_json))
+      {}))
+
+(defn expand-context-request [{:keys [root_path paths parser_opts selection_id snapshot_id unit_ids include_impact_hints]}]
+  (build-message :expand-context-request
+                 {:root_path root_path
+                  :paths (or paths [])
+                  :parser_opts_json (json-string parser_opts)
+                  :selection_id selection_id
+                  :snapshot_id snapshot_id
+                  :unit_ids (or unit_ids [])
+                  :include_impact_hints (when (some? include_impact_hints) (str include_impact_hints))}))
+
+(defn expand-context-request->map [message]
+  {:root_path (not-empty (string-field :expand-context-request message :root_path))
+   :paths (not-empty (repeated-string-field :expand-context-request message :paths))
+   :parser_opts (json-field "parser_opts_json"
+                            (string-field :expand-context-request message :parser_opts_json))
+   :selection_id (not-empty (string-field :expand-context-request message :selection_id))
+   :snapshot_id (not-empty (string-field :expand-context-request message :snapshot_id))
+   :unit_ids (not-empty (repeated-string-field :expand-context-request message :unit_ids))
+   :include_impact_hints (let [raw (some-> (string-field :expand-context-request message :include_impact_hints) not-empty)]
+                           (when raw
+                             (= "true" raw)))})
+
+(defn expand-context-response [{:keys [expansion_result] :as payload}]
+  (build-message :expand-context-response
+                 {:expansion_result_json (json-string (or expansion_result payload))}))
+
+(defn expand-context-response->map [message]
+  (or (json-field "expansion_result_json"
+                  (string-field :expand-context-response message :expansion_result_json))
+      {}))
+
+(defn fetch-context-detail-request [{:keys [root_path paths parser_opts selection_id snapshot_id unit_ids detail_level]}]
+  (build-message :fetch-context-detail-request
+                 {:root_path root_path
+                  :paths (or paths [])
+                  :parser_opts_json (json-string parser_opts)
+                  :selection_id selection_id
+                  :snapshot_id snapshot_id
+                  :unit_ids (or unit_ids [])
+                  :detail_level detail_level}))
+
+(defn fetch-context-detail-request->map [message]
+  {:root_path (not-empty (string-field :fetch-context-detail-request message :root_path))
+   :paths (not-empty (repeated-string-field :fetch-context-detail-request message :paths))
+   :parser_opts (json-field "parser_opts_json"
+                            (string-field :fetch-context-detail-request message :parser_opts_json))
+   :selection_id (not-empty (string-field :fetch-context-detail-request message :selection_id))
+   :snapshot_id (not-empty (string-field :fetch-context-detail-request message :snapshot_id))
+   :unit_ids (not-empty (repeated-string-field :fetch-context-detail-request message :unit_ids))
+   :detail_level (not-empty (string-field :fetch-context-detail-request message :detail_level))})
+
+(defn fetch-context-detail-response [{:keys [detail_result] :as payload}]
+  (build-message :fetch-context-detail-response
+                 {:detail_result_json (json-string (or detail_result payload))}))
+
+(defn fetch-context-detail-response->map [message]
+  (or (json-field "detail_result_json"
+                  (string-field :fetch-context-detail-response message :detail_result_json))
+      {}))

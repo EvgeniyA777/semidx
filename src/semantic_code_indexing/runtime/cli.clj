@@ -30,7 +30,7 @@
       (System/exit 1))
     (let [query (read-json query_path)
           index (sci/create-index {:root_path root_path})
-          result (sci/resolve-context index query)]
+          result (sci/resolve-context-detail index query)]
       (if out_path
         (do (write-json out_path result)
             (println (str "wrote " out_path)))

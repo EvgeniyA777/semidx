@@ -43,6 +43,8 @@
 (def health-method (unary-method "Health" :health-request :health-response))
 (def create-index-method (unary-method "CreateIndex" :create-index-request :create-index-response))
 (def resolve-context-method (unary-method "ResolveContext" :resolve-context-request :resolve-context-response))
+(def expand-context-method (unary-method "ExpandContext" :expand-context-request :expand-context-response))
+(def fetch-context-detail-method (unary-method "FetchContextDetail" :fetch-context-detail-request :fetch-context-detail-response))
 
 (def ^:private api-key-header
   (Metadata$Key/of "x-api-key" Metadata/ASCII_STRING_MARSHALLER))
@@ -210,13 +212,14 @@
   {:status "ok"
    :service "semantic-code-indexing-runtime-grpc"})
 
-(defn- handle-create-index [policy-registry usage-metrics payload]
+(defn- handle-create-index [policy-registry usage-metrics selection-cache payload]
   (let [index (sci/create-index {:root_path (or (:root_path payload) ".")
                                  :paths (:paths payload)
                                  :parser_opts (:parser_opts payload)
                                  :usage_metrics usage-metrics
                                  :usage_context (merge {:surface "grpc"}
                                                        (current-request-correlation))
+                                 :selection_cache selection-cache
                                  :policy_registry policy-registry})]
     {:snapshot_id (:snapshot_id index)
      :indexed_at (:indexed_at index)
@@ -231,7 +234,7 @@
       (or (:actor_id trace) (:agent_id trace))
       (assoc :actor_id (or (:actor_id trace) (:agent_id trace))))))
 
-(defn- handle-resolve-context [policy-registry usage-metrics payload]
+(defn- handle-resolve-context [policy-registry usage-metrics selection-cache payload]
   (let [query (:query payload)
         retrieval-policy (:retrieval_policy payload)
         correlation (merge (current-request-correlation)
@@ -249,15 +252,39 @@
                                    :parser_opts (:parser_opts payload)
                                    :usage_metrics usage-metrics
                                    :usage_context (merge {:surface "grpc"} correlation)
+                                   :selection_cache selection-cache
                                    :suppress_usage_metrics true
                                    :policy_registry policy-registry})]
       (sci/resolve-context index query {:retrieval_policy retrieval-policy
                                         :policy_registry policy-registry}))))
 
+(defn- handle-expand-context [policy-registry usage-metrics selection-cache payload]
+  (let [index (sci/create-index {:root_path (or (:root_path payload) ".")
+                                 :paths (:paths payload)
+                                 :parser_opts (:parser_opts payload)
+                                 :usage_metrics usage-metrics
+                                 :usage_context (merge {:surface "grpc"} (current-request-correlation))
+                                 :selection_cache selection-cache
+                                 :suppress_usage_metrics true
+                                 :policy_registry policy-registry})]
+    (sci/expand-context index (select-keys payload [:selection_id :snapshot_id :unit_ids :include_impact_hints]))))
+
+(defn- handle-fetch-context-detail [policy-registry usage-metrics selection-cache payload]
+  (let [index (sci/create-index {:root_path (or (:root_path payload) ".")
+                                 :paths (:paths payload)
+                                 :parser_opts (:parser_opts payload)
+                                 :usage_metrics usage-metrics
+                                 :usage_context (merge {:surface "grpc"} (current-request-correlation))
+                                 :selection_cache selection-cache
+                                 :suppress_usage_metrics true
+                                 :policy_registry policy-registry})]
+    (sci/fetch-context-detail index (select-keys payload [:selection_id :snapshot_id :unit_ids :detail_level]))))
+
 (defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry usage_metrics]}]
   (let [auth-config {:api_key api_key
                      :require_tenant require_tenant
                      :authz_check authz_check}
+        selection-cache (atom {})
         service (-> (ServerServiceDefinition/builder service-name)
                     (.addMethod health-method (unary-handler (constantly {})
                                                              grpc-proto/health-response
@@ -266,14 +293,24 @@
                                                              nil))
                     (.addMethod create-index-method (unary-handler grpc-proto/create-index-request->map
                                                                    grpc-proto/create-index-response
-                                                                   (partial handle-create-index policy_registry usage_metrics)
+                                                                   (partial handle-create-index policy_registry usage_metrics selection-cache)
                                                                    auth-config
                                                                    :create_index))
                     (.addMethod resolve-context-method (unary-handler grpc-proto/resolve-context-request->map
                                                                       grpc-proto/resolve-context-response
-                                                                      (partial handle-resolve-context policy_registry usage_metrics)
+                                                                      (partial handle-resolve-context policy_registry usage_metrics selection-cache)
                                                                       auth-config
                                                                       :resolve_context))
+                    (.addMethod expand-context-method (unary-handler grpc-proto/expand-context-request->map
+                                                                     grpc-proto/expand-context-response
+                                                                     (partial handle-expand-context policy_registry usage_metrics selection-cache)
+                                                                     auth-config
+                                                                     :expand_context))
+                    (.addMethod fetch-context-detail-method (unary-handler grpc-proto/fetch-context-detail-request->map
+                                                                           grpc-proto/fetch-context-detail-response
+                                                                           (partial handle-fetch-context-detail policy_registry usage_metrics selection-cache)
+                                                                           auth-config
+                                                                           :fetch_context_detail))
                     (.build))
         intercepted-service (ServerInterceptors/intercept service (into-array ServerInterceptor [(metadata-context-interceptor)]))
         server (-> (NettyServerBuilder/forAddress (java.net.InetSocketAddress. ^String host (int port)))

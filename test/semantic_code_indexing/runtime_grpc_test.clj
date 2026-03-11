@@ -90,12 +90,55 @@
                                (grpc-proto/resolve-context-request {:root_path tmp-root
                                                                     :query query})
                                grpc-proto/resolve-context-response->map)]
-          (is (map? (:context_packet resp)))
-          (is (map? (:diagnostics_trace resp)))
-          (is (map? (:guardrail_assessment resp)))
-          (is (vector? (:stage_events resp)))
+          (is (= "1.0" (:api_version resp)))
+          (is (string? (:selection_id resp)))
+          (is (string? (:snapshot_id resp)))
+          (is (= "completed" (:result_status resp)))
+          (is (vector? (:focus resp)))
           (is (some #(= "my.app.order/process-order" (:symbol %))
-                    (get-in resp [:context_packet :relevant_units])))))
+                    (:focus resp)))))
+
+      (testing "expand-context and fetch-context-detail rpc"
+        (let [query {:schema_version "1.0"
+                     :intent {:purpose "code_understanding"
+                              :details "Locate authority implementation for process-order."}
+                     :targets {:symbols ["my.app.order/process-order"]
+                               :paths ["src/my/app/order.clj"]}
+                     :constraints {:token_budget 1200
+                                   :max_raw_code_level "enclosing_unit"
+                                   :freshness "current_snapshot"}
+                     :hints {:prefer_definitions_over_callers true}
+                     :options {:include_tests true
+                               :include_impact_hints true
+                               :allow_raw_code_escalation false}
+                     :trace {:trace_id "02322222-2222-4222-8222-222222222222"
+                             :request_id "runtime-grpc-test-002"
+                             :actor_id "test_runner"}}
+              selection (unary-call channel
+                                    runtime-grpc/resolve-context-method
+                                    (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                                         :query query})
+                                    grpc-proto/resolve-context-response->map)
+              expansion (unary-call channel
+                                    runtime-grpc/expand-context-method
+                                    (grpc-proto/expand-context-request {:root_path tmp-root
+                                                                        :selection_id (:selection_id selection)
+                                                                        :snapshot_id (:snapshot_id selection)})
+                                    grpc-proto/expand-context-response->map)
+              detail (unary-call channel
+                                 runtime-grpc/fetch-context-detail-method
+                                 (grpc-proto/fetch-context-detail-request {:root_path tmp-root
+                                                                           :selection_id (:selection_id selection)
+                                                                           :snapshot_id (:snapshot_id selection)})
+                                 grpc-proto/fetch-context-detail-response->map)]
+          (is (seq (:skeletons expansion)))
+          (is (map? (:impact_hints expansion)))
+          (is (map? (:context_packet detail)))
+          (is (map? (:diagnostics_trace detail)))
+          (is (map? (:guardrail_assessment detail)))
+          (is (vector? (:stage_events detail)))
+          (is (some #(= "my.app.order/process-order" (:symbol %))
+                    (get-in detail [:context_packet :relevant_units])))))
 
       (testing "invalid payload returns INVALID_ARGUMENT"
         (try
@@ -287,24 +330,36 @@
                        :actor_id "test_runner"}}]
     (try
       (testing "active registry policy is used when no override is passed"
-        (let [resp (unary-call channel
-                               runtime-grpc/resolve-context-method
-                               (grpc-proto/resolve-context-request {:root_path tmp-root
-                                                                    :query query})
-                               grpc-proto/resolve-context-response->map)]
+        (let [selection (unary-call channel
+                                    runtime-grpc/resolve-context-method
+                                    (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                                         :query query})
+                                    grpc-proto/resolve-context-response->map)
+              resp (unary-call channel
+                               runtime-grpc/fetch-context-detail-method
+                               (grpc-proto/fetch-context-detail-request {:root_path tmp-root
+                                                                         :selection_id (:selection_id selection)
+                                                                         :snapshot_id (:snapshot_id selection)})
+                               grpc-proto/fetch-context-detail-response->map)]
           (is (= "heuristic_v1_grpc_active"
                  (get-in resp [:diagnostics_trace :retrieval_policy :policy_id])))
           (is (not= "top_authority"
                     (get-in resp [:context_packet :relevant_units 0 :rank_band])))))
 
       (testing "selector-based override resolves from registry"
-        (let [resp (unary-call channel
-                               runtime-grpc/resolve-context-method
-                               (grpc-proto/resolve-context-request {:root_path tmp-root
-                                                                    :query query
-                                                                    :retrieval_policy {:policy_id "heuristic_v1_grpc_shadow"
-                                                                                       :version "2026-03-12"}})
-                               grpc-proto/resolve-context-response->map)]
+        (let [selection (unary-call channel
+                                    runtime-grpc/resolve-context-method
+                                    (grpc-proto/resolve-context-request {:root_path tmp-root
+                                                                         :query query
+                                                                         :retrieval_policy {:policy_id "heuristic_v1_grpc_shadow"
+                                                                                            :version "2026-03-12"}})
+                                    grpc-proto/resolve-context-response->map)
+              resp (unary-call channel
+                               runtime-grpc/fetch-context-detail-method
+                               (grpc-proto/fetch-context-detail-request {:root_path tmp-root
+                                                                         :selection_id (:selection_id selection)
+                                                                         :snapshot_id (:snapshot_id selection)})
+                               grpc-proto/fetch-context-detail-response->map)]
           (is (= "heuristic_v1_grpc_shadow"
                  (get-in resp [:diagnostics_trace :retrieval_policy :policy_id])))
           (is (not= "top_authority"

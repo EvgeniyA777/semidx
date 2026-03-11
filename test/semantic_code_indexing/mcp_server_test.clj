@@ -284,7 +284,7 @@
               tool-names (->> (get-in tools-response [:result :tools])
                               (map :name)
                               set)]
-          (is (= #{"create_index" "repo_map" "resolve_context" "impact_analysis" "skeletons"}
+          (is (= #{"create_index" "repo_map" "resolve_context" "expand_context" "fetch_context_detail" "impact_analysis" "skeletons"}
                  tool-names))))
 
       (let [create-response (call-tool! handle 3 "create_index" {:root_path tmp-root})
@@ -312,16 +312,43 @@
             (is (map? (:index_lifecycle repo-map-data)))
             (is (string? (:summary repo-map-data)))))
 
-        (testing "resolve_context returns the expected contract keys"
+        (testing "resolve_context returns compact selection"
           (let [resolve-response (call-tool! handle 6 "resolve_context" {:index_id index-id
                                                                          :query sample-query})
                 resolve-data (get-in resolve-response [:result :structuredContent])]
             (is (= index-id (:index_id resolve-data)))
-            (is (map? (:context_packet resolve-data)))
-            (is (map? (:guardrail_assessment resolve-data)))
-            (is (vector? (:stage_events resolve-data)))
+            (is (string? (:selection_id resolve-data)))
+            (is (string? (:snapshot_id resolve-data)))
+            (is (= "completed" (:result_status resolve-data)))
+            (is (vector? (:focus resolve-data)))
+            (is (= ["expand_context" "fetch_context_detail"]
+                   (get-in resolve-data [:next_step :available_actions])))
             (is (some #(= "my.app.order/process-order" (:symbol %))
-                      (get-in resolve-data [:context_packet :relevant_units])))))
+                      (:focus resolve-data)))))
+
+        (testing "expand_context and fetch_context_detail return staged artifacts"
+          (let [resolve-response (call-tool! handle 61 "resolve_context" {:index_id index-id
+                                                                          :query sample-query})
+                resolve-data (get-in resolve-response [:result :structuredContent])
+                selection-id (:selection_id resolve-data)
+                snapshot-id (:snapshot_id resolve-data)
+                expand-response (call-tool! handle 62 "expand_context" {:index_id index-id
+                                                                        :selection_id selection-id
+                                                                        :snapshot_id snapshot-id})
+                expand-data (get-in expand-response [:result :structuredContent])
+                detail-response (call-tool! handle 63 "fetch_context_detail" {:index_id index-id
+                                                                              :selection_id selection-id
+                                                                              :snapshot_id snapshot-id})
+                detail-data (get-in detail-response [:result :structuredContent])]
+            (is (= index-id (:index_id expand-data)))
+            (is (seq (:skeletons expand-data)))
+            (is (map? (:impact_hints expand-data)))
+            (is (= index-id (:index_id detail-data)))
+            (is (map? (:context_packet detail-data)))
+            (is (map? (:guardrail_assessment detail-data)))
+            (is (vector? (:stage_events detail-data)))
+            (is (some #(= "my.app.order/process-order" (:symbol %))
+                      (get-in detail-data [:context_packet :relevant_units])))))
 
         (testing "impact_analysis wraps impact_hints"
           (let [impact-response (call-tool! handle 7 "impact_analysis" {:index_id index-id
@@ -403,22 +430,30 @@
         (testing "active registry policy is used when resolve_context has no override"
           (let [resolve-response (call-tool! handle 32 "resolve_context" {:index_id index-id
                                                                           :query sample-query})
-                resolve-data (get-in resolve-response [:result :structuredContent])]
+                resolve-data (get-in resolve-response [:result :structuredContent])
+                detail-response (call-tool! handle 34 "fetch_context_detail" {:index_id index-id
+                                                                              :selection_id (:selection_id resolve-data)
+                                                                              :snapshot_id (:snapshot_id resolve-data)})
+                detail-data (get-in detail-response [:result :structuredContent])]
             (is (= "heuristic_v1_mcp_active"
-                   (get-in resolve-data [:diagnostics_trace :retrieval_policy :policy_id])))
+                   (get-in detail-data [:diagnostics_trace :retrieval_policy :policy_id])))
             (is (not= "top_authority"
-                      (get-in resolve-data [:context_packet :relevant_units 0 :rank_band])))))
+                      (get-in detail-data [:context_packet :relevant_units 0 :rank_band])))))
 
         (testing "selector-based override resolves from registry"
           (let [resolve-response (call-tool! handle 33 "resolve_context" {:index_id index-id
                                                                           :query sample-query
                                                                           :retrieval_policy {:policy_id "heuristic_v1_mcp_shadow"
                                                                                              :version "2026-03-12"}})
-                resolve-data (get-in resolve-response [:result :structuredContent])]
+                resolve-data (get-in resolve-response [:result :structuredContent])
+                detail-response (call-tool! handle 35 "fetch_context_detail" {:index_id index-id
+                                                                              :selection_id (:selection_id resolve-data)
+                                                                              :snapshot_id (:snapshot_id resolve-data)})
+                detail-data (get-in detail-response [:result :structuredContent])]
             (is (= "heuristic_v1_mcp_shadow"
-                   (get-in resolve-data [:diagnostics_trace :retrieval_policy :policy_id])))
+                   (get-in detail-data [:diagnostics_trace :retrieval_policy :policy_id])))
             (is (not= "top_authority"
-                      (get-in resolve-data [:context_packet :relevant_units 0 :rank_band]))))))
+                      (get-in detail-data [:context_packet :relevant_units 0 :rank_band]))))))
       (finally
         (destroy-process! handle)))))
 
@@ -447,7 +482,7 @@
             tool-names (->> (get-in tools-response [:result :tools])
                             (map :name)
                             set)]
-        (is (= #{"create_index" "repo_map" "resolve_context" "impact_analysis" "skeletons"}
+        (is (= #{"create_index" "repo_map" "resolve_context" "expand_context" "fetch_context_detail" "impact_analysis" "skeletons"}
                tool-names)))
       (finally
         (destroy-process! handle)))))

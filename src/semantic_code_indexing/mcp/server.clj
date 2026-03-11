@@ -323,6 +323,7 @@
                                      :policy_registry (:policy_registry @state)
                                      :usage_metrics (:usage_metrics @state)
                                      :usage_context (tool-usage-context state)
+                                     :selection_cache (:selection_cache @state)
                                      :suppress_usage_metrics true})
             entry (store-index! state cache-key-value root-path paths parser-opts index)]
         (with-usage-event
@@ -368,25 +369,82 @@
                                              {:suppress_usage_metrics true
                                               :retrieval_policy retrieval-policy
                                               :policy_registry (:policy_registry @state)})
-                        :index_id (:index_id entry))]
+                        :index_id (:index_id entry))
+          result-meta (meta result)]
       (with-usage-event
         result
         (merge
          (usage-fields-for-query query)
          {:root_path_hash (usage/hash-root-path (:root_path entry))
-          :selected_units_count (count (get-in result [:context_packet :relevant_units]))
-          :selected_files_count (get-in result [:diagnostics_trace :result :selected_files_count])
-          :confidence_level (get-in result [:context_packet :confidence :level])
-          :autonomy_posture (get-in result [:guardrail_assessment :autonomy_posture])
-          :result_status (get-in result [:diagnostics_trace :result :result_status])
-          :raw_fetch_level (get-in result [:diagnostics_trace :result :raw_fetch_level_reached])
+          :selected_units_count (count (:focus result))
+          :selected_files_count (count (distinct (map :path (:focus result))))
+          :confidence_level (:confidence_level result)
+          :result_status (:result_status result)
           :payload {:index_id (:index_id entry)
-                    :warning_count (count (get-in result [:diagnostics_trace :warnings]))
-                    :degradation_count (count (get-in result [:diagnostics_trace :degradations]))
-                    :estimated_tokens (get-in result [:context_packet :budget :estimated_tokens])
-                    :fallback_units (get-in result [:diagnostics_trace :performance :parser_summary :fallback_units])
-                    :policy_id (get-in result [:diagnostics_trace :retrieval_policy :policy_id])
-                    :policy_version (get-in result [:diagnostics_trace :retrieval_policy :version])}})))))
+                    :selection_id (:selection_id result)
+                    :snapshot_id (:snapshot_id result)
+                    :estimated_tokens (get-in result [:budget_summary :estimated_tokens])
+                    :requested_tokens (get-in result [:budget_summary :requested_tokens])
+                    :policy_id (get-in result-meta [:retrieval_policy :policy_id])
+                    :policy_version (get-in result-meta [:retrieval_policy :version])
+                    :recommended_action (get-in result [:next_step :recommended_action])}})))))
+
+(defn- tool-expand-context [state args]
+  (when-not (map? args)
+    (invalid-request "expand_context arguments must be an object"))
+  (let [entry (resolve-entry! state args)
+        selection-id (ensure-string (:selection_id args) "selection_id")
+        snapshot-id (ensure-string (:snapshot_id args) "snapshot_id")
+        unit-ids (normalize-unit-ids (:unit_ids args))
+        include-impact-hints (ensure-boolean-or-nil (:include_impact_hints args) "include_impact_hints")
+        result (assoc (sci/expand-context (:index entry)
+                                          {:selection_id selection-id
+                                           :snapshot_id snapshot-id
+                                           :unit_ids unit-ids
+                                           :include_impact_hints include-impact-hints}
+                                          {:suppress_usage_metrics true})
+                      :index_id (:index_id entry))]
+    (with-usage-event
+      result
+      {:root_path_hash (usage/hash-root-path (:root_path entry))
+       :selected_units_count (count (:skeletons result))
+       :payload {:index_id (:index_id entry)
+                 :selection_id selection-id
+                 :snapshot_id snapshot-id
+                 :estimated_tokens (get-in result [:budget_summary :estimated_tokens])
+                 :include_impact_hints (boolean include-impact-hints)
+                 :impact_related_tests (count (get-in result [:impact_hints :related_tests]))}})))
+
+(defn- tool-fetch-context-detail [state args]
+  (when-not (map? args)
+    (invalid-request "fetch_context_detail arguments must be an object"))
+  (let [entry (resolve-entry! state args)
+        selection-id (ensure-string (:selection_id args) "selection_id")
+        snapshot-id (ensure-string (:snapshot_id args) "snapshot_id")
+        unit-ids (normalize-unit-ids (:unit_ids args))
+        detail-level (some-> (:detail_level args) (ensure-string "detail_level"))
+        result (assoc (sci/fetch-context-detail (:index entry)
+                                                {:selection_id selection-id
+                                                 :snapshot_id snapshot-id
+                                                 :unit_ids unit-ids
+                                                 :detail_level detail-level}
+                                                {:suppress_usage_metrics true})
+                      :index_id (:index_id entry))]
+    (with-usage-event
+      result
+      {:root_path_hash (usage/hash-root-path (:root_path entry))
+       :selected_units_count (count (get-in result [:context_packet :relevant_units]))
+       :selected_files_count (get-in result [:diagnostics_trace :result :selected_files_count])
+       :confidence_level (get-in result [:context_packet :confidence :level])
+       :autonomy_posture (get-in result [:guardrail_assessment :autonomy_posture])
+       :result_status (get-in result [:diagnostics_trace :result :result_status])
+       :raw_fetch_level (get-in result [:diagnostics_trace :result :raw_fetch_level_reached])
+       :payload {:index_id (:index_id entry)
+                 :selection_id selection-id
+                 :snapshot_id snapshot-id
+                 :warning_count (count (get-in result [:diagnostics_trace :warnings]))
+                 :degradation_count (count (get-in result [:diagnostics_trace :degradations]))
+                 :estimated_tokens (get-in result [:context_packet :budget :estimated_tokens])}})))
 
 (defn- tool-impact-analysis [state args]
   (when-not (map? args)
@@ -445,12 +503,32 @@
                   :required ["index_id"]
                   :additionalProperties false}}
    {:name "resolve_context"
-    :description "Find the most relevant files, symbols, and code context for a coding task or question, and return diagnostics and guardrails for downstream agent use."
+    :description "Return a compact shortlist of the most relevant units for a coding task. Use expand_context for signatures and impact hints, or fetch_context_detail for raw code and full diagnostics."
     :inputSchema {:type "object"
                   :properties {"index_id" {:type "string"}
                                "query" {:type "object"}
                                "retrieval_policy" {:type "object"}}
                   :required ["index_id" "query"]
+                  :additionalProperties false}}
+   {:name "expand_context"
+    :description "Expand a prior resolve_context selection with lightweight skeletons and optional impact hints without fetching raw code."
+    :inputSchema {:type "object"
+                  :properties {"index_id" {:type "string"}
+                               "selection_id" {:type "string"}
+                               "snapshot_id" {:type "string"}
+                               "unit_ids" {:type "array" :items {:type "string"}}
+                               "include_impact_hints" {:type "boolean"}}
+                  :required ["index_id" "selection_id" "snapshot_id"]
+                  :additionalProperties false}}
+   {:name "fetch_context_detail"
+    :description "Fetch raw code snippets and the full evidence packet for a prior resolve_context selection."
+    :inputSchema {:type "object"
+                  :properties {"index_id" {:type "string"}
+                               "selection_id" {:type "string"}
+                               "snapshot_id" {:type "string"}
+                               "unit_ids" {:type "array" :items {:type "string"}}
+                               "detail_level" {:type "string"}}
+                  :required ["index_id" "selection_id" "snapshot_id"]
                   :additionalProperties false}}
    {:name "impact_analysis"
     :description "Estimate which files, symbols, or semantic units are likely affected by a proposed change, bug fix, refactor, or target query."
@@ -472,6 +550,8 @@
   {"create_index" tool-create-index
    "repo_map" tool-repo-map
    "resolve_context" tool-resolve-context
+   "expand_context" tool-expand-context
+   "fetch_context_detail" tool-fetch-context-detail
    "impact_analysis" tool-impact-analysis
    "skeletons" tool-skeletons})
 
@@ -722,6 +802,7 @@
                      :allowed-roots allowed-roots
                      :max-indexes max-indexes
                      :policy_registry policy_registry
+                     :selection_cache (atom {})
                      :session_id (str (UUID/randomUUID))
                      :usage_metrics usage_metrics
                      :indexes-by-id {}

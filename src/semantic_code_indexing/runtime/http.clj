@@ -43,14 +43,16 @@
   (let [bytes (.getBytes (json/write-str payload :escape-slash false) "UTF-8")]
     (doto (.getResponseHeaders exchange)
       (#(do
-           (doseq [[header-name header-value] response-headers]
-             (when (seq (str header-value))
-               (.set % (str header-name) (str header-value))))
-           %))
+          (doseq [[header-name header-value] response-headers]
+            (when (seq (str header-value))
+              (.set % (str header-name) (str header-value))))
+          %))
       (.set "Content-Type" "application/json; charset=utf-8"))
     (.sendResponseHeaders exchange (long status) (long (count bytes)))
     (with-open [out (.getResponseBody exchange)]
       (.write out bytes)))))
+
+(def ^:private api-version-header {"x-sci-api-version" "1.0"})
 
 (def ^:private correlation-attribute "sci-correlation")
 
@@ -107,7 +109,6 @@
         (catch Exception e
           (let [{:keys [status body]} (errors/http-error-body e)]
             (write-json! exchange status body (response-correlation-header-map exchange))))))))
-
 
 (defn- post-request? [^HttpExchange exchange]
   (= "POST" (request-method exchange)))
@@ -230,27 +231,114 @@
                                                :usage_context (merge {:surface "http"
                                                                       :tenant_id tenant_id}
                                                                      correlation)
+                                               :selection_cache (:selection_cache auth-config)
                                                :suppress_usage_metrics true
                                                :policy_registry (:policy_registry auth-config)})
                       result (sci/resolve-context index
                                                   query
                                                   {:retrieval_policy retrieval-policy
                                                    :policy_registry (:policy_registry auth-config)})]
-                  (write-json! exchange 200 result (response-correlation-header-map exchange)))))))))))
+                  (write-json! exchange 200 result (merge api-version-header
+                                                          (response-correlation-header-map exchange))))))))))))
+
+(defn- handle-expand-context [auth-config ^HttpExchange exchange]
+  (if-not (post-request? exchange)
+    (write-json! exchange 405 {:error "method_not_allowed"
+                               :error_code "method_not_allowed"
+                               :error_category "client"
+                               :allowed ["POST"]})
+    (do
+      (remember-correlation! exchange (request-correlation exchange))
+      (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
+        (let [payload (read-json-body exchange)
+              root-path (or (:root_path payload) ".")
+              paths (:paths payload)
+              selector (select-keys payload [:selection_id :snapshot_id :unit_ids :include_impact_hints])
+              correlation (remember-correlation! exchange
+                                                 (assoc (request-correlation exchange) :tenant_id tenant_id))]
+          (when (enforce-authz! exchange auth-config
+                                {:operation :expand_context
+                                 :tenant_id tenant_id
+                                 :root_path root-path
+                                 :paths paths})
+            (let [index (sci/create-index {:root_path root-path
+                                           :paths paths
+                                           :parser_opts (:parser_opts payload)
+                                           :usage_metrics (:usage_metrics auth-config)
+                                           :usage_context (merge {:surface "http"
+                                                                  :tenant_id tenant_id}
+                                                                 correlation)
+                                           :selection_cache (:selection_cache auth-config)
+                                           :suppress_usage_metrics true
+                                           :policy_registry (:policy_registry auth-config)})
+                  result (sci/expand-context index selector)]
+              (write-json! exchange 200 result
+                           (merge api-version-header
+                                  (response-correlation-header-map exchange))))))))))
+
+(defn- handle-fetch-context-detail [auth-config ^HttpExchange exchange]
+  (if-not (post-request? exchange)
+    (write-json! exchange 405 {:error "method_not_allowed"
+                               :error_code "method_not_allowed"
+                               :error_category "client"
+                               :allowed ["POST"]})
+    (do
+      (remember-correlation! exchange (request-correlation exchange))
+      (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
+        (let [payload (read-json-body exchange)
+              root-path (or (:root_path payload) ".")
+              paths (:paths payload)
+              selector (select-keys payload [:selection_id :snapshot_id :unit_ids :detail_level])
+              correlation (remember-correlation! exchange
+                                                 (assoc (request-correlation exchange) :tenant_id tenant_id))]
+          (when (enforce-authz! exchange auth-config
+                                {:operation :fetch_context_detail
+                                 :tenant_id tenant_id
+                                 :root_path root-path
+                                 :paths paths})
+            (let [index (sci/create-index {:root_path root-path
+                                           :paths paths
+                                           :parser_opts (:parser_opts payload)
+                                           :usage_metrics (:usage_metrics auth-config)
+                                           :usage_context (merge {:surface "http"
+                                                                  :tenant_id tenant_id}
+                                                                 correlation)
+                                           :selection_cache (:selection_cache auth-config)
+                                           :suppress_usage_metrics true
+                                           :policy_registry (:policy_registry auth-config)})
+                  result (sci/fetch-context-detail index selector)]
+              (write-json! exchange 200 result
+                           (merge api-version-header
+                                  (response-correlation-header-map exchange))))))))))
 
 (defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry usage_metrics]}]
-  (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)]
+  (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)
+        selection-cache (atom {})]
     (.createContext server "/health" (with-handler handle-health))
     (.createContext server "/v1/index/create" (with-handler (partial handle-create-index {:api_key api_key
-                                                                                           :require_tenant require_tenant
-                                                                                           :authz_check authz_check
-                                                                                           :policy_registry policy_registry
-                                                                                           :usage_metrics usage_metrics})))
+                                                                                          :require_tenant require_tenant
+                                                                                          :authz_check authz_check
+                                                                                          :policy_registry policy_registry
+                                                                                          :usage_metrics usage_metrics
+                                                                                          :selection_cache selection-cache})))
     (.createContext server "/v1/retrieval/resolve-context" (with-handler (partial handle-resolve-context {:api_key api_key
-                                                                                                            :require_tenant require_tenant
-                                                                                                            :authz_check authz_check
-                                                                                                            :policy_registry policy_registry
-                                                                                                            :usage_metrics usage_metrics})))
+                                                                                                          :require_tenant require_tenant
+                                                                                                          :authz_check authz_check
+                                                                                                          :policy_registry policy_registry
+                                                                                                          :usage_metrics usage_metrics
+                                                                                                          :selection_cache selection-cache})))
+    (.createContext server "/v1/retrieval/expand-context" (with-handler (partial handle-expand-context {:api_key api_key
+                                                                                                        :require_tenant require_tenant
+                                                                                                        :authz_check authz_check
+                                                                                                        :policy_registry policy_registry
+                                                                                                        :usage_metrics usage_metrics
+                                                                                                        :selection_cache selection-cache})))
+    (.createContext server "/v1/retrieval/fetch-context-detail" (with-handler (partial handle-fetch-context-detail {:api_key api_key
+                                                                                                                    :require_tenant require_tenant
+                                                                                                                    :authz_check authz_check
+                                                                                                                    :policy_registry policy_registry
+                                                                                                                    :usage_metrics usage_metrics
+                                                                                                                    :selection_cache selection-cache})))
     (.setExecutor server nil)
     (.start server)
     server))

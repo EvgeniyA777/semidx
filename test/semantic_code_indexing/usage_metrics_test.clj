@@ -72,7 +72,7 @@
       (is (= "resolve_context" (:operation resolve-event)))
       (is (= "success" (:status resolve-event)))
       (is (= "usage-metrics-test-001" (:request_id resolve-event)))
-      (is (= (get-in result [:context_packet :confidence :level]) (:confidence_level resolve-event)))
+      (is (= (:confidence_level result) (:confidence_level resolve-event)))
       (is (pos-int? (:selected_units_count resolve-event)))
       (is (string? (:root_path_hash resolve-event)))
       (is (= "heuristic_v1" (get-in resolve-event [:payload :policy_id])))
@@ -102,6 +102,7 @@
                      :max-indexes 4
                      :session_id "mcp-session-001"
                      :usage_metrics sink
+                     :selection_cache (atom {})
                      :indexes-by-id {}
                      :cache-key->index-id {}
                      :client-info {:name "codex-test-client"}})
@@ -147,6 +148,7 @@
                      :max-indexes 4
                      :session_id "mcp-slo-session"
                      :usage_metrics sink
+                     :selection_cache (atom {})
                      :indexes-by-id {}
                      :cache-key->index-id {}
                      :client-info {:name "codex-test-client"}})

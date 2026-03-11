@@ -103,7 +103,7 @@
   (let [fixture-id (:fixture_id fixture)
         query (get-in fixture [:input :query])
         expected (:expected fixture)
-        result (sci/resolve-context index query)
+        result (sci/resolve-context-detail index query)
         packet (:context_packet result)
         diagnostics (:diagnostics_trace result)
         guardrails (:guardrail_assessment result)

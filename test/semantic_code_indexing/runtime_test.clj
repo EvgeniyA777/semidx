@@ -156,7 +156,7 @@
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
         index (sci/create-index {:root_path tmp-root})
-        result (sci/resolve-context index sample-query)
+        result (sci/resolve-context-detail index sample-query)
         packet (:context_packet result)
         diagnostics (:diagnostics_trace result)
         guardrails (:guardrail_assessment result)]
@@ -191,7 +191,7 @@
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-clj-related-tests" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
         index (sci/create-index {:root_path tmp-root})
-        result (sci/resolve-context index sample-query)
+        result (sci/resolve-context-detail index sample-query)
         related-tests (get-in result [:context_packet :impact_hints :related_tests])]
     (is (some #{"test/my/app/order_test.clj"} related-tests))))
 
@@ -199,7 +199,7 @@
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-clj-indirect-related-tests" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
         index (sci/create-index {:root_path tmp-root})
-        result (sci/resolve-context index sample-query)
+        result (sci/resolve-context-detail index sample-query)
         related-tests (get-in result [:context_packet :impact_hints :related_tests])]
     (is (some #{"test/my/app/order_support_test.clj"} related-tests))))
 
@@ -207,11 +207,11 @@
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-policy-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
         index (sci/create-index {:root_path tmp-root})
-        baseline (sci/resolve-context index sample-query)
+        baseline (sci/resolve-context-detail index sample-query)
         strict-policy {:policy_id "heuristic_v1_strict_top"
                        :version "2026-03-10"
                        :thresholds {:top_authority_min 500}}
-        strict-result (sci/resolve-context index sample-query {:retrieval_policy strict-policy})]
+        strict-result (sci/resolve-context-detail index sample-query {:retrieval_policy strict-policy})]
     (is (= "top_authority" (get-in baseline [:context_packet :relevant_units 0 :rank_band])))
     (is (not= "top_authority" (get-in strict-result [:context_packet :relevant_units 0 :rank_band])))
     (is (= "heuristic_v1_strict_top" (get-in strict-result [:diagnostics_trace :retrieval_policy :policy_id])))))
@@ -227,7 +227,7 @@
                   :policies [(rp/registry-entry strict-active {:state "active"})]}
         index (sci/create-index {:root_path tmp-root
                                  :policy_registry registry})
-        result (sci/resolve-context index sample-query)]
+        result (sci/resolve-context-detail index sample-query)]
     (is (not= "top_authority" (get-in result [:context_packet :relevant_units 0 :rank_band])))
     (is (= "heuristic_v1_active_strict"
            (get-in result [:diagnostics_trace :retrieval_policy :policy_id])))))
@@ -244,7 +244,7 @@
                              (rp/registry-entry strict-shadow {:state "shadow"})]}
         index (sci/create-index {:root_path tmp-root
                                  :policy_registry registry})
-        result (sci/resolve-context index
+        result (sci/resolve-context-detail index
                                     sample-query
                                     {:retrieval_policy {:policy_id "heuristic_v1_shadow_strict"
                                                         :version "2026-03-12"}})]
@@ -256,9 +256,9 @@
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-lang-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
         index (sci/create-index {:root_path tmp-root})
-        ex-result (sci/resolve-context index sample-query-elixir)
-        py-result (sci/resolve-context index sample-query-python)
-        ts-result (sci/resolve-context index sample-query-typescript)]
+        ex-result (sci/resolve-context-detail index sample-query-elixir)
+        py-result (sci/resolve-context-detail index sample-query-python)
+        ts-result (sci/resolve-context-detail index sample-query-typescript)]
     (testing "elixir symbol can be localized"
       (is (some #(= "MyApp.Order/process_order" (:symbol %))
                 (get-in ex-result [:context_packet :relevant_units])))
@@ -293,7 +293,7 @@
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-elixir-related-tests" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
         index (sci/create-index {:root_path tmp-root})
-        result (sci/resolve-context index sample-query-elixir)
+        result (sci/resolve-context-detail index sample-query-elixir)
         related-tests (get-in result [:context_packet :impact_hints :related_tests])]
     (is (some #{"test/my_app/order_test.exs"} related-tests))))
 
@@ -564,7 +564,7 @@
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-python-related-tests" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
         index (sci/create-index {:root_path tmp-root})
-        result (sci/resolve-context index sample-query-python)
+        result (sci/resolve-context-detail index sample-query-python)
         related-tests (get-in result [:context_packet :impact_hints :related_tests])]
     (is (some #{"app/orders_test.py"} related-tests))))
 
@@ -638,7 +638,7 @@
                                           :storage storage
                                           :pinned_snapshot_id (:snapshot_id initial)
                                           :max_snapshot_age_seconds 0})
-          result (sci/resolve-context pinned-stale sample-query)]
+          result (sci/resolve-context-detail pinned-stale sample-query)]
       (is (true? (get-in result [:context_packet :capabilities :index_stale])))
       (is (true? (get-in result [:context_packet :capabilities :snapshot_pinned])))
       (is (= "storage_pinned" (get-in result [:context_packet :capabilities :index_provenance_source])))
@@ -919,7 +919,7 @@
                :trace {:trace_id "55555555-5555-4555-8555-555555555555"
                        :request_id "runtime-test-clj-dispatch-001"
                        :actor_id "test_runner"}}
-        result (sci/resolve-context index query)]
+        result (sci/resolve-context-detail index query)]
     (is pickup-method)
     (is (= (:unit_id pickup-method)
            (get-in result [:context_packet :relevant_units 0 :unit_id])))

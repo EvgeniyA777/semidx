@@ -93,8 +93,35 @@
                           capped-soft)]
     capped-fallback))
 
+(defn- include-tests? [query]
+  (true? (get-in query [:options :include_tests])))
+
+(defn- allowed-path? [path allowed-prefixes]
+  (or (empty? allowed-prefixes)
+      (some #(str/starts-with? (str path) (str %)) allowed-prefixes)))
+
+(defn- allowed-language? [index unit language-allowlist]
+  (or (empty? language-allowlist)
+      (contains? (set (map str/lower-case language-allowlist))
+                 (some-> (get-in index [:files (:path unit) :language]) str str/lower-case))))
+
+(defn- query-visible-units [index query]
+  (let [allowed-prefixes (get-in query [:constraints :allowed_path_prefixes] [])
+        language-allowlist (get-in query [:constraints :language_allowlist] [])
+        include-tests?* (include-tests? query)
+        explicitly-targeted-tests (set (get-in query [:targets :tests] []))]
+    (->> (idx/all-units index)
+         (filter #(allowed-path? (:path %) allowed-prefixes))
+         (filter #(allowed-language? index % language-allowlist))
+         (filter (fn [u]
+                   (or include-tests?*
+                       (not (or (= "test" (:kind u))
+                                (str/includes? (:path u) "/test/")))
+                       (contains? explicitly-targeted-tests (:path u)))))
+         vec)))
+
 (defn- collect-candidates [index query policy]
-  (let [units (idx/all-units index)
+  (let [units (query-visible-units index query)
         target-symbols (get-in query [:targets :symbols] [])
         target-paths (set (get-in query [:targets :paths] []))
         target-modules (get-in query [:targets :modules] [])
@@ -143,14 +170,8 @@
                     (filter #(pos? (:score %)))
                     (sort-by (juxt (comp - :score) :path :start_line))
                     vec)
-        fallback (if (seq scored)
-                   scored
-                   (->> units
-                        (sort-by (juxt :path :start_line))
-                        (take 10)
-                        (map #(assoc % :score 1 :selection_reasons [(coded "fallback_candidate" "No strong match; selected from repository map.")]))
-                        vec))]
-    {:scored fallback
+        final-scored scored]
+    {:scored final-scored
      :tokens tokens}))
 
 (defn- with-rank-band [units policy]
@@ -425,6 +446,7 @@
        :level "none"
        :requests 0
        :snippets 0
+       :raw_context []
        :bytes 0
        :warnings []
        :degradations []}
@@ -434,6 +456,7 @@
         (loop [units chosen
                requests 0
                snippets 0
+               raw-context []
                bytes 0
                warnings []
                degradations []
@@ -449,6 +472,7 @@
                :level level
                :requests requests
                :snippets snippets
+               :raw_context raw-context
                :bytes bytes
                :warnings (vec (take 10 warnings*))
                :degradations (vec (take 10 degradations*))})
@@ -458,6 +482,7 @@
                 (recur (rest units)
                        (inc requests)
                        snippets
+                       raw-context
                        bytes
                        warnings
                        (conj degradations (coded "raw_fetch_file_missing" (str "Unable to read " (:path u) " for raw fetch.")))
@@ -467,6 +492,7 @@
                     (recur (rest units)
                            (inc requests)
                            snippets
+                           raw-context
                            bytes
                            warnings
                            (conj degradations (coded "raw_fetch_level_invalid" "Unknown raw-code fetch level requested."))
@@ -476,170 +502,390 @@
                           chunk-bytes (snippet-bytes chunk)
                           next-bytes (+ bytes chunk-bytes)]
                       (if (> next-bytes max-bytes)
-                        (recur [] requests snippets bytes warnings degradations true)
+                        (recur [] requests snippets raw-context bytes warnings degradations true)
                         (recur (rest units)
                                (inc requests)
                                (inc snippets)
+                               (conj raw-context
+                                     {:unit_id (:unit_id u)
+                                      :path (:path u)
+                                      :start_line (:start span)
+                                      :end_line (:end span)
+                                      :content chunk})
                                next-bytes
                                warnings
                                degradations
                                truncated?)))))))))))))
+
+(def ^:private default-api-version "1.0")
+
+(defn- query-api-version [query]
+  (or (:api_version query) default-api-version))
+
+(defn- ensure-supported-api-version! [query]
+  (let [version (query-api-version query)]
+    (when-not (= default-api-version (str version))
+      (throw (ex-info "unsupported api_version"
+                      {:type :invalid_request
+                       :message "unsupported api_version"})))))
+
+(defn- enforce-query-constraints! [index query]
+  (when-let [requested-snapshot (get-in query [:constraints :snapshot_id])]
+    (when (not= (str requested-snapshot) (str (:snapshot_id index)))
+      (throw (ex-info "requested snapshot_id is not available on the current index"
+                      {:type :invalid_request
+                       :message "requested snapshot_id is not available on the current index"})))))
+
+(defn- selection-cache [index]
+  (:selection_cache (meta index)))
+
+(defn- put-selection! [index selection]
+  (when-let [cache (selection-cache index)]
+    (swap! cache assoc (:selection_id selection) selection))
+  selection)
+
+(defn- get-selection [index selection-id]
+  (when-let [cache (selection-cache index)]
+    (get @cache selection-id)))
+
+(defn- ensure-selection! [index selection-id snapshot-id]
+  (let [selection (get-selection index selection-id)]
+    (cond
+      (nil? selection)
+      (throw (ex-info "selection_id not found"
+                      {:type :invalid_request
+                       :message "selection_id not found"}))
+
+      (not= (str snapshot-id) (str (:snapshot_id selection)))
+      (throw (ex-info "snapshot_id does not match selection"
+                      {:type :invalid_request
+                       :message "snapshot_id does not match selection"}))
+
+      :else
+      selection)))
+
+(defn- stage-budgets [requested]
+  (let [selection-budget (max 80 (int (Math/floor (* requested 0.10))))
+        expansion-budget (max 160 (int (Math/floor (* requested 0.20))))
+        detail-budget (max 0 (- requested selection-budget expansion-budget))]
+    {:selection_tokens selection-budget
+     :expansion_tokens expansion-budget
+     :detail_tokens detail-budget}))
+
+(defn- compact-item-estimate [u]
+  (int (Math/ceil (/ (double (+ (count (or (:symbol u) ""))
+                                 (count (or (:path u) ""))
+                                 (count (or (:unit_id u) ""))
+                                 24))
+                    4.0))))
+
+(defn- fit-focus [selected selection-budget]
+  (loop [remaining selected
+         chosen []
+         used 0]
+    (if (or (empty? remaining) (>= (count chosen) 5))
+      {:focus chosen :estimated_tokens used}
+      (let [u (first remaining)
+            next-used (+ used (compact-item-estimate u))]
+        (if (and (seq chosen) (> next-used selection-budget))
+          {:focus chosen :estimated_tokens used}
+          (if (> next-used selection-budget)
+            {:focus [] :estimated_tokens next-used}
+            (recur (rest remaining) (conj chosen u) next-used)))))))
+
+(defn- compact-focus-unit [u]
+  {:unit_id (:unit_id u)
+   :symbol (:symbol u)
+   :path (:path u)
+   :span {:path (:path u)
+          :start_line (:start_line u)
+          :end_line (:end_line u)}
+   :rank_band (:rank_band u)
+   :why_selected (->> (:selection_reasons u)
+                      (map :code)
+                      distinct
+                      (take 2)
+                      vec)})
+
+(defn- next-step [status focus confidence]
+  (let [target-unit-ids (mapv :unit_id focus)]
+    (case status
+      "insufficient_evidence"
+      {:recommended_action "expand_query_scope"
+       :available_actions []
+       :reason "No structurally relevant units were found."
+       :target_unit_ids []}
+
+      "budget_exhausted_at_selection"
+      {:recommended_action "raise_token_budget"
+       :available_actions []
+       :reason "Selection payload could not fit into the reserved selection budget."
+       :target_unit_ids []}
+
+      {:recommended_action (if (= "low" (:level confidence)) "fetch_context_detail" "expand_context")
+       :available_actions ["expand_context" "fetch_context_detail"]
+       :reason (if (= "low" (:level confidence))
+                 "Low confidence suggests additional detail fetch."
+                 "Compact selection identified likely relevant units.")
+       :target_unit_ids target-unit-ids})))
+
+(defn- build-selection-result [index query policy selected]
+  (let [requested (get-in query [:constraints :token_budget] 1800)
+        reserved (stage-budgets requested)
+        capabilities (rp/capability-summary index (capability-units selected))
+        confidence (-> (build-confidence selected query policy)
+                       (apply-capability-ceiling capabilities policy)
+                       (update :reasons #(vec (take 10 %)))
+                       (update :warnings #(vec (take 10 %)))
+                       (update :missing_evidence #(vec (take 10 %))))
+        {:keys [focus estimated_tokens]} (fit-focus selected (:selection_tokens reserved))
+        status (cond
+                 (empty? selected) "insufficient_evidence"
+                 (empty? focus) "budget_exhausted_at_selection"
+                 :else "completed")
+        selection-id (str (java.util.UUID/randomUUID))
+        selection {:api_version default-api-version
+                   :selection_id selection-id
+                   :snapshot_id (:snapshot_id index)
+                   :query query
+                   :policy policy
+                   :selected selected
+                   :focus focus
+                   :confidence confidence
+                   :capabilities capabilities
+                   :budget {:requested_tokens requested
+                            :estimated_tokens estimated_tokens
+                            :within_budget (<= estimated_tokens (:selection_tokens reserved))
+                            :remaining_tokens (max 0 (- requested estimated_tokens))
+                            :reserved_budget reserved}
+                   :result_status status}]
+    (put-selection! index selection)
+    (with-meta
+      {:api_version default-api-version
+       :selection_id selection-id
+       :snapshot_id (:snapshot_id index)
+       :result_status status
+       :confidence_level (:level confidence)
+       :budget_summary (:budget selection)
+       :focus (mapv compact-focus-unit focus)
+       :next_step (next-step status focus confidence)}
+      {:retrieval_policy (rp/policy-summary policy)
+       :capabilities capabilities
+       :confidence confidence})))
+
+(defn- build-detail-response [index selection selector]
+  (let [query (:query selection)
+        policy (:policy selection)
+        trace-id (get-in query [:trace :trace_id] (str (java.util.UUID/randomUUID)))
+        request-id (get-in query [:trace :request_id] (str "req-" (subs trace-id 0 8)))
+        summary (summarize-query query)
+        selected (if-let [unit-ids (seq (:unit_ids selector))]
+                   (->> (:selected selection)
+                        (filter #(contains? (set unit-ids) (:unit_id %)))
+                        vec)
+                   (:selected selection))
+        requested (get-in query [:constraints :token_budget] 1800)
+        detail-level (or (:detail_level selector)
+                         (get-in query [:constraints :max_raw_code_level])
+                         "enclosing_unit")
+        query* (-> query
+                   (assoc-in [:options :allow_raw_code_escalation] true)
+                   (assoc-in [:constraints :max_raw_code_level] detail-level))
+        stage-query (build-stage "query_validation" "completed" "Structured query accepted." {:target_count (count (:targets_summary summary)) :constraint_count (count (:constraints_summary summary))} [] [] 2)
+        stage-candidates (build-stage "candidate_generation" "completed" "Generated retrieval candidates from structural signals." {:candidate_units (count (:selected selection)) :candidate_files (count (distinct (map :path (:selected selection))))} [] [] 7)
+        stage-ranking (build-stage "ranking" "completed" "Ranked candidates using structural-first signals." {:ranked_units (count (:selected selection)) :top_authority_units (count (filter #(= "top_authority" (:rank_band %)) selected))} [] [] 4)
+        estimated (estimate-tokens selected)
+        truncation (cond-> [] (> estimated requested) (conj "budget_restricted"))
+        budget {:requested_tokens requested :estimated_tokens estimated :truncation_flags truncation}
+        impact (build-impact-hints index selected)
+        capabilities (rp/capability-summary index (capability-units selected))
+        base-confidence (build-confidence selected query* policy)
+        raw-fetch (perform-raw-fetch index selected query* requested)
+        fallback-selected? (some #(= "parser_fallback" (:code %)) (:warnings base-confidence))
+        confidence-a (cond-> base-confidence
+                       (and (not= "none" (:level raw-fetch))
+                            (pos? (:snippets raw-fetch)))
+                       (update :reasons conj (coded "raw_code_escalated" "Late raw-code fetch was performed for selected units."))
+                       (seq (:degradations raw-fetch))
+                       (update :warnings conj (coded "raw_fetch_degraded" "Raw-code escalation produced degraded signals.")))
+        confidence-b (if (and (= "low" (:level base-confidence))
+                              (= "completed" (:status raw-fetch))
+                              (>= (:snippets raw-fetch) (rp/raw-fetch-threshold policy :medium_upgrade_min_snippets))
+                              (not fallback-selected?))
+                       (-> confidence-a
+                           (assoc :level "medium"
+                                  :score (rp/confidence-score policy "medium"))
+                           (update :reasons conj (coded "raw_fetch_disambiguated" "Raw-code spans reduced ambiguity for low-confidence retrieval.")))
+                       confidence-a)
+        confidence (-> confidence-b
+                       (apply-capability-ceiling capabilities policy)
+                       (update :reasons #(vec (take 10 %)))
+                       (update :warnings #(vec (take 10 %)))
+                       (update :missing_evidence #(vec (take 10 %))))
+        guardrails (build-guardrails confidence impact query* policy capabilities)
+        focus-paths (->> selected (map :path) distinct (take 20) vec)
+        focus-modules (->> selected (map :module) (remove nil?) distinct (take 20) vec)
+        context-packet {:schema_version "1.0"
+                        :retrieval_policy (rp/policy-summary policy)
+                        :capabilities capabilities
+                        :query summary
+                        :repo_map {:focus_paths focus-paths
+                                   :focus_modules focus-modules
+                                   :summary (str "Selected " (count selected) " units from " (count focus-paths) " files.")}
+                        :relevant_units (mapv compact-unit selected)
+                        :skeletons (mapv compact-skeleton selected)
+                        :impact_hints impact
+                        :evidence {:selection_reasons (top-reasons selected)
+                                   :hint_effects (cond-> []
+                                                   (seq (:hints_summary summary))
+                                                   (conj (coded "hints_applied" "Soft hints were applied during candidate ranking."))
+                                                   (and (not= "none" (:level raw-fetch))
+                                                        (pos? (:snippets raw-fetch)))
+                                                   (conj (coded "raw_code_escalated" "Late raw-code fetch was executed for ranked units.")))}
+                        :budget budget
+                        :confidence confidence}
+        packet-status (if (or (= "low" (:level confidence))
+                              (= "degraded" (:status raw-fetch)))
+                        "degraded"
+                        "completed")
+        packet-warns (cond-> []
+                       (= "low" (:level confidence)) (conj (coded "confidence_low" "Context packet confidence is low."))
+                       (= "degraded" (:status raw-fetch)) (conj (coded "raw_fetch_degraded" "Raw-code fetch was executed in degraded mode.")))
+        stage-packet (build-stage "context_packet_assembly" packet-status "Assembled bounded context packet." {:selected_units (count selected) :selected_files (count focus-paths)} packet-warns [] 5)
+        stage-fetch (build-stage "raw_code_fetch"
+                                 (:status raw-fetch)
+                                 (case (:status raw-fetch)
+                                   "skipped" "Late raw-code fetch skipped by query options."
+                                   "degraded" "Late raw-code fetch executed with degradation flags."
+                                   "completed" "Late raw-code fetch completed for ranked units."
+                                   "Late raw-code fetch stage completed.")
+                                 {:raw_fetch_requests (:requests raw-fetch)
+                                  :raw_fetch_snippets (:snippets raw-fetch)
+                                  :raw_fetch_bytes (:bytes raw-fetch)}
+                                 (:warnings raw-fetch)
+                                 (:degradations raw-fetch)
+                                 (if (= "skipped" (:status raw-fetch)) 0 3))
+        base-degradations (cond-> []
+                            (= "low" (:level confidence)) (conj (coded "confidence_low" "Confidence degraded due to weak or ambiguous evidence."))
+                            fallback-selected? (conj (coded "parser_fallback" "Fallback parser evidence contributed to selected units.")))
+        diagnostics-degradations (vec (take 10 (concat base-degradations (:degradations raw-fetch))))
+        stage-final-status (if (or (= "low" (:level confidence))
+                                   (seq diagnostics-degradations))
+                             "degraded"
+                             "completed")
+        stage-final (build-stage "result_finalization"
+                                 stage-final-status
+                                 "Confidence, guardrails, and diagnostics emitted."
+                                 {:warning_count (count (:warnings confidence))
+                                  :degradation_count (count diagnostics-degradations)}
+                                 []
+                                 diagnostics-degradations
+                                 2)
+        stages [stage-query stage-candidates stage-ranking stage-packet stage-fetch stage-final]
+        diagnostics {:schema_version "1.0"
+                     :retrieval_policy (rp/policy-summary policy)
+                     :capabilities capabilities
+                     :trace {:trace_id trace-id
+                             :request_id request-id
+                             :timestamp_start (now-iso)
+                             :timestamp_end (now-iso)
+                             :host_metadata {:host "library_runtime"
+                                             :interactive true}}
+                     :query (assoc summary
+                                   :options_summary (->> (:options query*) (keep (fn [[k v]] (when (true? v) (name k)))) vec)
+                                   :validation_status "accepted")
+                     :stages stages
+                     :result {:selected_units_count (count selected)
+                              :selected_files_count (count focus-paths)
+                              :raw_fetch_level_reached (:level raw-fetch)
+                              :packet_size_estimate estimated
+                              :top_authority_targets (->> selected (filter #(= "top_authority" (:rank_band %))) (map :unit_id) (take 10) vec)
+                              :result_status (if (or (= "low" (:level confidence))
+                                                     (= "degraded" (:status raw-fetch)))
+                                               "degraded"
+                                               "completed")}
+                     :warnings (vec (take 10 (concat (:warnings confidence) (:warnings raw-fetch))))
+                     :degradations diagnostics-degradations
+                     :confidence confidence
+                     :guardrails guardrails
+                     :performance {:total_duration_ms (+ 20 (if (= "skipped" (:status raw-fetch)) 0 3))
+                                   :cache_summary {:cache_hits 0 :cache_misses 1}
+                                   :parser_summary {:fallback_units (count (filter #(= "fallback" (:parser_mode %)) selected))
+                                                    :selected_units (count selected)}
+                                   :fetch_summary {:raw_fetch_requests (:requests raw-fetch)
+                                                   :raw_fetch_snippets (:snippets raw-fetch)
+                                                   :raw_fetch_bytes (:bytes raw-fetch)}
+                                   :budget_summary {:requested_tokens requested :estimated_tokens estimated}}}
+        events (build-stage-events trace-id request-id (get-in query [:intent :purpose] "unknown") stages {:requested_tokens requested :estimated_tokens estimated})]
+    (when-let [explain (m/explain (:example/context-packet contracts/contracts) context-packet)]
+      (throw (ex-info "invalid context packet generated" {:type :internal_contract_error :errors (me/humanize explain)})))
+    (when-let [explain (m/explain (:example/diagnostics-trace contracts/contracts) diagnostics)]
+      (throw (ex-info "invalid diagnostics trace generated" {:type :internal_contract_error :errors (me/humanize explain)})))
+    {:api_version default-api-version
+     :selection_id (:selection_id selection)
+     :snapshot_id (:snapshot_id selection)
+     :raw_context (:raw_context raw-fetch)
+     :context_packet context-packet
+     :guardrail_assessment guardrails
+     :diagnostics_trace diagnostics
+     :stage_events events}))
 
 (defn resolve-context
   ([index query]
    (resolve-context index query {}))
   ([index query opts]
    (validate-query! query)
+   (ensure-supported-api-version! query)
+   (enforce-query-constraints! index query)
    (let [policy (rp/resolve-policy (:retrieval_policy opts) (:policy_registry opts))
-         trace-id (get-in query [:trace :trace_id] (str (java.util.UUID/randomUUID)))
-         request-id (get-in query [:trace :request_id] (str "req-" (subs trace-id 0 8)))
-         summary (summarize-query query)
-         stage-query (build-stage "query_validation" "completed" "Structured query accepted." {:target_count (count (:targets_summary summary)) :constraint_count (count (:constraints_summary summary))} [] [] 2)
          {:keys [scored]} (collect-candidates index query policy)
-         stage-candidates (build-stage "candidate_generation" "completed" "Generated retrieval candidates from structural signals." {:candidate_units (count scored) :candidate_files (count (distinct (map :path scored)))} [] [] 7)
-         ranked (->> (with-rank-band scored policy) (sort-by (juxt (comp - :score) :path :start_line)) vec)
-         selected (vec (take 20 ranked))
-         stage-ranking (build-stage "ranking" "completed" "Ranked candidates using structural-first signals." {:ranked_units (count ranked) :top_authority_units (count (filter #(= "top_authority" (:rank_band %)) selected))} [] [] 4)
-         requested (get-in query [:constraints :token_budget] 1800)
-         estimated (estimate-tokens selected)
-         truncation (cond-> [] (> estimated requested) (conj "budget_restricted"))
-         budget {:requested_tokens requested :estimated_tokens estimated :truncation_flags truncation}
-         impact (build-impact-hints index selected)
-         capabilities (rp/capability-summary index (capability-units selected))
-         base-confidence (build-confidence selected query policy)
-         raw-fetch (perform-raw-fetch index selected query requested)
-         fallback-selected? (some #(= "parser_fallback" (:code %)) (:warnings base-confidence))
-         confidence-a (cond-> base-confidence
-                        (and (not= "none" (:level raw-fetch))
-                             (pos? (:snippets raw-fetch)))
-                        (update :reasons conj (coded "raw_code_escalated" "Late raw-code fetch was performed for selected units."))
-                        (seq (:degradations raw-fetch))
-                        (update :warnings conj (coded "raw_fetch_degraded" "Raw-code escalation produced degraded signals.")))
-         confidence-b (if (and (= "low" (:level base-confidence))
-                               (= "completed" (:status raw-fetch))
-                               (>= (:snippets raw-fetch) (rp/raw-fetch-threshold policy :medium_upgrade_min_snippets))
-                               (not fallback-selected?))
-                        (-> confidence-a
-                            (assoc :level "medium"
-                                   :score (rp/confidence-score policy "medium"))
-                            (update :reasons conj (coded "raw_fetch_disambiguated" "Raw-code spans reduced ambiguity for low-confidence retrieval.")))
-                        confidence-a)
-         confidence (-> confidence-b
-                        (apply-capability-ceiling capabilities policy)
-                        (update :reasons #(vec (take 10 %)))
-                        (update :warnings #(vec (take 10 %)))
-                        (update :missing_evidence #(vec (take 10 %))))
-         guardrails (build-guardrails confidence impact query policy capabilities)
-         focus-paths (->> selected (map :path) distinct (take 20) vec)
-         focus-modules (->> selected (map :module) (remove nil?) distinct (take 20) vec)
-         context-packet {:schema_version "1.0"
-                         :retrieval_policy (rp/policy-summary policy)
-                         :capabilities capabilities
-                         :query summary
-                         :repo_map {:focus_paths focus-paths
-                                    :focus_modules focus-modules
-                                    :summary (str "Selected " (count selected) " units from " (count focus-paths) " files.")}
-                         :relevant_units (mapv compact-unit selected)
-                         :skeletons (mapv compact-skeleton selected)
-                         :impact_hints impact
-                         :evidence {:selection_reasons (top-reasons selected)
-                                    :hint_effects (cond-> []
-                                                    (seq (:hints_summary summary))
-                                                    (conj (coded "hints_applied" "Soft hints were applied during candidate ranking."))
-                                                    (and (not= "none" (:level raw-fetch))
-                                                         (pos? (:snippets raw-fetch)))
-                                                    (conj (coded "raw_code_escalated" "Late raw-code fetch was executed for ranked units.")))}
-                         :budget budget
-                         :confidence confidence}
-         packet-status (if (or (= "low" (:level confidence))
-                               (= "degraded" (:status raw-fetch)))
-                         "degraded"
-                         "completed")
-         packet-warns (cond-> []
-                        (= "low" (:level confidence)) (conj (coded "confidence_low" "Context packet confidence is low."))
-                        (= "degraded" (:status raw-fetch)) (conj (coded "raw_fetch_degraded" "Raw-code fetch was executed in degraded mode.")))
-         stage-packet (build-stage "context_packet_assembly" packet-status "Assembled bounded context packet." {:selected_units (count selected) :selected_files (count focus-paths)} packet-warns [] 5)
-         stage-fetch (build-stage "raw_code_fetch"
-                                  (:status raw-fetch)
-                                  (case (:status raw-fetch)
-                                    "skipped" "Late raw-code fetch skipped by query options."
-                                    "degraded" "Late raw-code fetch executed with degradation flags."
-                                    "completed" "Late raw-code fetch completed for ranked units."
-                                    "Late raw-code fetch stage completed.")
-                                  {:raw_fetch_requests (:requests raw-fetch)
-                                   :raw_fetch_snippets (:snippets raw-fetch)
-                                   :raw_fetch_bytes (:bytes raw-fetch)}
-                                  (:warnings raw-fetch)
-                                  (:degradations raw-fetch)
-                                  (if (= "skipped" (:status raw-fetch)) 0 3))
-         base-degradations (cond-> []
-                             (= "low" (:level confidence)) (conj (coded "confidence_low" "Confidence degraded due to weak or ambiguous evidence."))
-                             fallback-selected? (conj (coded "parser_fallback" "Fallback parser evidence contributed to selected units.")))
-         diagnostics-degradations (vec (take 10 (concat base-degradations (:degradations raw-fetch))))
-         stage-final-status (if (or (= "low" (:level confidence))
-                                    (seq diagnostics-degradations))
-                              "degraded"
-                              "completed")
-         stage-final (build-stage "result_finalization"
-                                  stage-final-status
-                                  "Confidence, guardrails, and diagnostics emitted."
-                                  {:warning_count (count (:warnings confidence))
-                                   :degradation_count (count diagnostics-degradations)}
-                                  []
-                                  diagnostics-degradations
-                                  2)
-         stages [stage-query stage-candidates stage-ranking stage-packet stage-fetch stage-final]
-         diagnostics {:schema_version "1.0"
-                      :retrieval_policy (rp/policy-summary policy)
-                      :capabilities capabilities
-                      :trace {:trace_id trace-id
-                              :request_id request-id
-                              :timestamp_start (now-iso)
-                              :timestamp_end (now-iso)
-                              :host_metadata {:host "library_runtime"
-                                              :interactive true}}
-                      :query (assoc summary
-                                    :options_summary (->> (:options query) (keep (fn [[k v]] (when (true? v) (name k)))) vec)
-                                    :validation_status "accepted")
-                      :stages stages
-                      :result {:selected_units_count (count selected)
-                               :selected_files_count (count focus-paths)
-                               :raw_fetch_level_reached (:level raw-fetch)
-                               :packet_size_estimate estimated
-                               :top_authority_targets (->> selected (filter #(= "top_authority" (:rank_band %))) (map :unit_id) (take 10) vec)
-                               :result_status (if (or (= "low" (:level confidence))
-                                                      (= "degraded" (:status raw-fetch)))
-                                                "degraded"
-                                                "completed")}
-                      :warnings (vec (take 10 (concat (:warnings confidence) (:warnings raw-fetch))))
-                      :degradations diagnostics-degradations
-                      :confidence confidence
-                      :guardrails guardrails
-                      :performance {:total_duration_ms (+ 20 (if (= "skipped" (:status raw-fetch)) 0 3))
-                                    :cache_summary {:cache_hits 0 :cache_misses 1}
-                                    :parser_summary {:fallback_units (count (filter #(= "fallback" (:parser_mode %)) selected))
-                                                     :selected_units (count selected)}
-                                    :fetch_summary {:raw_fetch_requests (:requests raw-fetch)
-                                                    :raw_fetch_snippets (:snippets raw-fetch)
-                                                    :raw_fetch_bytes (:bytes raw-fetch)}
-                                    :budget_summary {:requested_tokens requested :estimated_tokens estimated}}}
-         events (build-stage-events trace-id request-id (get-in query [:intent :purpose] "unknown") stages {:requested_tokens requested :estimated_tokens estimated})]
-     (when-let [explain (m/explain (:example/context-packet contracts/contracts) context-packet)]
-       (throw (ex-info "invalid context packet generated" {:type :internal_contract_error :errors (me/humanize explain)})))
-     (when-let [explain (m/explain (:example/diagnostics-trace contracts/contracts) diagnostics)]
-       (throw (ex-info "invalid diagnostics trace generated" {:type :internal_contract_error :errors (me/humanize explain)})))
-     {:context_packet context-packet
-      :guardrail_assessment guardrails
-      :diagnostics_trace diagnostics
-      :stage_events events})))
+         ranked (->> (with-rank-band scored policy)
+                     (sort-by (juxt (comp - :score) :path :start_line))
+                     vec)
+         selected (vec (take 20 ranked))]
+     (build-selection-result index query policy selected))))
+
+(defn expand-context
+  ([index selector]
+   (expand-context index selector {}))
+  ([index {:keys [selection_id snapshot_id unit_ids include_impact_hints] :as _selector} _opts]
+   (let [selection (ensure-selection! index selection_id snapshot_id)
+         selected (if (seq unit_ids)
+                    (->> (:selected selection)
+                         (filter #(contains? (set unit_ids) (:unit_id %)))
+                         vec)
+                    (:focus selection))
+         impact? (if (some? include_impact_hints)
+                   (boolean include_impact_hints)
+                   true)
+         impact (when impact? (build-impact-hints index selected))
+         expansion-budget (get-in selection [:budget :reserved_budget :expansion_tokens] 0)
+         estimated (+ (estimate-tokens selected)
+                      (if impact? 40 0))]
+     {:api_version default-api-version
+      :selection_id selection_id
+      :snapshot_id snapshot_id
+      :budget_summary {:reserved_tokens expansion-budget
+                       :estimated_tokens estimated
+                       :within_budget (<= estimated expansion-budget)}
+      :skeletons (mapv compact-skeleton selected)
+      :impact_hints impact})))
+
+(defn fetch-context-detail
+  ([index selector]
+   (fetch-context-detail index selector {}))
+  ([index {:keys [selection_id snapshot_id] :as selector} _opts]
+   (let [selection (ensure-selection! index selection_id snapshot_id)]
+     (build-detail-response index selection selector))))
 
 (defn impact-analysis
   ([index query]
    (impact-analysis index query {}))
   ([index query opts]
-   (-> (resolve-context index query opts)
-       :context_packet
-       :impact_hints)))
+   (let [selection (resolve-context index query opts)]
+     (:impact_hints (expand-context index {:selection_id (:selection_id selection)
+                                           :snapshot_id (:snapshot_id selection)
+                                           :include_impact_hints true})))))
 
 (defn skeletons [index {:keys [unit_ids paths]}]
   (let [units (cond

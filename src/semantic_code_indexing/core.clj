@@ -9,12 +9,15 @@
 (defn- now-ms []
   (System/currentTimeMillis))
 
-(defn- attach-runtime-context [index usage-metrics usage-context policy-registry]
+(defn- attach-runtime-context [index usage-metrics usage-context policy-registry selection-cache]
   (with-meta index
     (merge (meta index)
            {:usage_metrics usage-metrics
             :usage_context (merge {:surface "library"} usage-context)
-            :policy_registry policy-registry})))
+            :policy_registry policy-registry
+            :selection_cache (or selection-cache
+                                 (:selection_cache (meta index))
+                                 (atom {}))})))
 
 (defn- resolve-usage-metrics [index opts]
   (or (:usage_metrics opts)
@@ -54,11 +57,12 @@
   (let [sink (:usage_metrics opts)
         usage-context (resolve-usage-context nil opts)
         policy-registry (resolve-policy-registry nil opts)
+        selection-cache (:selection_cache opts)
         root-path (or (:root_path opts) ".")
         start-ms (now-ms)]
     (try
       (let [index (idx/create-index opts)
-            index* (attach-runtime-context index sink usage-context policy-registry)]
+            index* (attach-runtime-context index sink usage-context policy-registry selection-cache)]
         (when (should-record-usage? sink opts)
           (usage/safe-record-event!
            sink
@@ -96,10 +100,11 @@
   (let [sink (resolve-usage-metrics index opts)
         usage-context (resolve-usage-context index opts)
         policy-registry (resolve-policy-registry index opts)
+        selection-cache (or (:selection_cache opts) (:selection_cache (meta index)))
         start-ms (now-ms)]
     (try
       (let [updated (idx/update-index index opts)
-            updated* (attach-runtime-context updated sink usage-context policy-registry)]
+            updated* (attach-runtime-context updated sink usage-context policy-registry selection-cache)]
         (when (should-record-usage? sink opts)
           (usage/safe-record-event!
            sink
@@ -163,7 +168,7 @@
          (throw (errors/normalize-exception e)))))))
 
 (defn resolve-context
-  "Resolve context packet, diagnostics trace and stage events for a retrieval query."
+  "Resolve compact staged selection for a retrieval query."
   ([index query]
    (resolve-context index query {}))
   ([index query opts]
@@ -173,9 +178,7 @@
          start-ms (now-ms)]
      (try
        (let [result (retrieval/resolve-context index query (assoc opts :policy_registry policy-registry))
-             diagnostics (:diagnostics_trace result)
-             packet (:context_packet result)
-             guardrails (:guardrail_assessment result)]
+             result-meta (meta result)]
          (when (should-record-usage? sink opts)
            (usage/safe-record-event!
             sink
@@ -185,30 +188,25 @@
                     :status "success"
                     :latency_ms (- (now-ms) start-ms)
                     :root_path_hash (usage/hash-root-path (:root_path index))
-                    :selected_units_count (count (get-in packet [:relevant_units]))
-                    :selected_files_count (get-in diagnostics [:result :selected_files_count])
-                    :confidence_level (get-in packet [:confidence :level])
-                    :autonomy_posture (:autonomy_posture guardrails)
-                    :result_status (get-in diagnostics [:result :result_status])
-                    :raw_fetch_level (get-in diagnostics [:result :raw_fetch_level_reached])
-                    :payload {:estimated_tokens (get-in packet [:budget :estimated_tokens])
-                              :requested_tokens (get-in packet [:budget :requested_tokens])
-                              :warning_count (count (:warnings diagnostics))
-                              :degradation_count (count (:degradations diagnostics))
-                              :fallback_units (get-in diagnostics [:performance :parser_summary :fallback_units])
-                              :policy_id (get-in diagnostics [:retrieval_policy :policy_id])
-                              :policy_version (get-in diagnostics [:retrieval_policy :version])
+                    :selected_units_count (count (:focus result))
+                    :selected_files_count (count (distinct (map :path (:focus result))))
+                    :confidence_level (:confidence_level result)
+                    :result_status (:result_status result)
+                    :payload {:selection_id (:selection_id result)
+                              :snapshot_id (:snapshot_id result)
+                              :estimated_tokens (get-in result [:budget_summary :estimated_tokens])
+                              :requested_tokens (get-in result [:budget_summary :requested_tokens])
+                              :policy_id (get-in result-meta [:retrieval_policy :policy_id])
+                              :policy_version (get-in result-meta [:retrieval_policy :version])
                               :query query
-                              :selected_unit_ids (mapv :unit_id (get-in packet [:relevant_units]))
-                              :selected_paths (->> (get-in packet [:relevant_units])
+                              :selected_unit_ids (mapv :unit_id (:focus result))
+                              :selected_paths (->> (:focus result)
                                                    (map :path)
                                                    distinct
                                                    vec)
-                              :top_authority_unit_ids (get-in diagnostics [:result :top_authority_targets])
-                              :outcome_summary {:confidence_level (get-in packet [:confidence :level])
-                                                :confidence_score (get-in packet [:confidence :score])
-                                                :result_status (get-in diagnostics [:result :result_status])
-                                                :autonomy_posture (:autonomy_posture guardrails)}}})))
+                              :outcome_summary {:confidence_level (:confidence_level result)
+                                                :result_status (:result_status result)
+                                                :recommended_action (get-in result [:next_step :recommended_action])}}})))
          result)
        (catch Exception e
          (when (should-record-usage? sink opts)
@@ -222,6 +220,100 @@
                     :root_path_hash (usage/hash-root-path (:root_path index))
                     :payload (error-payload e)})))
          (throw (errors/normalize-exception e)))))))
+
+(defn expand-context
+  "Expand a previously resolved selection with skeletons and impact hints."
+  ([index selector]
+   (expand-context index selector {}))
+  ([index selector opts]
+   (let [sink (resolve-usage-metrics index opts)
+         usage-context (resolve-usage-context index opts)
+         start-ms (now-ms)]
+     (try
+       (let [result (retrieval/expand-context index selector opts)]
+         (when (should-record-usage? sink opts)
+           (usage/safe-record-event!
+            sink
+            (merge usage-context
+                   {:operation "expand_context"
+                    :status "success"
+                    :latency_ms (- (now-ms) start-ms)
+                    :root_path_hash (usage/hash-root-path (:root_path index))
+                    :selected_units_count (count (:skeletons result))
+                    :payload {:selection_id (:selection_id result)
+                              :snapshot_id (:snapshot_id result)
+                              :impact_hints_present (boolean (:impact_hints result))}})))
+         result)
+       (catch Exception e
+         (when (should-record-usage? sink opts)
+           (usage/safe-record-event!
+            sink
+            (merge usage-context
+                   {:operation "expand_context"
+                    :status "error"
+                    :latency_ms (- (now-ms) start-ms)
+                    :root_path_hash (usage/hash-root-path (:root_path index))
+                    :payload (error-payload e)})))
+         (throw (errors/normalize-exception e)))))))
+
+(defn fetch-context-detail
+  "Fetch raw context and rich diagnostics for a previously resolved selection."
+  ([index selector]
+   (fetch-context-detail index selector {}))
+  ([index selector opts]
+   (let [sink (resolve-usage-metrics index opts)
+         usage-context (resolve-usage-context index opts)
+         start-ms (now-ms)]
+     (try
+       (let [result (retrieval/fetch-context-detail index selector opts)
+             diagnostics (:diagnostics_trace result)
+             packet (:context_packet result)
+             guardrails (:guardrail_assessment result)]
+         (when (should-record-usage? sink opts)
+           (usage/safe-record-event!
+            sink
+            (merge usage-context
+                   {:operation "fetch_context_detail"
+                    :status "success"
+                    :latency_ms (- (now-ms) start-ms)
+                    :root_path_hash (usage/hash-root-path (:root_path index))
+                    :selected_units_count (count (get-in packet [:relevant_units]))
+                    :selected_files_count (get-in diagnostics [:result :selected_files_count])
+                    :confidence_level (get-in packet [:confidence :level])
+                    :autonomy_posture (:autonomy_posture guardrails)
+                    :result_status (get-in diagnostics [:result :result_status])
+                    :raw_fetch_level (get-in diagnostics [:result :raw_fetch_level_reached])
+                    :payload {:selection_id (:selection_id result)
+                              :snapshot_id (:snapshot_id result)
+                              :estimated_tokens (get-in packet [:budget :estimated_tokens])
+                              :requested_tokens (get-in packet [:budget :requested_tokens])
+                              :warning_count (count (:warnings diagnostics))
+                              :degradation_count (count (:degradations diagnostics))
+                              :fallback_units (get-in diagnostics [:performance :parser_summary :fallback_units])
+                              :policy_id (get-in diagnostics [:retrieval_policy :policy_id])
+                              :policy_version (get-in diagnostics [:retrieval_policy :version])}})))
+         result)
+       (catch Exception e
+         (when (should-record-usage? sink opts)
+           (usage/safe-record-event!
+            sink
+            (merge usage-context
+                   {:operation "fetch_context_detail"
+                    :status "error"
+                    :latency_ms (- (now-ms) start-ms)
+                    :root_path_hash (usage/hash-root-path (:root_path index))
+                    :payload (error-payload e)})))
+         (throw (errors/normalize-exception e)))))))
+
+(defn resolve-context-detail
+  "Convenience helper for internal consumers that still need the rich detail payload."
+  ([index query]
+   (resolve-context-detail index query {}))
+  ([index query opts]
+   (let [selection (resolve-context index query (assoc opts :suppress_usage_metrics true))]
+     (fetch-context-detail index {:selection_id (:selection_id selection)
+                                  :snapshot_id (:snapshot_id selection)}
+                           opts))))
 
 (defn impact-analysis
   "Return impact hints for the same retrieval query semantics used by resolve-context."

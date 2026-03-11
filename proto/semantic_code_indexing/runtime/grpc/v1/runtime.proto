@@ -33,8 +33,33 @@ message ResolveContextRequest {
 }
 
 message ResolveContextResponse {
-  string context_packet_json = 1;
-  string guardrail_assessment_json = 2;
-  string diagnostics_trace_json = 3;
-  string stage_events_json = 4;
+  string selection_result_json = 1;
+}
+
+message ExpandContextRequest {
+  string root_path = 1;
+  repeated string paths = 2;
+  string parser_opts_json = 3;
+  string selection_id = 4;
+  string snapshot_id = 5;
+  repeated string unit_ids = 6;
+  string include_impact_hints = 7;
+}
+
+message ExpandContextResponse {
+  string expansion_result_json = 1;
+}
+
+message FetchContextDetailRequest {
+  string root_path = 1;
+  repeated string paths = 2;
+  string parser_opts_json = 3;
+  string selection_id = 4;
+  string snapshot_id = 5;
+  repeated string unit_ids = 6;
+  string detail_level = 7;
+}
+
+message FetchContextDetailResponse {
+  string detail_result_json = 1;
 }

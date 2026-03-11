@@ -15,7 +15,7 @@
         _ (write-file! tmp-root "src/example/main.ts"
                        "import { normalizeOrder } from \"./normalize\";\n\nexport function processMain(orderId: string): string {\n  return normalizeOrder(orderId);\n}\n")
         index (sci/create-index {:root_path tmp-root})
-        result (sci/resolve-context index
+        result (sci/resolve-context-detail index
                                     {:schema_version "1.0"
                                      :intent {:purpose "code_understanding"
                                               :details "Locate TypeScript processMain function."}

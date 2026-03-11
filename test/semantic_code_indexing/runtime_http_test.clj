@@ -103,12 +103,58 @@
                                 {:root_path tmp-root
                                  :query query})]
             (is (= 200 (:status resp)))
-            (is (map? (get-in resp [:json :context_packet])))
-            (is (map? (get-in resp [:json :diagnostics_trace])))
-            (is (map? (get-in resp [:json :guardrail_assessment])))
-            (is (vector? (get-in resp [:json :stage_events])))
+            (is (= "1.0" (get-in resp [:json :api_version])))
+            (is (string? (get-in resp [:json :selection_id])))
+            (is (string? (get-in resp [:json :snapshot_id])))
+            (is (= "completed" (get-in resp [:json :result_status])))
+            (is (vector? (get-in resp [:json :focus])))
             (is (some #(= "my.app.order/process-order" (:symbol %))
-                      (get-in resp [:json :context_packet :relevant_units])))))
+                      (get-in resp [:json :focus])))
+            (is (= ["expand_context" "fetch_context_detail"]
+                   (get-in resp [:json :next_step :available_actions])))))
+
+        (testing "expand-context and fetch-context-detail endpoints"
+          (let [query {:schema_version "1.0"
+                       :intent {:purpose "code_understanding"
+                                :details "Locate authority implementation for process-order."}
+                       :targets {:symbols ["my.app.order/process-order"]
+                                 :paths ["src/my/app/order.clj"]}
+                       :constraints {:token_budget 1200
+                                     :max_raw_code_level "enclosing_unit"
+                                     :freshness "current_snapshot"}
+                       :hints {:prefer_definitions_over_callers true}
+                       :options {:include_tests true
+                                 :include_impact_hints true
+                                 :allow_raw_code_escalation false}
+                       :trace {:trace_id "02111111-1111-4111-8111-111111111111"
+                               :request_id "runtime-http-test-002"
+                               :actor_id "test_runner"}}
+                resolve-resp (post-json client
+                                        (str base-url "/v1/retrieval/resolve-context")
+                                        {:root_path tmp-root
+                                         :query query})
+                selection-id (get-in resolve-resp [:json :selection_id])
+                snapshot-id (get-in resolve-resp [:json :snapshot_id])
+                expand-resp (post-json client
+                                       (str base-url "/v1/retrieval/expand-context")
+                                       {:root_path tmp-root
+                                        :selection_id selection-id
+                                        :snapshot_id snapshot-id})
+                detail-resp (post-json client
+                                       (str base-url "/v1/retrieval/fetch-context-detail")
+                                       {:root_path tmp-root
+                                        :selection_id selection-id
+                                        :snapshot_id snapshot-id})]
+            (is (= 200 (:status expand-resp)))
+            (is (seq (get-in expand-resp [:json :skeletons])))
+            (is (map? (get-in expand-resp [:json :impact_hints])))
+            (is (= 200 (:status detail-resp)))
+            (is (map? (get-in detail-resp [:json :context_packet])))
+            (is (map? (get-in detail-resp [:json :diagnostics_trace])))
+            (is (map? (get-in detail-resp [:json :guardrail_assessment])))
+            (is (vector? (get-in detail-resp [:json :stage_events])))
+            (is (some #(= "my.app.order/process-order" (:symbol %))
+                      (get-in detail-resp [:json :context_packet :relevant_units])))))
 
         (testing "method and payload validation"
           (let [method-resp (http-request client "GET" (str base-url "/v1/index/create") nil)
@@ -257,28 +303,38 @@
                            :request_id "runtime-http-policy-registry-test-001"
                            :actor_id "test_runner"}}]
         (testing "active registry policy is used when no override is passed"
-          (let [resp (post-json client
-                                (str base-url "/v1/retrieval/resolve-context")
-                                {:root_path tmp-root
-                                 :query query})]
-            (is (= 200 (:status resp)))
+          (let [resolve-resp (post-json client
+                                        (str base-url "/v1/retrieval/resolve-context")
+                                        {:root_path tmp-root
+                                         :query query})
+                detail-resp (post-json client
+                                       (str base-url "/v1/retrieval/fetch-context-detail")
+                                       {:root_path tmp-root
+                                        :selection_id (get-in resolve-resp [:json :selection_id])
+                                        :snapshot_id (get-in resolve-resp [:json :snapshot_id])})]
+            (is (= 200 (:status resolve-resp)))
             (is (= "heuristic_v1_http_active"
-                   (get-in resp [:json :diagnostics_trace :retrieval_policy :policy_id])))
+                   (get-in detail-resp [:json :diagnostics_trace :retrieval_policy :policy_id])))
             (is (not= "top_authority"
-                      (get-in resp [:json :context_packet :relevant_units 0 :rank_band])))))
+                      (get-in detail-resp [:json :context_packet :relevant_units 0 :rank_band])))))
 
         (testing "selector-based override resolves from registry"
-          (let [resp (post-json client
-                                (str base-url "/v1/retrieval/resolve-context")
-                                {:root_path tmp-root
-                                 :query query
-                                 :retrieval_policy {:policy_id "heuristic_v1_http_shadow"
-                                                    :version "2026-03-12"}})]
-            (is (= 200 (:status resp)))
+          (let [resolve-resp (post-json client
+                                        (str base-url "/v1/retrieval/resolve-context")
+                                        {:root_path tmp-root
+                                         :query query
+                                         :retrieval_policy {:policy_id "heuristic_v1_http_shadow"
+                                                            :version "2026-03-12"}})
+                detail-resp (post-json client
+                                       (str base-url "/v1/retrieval/fetch-context-detail")
+                                       {:root_path tmp-root
+                                        :selection_id (get-in resolve-resp [:json :selection_id])
+                                        :snapshot_id (get-in resolve-resp [:json :snapshot_id])})]
+            (is (= 200 (:status resolve-resp)))
             (is (= "heuristic_v1_http_shadow"
-                   (get-in resp [:json :diagnostics_trace :retrieval_policy :policy_id])))
+                   (get-in detail-resp [:json :diagnostics_trace :retrieval_policy :policy_id])))
             (is (not= "top_authority"
-                      (get-in resp [:json :context_packet :relevant_units 0 :rank_band]))))))
+                      (get-in detail-resp [:json :context_packet :relevant_units 0 :rank_band]))))))
       (finally
         (.stop server 0)))))
 

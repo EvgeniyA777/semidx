@@ -218,7 +218,7 @@
         index (sci/create-index {:root_path root_path
                                  :parser_opts parser_opts})
         results (mapv (fn [{:keys [query expected query_id protected_case]}]
-                        (let [result (sci/resolve-context index query {:retrieval_policy policy})
+                        (let [result (sci/resolve-context-detail index query {:retrieval_policy policy})
                               evaluation (evaluate-query-result result expected)]
                           (enriched-result (or query_id (get-in query [:trace :request_id]) "query")
                                            result

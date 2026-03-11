@@ -30,6 +30,8 @@
    "update_index"
    "repo_map"
    "resolve_context"
+   "expand_context"
+   "fetch_context_detail"
    "impact_analysis"
    "skeletons"
    "cache_eviction"])
@@ -158,6 +160,7 @@
 
 (def retrieval-query
   [:map {:closed true}
+   [:api_version {:optional true} bounded-string]
    [:schema_version schema-version]
    [:intent retrieval-intent]
    [:targets retrieval-targets]
@@ -186,6 +189,45 @@
      [:favor_higher_recall {:optional true} boolean?]]]
    [:trace trace-ref]])
 
+(def compact-focus-unit
+  [:map {:closed true}
+   [:unit_id bounded-string]
+   [:symbol {:optional true} bounded-string]
+   [:path bounded-string]
+   [:span span]
+   [:rank_band rank-band]
+   [:why_selected string-array]])
+
+(def next-step
+  [:map {:closed true}
+   [:recommended_action bounded-string]
+   [:available_actions string-array]
+   [:reason bounded-string]
+   [:target_unit_ids string-array]])
+
+(def selection-budget-summary
+  [:map {:closed true}
+   [:requested_tokens pos-int?]
+   [:estimated_tokens nat-int?]
+   [:within_budget boolean?]
+   [:remaining_tokens nat-int?]
+   [:reserved_budget
+    [:map {:closed true}
+     [:selection_tokens nat-int?]
+     [:expansion_tokens nat-int?]
+     [:detail_tokens nat-int?]]]])
+
+(def selection-result
+  [:map {:closed true}
+   [:api_version bounded-string]
+   [:selection_id bounded-string]
+   [:snapshot_id bounded-string]
+   [:result_status [:enum "completed" "insufficient_evidence" "budget_exhausted_at_selection"]]
+   [:confidence_level confidence-level]
+   [:budget_summary selection-budget-summary]
+   [:focus [:vector {:max 5} compact-focus-unit]]
+   [:next_step next-step]])
+
 (def relevant-unit
   [:map {:closed true}
    [:unit_id bounded-string]
@@ -201,6 +243,24 @@
    [:signature bounded-long-string]
    [:summary bounded-string]
    [:docstring_excerpt {:optional true} bounded-long-string]])
+
+(def expansion-result
+  [:map {:closed true}
+   [:api_version bounded-string]
+   [:selection_id bounded-string]
+   [:snapshot_id bounded-string]
+   [:budget_summary
+    [:map {:closed true}
+     [:reserved_tokens nat-int?]
+     [:estimated_tokens nat-int?]
+     [:within_budget boolean?]]]
+   [:skeletons [:vector {:max 20} skeleton]]
+   [:impact_hints {:optional true}
+    [:map {:closed true}
+     [:callers string-array]
+     [:dependents string-array]
+     [:related_tests string-array]
+     [:risky_neighbors string-array]]]])
 
 (def context-packet
   [:map {:closed true}
@@ -430,6 +490,8 @@
 (def contracts
   {:example/catalog example-catalog
    :example/query retrieval-query
+   :example/selection-result selection-result
+   :example/expansion-result expansion-result
    :example/context-packet context-packet
    :example/diagnostics-trace diagnostics-trace
    :example/stage-event retrieval-stage-event
