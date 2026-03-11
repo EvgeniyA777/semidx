@@ -107,6 +107,18 @@
                "import normalizeDefault from \"./default_normalize\";\nimport { normalizeHelper as namedNormalize } from \"./helpers\";\nimport * as helperNs from \"./helpers\";\n\nexport function processImports(orderId: string): string {\n  namedNormalize(orderId);\n  return normalizeDefault(orderId);\n}\n\nexport const normalizeExpr = function(orderId: string): string {\n  return namedNormalize(orderId);\n};\n\nexport class ImportService {\n  processThis(orderId: string): string {\n    return this.normalizeLocal(orderId);\n  }\n\n  processNamespace(orderId: string): string {\n    return helperNs.normalizeHelper(orderId);\n  }\n\n  static processStaticCall(orderId: string): string {\n    return ImportService.normalizeStatic(orderId);\n  }\n\n  normalizeLocal(orderId: string): string {\n    return namedNormalize(orderId);\n  }\n\n  static normalizeStatic(orderId: string): string {\n    return normalizeDefault(orderId);\n  }\n}\n")
   (write-file! root "src/example/collision_modes.ts"
                "import * as helperNs from \"./helpers\";\n\nexport class CollisionService {\n  normalizeHelper(orderId: string): string {\n    return `local:${orderId}`;\n  }\n\n  processThis(orderId: string): string {\n    return this.normalizeHelper(orderId);\n  }\n\n  processNamespace(orderId: string): string {\n    return helperNs.normalizeHelper(orderId);\n  }\n}\n")
+  (write-file! root "src/example/object_modes.ts"
+               "export const formatters = {\n  normalizeObject(orderId: string): string {\n    return (orderId || \"\").trim();\n  }\n};\n\nexport function processObject(orderId: string): string {\n  return formatters.normalizeObject(orderId);\n}\n")
+  (write-file! root "src/example/field_methods.ts"
+               "export class FieldService {\n  normalizeField = (orderId: string): string => {\n    return (orderId || \"\").trim();\n  };\n\n  processField(orderId: string): string {\n    return this.normalizeField(orderId);\n  }\n}\n")
+  (write-file! root "src/example/default_alias.ts"
+               "function normalizeAlias(orderId: string): string {\n  return (orderId || \"\").trim();\n}\n\nexport default normalizeAlias;\n")
+  (write-file! root "src/example/default_alias_consumer.ts"
+               "import normalizeAlias from \"./default_alias\";\n\nexport function processDefaultAlias(orderId: string): string {\n  return normalizeAlias(orderId);\n}\n")
+  (write-file! root "src/example/barrel.ts"
+               "export { normalizeOrder as exportedNormalize } from \"./normalize\";\n")
+  (write-file! root "src/example/re_export_consumer.ts"
+               "import { exportedNormalize } from \"./barrel\";\n\nexport function processReExport(orderId: string): string {\n  return exportedNormalize(orderId);\n}\n")
   (write-file! root "test/example/main_test.ts"
                "import { processMain } from \"../../src/example/main\";\n\nexport function testProcessMain(): string {\n  return processMain(\"A-1\");\n}\n"))
 
@@ -910,6 +922,58 @@
     (is (some #(= "src.example.collision_modes.CollisionService#processThis" (:symbol %)) collision-local-callers))
     (is (some #(= "src.example.collision_modes.CollisionService#processNamespace" (:symbol %)) helper-callers))
     (is (not-any? #(= "src.example.collision_modes.CollisionService#processThis" (:symbol %)) helper-callers))))
+
+(deftest typescript-object-method-and-class-field-arrow-resolution-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-typescript-object-methods" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        object-units (sci/query-units storage tmp-root {:module "src.example.object_modes.formatters" :limit 20})
+        field-units (sci/query-units storage tmp-root {:module "src.example.field_methods.FieldService" :limit 20})
+        object-id (some->> object-units
+                           (filter #(= "src.example.object_modes.formatters#normalizeObject" (:symbol %)))
+                           first
+                           :unit_id)
+        field-id (some->> field-units
+                          (filter #(= "src.example.field_methods.FieldService#normalizeField" (:symbol %)))
+                          first
+                          :unit_id)
+        object-callers (sci/query-callers storage tmp-root object-id {:limit 20})
+        field-callers (sci/query-callers storage tmp-root field-id {:limit 20})]
+    (is object-id)
+    (is field-id)
+    (is (some #(= "src.example.object_modes/processObject" (:symbol %)) object-callers))
+    (is (some #(= "src.example.field_methods.FieldService#processField" (:symbol %)) field-callers))))
+
+(deftest typescript-default-export-alias-and-re-export-chain-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-typescript-default-alias" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        alias-units (sci/query-units storage tmp-root {:module "src.example.default_alias" :limit 20})
+        normalize-units (sci/query-units storage tmp-root {:module "src.example.normalize" :limit 20})
+        barrel-units (sci/query-units storage tmp-root {:module "src.example.barrel" :limit 20})
+        default-alias-id (some->> alias-units
+                                  (filter #(= "src.example.default_alias/normalizeAlias" (:symbol %)))
+                                  first
+                                  :unit_id)
+        normalize-id (some->> normalize-units
+                              (filter #(= "src.example.normalize/normalizeOrder" (:symbol %)))
+                              first
+                              :unit_id)
+        barrel-id (some->> barrel-units
+                           (filter #(= "src.example.barrel/exportedNormalize" (:symbol %)))
+                           first
+                           :unit_id)
+        default-callers (sci/query-callers storage tmp-root default-alias-id {:limit 20})
+        normalize-callers (sci/query-callers storage tmp-root normalize-id {:limit 20})
+        barrel-callers (sci/query-callers storage tmp-root barrel-id {:limit 20})]
+    (is default-alias-id)
+    (is normalize-id)
+    (is barrel-id)
+    (is (some #(= "src.example.default_alias_consumer/processDefaultAlias" (:symbol %)) default-callers))
+    (is (some #(= "src.example.barrel/exportedNormalize" (:symbol %)) normalize-callers))
+    (is (some #(= "src.example.re_export_consumer/processReExport" (:symbol %)) barrel-callers))))
 
 (deftest in-memory-storage-roundtrip-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-storage-test" (make-array java.nio.file.attribute.FileAttribute 0)))

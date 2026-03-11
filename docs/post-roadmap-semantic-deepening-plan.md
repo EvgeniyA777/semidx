@@ -13,7 +13,7 @@ Push the language adapters beyond the delivered roadmap scope toward more compil
 - `[x]` Stage 3 Java inheritance / lambda / method-reference deepening
 - `[x]` Stage 4 Python decorator / class-scope deepening
 - `[x]` Stage 5 Elixir pipelines / `with` / nested-module deepening
-- `[ ]` Stage 6 TypeScript parser-strengthening tranche
+- `[x]` Stage 6 TypeScript parser-strengthening tranche
 - `[ ]` Stage 7 Cross-language confidence recalibration
 - `[ ]` Stage 8 Post-roadmap closure
 
@@ -31,7 +31,7 @@ No batching of multiple stages into one commit.
 
 ## Current Active Stage
 
-`Stage 6` is now the active slice.
+`Stage 7` is now the active slice.
 
 ## Stage Notes
 
@@ -81,9 +81,18 @@ Delivered scope:
 
 ### Stage 6
 
+Delivered scope:
+
+- TypeScript regex extraction now emits first-class units for object-literal methods and class field arrow methods, so those surfaces no longer stay invisible to the semantic layer.
+- `export default foo;` indirection now backfills the default-export call token onto the referenced local unit, which keeps default-import callers attached to the real function symbol.
+- Direct re-export aliases now materialize as first-class alias units, giving barrel-style `export { foo as bar } from "./mod"` chains a provable semantic surface for downstream callers.
+- Runtime and onboarding regression coverage now prove object methods, class field arrows, default-export aliasing, and re-export alias units while TypeScript still keeps its conservative public confidence ceiling.
+
+### Stage 7
+
 Planned scope:
 
-- tighten tree-sitter TypeScript extraction parity with regex path
-- object-literal methods and default-export indirection
-- re-export chains where directly provable
-- class field arrow method ownership
+- reassess per-language ceiling wording
+- only bump ceilings where tests and behavior justify it
+- normalize runtime/MCP/docs wording
+- verify no contract drift in capability fields

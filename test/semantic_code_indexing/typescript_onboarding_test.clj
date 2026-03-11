@@ -61,3 +61,29 @@
               helper-callers))
     (is (some #(= "src.example.import_modes/normalizeExpr" (:symbol %))
               helper-callers))))
+
+(deftest typescript-adapter-default-alias-object-and-field-regression-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-typescript-advanced-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (write-file! tmp-root "src/example/normalize.ts"
+                       "export function normalizeOrder(orderId: string): string {\n  return (orderId || \"\").trim().toLowerCase();\n}\n")
+        _ (write-file! tmp-root "src/example/default_alias.ts"
+                       "function normalizeAlias(orderId: string): string {\n  return (orderId || \"\").trim();\n}\n\nexport default normalizeAlias;\n")
+        _ (write-file! tmp-root "src/example/object_modes.ts"
+                       "export const formatters = {\n  normalizeObject(orderId: string): string {\n    return (orderId || \"\").trim();\n  }\n};\n")
+        _ (write-file! tmp-root "src/example/field_methods.ts"
+                       "export class FieldService {\n  normalizeField = (orderId: string): string => {\n    return (orderId || \"\").trim();\n  };\n\n  processField(orderId: string): string {\n    return this.normalizeField(orderId);\n  }\n}\n")
+        _ (write-file! tmp-root "src/example/barrel.ts"
+                       "export { normalizeOrder as exportedNormalize } from \"./normalize\";\n")
+        index (sci/create-index {:root_path tmp-root})
+        barrel-units (->> (:unit_order index)
+                          (map #(get (:units index) %))
+                          (filter #(= "src/example/barrel.ts" (:path %)))
+                          vec)]
+    (is (some #(= "src.example.default_alias/normalizeAlias" (:symbol %))
+              (vals (:units index))))
+    (is (some #(= "src.example.object_modes.formatters#normalizeObject" (:symbol %))
+              (vals (:units index))))
+    (is (some #(= "src.example.field_methods.FieldService#normalizeField" (:symbol %))
+              (vals (:units index))))
+    (is (some #(= "src.example.barrel/exportedNormalize" (:symbol %))
+              barrel-units))))

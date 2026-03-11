@@ -53,6 +53,9 @@
 (def ^:private ts-arrow-re #"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>")
 (def ^:private ts-function-expression-re #"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?function\b")
 (def ^:private ts-method-re #"^\s*(?:(?:public|private|protected|static|async|readonly|get|set)\s+)*([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^;]*\)\s*(?::\s*[^\{=]+)?\s*\{")
+(def ^:private ts-class-field-arrow-re #"^\s*(?:(?:public|private|protected|static|async|readonly)\s+)*([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*(?::\s*[^\{=]+)?\s*=>")
+(def ^:private ts-object-start-re #"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*\{")
+(def ^:private ts-object-method-re #"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^;]*\)\s*(?::\s*[^\{=]+)?\s*\{")
 (def ^:private ts-call-re #"\b([A-Za-z_$][A-Za-z0-9_$\.]*)\s*\(")
 
 (def ^:private clj-call-stop
@@ -2541,6 +2544,40 @@
        (sort-by :start-line)
        last))
 
+(defn- ts-object-ranges [lines]
+  (let [line-count (count lines)]
+    (loop [idx 0
+           out []]
+      (if (>= idx line-count)
+        out
+        (let [line (nth lines idx)]
+          (if-let [[_ obj] (re-find ts-object-start-re line)]
+            (let [end-line
+                  (loop [j idx
+                         depth 0
+                         saw-open? false]
+                    (if (>= j line-count)
+                      line-count
+                      (let [ln (nth lines j)
+                            open-n (count (re-seq #"\{" ln))
+                            close-n (count (re-seq #"\}" ln))
+                            saw-open?* (or saw-open? (pos? open-n))
+                            depth* (+ depth open-n (- close-n))]
+                        (if (and saw-open?* (<= depth* 0))
+                          (inc j)
+                          (recur (inc j) depth* saw-open?*)))))
+                  range {:object obj
+                         :start-line (inc idx)
+                         :end-line (max (inc idx) end-line)}]
+              (recur (inc idx) (conj out range)))
+            (recur (inc idx) out)))))))
+
+(defn- ts-object-for-line [object-ranges line-no]
+  (->> object-ranges
+       (filter #(<= (:start-line %) line-no (:end-line %)))
+       (sort-by :start-line)
+       last))
+
 (defn- ts-local-call-names [defs]
   (->> defs
        (keep :raw-symbol)
@@ -2589,8 +2626,17 @@
            (str base "." suffix)]))
       [])))
 
+(defn- ts-expand-local-object-token [token file-module local-object-names]
+  (let [token* (str token)]
+    (if-let [[_ obj suffix] (re-matches #"([A-Za-z_$][A-Za-z0-9_$]*)\.(.+)" token*)]
+      (when (contains? local-object-names obj)
+        (let [base (str file-module "." obj)]
+          [(str base "#" suffix)
+           (str base "." suffix)]))
+      [])))
+
 (defn- extract-ts-calls [body {:keys [owner-module file-module module-aliases symbol-aliases
-                                      default-aliases local-call-names local-class-names]}]
+                                      default-aliases local-call-names local-class-names local-object-names]}]
   (->> (re-seq ts-call-re body)
        (map second)
        (mapcat (fn [token]
@@ -2603,6 +2649,9 @@
                        class-symbols (if (seq file-module)
                                        (ts-expand-local-class-token token file-module local-class-names)
                                        [])
+                       object-symbols (if (seq file-module)
+                                        (ts-expand-local-object-token token file-module local-object-names)
+                                        [])
                        tail (tail-token token)]
                    (cond-> [token]
                      (seq module-alias-token) (conj module-alias-token)
@@ -2610,6 +2659,7 @@
                      (seq imported-defaults) (into imported-defaults)
                      (seq this-symbols) (into this-symbols)
                      (seq class-symbols) (into class-symbols)
+                     (seq object-symbols) (into object-symbols)
                      (and tail (not= tail token)) (conj tail)))))
        (remove #(contains? ts-call-stop %))
        distinct
@@ -2621,6 +2671,27 @@
         {:keys [imports module-aliases symbol-aliases default-aliases]} (ts-import-state path lines)
         imports (->> imports distinct vec)
         class-ranges (ts-class-ranges lines)
+        object-ranges (ts-object-ranges lines)
+        default-export-aliases (->> lines
+                                    (keep #(some-> (re-find #"^\s*export\s+default\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*;?\s*$" %) second))
+                                    set)
+        re-export-defs (->> lines
+                            (keep (fn [line]
+                                    (when-let [[_ exported alias spec] (re-find #"^\s*export\s+\{\s*([A-Za-z_$][A-Za-z0-9_$]*)(?:\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*))?\s*\}\s+from\s+['\"]([^'\"]+)['\"]" line)]
+                                      (let [resolved (-> (ts-resolve-import-path path spec) ts-module-name)
+                                            alias* (or alias exported)
+                                            target (if (= "default" exported)
+                                                     (str resolved "/default")
+                                                     (str resolved "/" exported))]
+                                        {:start-line (inc (.indexOf lines line))
+                                         :kind "function"
+                                         :raw-symbol (str module "/" alias*)
+                                         :module module
+                                         :signature (trim-signature line)
+                                         :call_tokens (cond-> []
+                                                        (= "default" alias*) (conj (str module "/default")))
+                                         :synthetic-calls [target]}))))
+                            vec)
         defs (->> (map-indexed vector lines)
                   (keep (fn [[idx line]]
                           (let [line-no (inc idx)
@@ -2663,12 +2734,37 @@
                                    :module (str module "." (:class class-ctx))
                                    :signature (trim-signature line)}))
 
+                              (and class-ctx (re-find ts-class-field-arrow-re line))
+                              (let [[_ method-name] (re-find ts-class-field-arrow-re line)]
+                                {:start-line line-no
+                                 :kind (ts-kind path method-name true)
+                                 :raw-symbol (str module "." (:class class-ctx) "#" method-name)
+                                 :class-name (:class class-ctx)
+                                 :module (str module "." (:class class-ctx))
+                                 :signature (trim-signature line)})
+
+                              (and (nil? class-ctx)
+                                   (ts-object-for-line object-ranges line-no)
+                                   (re-find ts-object-method-re line))
+                              (let [object-ctx (ts-object-for-line object-ranges line-no)
+                                    [_ method-name] (re-find ts-object-method-re line)]
+                                {:start-line line-no
+                                 :kind "function"
+                                 :raw-symbol (str module "." (:object object-ctx) "#" method-name)
+                                 :object-name (:object object-ctx)
+                                 :module (str module "." (:object object-ctx))
+                                 :signature (trim-signature line)})
+
                               :else nil))))
                   vec)
+        defs (vec (concat defs re-export-defs))
         local-call-names (ts-local-call-names defs)
         local-class-names (->> class-ranges
                                (keep :class)
                                set)
+        local-object-names (->> object-ranges
+                                (keep :object)
+                                set)
         starts (mapv :start-line defs)
         ends (unit-end-lines starts line-count)
         units (->> (map vector defs ends)
@@ -2687,14 +2783,19 @@
                              :summary (str (:kind d) " " (:raw-symbol d))
                              :docstring_excerpt nil
                              :imports imports
-                             :call_tokens (vec (:call_tokens d))
-                             :calls (extract-ts-calls body {:owner-module (:module d)
-                                                           :file-module module
-                                                           :module-aliases module-aliases
-                                                           :symbol-aliases symbol-aliases
-                                                           :default-aliases default-aliases
-                                                           :local-call-names local-call-names
-                                                           :local-class-names local-class-names})
+                             :call_tokens (cond-> (vec (:call_tokens d))
+                                            (contains? default-export-aliases
+                                                       (last (str/split (str (:raw-symbol d)) #"[#/]" 2)))
+                                            (conj (str module "/default")))
+                             :calls (vec (distinct (concat (extract-ts-calls body {:owner-module (:module d)
+                                                                                   :file-module module
+                                                                                   :module-aliases module-aliases
+                                                                                   :symbol-aliases symbol-aliases
+                                                                                   :default-aliases default-aliases
+                                                                                   :local-call-names local-call-names
+                                                                                   :local-class-names local-class-names
+                                                                                   :local-object-names local-object-names})
+                                                        (:synthetic-calls d))))
                              :parser_mode "full"})))
                    vec)]
     {:language "typescript"

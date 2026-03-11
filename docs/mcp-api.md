@@ -132,7 +132,7 @@ Because MCP uses the same core retrieval runtime as the library and service edge
 - Elixir: better `import` / `use` normalization, implicit imports propagated from `__using__/1`, pipeline/capture-aware arity handling, `__MODULE__` and nested local-module ownership, arity-aware local shadowing, `defdelegate` linkage, and ExUnit `related_tests`
 - Java: arity-aware overload and constructor linking, better static-import/class ownership, inherited superclass targeting, local `this.` / `super.` ownership preservation, and `super::method` reference linkage
 - Python: imported-symbol, relative-import, and module-alias resolution, `self` / `cls` and decorated class/static method ownership, explicit module-alias preservation, nested local-scope suppression, conservative `@property` access, and Python test-file linkage
-- TypeScript: named/default/namespace import ownership, local `this.` and class-qualified method targeting, and exported function-expression identity, while confidence remains `low`-ceiling because the parser path is still intentionally conservative
+- TypeScript: named/default/namespace import ownership, local `this.` and class-qualified method targeting, exported function-expression identity, object-literal and class-field-arrow units, plus direct default/re-export alias surfaces, while confidence remains `low`-ceiling because the parser path is still intentionally conservative
 
 Because the capability summary is now language-strength-aware, MCP `resolve_context` responses may also carry a capability-limited confidence outcome even when symbol resolution is exact. Today that effectively means Clojure can reach `high`, Elixir/Java/Python currently ceiling at `medium`, and TypeScript remains `low`-ceiling strategic coverage by design.
 
