@@ -4,6 +4,7 @@
             [clojure.java.shell :as sh]
             [clojure.set :as set]
             [clojure.string :as str]
+            [semantic-code-indexing.runtime.languages.typescript :as ts-language]
             [semantic-code-indexing.runtime.semantic-ir :as semantic-ir]))
 
 (def ^:private clj-def-re
@@ -3046,7 +3047,7 @@
                 "java" (parse-java root-path file-path lines parser-opts)
                 "elixir" (parse-elixir file-path lines)
                 "python" (parse-python file-path lines)
-                "typescript" (parse-typescript root-path file-path lines parser-opts)
+                "typescript" (ts-language/parse-file root-path file-path lines parser-opts)
                 (fallback-unit file-path lines language "unsupported_language"))
               (semantic-ir/finalize-parsed-file file-path language)))
        (catch Exception _

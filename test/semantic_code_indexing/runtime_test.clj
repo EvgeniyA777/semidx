@@ -5,6 +5,7 @@
             [malli.core :as m]
             [semantic-code-indexing.contracts.schemas :as contracts]
             [semantic-code-indexing.core :as sci]
+            [semantic-code-indexing.runtime.languages.typescript :as ts-language]
             [semantic-code-indexing.runtime.retrieval-policy :as rp]))
 
 (defn- write-file! [root rel-path content]
@@ -975,6 +976,21 @@
     (is (some #(= "src.example.barrel/exportedNormalize" (:symbol %)) normalize-callers))
     (is (some #(= "src.example.re_export_consumer/processReExport" (:symbol %)) barrel-callers))))
 
+(deftest typescript-duplicate-re-export-lines-keep-distinct-start-lines-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-typescript-duplicate-barrel" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (write-file! tmp-root "src/example/normalize.ts"
+                       "export function normalizeOrder(orderId: string): string {\n  return orderId.trim();\n}\n")
+        _ (write-file! tmp-root "src/example/duplicate_barrel.ts"
+                       "export { normalizeOrder as exportedNormalize } from \"./normalize\";\nexport { normalizeOrder as exportedNormalize } from \"./normalize\";\n")
+        lines (-> (io/file tmp-root "src/example/duplicate_barrel.ts") slurp str/split-lines vec)
+        parsed (ts-language/parse-file tmp-root "src/example/duplicate_barrel.ts" lines {})]
+    (is (= [1 2]
+           (->> (:units parsed)
+                (filter #(= "src.example.duplicate_barrel/exportedNormalize" (:symbol %)))
+                (map :start_line)
+                sort
+                vec)))))
+
 (deftest typescript-advanced-surfaces-still-keep-low-capability-ceiling-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-typescript-capability" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
@@ -1571,6 +1587,31 @@
         (is (some #(= "tree_sitter_active" (:code %)) java-diags))
         (is (some #(= "tree_sitter_active" (:code %)) ts-diags)))
       (is true "Tree-sitter grammar paths are not configured for Clojure/Java/TypeScript; skipping tree-sitter parser test."))))
+
+(deftest tree-sitter-typescript-advanced-surface-parity-test
+  (let [ts-grammar (System/getenv "SCI_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH")]
+    (if (seq ts-grammar)
+      (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-tree-sitter-typescript-parity" (make-array java.nio.file.attribute.FileAttribute 0)))
+            _ (create-sample-repo! tmp-root)
+            storage (sci/in-memory-storage)
+            _index (sci/create-index {:root_path tmp-root
+                                      :storage storage
+                                      :parser_opts {:typescript_engine :tree-sitter
+                                                    :tree_sitter_enabled true
+                                                    :tree_sitter_grammars {:typescript ts-grammar}}})
+            object-units (sci/query-units storage tmp-root {:module "src.example.object_modes.formatters" :limit 20})
+            field-units (sci/query-units storage tmp-root {:module "src.example.field_methods.FieldService" :limit 20})
+            barrel-units (sci/query-units storage tmp-root {:module "src.example.barrel" :limit 20})
+            default-alias-id (some->> (sci/query-units storage tmp-root {:module "src.example.default_alias" :limit 20})
+                                      (filter #(= "src.example.default_alias/normalizeAlias" (:symbol %)))
+                                      first
+                                      :unit_id)
+            alias-callers (sci/query-callers storage tmp-root default-alias-id {:limit 20})]
+        (is (some #(= "src.example.object_modes.formatters#normalizeObject" (:symbol %)) object-units))
+        (is (some #(= "src.example.field_methods.FieldService#normalizeField" (:symbol %)) field-units))
+        (is (some #(= "src.example.barrel/exportedNormalize" (:symbol %)) barrel-units))
+        (is (some #(= "src.example.default_alias_consumer/processDefaultAlias" (:symbol %)) alias-callers)))
+      (is true "SCI_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH is not set; skipping TypeScript tree-sitter parity test."))))
 
 (deftest parsed-files-carry-semantic-pipeline-metadata-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-semantic-pipeline-meta" (make-array java.nio.file.attribute.FileAttribute 0)))
