@@ -25,6 +25,8 @@
                "(ns my.app.alt-order)\n\n(defn validate-order [order]\n  (assoc order :alt true))\n")
   (write-file! root "src/my/app/alias_workflow.clj"
                "(ns my.app.alias-workflow\n  (:require [my.app.order :as primary]\n            [my.app.alt-order :as alternate]))\n\n(defn prepare-primary [order]\n  (primary/validate-order order))\n\n(defn prepare-alternate [order]\n  (alternate/validate-order order))\n")
+  (write-file! root "src/my/app/lexical_shadow.clj"
+               "(ns my.app.lexical-shadow\n  (:require [my.app.order :as order]))\n\n(defn run-qualified-global [payload]\n  (order/validate-order payload))\n\n(defn run-param-shadow [validate-order payload]\n  (validate-order payload))\n\n(defn run-let-shadow [payload]\n  (let [validate-order (fn [value] value)]\n    (validate-order payload)))\n\n(defn run-destructured-shadow [helpers payload]\n  (let [{:keys [validate-order]} helpers]\n    (validate-order payload)))\n\n(defn run-when-let-shadow [maybe-validator payload]\n  (when-let [validate-order maybe-validator]\n    (validate-order payload)))\n\n(defn run-doseq-shadow [payload]\n  (doseq [validate-order [(fn [value] value)]]\n    (validate-order payload)))\n\n(defn run-as-thread-shadow [payload]\n  (as-> payload validate-order\n    (str validate-order)))\n")
   (write-file! root "src/my/app/macros.clj"
                "(ns my.app.macros\n  (:require [my.app.order :as order]\n            [my.app.alt-order :as alt-order]))\n\n(comment\n  (defn hidden-helper [order]\n    (:id order)))\n\n(defn macro-helper [order]\n  order)\n\n(defn emit-top-level-validation [order]\n  (list 'order/validate-order order))\n\n(defn helper-side-effect [order]\n  (emit-top-level-validation order)\n  order)\n\n(defmacro with-order [order & body]\n  `(let [current-order# ~order]\n     ~@body))\n\n(defmacro with-validated-order [order & body]\n  (macro-helper order)\n  `(let [validated-order# (order/validate-order ~order)]\n     ~@body))\n\n(defmacro with-prepared-order [order & body]\n  `(with-validated-order ~order\n     ~@body))\n\n(defmacro with-listed-validation [order & body]\n  (list 'do\n        (list 'order/validate-order order)\n        (cons 'do body)))\n\n(defmacro with-listed-prepared [order & body]\n  (list 'with-listed-validation order\n        (cons 'do body)))\n\n(defmacro with-composed-validation [order & body]\n  (concat (list 'do)\n          (list (list 'order/validate-order order))\n          body))\n\n(defmacro with-threaded-validation [order & body]\n  `(let [validated-order# (-> ~order\n                              order/validate-order)]\n     ~@body))\n\n(defmacro with-threaded-ambiguous-validation [order mode & body]\n  (if (= mode :primary)\n    `(let [validated-order# (-> ~order\n                                order/validate-order)]\n       ~@body)\n    `(let [validated-order# (-> ~order\n                                alt-order/validate-order)]\n       ~@body)))\n\n(defmacro with-top-level-helper-validation [order & body]\n  (apply list 'do\n         (concat [(emit-top-level-validation order)]\n                 body)))\n\n(defmacro with-branching-validation [order mode & body]\n  (if (= mode :apply)\n    (apply list 'do\n           (concat (list (list 'order/validate-order order))\n                   body))\n    (concat (list 'do)\n            (into []\n                  (concat [(list 'order/validate-order order)]\n                          body)))))\n\n(defmacro with-ambiguous-branch-validation [order mode & body]\n  (if (= mode :primary)\n    (apply list 'do\n           (concat (list (list 'order/validate-order order))\n                   body))\n    (apply list 'do\n           (concat (list (list 'alt-order/validate-order order))\n                   body))))\n\n(defmacro with-letfn-validation [order & body]\n  (letfn [(emit-validation []\n            (list 'order/validate-order order))]\n    (apply list 'do\n           (concat [(emit-validation)]\n                   body))))\n\n(defmacro with-side-effect-helper [order & body]\n  (helper-side-effect order)\n  `(do ~@body))\n\n(defn visible-helper [order]\n  (with-order order\n    (:id order)))\n")
   (write-file! root "src/my/app/workflow.clj"
@@ -965,6 +967,39 @@
     (is validate-unit-id)
     (is (some #(= "my.app.order/process-order" (:symbol %)) callers))
     (is (some #(= "my.app.order-test/process-order-test" (:symbol %)) callers))))
+
+(deftest clojure-regex-fallback-local-lexical-bindings-beat-global-vars-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-clj-lexical-shadow-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root
+                                  :storage storage
+                                  :parser_opts {:clojure_engine :regex
+                                                :tree_sitter_enabled false}})
+        order-units (sci/query-units storage tmp-root {:module "my.app.order" :limit 20})
+        validate-unit-id (some->> order-units (filter #(= "my.app.order/validate-order" (:symbol %))) first :unit_id)
+        callers (sci/query-callers storage tmp-root validate-unit-id {:limit 30})]
+    (is validate-unit-id)
+    (is (some #(= "my.app.lexical-shadow/run-qualified-global" (:symbol %)) callers))
+    (is (not-any? #(= "my.app.lexical-shadow/run-param-shadow" (:symbol %)) callers))
+    (is (not-any? #(= "my.app.lexical-shadow/run-let-shadow" (:symbol %)) callers))
+    (is (not-any? #(= "my.app.lexical-shadow/run-destructured-shadow" (:symbol %)) callers))
+    (is (not-any? #(= "my.app.lexical-shadow/run-when-let-shadow" (:symbol %)) callers))
+    (is (not-any? #(= "my.app.lexical-shadow/run-doseq-shadow" (:symbol %)) callers))))
+
+(deftest clojure-regex-fallback-as-thread-local-binding-does-not-leak-global-call-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-clj-as-thread-shadow-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root
+                                  :storage storage
+                                  :parser_opts {:clojure_engine :regex
+                                                :tree_sitter_enabled false}})
+        order-units (sci/query-units storage tmp-root {:module "my.app.order" :limit 20})
+        validate-unit-id (some->> order-units (filter #(= "my.app.order/validate-order" (:symbol %))) first :unit_id)
+        callers (sci/query-callers storage tmp-root validate-unit-id {:limit 30})]
+    (is validate-unit-id)
+    (is (not-any? #(= "my.app.lexical-shadow/run-as-thread-shadow" (:symbol %)) callers))))
 
 (deftest clojure-alias-heavy-same-name-var-resolution-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-clj-alias-same-name-test" (make-array java.nio.file.attribute.FileAttribute 0)))

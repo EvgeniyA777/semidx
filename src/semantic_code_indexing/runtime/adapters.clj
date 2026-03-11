@@ -367,16 +367,229 @@
          vec)
     []))
 
+(defn- clj-binding-symbols [binding-form]
+  (letfn [(collect [node]
+            (cond
+              (symbol? node)
+              (let [s (str node)]
+                (if (or (str/blank? s) (= "&" s))
+                  []
+                  [s]))
+
+              (vector? node)
+              (mapcat collect node)
+
+              (map? node)
+              (concat
+               (when-let [as-binding (:as node)]
+                 (collect as-binding))
+               (mapcat collect (vals (apply dissoc node [:as :keys :syms :strs :or])))
+               (map name (:keys node))
+               (map name (:syms node))
+               (map str (:strs node)))
+
+              (seq? node)
+              (mapcat collect node)
+
+              :else
+              []))]
+    (->> (collect binding-form)
+         (remove #(or (str/blank? %) (= "&" %)))
+         distinct
+         vec)))
+
+(defn- clj-sequential-binding-calls [bindings locals walk]
+  (loop [pairs (partition 2 2 [] bindings)
+         locals* (set locals)
+         acc []]
+    (if (empty? pairs)
+      {:calls acc :locals locals*}
+      (let [[binding init] (first pairs)
+            calls* (into acc (walk init locals*))
+            locals** (into locals* (clj-binding-symbols binding))]
+        (recur (rest pairs) locals** calls*)))))
+
+(defn- clj-comprehension-binding-calls [bindings locals walk]
+  (loop [items (seq bindings)
+         locals* (set locals)
+         acc []]
+    (if (empty? items)
+      {:calls acc :locals locals*}
+      (let [head (first items)
+            next-item (second items)]
+        (cond
+          (= head :let)
+          (let [{:keys [calls locals]} (clj-sequential-binding-calls next-item locals* walk)]
+            (recur (nnext items) locals (into acc calls)))
+
+          (#{:when :while} head)
+          (recur (nnext items) locals* (into acc (walk next-item locals*)))
+
+          :else
+          (recur (nnext items)
+                 (into locals* (clj-binding-symbols head))
+                 (into acc (walk next-item locals*))))))))
+
+(declare clj-read-form)
+
 (defn- extract-clj-calls
   ([body]
    (extract-clj-calls body {}))
   ([body alias-map]
-   (->> (re-seq clj-call-re body)
-        (map second)
-        (remove clj-call-stop)
-        (mapcat #(expand-clj-call-token % alias-map))
-        distinct
-        vec)))
+   (let [form (clj-read-form body)]
+     (if (nil? form)
+       (->> (re-seq clj-call-re body)
+            (map second)
+            (remove clj-call-stop)
+            (mapcat #(expand-clj-call-token % alias-map))
+            distinct
+            vec)
+       (letfn [(walk [node locals]
+                 (let [locals* (set locals)]
+                   (cond
+                     (nil? node)
+                     []
+
+                     (seq? node)
+                     (let [items (seq node)
+                           op-node (first items)
+                           op (some-> op-node str)
+                           args (rest items)
+                           op-calls (if (and (symbol? op-node)
+                                             (not (contains? locals* op))
+                                             (not (contains? clj-call-stop op)))
+                                      (expand-clj-call-token op alias-map)
+                                      [])]
+                       (->> (case op
+                              ("quote" "var")
+                              []
+
+                              ("let" "loop" "binding")
+                              (let [binding-vec (first args)
+                                    body-forms (rest args)
+                                    {:keys [calls locals]} (clj-sequential-binding-calls binding-vec locals* walk)]
+                                (concat calls (mapcat #(walk % locals) body-forms)))
+
+                              ("when-let" "when-some")
+                              (let [binding-vec (first args)
+                                    body-forms (rest args)
+                                    {:keys [calls locals]} (clj-sequential-binding-calls binding-vec locals* walk)]
+                                (concat calls (mapcat #(walk % locals) body-forms)))
+
+                              ("if-let" "if-some")
+                              (let [binding-vec (first args)
+                                    then-form (second args)
+                                    else-form (nth args 2 nil)
+                                    {:keys [calls locals]} (clj-sequential-binding-calls binding-vec locals* walk)]
+                                (concat calls
+                                        (walk then-form locals)
+                                        (when else-form (walk else-form locals*))))
+
+                              ("for" "doseq")
+                              (let [binding-vec (first args)
+                                    body-forms (rest args)
+                                    {:keys [calls locals]} (clj-comprehension-binding-calls binding-vec locals* walk)]
+                                (concat calls (mapcat #(walk % locals) body-forms)))
+
+                              "as->"
+                              (let [expr (first args)
+                                    binding-sym (second args)
+                                    body-forms (drop 2 args)
+                                    locals** (into locals* (clj-binding-symbols binding-sym))]
+                                (concat (walk expr locals*)
+                                        (mapcat #(walk % locals**) body-forms)))
+
+                              "fn"
+                              (let [[fn-name arg-tail] (if (symbol? (first args))
+                                                         [(str (first args)) (rest args)]
+                                                         [nil args])]
+                                (if (vector? (first arg-tail))
+                                  (let [params (first arg-tail)
+                                        body-forms (rest arg-tail)
+                                        locals** (into locals* (clj-binding-symbols params))
+                                        locals** (cond-> locals**
+                                                   fn-name (conj fn-name))]
+                                    (mapcat #(walk % locals**) body-forms))
+                                  (mapcat (fn [arity-form]
+                                            (if (seq? arity-form)
+                                              (let [params (first arity-form)
+                                                    body-forms (rest arity-form)
+                                                    locals** (into locals* (clj-binding-symbols params))
+                                                    locals** (cond-> locals**
+                                                               fn-name (conj fn-name))]
+                                                (mapcat #(walk % locals**) body-forms))
+                                              (walk arity-form locals*)))
+                                          arg-tail)))
+
+                              ("defn" "defn-" "defmacro")
+                              (let [after-name (rest args)
+                                    after-doc (cond-> after-name
+                                                (string? (first after-name)) rest
+                                                (map? (first after-name)) rest)]
+                                (if (vector? (first after-doc))
+                                  (let [params (first after-doc)
+                                        body-forms (rest after-doc)
+                                        locals** (into locals* (clj-binding-symbols params))]
+                                    (mapcat #(walk % locals**) body-forms))
+                                  (mapcat (fn [arity-form]
+                                            (if (seq? arity-form)
+                                              (let [params (first arity-form)
+                                                    body-forms (rest arity-form)
+                                                    locals** (into locals* (clj-binding-symbols params))]
+                                                (mapcat #(walk % locals**) body-forms))
+                                              (walk arity-form locals*)))
+                                          after-doc)))
+
+                              "defmethod"
+                              (let [after-dispatch (drop 2 args)
+                                    after-doc (cond-> after-dispatch
+                                                (string? (first after-dispatch)) rest
+                                                (map? (first after-dispatch)) rest)
+                                    params (first after-doc)
+                                    body-forms (rest after-doc)
+                                    locals** (into locals* (clj-binding-symbols params))]
+                                (mapcat #(walk % locals**) body-forms))
+
+                              "letfn"
+                              (let [bindings (first args)
+                                    helper-names (->> bindings
+                                                      (keep (fn [binding]
+                                                              (when (seq? binding)
+                                                                (some-> binding first str))))
+                                                      set)
+                                    binding-calls (mapcat (fn [binding]
+                                                            (if (seq? binding)
+                                                              (let [parts (rest binding)
+                                                                    params (first parts)
+                                                                    body-forms (rest parts)
+                                                                    locals** (into locals* helper-names)
+                                                                    locals** (into locals** (clj-binding-symbols params))]
+                                                                (mapcat #(walk % locals**) body-forms))
+                                                              []))
+                                                          bindings)
+                                    body-locals (into locals* helper-names)]
+                                (concat binding-calls
+                                        (mapcat #(walk % body-locals) (rest args))))
+
+                              (concat op-calls
+                                      (mapcat #(walk % locals*) items)))
+                            distinct
+                            vec))
+
+                     (vector? node)
+                     (mapcat #(walk % locals*) node)
+
+                     (map? node)
+                     (mapcat #(walk % locals*) (concat (keys node) (vals node)))
+
+                     (set? node)
+                     (mapcat #(walk % locals*) node)
+
+                     :else
+                     [])))]
+         (->> (walk form #{})
+              distinct
+              vec))))))
 
 (declare short-hash usage->call-token)
 

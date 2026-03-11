@@ -49,5 +49,6 @@ The roadmap through Phase 5 is now effectively delivered for the current scope.
 
 The current near-term focus is post-roadmap follow-up work:
 
+- execute [docs/post-roadmap-semantic-deepening-plan.md](/Users/ae/workspaces/SemanticCodeIndexing/docs/post-roadmap-semantic-deepening-plan.md) stage by stage
 - deeper compiler-grade ownership/disambiguation work in the priority language adapters
 - any incremental operational polish on top of the now-complete retained Phase 5 loop

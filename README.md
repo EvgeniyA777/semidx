@@ -96,6 +96,7 @@ Canonical retrieval flow is compact-first staged retrieval:
 - MCP docs: [docs/mcp-api.md](docs/mcp-api.md)
 - Roadmap status checklist: [docs/roadmap-status.md](docs/roadmap-status.md)
 - Compact-first staged retrieval execution plan: [docs/compact-first-staged-retrieval-plan.md](docs/compact-first-staged-retrieval-plan.md)
+- Post-roadmap semantic deepening plan: [docs/post-roadmap-semantic-deepening-plan.md](docs/post-roadmap-semantic-deepening-plan.md)
 
 ## Agent Limit Policy
 
@@ -130,6 +131,7 @@ Roadmap status is tracked separately in [docs/roadmap-status.md](docs/roadmap-st
 - MVP runtime implemented (`src/semantic_code_indexing/core.clj`, `src/semantic_code_indexing/runtime/*`)
 - Clojure retrieval uses `clj-kondo` as primary parser with fallback path
 - Clojure semantic-core now includes alias-aware fallback call resolution, top-level-aware fallback parsing for macro/comment wrappers, namespace-linked `related_tests` hints for direct and helper-mediated test namespaces, dispatch-aware `defmethod` unit identities, dispatch-sensitive multimethod ranking, same-name var disambiguation across aliased namespaces, and recursive graph-level macro-generated ownership for syntax-quote, list-built, top-level helper-generated, threading-macro-generated, and common composed macro expansions such as `concat`, `apply list`, `into`, and conditional branches, with ambiguous branch-only and ambiguous threaded generated calls held back conservatively instead of over-claiming ownership
+- Clojure semantic-core now also respects lexical local bindings more accurately in fallback extraction, so params, destructured locals, `when-let` / comprehension bindings, `as->` locals, and `letfn` helper names no longer leak false same-name caller edges toward namespace vars
 - Elixir, Python, and TypeScript retrieval paths are implemented in the same runtime adapter pipeline
 - Elixir semantic-core now resolves `import`/`use` targets more accurately, expands unqualified imported calls conservatively, propagates implicit imports emitted by `__using__/1` macros, prefers same-module local definitions over imported/use-expanded collisions, does that shadowing arity-sensitively for same-name functions, resolves `__MODULE__.foo(...)` back to the local module instead of imported collisions, links `defdelegate` units back to their target module functions, and surfaces ExUnit file linkage in `related_tests`
 - Java semantic-core now uses arity-aware call resolution for overloads and constructors and respects static-import/class ownership when linking method calls, including same-name local-method vs static-import collisions, explicit `this.`-qualified local ownership, and constructor-target disambiguation on `new ClassName(...)`
