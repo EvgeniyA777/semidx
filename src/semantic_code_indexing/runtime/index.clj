@@ -60,23 +60,56 @@
    units))
 
 (defn- parse-files [root-path paths parser-opts]
-  (reduce
-   (fn [acc path]
-     (let [parsed (adapters/parse-file root-path path parser-opts)
-           file-rec {:path path
-                     :language (:language parsed)
-                     :module (:module parsed)
-                     :imports (:imports parsed)
-                     :test_target_modules (:test_target_modules parsed)
-                     :parser_mode (:parser_mode parsed)
-                     :diagnostics (:diagnostics parsed)}]
-       (-> acc
-           (update :files assoc path file-rec)
-           (update :units into (:units parsed))
-           (update :diagnostics into
-                   (map (fn [d] (assoc d :path path)) (:diagnostics parsed))))))
-   {:files {} :units [] :diagnostics []}
-   paths))
+  (letfn [(distinct-vec [xs]
+            (->> xs (remove nil?) distinct vec))
+          (enrich-elixir-use-imports [{:keys [files units diagnostics] :as parsed-data}]
+            (let [module->use-imports (->> (vals files)
+                                           (filter #(= "elixir" (:language %)))
+                                           (keep (fn [{:keys [module use_expansion_imports]}]
+                                                   (when (and (seq module) (seq use_expansion_imports))
+                                                     [module use_expansion_imports])))
+                                           (into {}))
+                  files* (reduce-kv (fn [acc path {:keys [language imports use_modules] :as file-rec}]
+                                      (if (and (= "elixir" language) (seq use_modules))
+                                        (let [implicit-imports (->> use_modules
+                                                                    (mapcat #(get module->use-imports % []))
+                                                                    distinct-vec)]
+                                          (assoc acc path
+                                                 (assoc file-rec
+                                                        :imports (distinct-vec (concat imports implicit-imports)))))
+                                        (assoc acc path file-rec)))
+                                    {}
+                                    files)
+                  units* (mapv (fn [unit]
+                                 (let [imports* (get-in files* [(:path unit) :imports])]
+                                   (if (and (= "elixir" (get-in files* [(:path unit) :language]))
+                                            (seq imports*))
+                                     (assoc unit :imports imports*)
+                                     unit)))
+                               units)]
+              {:files files*
+               :units units*
+               :diagnostics diagnostics}))]
+    (->> paths
+         (reduce
+          (fn [acc path]
+            (let [parsed (adapters/parse-file root-path path parser-opts)
+                  file-rec {:path path
+                            :language (:language parsed)
+                            :module (:module parsed)
+                            :imports (:imports parsed)
+                            :use_modules (:use_modules parsed)
+                            :use_expansion_imports (:use_expansion_imports parsed)
+                            :test_target_modules (:test_target_modules parsed)
+                            :parser_mode (:parser_mode parsed)
+                            :diagnostics (:diagnostics parsed)}]
+              (-> acc
+                  (update :files assoc path file-rec)
+                  (update :units into (:units parsed))
+                  (update :diagnostics into
+                          (map (fn [d] (assoc d :path path)) (:diagnostics parsed))))))
+          {:files {} :units [] :diagnostics []})
+         enrich-elixir-use-imports)))
 
 (defn- lower [s]
   (some-> s str/lower-case))

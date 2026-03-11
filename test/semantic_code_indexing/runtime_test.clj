@@ -25,9 +25,9 @@
   (write-file! root "src/my/app/alias_workflow.clj"
                "(ns my.app.alias-workflow\n  (:require [my.app.order :as primary]\n            [my.app.alt-order :as alternate]))\n\n(defn prepare-primary [order]\n  (primary/validate-order order))\n\n(defn prepare-alternate [order]\n  (alternate/validate-order order))\n")
   (write-file! root "src/my/app/macros.clj"
-               "(ns my.app.macros\n  (:require [my.app.order :as order]\n            [my.app.alt-order :as alt-order]))\n\n(comment\n  (defn hidden-helper [order]\n    (:id order)))\n\n(defn macro-helper [order]\n  order)\n\n(defmacro with-order [order & body]\n  `(let [current-order# ~order]\n     ~@body))\n\n(defmacro with-validated-order [order & body]\n  (macro-helper order)\n  `(let [validated-order# (order/validate-order ~order)]\n     ~@body))\n\n(defmacro with-prepared-order [order & body]\n  `(with-validated-order ~order\n     ~@body))\n\n(defmacro with-listed-validation [order & body]\n  (list 'do\n        (list 'order/validate-order order)\n        (cons 'do body)))\n\n(defmacro with-listed-prepared [order & body]\n  (list 'with-listed-validation order\n        (cons 'do body)))\n\n(defmacro with-composed-validation [order & body]\n  (concat (list 'do)\n          (list (list 'order/validate-order order))\n          body))\n\n(defmacro with-branching-validation [order mode & body]\n  (if (= mode :apply)\n    (apply list 'do\n           (concat (list (list 'order/validate-order order))\n                   body))\n    (concat (list 'do)\n            (into []\n                  (concat [(list 'order/validate-order order)]\n                          body)))))\n\n(defmacro with-ambiguous-branch-validation [order mode & body]\n  (if (= mode :primary)\n    (apply list 'do\n           (concat (list (list 'order/validate-order order))\n                   body))\n    (apply list 'do\n           (concat (list (list 'alt-order/validate-order order))\n                   body))))\n\n(defmacro with-letfn-validation [order & body]\n  (letfn [(emit-validation []\n            (list 'order/validate-order order))]\n    (apply list 'do\n           (concat [(emit-validation)]\n                   body))))\n\n(defmacro with-side-effect-helper [order & body]\n  (letfn [(emit-validation []\n            (list 'order/validate-order order))]\n    (emit-validation)\n    `(do ~@body)))\n\n(defn visible-helper [order]\n  (with-order order\n    (:id order)))\n")
+               "(ns my.app.macros\n  (:require [my.app.order :as order]\n            [my.app.alt-order :as alt-order]))\n\n(comment\n  (defn hidden-helper [order]\n    (:id order)))\n\n(defn macro-helper [order]\n  order)\n\n(defn emit-top-level-validation [order]\n  (list 'order/validate-order order))\n\n(defn helper-side-effect [order]\n  (emit-top-level-validation order)\n  order)\n\n(defmacro with-order [order & body]\n  `(let [current-order# ~order]\n     ~@body))\n\n(defmacro with-validated-order [order & body]\n  (macro-helper order)\n  `(let [validated-order# (order/validate-order ~order)]\n     ~@body))\n\n(defmacro with-prepared-order [order & body]\n  `(with-validated-order ~order\n     ~@body))\n\n(defmacro with-listed-validation [order & body]\n  (list 'do\n        (list 'order/validate-order order)\n        (cons 'do body)))\n\n(defmacro with-listed-prepared [order & body]\n  (list 'with-listed-validation order\n        (cons 'do body)))\n\n(defmacro with-composed-validation [order & body]\n  (concat (list 'do)\n          (list (list 'order/validate-order order))\n          body))\n\n(defmacro with-top-level-helper-validation [order & body]\n  (apply list 'do\n         (concat [(emit-top-level-validation order)]\n                 body)))\n\n(defmacro with-branching-validation [order mode & body]\n  (if (= mode :apply)\n    (apply list 'do\n           (concat (list (list 'order/validate-order order))\n                   body))\n    (concat (list 'do)\n            (into []\n                  (concat [(list 'order/validate-order order)]\n                          body)))))\n\n(defmacro with-ambiguous-branch-validation [order mode & body]\n  (if (= mode :primary)\n    (apply list 'do\n           (concat (list (list 'order/validate-order order))\n                   body))\n    (apply list 'do\n           (concat (list (list 'alt-order/validate-order order))\n                   body))))\n\n(defmacro with-letfn-validation [order & body]\n  (letfn [(emit-validation []\n            (list 'order/validate-order order))]\n    (apply list 'do\n           (concat [(emit-validation)]\n                   body))))\n\n(defmacro with-side-effect-helper [order & body]\n  (helper-side-effect order)\n  `(do ~@body))\n\n(defn visible-helper [order]\n  (with-order order\n    (:id order)))\n")
   (write-file! root "src/my/app/workflow.clj"
-               "(ns my.app.workflow\n  (:require [my.app.macros :refer [with-validated-order with-prepared-order with-listed-prepared with-composed-validation with-branching-validation with-ambiguous-branch-validation with-letfn-validation with-side-effect-helper]]))\n\n(defn prepare-order [order]\n  (with-validated-order order\n    {:prepared true}))\n\n(defn prepare-prevalidated-order [order]\n  (with-prepared-order order\n    {:prepared true :mode :nested}))\n\n(defn prepare-listed-order [order]\n  (with-listed-prepared order\n    {:prepared true :mode :list-generated}))\n\n(defn prepare-composed-order [order]\n  (with-composed-validation order\n    {:prepared true :mode :concat-generated}))\n\n(defn prepare-branching-order [order]\n  (with-branching-validation order :apply\n    {:prepared true :mode :branch-generated}))\n\n(defn prepare-ambiguous-order [order]\n  (with-ambiguous-branch-validation order :primary\n    {:prepared true :mode :branch-ambiguous}))\n\n(defn prepare-letfn-order [order]\n  (with-letfn-validation order\n    {:prepared true :mode :letfn-generated}))\n\n(defn prepare-side-effect-order [order]\n  (with-side-effect-helper order\n    {:prepared true :mode :helper-side-effect}))\n")
+               "(ns my.app.workflow\n  (:require [my.app.macros :refer [with-validated-order with-prepared-order with-listed-prepared with-composed-validation with-top-level-helper-validation with-branching-validation with-ambiguous-branch-validation with-letfn-validation with-side-effect-helper]]))\n\n(defn prepare-order [order]\n  (with-validated-order order\n    {:prepared true}))\n\n(defn prepare-prevalidated-order [order]\n  (with-prepared-order order\n    {:prepared true :mode :nested}))\n\n(defn prepare-listed-order [order]\n  (with-listed-prepared order\n    {:prepared true :mode :list-generated}))\n\n(defn prepare-composed-order [order]\n  (with-composed-validation order\n    {:prepared true :mode :concat-generated}))\n\n(defn prepare-top-level-helper-order [order]\n  (with-top-level-helper-validation order\n    {:prepared true :mode :top-level-helper-generated}))\n\n(defn prepare-branching-order [order]\n  (with-branching-validation order :apply\n    {:prepared true :mode :branch-generated}))\n\n(defn prepare-ambiguous-order [order]\n  (with-ambiguous-branch-validation order :primary\n    {:prepared true :mode :branch-ambiguous}))\n\n(defn prepare-letfn-order [order]\n  (with-letfn-validation order\n    {:prepared true :mode :letfn-generated}))\n\n(defn prepare-side-effect-order [order]\n  (with-side-effect-helper order\n    {:prepared true :mode :helper-side-effect}))\n")
   (write-file! root "src/my/app/shipping.clj"
                "(ns my.app.shipping)\n\n(defmulti route-order (fn [mode payload] mode))\n\n(defn pickup-stop [payload]\n  (:pickup payload))\n\n(defn delivery-stop [payload]\n  (:delivery payload))\n\n(defmethod route-order :pickup [_ payload]\n  (pickup-stop payload))\n\n(defmethod route-order :delivery [_ payload]\n  (delivery-stop payload))\n\n(defn plan-route [mode payload]\n  (route-order mode payload))\n")
   (write-file! root "src/com/acme/CheckoutService.java"
@@ -52,6 +52,10 @@
                "defmodule MyApp.LocalFormatter do\n  use MyApp.Formatter\n\n  def normalize(order) do\n    {:local, order}\n  end\n\n  def process_local(order) do\n    normalize(order)\n  end\nend\n")
   (write-file! root "lib/my_app/local_overloaded_formatter.ex"
                "defmodule MyApp.LocalOverloadedFormatter do\n  use MyApp.Formatter\n\n  def normalize(order, mode) do\n    {order, mode}\n  end\n\n  def process_imported_one(order) do\n    normalize(order)\n  end\n\n  def process_local_two(order) do\n    normalize(order, :strict)\n  end\nend\n")
+  (write-file! root "lib/my_app/order_case.ex"
+               "defmodule MyApp.OrderCase do\n  defmacro __using__(_opts) do\n    quote do\n      import MyApp.Validator\n    end\n  end\nend\n")
+  (write-file! root "lib/my_app/implicit_use_client.ex"
+               "defmodule MyApp.ImplicitUseClient do\n  use MyApp.OrderCase\n\n  def process_implicit(order) do\n    validate(order)\n  end\nend\n")
   (write-file! root "lib/my_app/overloads.ex"
                "defmodule MyApp.Overloads do\n  def normalize(order) do\n    normalize(order, :default)\n  end\n\n  def normalize(order, mode) do\n    {order, mode}\n  end\n\n  def call_one(order) do\n    normalize(order)\n  end\n\n  def call_two(order) do\n    normalize(order, :strict)\n  end\nend\n")
   (write-file! root "test/my_app/order_test.exs"
@@ -59,7 +63,7 @@
   (write-file! root "app/orders.py"
                "from app.validators import validate_order\nimport app.validators as validators\n\nclass OrderService:\n    def process_order(self, order):\n        return validate_order(order)\n\n    def process_alias(self, order):\n        return validators.validate_order(order)\n\n    def process_local(self, order):\n        return self.validate_local(order)\n\n    def validate_local(self, order):\n        return bool(order)\n\n\ndef validate_local(order):\n    return bool(order)\n")
   (write-file! root "app/collision_orders.py"
-               "from app.validators import validate_order\nimport app.validators as validators\n\nclass CollisionService:\n    def validate_order(self, order):\n        return {\"local\": bool(order)}\n\n    def process_method(self, order):\n        return self.validate_order(order)\n\n    def process_module_alias(self, order):\n        return validators.validate_order(order)\n\n\ndef validate_order(order):\n    return {\"top_level\": bool(order)}\n\n\ndef process_top_level(order):\n    return validate_order(order)\n")
+               "from app.validators import validate_order\nimport app.validators as validators\n\nclass CollisionService:\n    def validate_order(self, order):\n        return {\"local\": bool(order)}\n\n    def process_method(self, order):\n        return self.validate_order(order)\n\n    def process_class_name(self, order):\n        return CollisionService.validate_order(self, order)\n\n    def process_module_alias(self, order):\n        return validators.validate_order(order)\n\n\ndef validate_order(order):\n    return {\"top_level\": bool(order)}\n\n\ndef process_top_level(order):\n    return validate_order(order)\n")
   (write-file! root "app/validators.py"
                "def validate_order(order):\n    return bool(order and order.get(\"id\"))\n")
   (write-file! root "app/orders_test.py"
@@ -380,6 +384,20 @@
     (is (not-any? #(= "MyApp.LocalOverloadedFormatter/process_imported_one" (:symbol %)) local-callers))
     (is (some #(= "MyApp.LocalOverloadedFormatter/process_imported_one" (:symbol %)) formatter-callers))))
 
+(deftest elixir-implicit-use-imports-propagate-from-using-macro-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-elixir-implicit-use-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        validator-units (sci/query-units storage tmp-root {:module "MyApp.Validator" :limit 20})
+        validate-unit-id (some->> validator-units
+                                  (filter #(= "MyApp.Validator/validate" (:symbol %)))
+                                  first
+                                  :unit_id)
+        callers (sci/query-callers storage tmp-root validate-unit-id {:limit 20})]
+    (is validate-unit-id)
+    (is (some #(= "MyApp.ImplicitUseClient/process_implicit" (:symbol %)) callers))))
+
 (deftest elixir-arity-aware-caller-resolution-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-elixir-arity-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
@@ -538,6 +556,7 @@
     (is imported-validator-id)
     (is (some #(= "app.collision_orders/process_top_level" (:symbol %)) top-level-callers))
     (is (some #(= "app.collision_orders.CollisionService/process_method" (:symbol %)) method-callers))
+    (is (some #(= "app.collision_orders.CollisionService/process_class_name" (:symbol %)) method-callers))
     (is (some #(= "app.collision_orders.CollisionService/process_module_alias" (:symbol %)) imported-callers))
     (is (not-any? #(= "app.collision_orders/process_top_level" (:symbol %)) imported-callers))))
 
@@ -707,7 +726,10 @@
         with-order-unit (some->> macro-units (filter #(= "my.app.macros/with-order" (:symbol %))) first)
         visible-helper-unit (some->> macro-units (filter #(= "my.app.macros/visible-helper" (:symbol %))) first)]
     (is (= #{"my.app.macros/macro-helper"
+             "my.app.macros/emit-top-level-validation"
+             "my.app.macros/helper-side-effect"
              "my.app.macros/with-letfn-validation"
+             "my.app.macros/with-top-level-helper-validation"
              "my.app.macros/with-branching-validation"
              "my.app.macros/with-ambiguous-branch-validation"
              "my.app.macros/with-composed-validation"
@@ -769,6 +791,17 @@
     (is (some #(= "my.app.workflow/prepare-composed-order" (:symbol %)) callers))
     (is (some #(= "my.app.workflow/prepare-branching-order" (:symbol %)) callers))))
 
+(deftest clojure-top-level-helper-generated-ownership-adds-caller-edge-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-clj-top-level-helper-ownership" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        order-units (sci/query-units storage tmp-root {:module "my.app.order" :limit 20})
+        validate-unit-id (some->> order-units (filter #(= "my.app.order/validate-order" (:symbol %))) first :unit_id)
+        callers (sci/query-callers storage tmp-root validate-unit-id {:limit 20})]
+    (is validate-unit-id)
+    (is (some #(= "my.app.workflow/prepare-top-level-helper-order" (:symbol %)) callers))))
+
 (deftest clojure-ambiguous-branch-generated-ownership-stays-conservative-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-clj-ambiguous-branch-ownership" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
@@ -824,6 +857,17 @@
     (is helper-unit-id)
     (is (not-any? #(= "my.app.workflow/prepare-order" (:symbol %)) callers))
     (is (not-any? #(= "my.app.workflow/prepare-prevalidated-order" (:symbol %)) callers))))
+
+(deftest clojure-top-level-helper-side-effects-do-not-leak-ownership-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-clj-top-level-helper-side-effects" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        _index (sci/create-index {:root_path tmp-root :storage storage})
+        order-units (sci/query-units storage tmp-root {:module "my.app.order" :limit 20})
+        validate-unit-id (some->> order-units (filter #(= "my.app.order/validate-order" (:symbol %))) first :unit_id)
+        callers (sci/query-callers storage tmp-root validate-unit-id {:limit 20})]
+    (is validate-unit-id)
+    (is (not-any? #(= "my.app.workflow/prepare-side-effect-order" (:symbol %)) callers))))
 
 (deftest clojure-defmethod-identity-and-caller-resolution-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-clj-defmethod-identity" (make-array java.nio.file.attribute.FileAttribute 0)))

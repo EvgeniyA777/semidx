@@ -588,28 +588,62 @@
               []))]
     (walk form helper-generated-calls generated-context?)))
 
-(defn- generated-builder-call-tokens [form]
-  (->> (generated-builder-call-tokens* form {} false)
+(defn- generated-builder-call-tokens
+  ([form]
+   (generated-builder-call-tokens form {}))
+  ([form helper-generated-calls]
+   (->> (generated-builder-call-tokens* form helper-generated-calls false)
        distinct
-       vec))
+       vec)))
 
-(defn- extract-clj-generated-calls [form-text alias-map]
+(defn- helper-generated-call-tokens [form-text alias-map helper-generated-calls]
   (let [form (clj-read-form form-text)]
     (->> (generated-call-form-texts form-text)
          (mapcat #(extract-clj-calls % alias-map))
          (concat
-          (->> (defmacro-expansion-forms form)
-               (mapcat generated-builder-call-tokens)
+          (->> (generated-builder-call-tokens form helper-generated-calls)
                (mapcat #(expand-clj-call-token % alias-map))
                (remove clj-call-stop)))
          distinct
          vec)))
 
+(defn- extract-clj-generated-calls [form-text alias-map helper-generated-calls]
+  (let [form (clj-read-form form-text)]
+    (->> (helper-generated-call-tokens form-text alias-map helper-generated-calls)
+         (concat
+          (->> (defmacro-expansion-forms form)
+               (mapcat #(generated-builder-call-tokens % helper-generated-calls))
+               (mapcat #(expand-clj-call-token % alias-map))
+               (remove clj-call-stop)))
+         distinct
+         vec)))
+
+(defn- helper-form-record? [{:keys [operator]}]
+  (contains? #{"defn" "defn-"} (str operator)))
+
+(defn- top-level-helper-generated-calls [form-records ns-name alias-map]
+  (let [helper-records (->> form-records
+                            (filter helper-form-record?)
+                            vec)]
+    (loop [helper-map {}
+           remaining 6]
+      (let [next-map (reduce (fn [acc {:keys [raw-symbol form-text]}]
+                               (let [tokens (helper-generated-call-tokens form-text alias-map acc)
+                                     qualified (clj-qualified-symbol ns-name raw-symbol)]
+                                 (cond-> acc
+                                   (seq tokens) (assoc (str raw-symbol) tokens
+                                                       (str qualified) tokens))))
+                             helper-map
+                             helper-records)]
+        (if (or (= next-map helper-map) (<= remaining 0))
+          next-map
+          (recur next-map (dec remaining)))))))
+
 (defn- clj-dispatch-fragment [dispatch-value]
   (some-> dispatch-value pr-str (str/replace #"\s+" " ") str/trim))
 
 (defn- clj-unit-from-form
-  [{:keys [path ns-name raw-symbol operator kind start-line end-line signature imports calls parser-mode alias-map]}
+  [{:keys [path ns-name raw-symbol operator kind start-line end-line signature imports calls parser-mode alias-map helper-generated-calls]}
    form-text]
   (let [form (clj-read-form form-text)
         operator* (or operator (some-> form first str))
@@ -618,7 +652,7 @@
         dispatch-value (when (= "defmethod" operator*)
                          (some-> form (nth 2 nil) clj-dispatch-fragment))
         generated-calls (when (= "defmacro" operator*)
-                          (extract-clj-generated-calls form-text alias-map))
+                          (extract-clj-generated-calls form-text alias-map helper-generated-calls))
         unit-id (if dispatch-value
                   (str path "::" symbol "$dispatch" (short-hash dispatch-value))
                   (str path "::" symbol))
@@ -682,25 +716,33 @@
         ends (if (seq starts)
                (mapv #(clj-form-end-line lines %) starts)
                (unit-end-lines starts line-count))
-        units (->> (map vector defs ends)
-                   (map (fn [[d end-line]]
-                          (let [start-line (:start-line d)
-                                body-lines (subvec lines (dec start-line) end-line)
-                                body (str/join "\n" body-lines)
-                                form-text (str/join "\n" body-lines)]
-                            (clj-unit-from-form {:path path
-                                                 :ns-name ns-name
-                                                 :raw-symbol (:raw-symbol d)
-                                                 :operator (:operator d)
-                                                 :kind (:kind d)
-                                                 :start-line start-line
-                                                 :end-line end-line
-                                                 :signature (:signature d)
-                                                 :imports imports
-                                                 :calls (extract-clj-calls body alias-map)
-                                                 :parser-mode "fallback"
-                                                 :alias-map alias-map}
-                                                form-text))))
+        form-records (->> (map vector defs ends)
+                          (mapv (fn [[d end-line]]
+                                  (let [start-line (:start-line d)
+                                        body-lines (subvec lines (dec start-line) end-line)
+                                        body (str/join "\n" body-lines)
+                                        form-text (str/join "\n" body-lines)]
+                                    {:def d
+                                     :end-line end-line
+                                     :body body
+                                     :form-text form-text}))))
+        helper-generated-calls (top-level-helper-generated-calls form-records ns-name alias-map)
+        units (->> form-records
+                   (map (fn [{:keys [def end-line body form-text]}]
+                          (clj-unit-from-form {:path path
+                                               :ns-name ns-name
+                                               :raw-symbol (:raw-symbol def)
+                                               :operator (:operator def)
+                                               :kind (:kind def)
+                                               :start-line (:start-line def)
+                                               :end-line end-line
+                                               :signature (:signature def)
+                                               :imports imports
+                                               :calls (extract-clj-calls body alias-map)
+                                               :parser-mode "fallback"
+                                               :alias-map alias-map
+                                               :helper-generated-calls helper-generated-calls}
+                                              form-text)))
                    vec)]
     {:language "clojure"
      :module ns-name
@@ -751,27 +793,48 @@
         var-usages (->> (:var-usages analysis) (filter #(same-file? abs (:filename %))) vec)
         imports (->> ns-usages (keep :to) (map str) distinct vec)
         test-target-modules (clj-test-target-modules (some-> var-defs first :ns str) imports path)
-        primary-units
+        primary-records
         (->> var-defs
              (map (fn [d]
                     (let [ns-name (str (:ns d))
                           nm (str (:name d))
-                          kind (kondo-defined-kind (:defined-by d) path)
                           start (max 1 (int (or (:name-row d) (:row d) 1)))
                           end (max start (int (or (:end-row d) start)))
-                          form-text (str/join "\n" (subvec lines (dec start) end))]
+                          form-text (str/join "\n" (subvec lines (dec start) end))
+                          operator (some-> form-text clj-read-form first str)]
+                      {:ns-name ns-name
+                       :raw-symbol nm
+                       :kind (kondo-defined-kind (:defined-by d) path)
+                       :start start
+                       :end end
+                       :form-text form-text
+                       :signature (safe-line lines start)
+                       :operator operator})))
+             vec)
+        helper-generated-calls (top-level-helper-generated-calls (mapv (fn [{:keys [operator raw-symbol form-text]}]
+                                                                         {:operator operator
+                                                                          :raw-symbol raw-symbol
+                                                                          :form-text form-text})
+                                                                       primary-records)
+                                                                 (some-> primary-records first :ns-name)
+                                                                 (clj-require-alias-map lines))
+        primary-units
+        (->> primary-records
+             (map (fn [{:keys [ns-name raw-symbol kind start end form-text signature operator]}]
                       (clj-unit-from-form {:path path
                                            :ns-name ns-name
-                                           :raw-symbol nm
+                                           :raw-symbol raw-symbol
+                                           :operator operator
                                            :kind kind
                                            :start-line start
                                            :end-line end
-                                           :signature (safe-line lines start)
+                                           :signature signature
                                            :imports imports
                                            :calls (clj-kondo-unit-calls var-usages start end)
                                            :parser-mode "full"
-                                           :alias-map (clj-require-alias-map lines)}
-                                          form-text))))
+                                           :alias-map (clj-require-alias-map lines)
+                                           :helper-generated-calls helper-generated-calls}
+                                          form-text)))
              vec)
         existing-unit-ids (set (map :unit_id primary-units))
         supplemental-units (->> (:units fallback)
@@ -876,21 +939,30 @@
                                                    distinct
                                                    vec)}))))
                           vec)
-                units (->> defs
-                           (map (fn [{:keys [start-line end-line operator raw-symbol calls]}]
-                                  (let [form-text (str/join "\n" (subvec src-lines (dec start-line) end-line))]
-                                    (clj-unit-from-form {:path path
-                                                         :ns-name ns-name
-                                                         :raw-symbol raw-symbol
-                                                         :operator operator
-                                                         :start-line start-line
-                                                         :end-line end-line
-                                                         :signature (safe-line src-lines start-line)
-                                                         :imports imports
-                                                         :calls calls
-                                                         :parser-mode "full"
-                                                         :alias-map alias-map}
-                                                        form-text))))
+                form-records (->> defs
+                                  (mapv (fn [{:keys [start-line end-line operator raw-symbol calls]}]
+                                          {:start-line start-line
+                                           :end-line end-line
+                                           :operator operator
+                                           :raw-symbol raw-symbol
+                                           :calls calls
+                                           :form-text (str/join "\n" (subvec src-lines (dec start-line) end-line))})))
+                helper-generated-calls (top-level-helper-generated-calls form-records ns-name alias-map)
+                units (->> form-records
+                           (map (fn [{:keys [start-line end-line operator raw-symbol calls form-text]}]
+                                  (clj-unit-from-form {:path path
+                                                       :ns-name ns-name
+                                                       :raw-symbol raw-symbol
+                                                       :operator operator
+                                                       :start-line start-line
+                                                       :end-line end-line
+                                                       :signature (safe-line src-lines start-line)
+                                                       :imports imports
+                                                       :calls calls
+                                                       :parser-mode "full"
+                                                       :alias-map alias-map
+                                                       :helper-generated-calls helper-generated-calls}
+                                                      form-text)))
                            vec)]
             (if (seq units)
               {:ok? true
@@ -1491,6 +1563,12 @@
            vec))
     []))
 
+(defn- ex-use-expansion-imports [body alias-map]
+  (->> (str/split-lines (str body))
+       (mapcat #(or (ex-directive-targets [%] ex-import-only-re alias-map) []))
+       distinct
+       vec))
+
 (defn- extract-ex-calls [body alias-map import-modules local-call-arities call-arity-index]
   (->> (re-seq ex-call-re body)
        (map second)
@@ -1573,40 +1651,51 @@
                            ceiling-line (max start-line (or (some-> next-start dec) line-count))]
                        (ex-unit-end-line lines start-line ceiling-line (:form d)))))
                   vec)
-        units (->> (map vector defs ends)
-                   (map (fn [[d end-line]]
-                          (let [start-line (:start-line d)
-                                body-lines (subvec lines (dec start-line) end-line)
-                                body (str/join "\n" body-lines)
-                                method-arity (:method_arity d)
-                                call-arity-index (if (= "defdelegate" (:form d))
-                                                   {}
-                                                   (ex-call-arity-index body))]
-                            {:unit_id (cond-> (str path "::" (:raw-symbol d))
-                                        (some? method-arity) (str "$arity" method-arity))
-                             :kind (:kind d)
-                             :symbol (:raw-symbol d)
-                             :path path
-                             :module module-name
-                             :start_line start-line
-                             :end_line end-line
-                             :signature (:signature d)
-                             :summary (str (:form d) " " (:raw-symbol d))
-                             :docstring_excerpt nil
-                             :imports imports
-                             :calls (if (= "defdelegate" (:form d))
-                                      (ex-delegate-calls body alias-map)
-                                      (extract-ex-calls body alias-map call-expansion-modules local-call-arities call-arity-index))
-                             :method_arity method-arity
-                             :call_arity_by_token (if (= "defdelegate" (:form d))
-                                                    {}
-                                                    call-arity-index)
-                             :ex_form (:form d)
-                             :parser_mode "full"})))
-                   vec)]
+        unit-records (->> (map vector defs ends)
+                          (mapv
+                           (fn [[d end-line]]
+                             (let [start-line (:start-line d)
+                                   body-lines (subvec lines (dec start-line) end-line)
+                                   body (str/join "\n" body-lines)
+                                   method-arity (:method_arity d)
+                                   call-arity-index (if (= "defdelegate" (:form d))
+                                                      {}
+                                                      (ex-call-arity-index body))]
+                               {:unit {:unit_id (cond-> (str path "::" (:raw-symbol d))
+                                                  (some? method-arity) (str "$arity" method-arity))
+                                       :kind (:kind d)
+                                       :symbol (:raw-symbol d)
+                                       :path path
+                                       :module module-name
+                                       :start_line start-line
+                                       :end_line end-line
+                                       :signature (:signature d)
+                                       :summary (str (:form d) " " (:raw-symbol d))
+                                       :docstring_excerpt nil
+                                       :imports imports
+                                       :calls (if (= "defdelegate" (:form d))
+                                                (ex-delegate-calls body alias-map)
+                                                (extract-ex-calls body alias-map call-expansion-modules local-call-arities call-arity-index))
+                                       :method_arity method-arity
+                                       :call_arity_by_token (if (= "defdelegate" (:form d))
+                                                              {}
+                                                              call-arity-index)
+                                       :ex_form (:form d)
+                                       :parser_mode "full"}
+                                :use-expansion-imports
+                                (when (and (= "defmacro" (:form d))
+                                           (= (str module-name "/__using__") (:raw-symbol d)))
+                                  (ex-use-expansion-imports body alias-map))}))))
+        units (mapv :unit unit-records)
+        use-expansion-imports (->> unit-records
+                                   (mapcat #(or (:use-expansion-imports %) []))
+                                   distinct
+                                   vec)]
     {:language "elixir"
      :module module-name
      :imports imports
+     :use_modules use-modules
+     :use_expansion_imports use-expansion-imports
      :test_target_modules test-target-modules
      :units units
      :diagnostics []
@@ -1697,6 +1786,14 @@
         [(str base "." suffix) (str base "/" suffix)])
       [])))
 
+(defn- py-expand-local-class-token [token module local-class-names]
+  (let [token* (str token)]
+    (if-let [[_ cls suffix] (re-matches #"([A-Za-z_][A-Za-z0-9_]*)\.(.+)" token*)]
+      (when (contains? local-class-names cls)
+        (let [base (str module "." cls)]
+          [(str base "." suffix) (str base "/" suffix)]))
+      [])))
+
 (defn- py-expand-symbol-import [token symbol-aliases local-call-names]
   (when (not (contains? local-call-names (str token)))
     (when-let [resolved (get symbol-aliases (str token))]
@@ -1715,7 +1812,7 @@
        (remove str/blank?)
        set))
 
-(defn- extract-py-calls [body {:keys [module class-name module-aliases symbol-aliases local-call-names]}]
+(defn- extract-py-calls [body {:keys [module class-name module-aliases symbol-aliases local-call-names local-class-names]}]
   (->> (re-seq py-call-re body)
        (map second)
        (mapcat (fn [token]
@@ -1724,11 +1821,15 @@
                        self-symbols (if (and class-name module)
                                       (py-expand-self-token token module class-name)
                                       [])
+                       class-symbols (if module
+                                       (py-expand-local-class-token token module local-class-names)
+                                       [])
                        tail (tail-token token)]
                    (cond-> [token]
                      (seq module-alias-token) (conj module-alias-token)
                      (seq imported-symbols) (into imported-symbols)
                      (seq self-symbols) (into self-symbols)
+                     (seq class-symbols) (into class-symbols)
                      (and tail (not= tail token)) (conj tail)))))
        (remove #(contains? py-call-stop %))
        distinct
@@ -1791,6 +1892,11 @@
                      :else
                      (recur (inc idx) pruned out)))))
         local-call-names (py-local-call-names defs)
+        local-class-names (->> defs
+                               (filter #(= "class" (:kind %)))
+                               (keep (fn [{:keys [raw-symbol]}]
+                                       (some-> raw-symbol str (str/split #"\.") last)))
+                               set)
         starts (mapv :start-line defs)
         ends (unit-end-lines starts line-count)
         units (->> (map vector defs ends)
@@ -1813,7 +1919,8 @@
                                                            :class-name (:class-name d)
                                                            :module-aliases module-aliases
                                                            :symbol-aliases symbol-aliases
-                                                           :local-call-names local-call-names})
+                                                           :local-call-names local-call-names
+                                                           :local-class-names local-class-names})
                              :parser_mode "full"})))
                    vec)]
     {:language "python"
