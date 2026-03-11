@@ -8,3 +8,22 @@
 - After any manual `apply_patch` that changes Clojure forms, run an immediate syntax or compile probe before continuing with more edits.
 - If Clojure reports `Unmatched delimiter`, `EOF while reading`, or `defn` spec errors after an edit, inspect the just-edited form tail first and repair delimiters before making additional changes.
 - Keep Clojure patches scoped to one top-level form where possible; session history shows multi-form raw patches are the recurring source of delimiter regressions.
+
+
+## MCP-First Workflow For This Repo
+
+- If the `semantic-code-indexing` MCP server is available, use it before manual file crawling.
+- First-pass flow is strict:
+  1. `create_index`
+  2. `repo_map`
+  3. `resolve_context`
+  4. optional `expand_context`
+  5. optional `fetch_context_detail`
+- Treat `no_supported_languages_found` as a user-guidance path: ask for the core language and suggest activating other languages later.
+- Treat `language_refresh_required` as a signal to rerun `create_index`, not as a reason to abandon MCP.
+- Treat `language_activation_in_progress` as a wait-and-retry signal for the same request.
+- Do not silently fall back to manual inspection if MCP fails; state that MCP failed, then continue manually if needed.
+- MCP wire-shape requirements:
+  - `initialize.params.clientInfo` must be an object, not a string.
+  - `tools/call.arguments` must be a JSON object, not a JSON-encoded string.
+- Canonical client prompts live in [docs/mcp-agent-prompts.md](docs/mcp-agent-prompts.md).

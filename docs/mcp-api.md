@@ -47,6 +47,19 @@ The MCP server exposes only `tools` capability in v1 and keeps cached indexes in
 
 The HTTP MCP transport is local-only by default because `mcp-http` binds to `127.0.0.1` unless overridden explicitly.
 
+## Agent Onboarding
+
+If you want an IDE or coding agent to use this server correctly on the first pass, do not rely on a generic “use the MCP if helpful” instruction. Use an explicit `MCP-first` prompt that says:
+
+1. call `create_index` first
+2. call `repo_map` immediately after indexing
+3. use `resolve_context -> expand_context -> fetch_context_detail` for code-understanding work
+4. treat `language_refresh_required` as “rerun create_index”
+5. treat `language_activation_in_progress` as “wait and retry the same request”
+6. only fall back to manual file inspection after the MCP failure has been surfaced explicitly
+
+Canonical English prompt snippets for Codex, Claude-style IDE agents, and generic MCP-capable IDE fields live in [docs/mcp-agent-prompts.md](mcp-agent-prompts.md).
+
 ## Transport Shapes
 
 ### Streamable HTTP
@@ -101,6 +114,12 @@ Shorter version for clients with tight field limits:
 
 ```json
 "description": "Repository-aware code retrieval MCP: index a repo, generate repo maps, find relevant symbols and files, run impact analysis, and fetch code skeletons with low token cost."
+```
+
+Minimal onboarding snippet for clients that support only a short instruction field:
+
+```text
+Use semantic-code-indexing in MCP-first mode: call create_index, then repo_map, then use resolve_context -> expand_context -> fetch_context_detail. Treat language_refresh_required as rerun-create_index, language_activation_in_progress as wait-and-retry, and only fall back to manual repo inspection after you report the MCP failure explicitly.
 ```
 
 ## Tools

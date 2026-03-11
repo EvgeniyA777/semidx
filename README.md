@@ -98,6 +98,7 @@ Canonical retrieval flow is compact-first staged retrieval:
 - CI runtime gates: `.github/workflows/mvp-runtime.yml`
 - Runtime API docs: [docs/runtime-api.md](docs/runtime-api.md)
 - MCP docs: [docs/mcp-api.md](docs/mcp-api.md)
+- Agent MCP prompts: [docs/mcp-agent-prompts.md](docs/mcp-agent-prompts.md)
 - Roadmap status checklist: [docs/roadmap-status.md](docs/roadmap-status.md)
 - Compact-first staged retrieval execution plan: [docs/compact-first-staged-retrieval-plan.md](docs/compact-first-staged-retrieval-plan.md)
 - Post-roadmap semantic deepening plan (delivered tranche): [docs/post-roadmap-semantic-deepening-plan.md](docs/post-roadmap-semantic-deepening-plan.md)
@@ -117,6 +118,25 @@ Canonical retrieval flow is compact-first staged retrieval:
 - If an instance is running, stop/shutdown it.
 - Start a fresh instance with the required test configuration.
 - Run tests only after the clean restart.
+
+## Agent Onboarding
+
+If an IDE or coding agent supports MCP plus repo-local instructions, this repo is intended to be used in `MCP-first` mode, not manual file-first mode.
+
+Recommended first-pass behavior:
+
+1. `create_index`
+2. `repo_map`
+3. `resolve_context`
+4. optional `expand_context`
+5. optional `fetch_context_detail`
+
+Canonical English prompt snippets for Antigravity-style IDEs, Codex, Claude-style agents, and generic MCP-capable clients live in [docs/mcp-agent-prompts.md](docs/mcp-agent-prompts.md).
+
+Repo-local pickup points:
+
+- Codex / agents that read repository instructions: [AGENTS.md](AGENTS.md)
+- Claude-style clients that read root project instructions: [CLAUDE.md](CLAUDE.md)
 
 ## Current Contract Strategy
 
