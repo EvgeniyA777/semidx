@@ -47,8 +47,10 @@ The compact-first staged retrieval refactor captured in [docs/compact-first-stag
 
 The roadmap through Phase 5 is now effectively delivered for the current scope.
 
-The current near-term focus is post-roadmap follow-up work:
+The post-roadmap semantic tranche in [docs/post-roadmap-semantic-deepening-plan.md](/Users/ae/workspaces/SemanticCodeIndexing/docs/post-roadmap-semantic-deepening-plan.md) is now also complete.
 
-- execute [docs/post-roadmap-semantic-deepening-plan.md](/Users/ae/workspaces/SemanticCodeIndexing/docs/post-roadmap-semantic-deepening-plan.md) stage by stage
-- deeper compiler-grade ownership/disambiguation work in the priority language adapters
-- any incremental operational polish on top of the now-complete retained Phase 5 loop
+The next near-term focus is a new deeper-semantic tranche:
+
+- interprocedural/dataflow-sensitive semantic resolution where current ownership is still mostly local/syntactic
+- stronger tree-sitter/compiler-grade ownership in the non-Clojure lanes
+- incremental operational/docs polish on top of the already-complete retained Phase 5 loop

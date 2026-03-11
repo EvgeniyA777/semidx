@@ -15,7 +15,7 @@ Push the language adapters beyond the delivered roadmap scope toward more compil
 - `[x]` Stage 5 Elixir pipelines / `with` / nested-module deepening
 - `[x]` Stage 6 TypeScript parser-strengthening tranche
 - `[x]` Stage 7 Cross-language confidence recalibration
-- `[ ]` Stage 8 Post-roadmap closure
+- `[x]` Stage 8 Post-roadmap closure
 
 ## Delivery Rule
 
@@ -31,7 +31,7 @@ No batching of multiple stages into one commit.
 
 ## Current Active Stage
 
-`Stage 8` is now the active slice.
+All stages in this tranche are now delivered.
 
 ## Stage Notes
 
@@ -99,8 +99,16 @@ Delivered scope:
 
 ### Stage 8
 
-Planned scope:
+Delivered scope:
 
-- final docs normalization
-- mark the tranche delivered
-- define the next frontier after this post-roadmap slice
+- Final docs/status normalization is complete across README, runtime/MCP docs, onboarding notes, memory, and roadmap status pointers.
+- This full post-roadmap semantic-deepening tranche is now marked delivered rather than active.
+- The next explicit frontier after this tranche is deeper interprocedural/dataflow-sensitive semantic work plus stronger tree-sitter/compiler-grade ownership where the current regex-first lanes still stay conservative.
+
+## Next Frontier
+
+The next tranche after this delivered plan should focus on:
+
+- deeper interprocedural/dataflow-sensitive semantic resolution
+- stronger tree-sitter/compiler-grade ownership in the non-Clojure lanes
+- continued operational/docs alignment as those deeper semantic capabilities land

@@ -96,7 +96,7 @@ Canonical retrieval flow is compact-first staged retrieval:
 - MCP docs: [docs/mcp-api.md](docs/mcp-api.md)
 - Roadmap status checklist: [docs/roadmap-status.md](docs/roadmap-status.md)
 - Compact-first staged retrieval execution plan: [docs/compact-first-staged-retrieval-plan.md](docs/compact-first-staged-retrieval-plan.md)
-- Post-roadmap semantic deepening plan: [docs/post-roadmap-semantic-deepening-plan.md](docs/post-roadmap-semantic-deepening-plan.md)
+- Post-roadmap semantic deepening plan (delivered tranche): [docs/post-roadmap-semantic-deepening-plan.md](docs/post-roadmap-semantic-deepening-plan.md)
 
 ## Agent Limit Policy
 

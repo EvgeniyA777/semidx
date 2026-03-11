@@ -64,7 +64,7 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Phase 5 now also has a top-level retained orchestration command, `scheduled-phase5-cycle`, which snapshots the current governance run, queue state, and aggregate status into one first-class artifact stream plus `phase5-run-index.json`.
 - Canonical in-repo roadmap status checklist now lives in `docs/roadmap-status.md`, with a dated rationale and status snapshot stored under `notes/`.
 - Product roadmap progress is now effectively through the main Phase 5 slices: governed quality loop, language-priority semantic-core deepening, capabilities/calibration, index lifecycle, unified error taxonomy, SLO-facing metrics, tenant/trace consistency, governance-tier enforcement, and retained self-improvement orchestration are in place; the next major tranche is post-roadmap deeper compiler-grade semantic follow-up.
-- Active execution backlog is now tracked in `docs/post-roadmap-semantic-deepening-plan.md`; Stages 1-7 (Clojure lexical/destructuring, Clojure dispatch/protocol, Java inheritance/method-reference, Python decorator/class-scope, Elixir pipeline/nested-module, TypeScript parser-strengthening, and cross-language confidence recalibration) are delivered and Stage 8 is the active slice.
+- The post-roadmap semantic deepening tranche tracked in `docs/post-roadmap-semantic-deepening-plan.md` is now fully delivered across Stages 1-8.
 
 ## Hard Invariants
 
@@ -91,6 +91,7 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Elixir semantic-core now also treats pipeline calls and local captures (`&normalize/1`) as arity-aware caller edges and has regression coverage for `__MODULE__.Nested.foo(...)` nested-module linkage without regressing local-vs-import precedence.
 - TypeScript semantic-core now also emits object-literal methods, class field arrow methods, `export default foo` aliases, and direct re-export alias units in both runtime and onboarding coverage while still keeping the public confidence ceiling conservative.
 - Confidence recalibration pass kept the public ceilings unchanged: Clojure stays `high`, Elixir/Java/Python stay `medium`, and TypeScript stays `low`, with runtime/docs/tests now explicitly aligned on that non-bump.
+- The next frontier after the delivered post-roadmap tranche is deeper interprocedural/dataflow-sensitive semantic work plus stronger compiler-grade ownership in the non-Clojure lanes.
 - Runtime hardening is now effectively complete for the main roadmap scope; any remaining ops work is incremental polish rather than a missing Phase 4 primitive.
 - Real self-improvement loop is now operationally complete for the current roadmap scope: replay harvesting, difficult-case capture, calibration reports, weekly review artifacts, protected replay dataset conversion, retained review/governance runs, queue/status reporting, and top-level retained Phase 5 orchestration all exist.
 - Compact-first staged retrieval is now fully aligned as the canonical public flow: `resolve_context` is compact-first, `expand_context` / `fetch_context_detail` are the explicit later stages, selection artifacts are snapshot-bound, and the implementation/docs/examples line is captured by `ADR-024` plus the completed `docs/compact-first-staged-retrieval-plan.md`.
