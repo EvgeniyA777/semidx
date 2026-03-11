@@ -312,7 +312,7 @@ The capability layer is now language-strength-aware. Runtime retrieval emits `:s
 
 - Clojure can still reach `high` when structural evidence is strong
 - Elixir, Java, and Python currently top out at `medium`
-- TypeScript now has strategic import/method coverage but still intentionally tops out at `low`
+- TypeScript now has broader strategic import/method/object-surface coverage but still intentionally tops out at `low`
 
 Guardrails now also surface `capability_ceiling` risk/blocking signals when language strength prevents a higher-autonomy posture.
 

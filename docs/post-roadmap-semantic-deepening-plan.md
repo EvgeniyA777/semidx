@@ -14,7 +14,7 @@ Push the language adapters beyond the delivered roadmap scope toward more compil
 - `[x]` Stage 4 Python decorator / class-scope deepening
 - `[x]` Stage 5 Elixir pipelines / `with` / nested-module deepening
 - `[x]` Stage 6 TypeScript parser-strengthening tranche
-- `[ ]` Stage 7 Cross-language confidence recalibration
+- `[x]` Stage 7 Cross-language confidence recalibration
 - `[ ]` Stage 8 Post-roadmap closure
 
 ## Delivery Rule
@@ -31,7 +31,7 @@ No batching of multiple stages into one commit.
 
 ## Current Active Stage
 
-`Stage 7` is now the active slice.
+`Stage 8` is now the active slice.
 
 ## Stage Notes
 
@@ -90,9 +90,17 @@ Delivered scope:
 
 ### Stage 7
 
+Delivered scope:
+
+- Recalibration pass confirmed that the recent Java/Python/Elixir/TypeScript semantic gains still do not justify a public confidence-ceiling bump beyond the already published language strengths.
+- TypeScript retains its explicit `low` ceiling even after object/class-field/default-alias/re-export improvements, and runtime regression coverage now proves that this non-bump is intentional rather than accidental drift.
+- Runtime, MCP, README, onboarding, and memory wording are now aligned around the same “stronger surfaces, unchanged public ceiling” story.
+- No contract fields changed: `selected_language_strengths` and `confidence_ceiling` remain stable, additive metadata only.
+
+### Stage 8
+
 Planned scope:
 
-- reassess per-language ceiling wording
-- only bump ceilings where tests and behavior justify it
-- normalize runtime/MCP/docs wording
-- verify no contract drift in capability fields
+- final docs normalization
+- mark the tranche delivered
+- define the next frontier after this post-roadmap slice

@@ -975,6 +975,32 @@
     (is (some #(= "src.example.barrel/exportedNormalize" (:symbol %)) normalize-callers))
     (is (some #(= "src.example.re_export_consumer/processReExport" (:symbol %)) barrel-callers))))
 
+(deftest typescript-advanced-surfaces-still-keep-low-capability-ceiling-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-typescript-capability" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        index (sci/create-index {:root_path tmp-root})
+        result (sci/resolve-context-detail
+                index
+                {:api_version "1.0"
+                 :schema_version "1.0"
+                 :intent {:purpose "code_understanding"
+                          :details "Locate TypeScript default-alias consumer."}
+                 :targets {:symbols ["src.example.default_alias_consumer/processDefaultAlias"]
+                           :paths ["src/example/default_alias_consumer.ts"]}
+                 :constraints {:token_budget 1200
+                               :max_raw_code_level "enclosing_unit"
+                               :freshness "current_snapshot"}
+                 :hints {:prefer_definitions_over_callers true}
+                 :options {:include_tests false
+                           :include_impact_hints true
+                           :allow_raw_code_escalation false}
+                 :trace {:trace_id "66666666-6666-4666-8666-666666666666"
+                         :request_id "runtime-test-ts-capability-001"
+                         :actor_id "test_runner"}})]
+    (is (= "low" (get-in result [:context_packet :capabilities :selected_language_strengths "typescript"])))
+    (is (= "low" (get-in result [:context_packet :capabilities :confidence_ceiling])))
+    (is (= "low" (get-in result [:context_packet :confidence :level])))))
+
 (deftest in-memory-storage-roundtrip-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-storage-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)

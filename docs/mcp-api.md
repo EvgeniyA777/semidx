@@ -134,7 +134,7 @@ Because MCP uses the same core retrieval runtime as the library and service edge
 - Python: imported-symbol, relative-import, and module-alias resolution, `self` / `cls` and decorated class/static method ownership, explicit module-alias preservation, nested local-scope suppression, conservative `@property` access, and Python test-file linkage
 - TypeScript: named/default/namespace import ownership, local `this.` and class-qualified method targeting, exported function-expression identity, object-literal and class-field-arrow units, plus direct default/re-export alias surfaces, while confidence remains `low`-ceiling because the parser path is still intentionally conservative
 
-Because the capability summary is now language-strength-aware, MCP `resolve_context` responses may also carry a capability-limited confidence outcome even when symbol resolution is exact. Today that effectively means Clojure can reach `high`, Elixir/Java/Python currently ceiling at `medium`, and TypeScript remains `low`-ceiling strategic coverage by design.
+Because the capability summary is now language-strength-aware, MCP `resolve_context` responses may also carry a capability-limited confidence outcome even when symbol resolution is exact. Today that effectively means Clojure can reach `high`, Elixir/Java/Python currently ceiling at `medium`, and TypeScript remains intentionally `low`-ceiling even after the newer object/class-field/default-alias surfaces.
 
 ### `expand_context`
 
