@@ -446,15 +446,25 @@
       (is (str/ends-with? (get-in second-run [:scheduled_run :weekly_review_path]) ".json"))
       (is (str/ends-with? (get-in second-run [:scheduled_run :protected_replay_dataset_path]) ".json"))
       (is (str/ends-with? (get-in second-run [:scheduled_run :shadow_review_path]) ".json"))
+      (is (str/ends-with? (get-in second-run [:scheduled_run :review_index_path]) ".json"))
       (is (.exists (io/file (get-in second-run [:scheduled_run :weekly_review_path]))))
       (is (.exists (io/file (get-in second-run [:scheduled_run :protected_replay_dataset_path]))))
       (is (.exists (io/file (get-in second-run [:scheduled_run :shadow_review_path]))))
+      (is (.exists (io/file (get-in second-run [:scheduled_run :review_index_path]))))
       (is (= (get-in second-run [:scheduled_run :weekly_review_path])
              (get-in second-run [:manifest :latest_weekly_review_path])))
       (is (= (get-in second-run [:scheduled_run :protected_replay_dataset_path])
              (get-in second-run [:manifest :latest_protected_replay_dataset_path])))
       (is (= (get-in second-run [:scheduled_run :shadow_review_path])
-             (get-in second-run [:manifest :latest_shadow_review_path]))))
+             (get-in second-run [:manifest :latest_shadow_review_path])))
+      (is (= (get-in second-run [:scheduled_run :review_index_path])
+             (get-in second-run [:manifest :review_index_path]))))
+    (testing "review index retains one current run summary with direct artifact pointers"
+      (is (= 1 (count (get-in second-run [:review_index :runs]))))
+      (is (= (get-in second-run [:scheduled_run :artifact_path])
+             (get-in second-run [:review_index :runs 0 :artifact_paths :policy_review_bundle])))
+      (is (= (get-in second-run [:scheduled_run :protected_replay_dataset_path])
+             (get-in second-run [:review_index :runs 0 :artifact_paths :protected_replay_dataset]))))
     (testing "second run uses previous manifest timestamp as implicit since"
       (is (= (get-in first-run [:scheduled_run :generated_at])
              (get-in second-run [:scheduled_run :since]))))
@@ -623,8 +633,10 @@
       (is (= 1 (get-in report [:summary :promotion_reason_counts "multiple_eligible_candidates"])))
       (is (= 1 (get-in report [:summary :selected_policy_counts "heuristic_v1_shadow_hist_a"]))))
     (testing "history report preserves recent run entries"
+      (is (true? (:index_used report)))
       (is (= 2 (count (:runs report))))
       (is (some :artifact_path (:runs report)))
+      (is (every? :review_run_ref (:runs report)))
       (is (string? (get-in report [:summary :latest_run_at]))))))
 
 (deftest scheduled-governance-cycle-can-require-candidate-streak-before-promotion-test
@@ -933,3 +945,104 @@
              (:state (rp/resolve-registry-entry (:registry cycle)
                                                 "heuristic_v1_shadow_blocked_cycle"
                                                 "2026-03-31")))))))
+
+(deftest phase5-review-queue-emits-feedback-gap-and-manual-review-items-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-phase5-review-queue" (make-array java.nio.file.attribute.FileAttribute 0)))
+        artifacts-dir (str (io/file tmp-root ".tmp" "policy-review"))
+        _ (create-sample-repo! tmp-root)
+        metrics (sci/in-memory-usage-metrics)
+        index (sci/create-index {:root_path tmp-root
+                                 :usage_metrics metrics})
+        active-policy (rp/default-retrieval-policy)
+        manual-shadow (assoc active-policy :policy_id "heuristic_v1_shadow_queue_manual" :version "2026-04-01")
+        registry {:schema_version "1.0"
+                  :policies [(rp/registry-entry active-policy {:state "active"})
+                             (rp/registry-entry manual-shadow {:state "shadow"
+                                                               :governance {:promotion_mode "manual_approval_required"
+                                                                            :approval_tier "restricted"}})]}
+        _no-feedback-run (evaluation/scheduled-policy-review {:root_path tmp-root
+                                                              :usage_metrics metrics
+                                                              :registry registry
+                                                              :artifacts_dir artifacts-dir
+                                                              :retention_runs 4
+                                                              :lookback_days 7})
+        _ (Thread/sleep 5)
+        query (assoc sample-query
+                     :trace {:trace_id "98989898-9898-4898-8898-989898989898"
+                             :request_id "phase5-review-queue-001"})
+        _result (sci/resolve-context index query)
+        _feedback (sci/record-feedback! index {:trace_id (get-in query [:trace :trace_id])
+                                               :request_id (get-in query [:trace :request_id])
+                                               :feedback_outcome "not_helpful"
+                                               :followup_action "discarded"
+                                               :confidence_level "medium"
+                                               :retrieval_issue_codes ["missing_authority"]
+                                               :ground_truth_unit_ids ["src/my/app/order.clj::my.app.order/process-order"]
+                                               :ground_truth_paths ["src/my/app/order.clj"]})
+        _manual-review-run (evaluation/scheduled-policy-review {:root_path tmp-root
+                                                                :usage_metrics metrics
+                                                                :registry registry
+                                                                :artifacts_dir artifacts-dir
+                                                                :retention_runs 4
+                                                                :lookback_days 7})
+        queue (evaluation/phase5-review-queue {:artifacts_dir artifacts-dir})]
+    (testing "queue retains both scope-level feedback gaps and candidate-level manual review work"
+      (is (= 2 (get-in queue [:summary :total_items])))
+      (is (= 1 (get-in queue [:summary :reason_counts "no_protected_queries"])))
+      (is (= 1 (get-in queue [:summary :reason_counts "manual_approval_required"])))
+      (is (= #{"no_protected_queries" "manual_approval_required"}
+             (set (map :reason_code (:items queue))))))
+    (testing "manual review items keep the candidate identity and direct artifact pointers"
+      (let [manual-item (some #(when (= "manual_approval_required" (:reason_code %)) %) (:items queue))]
+        (is (= "heuristic_v1_shadow_queue_manual" (get-in manual-item [:policy_summary :policy_id])))
+        (is (str/ends-with? (get-in manual-item [:artifact_paths :shadow_review]) ".json"))))
+    (testing "feedback-gap items keep the expected operator action"
+      (let [gap-item (some #(when (= "no_protected_queries" (:reason_code %)) %) (:items queue))]
+        (is (= "collect_more_feedback" (:required_action gap-item)))))))
+
+(deftest phase5-status-report-aggregates-review-governance-and-queue-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-phase5-status-report" (make-array java.nio.file.attribute.FileAttribute 0)))
+        artifacts-dir (str (io/file tmp-root ".tmp" "policy-review"))
+        _ (create-sample-repo! tmp-root)
+        metrics (sci/in-memory-usage-metrics)
+        index (sci/create-index {:root_path tmp-root
+                                 :usage_metrics metrics})
+        query (assoc sample-query
+                     :trace {:trace_id "99999999-9999-4999-8999-999999999999"
+                             :request_id "phase5-status-report-001"})
+        _result (sci/resolve-context index query)
+        _feedback (sci/record-feedback! index {:trace_id (get-in query [:trace :trace_id])
+                                               :request_id (get-in query [:trace :request_id])
+                                               :feedback_outcome "not_helpful"
+                                               :followup_action "discarded"
+                                               :confidence_level "medium"
+                                               :retrieval_issue_codes ["missing_authority"]
+                                               :ground_truth_unit_ids ["src/my/app/order.clj::my.app.order/process-order"]
+                                               :ground_truth_paths ["src/my/app/order.clj"]})
+        active-policy (rp/default-retrieval-policy)
+        shadow-a (assoc active-policy :policy_id "heuristic_v1_shadow_status_a" :version "2026-04-02")
+        shadow-b (assoc active-policy :policy_id "heuristic_v1_shadow_status_b" :version "2026-04-03")
+        registry {:schema_version "1.0"
+                  :policies [(rp/registry-entry active-policy {:state "active"})
+                             (rp/registry-entry shadow-a {:state "shadow"})
+                             (rp/registry-entry shadow-b {:state "shadow"})]}
+        _cycle (evaluation/scheduled-governance-cycle {:root_path tmp-root
+                                                       :usage_metrics metrics
+                                                       :registry registry
+                                                       :artifacts_dir artifacts-dir
+                                                       :retention_runs 4
+                                                       :auto_promote true})
+        report (evaluation/phase5-status-report {:artifacts_dir artifacts-dir})]
+    (testing "status report joins retained review runs, governance runs, and pending queue items"
+      (is (= 1 (get-in report [:summary :review_runs])))
+      (is (= 1 (get-in report [:summary :governance_runs])))
+      (is (= 1 (get-in report [:summary :pending_queue_items])))
+      (is (= 1 (get-in report [:summary :protected_queries_total])))
+      (is (= 1 (get-in report [:summary :pending_reason_counts "multiple_eligible_candidates"]))))
+    (testing "latest governance run keeps source review artifact references"
+      (is (= 1 (count (:governance_runs report))))
+      (is (str/ends-with? (get-in report [:governance_runs 0 :artifact_paths :governance_cycle]) ".json"))
+      (is (str/ends-with? (get-in report [:governance_runs 0 :review_run_ref :protected_replay_dataset_path]) ".json")))
+    (testing "pending queue exposes the operator action for the governance skip"
+      (is (= "choose_best_candidate_from_ranking"
+             (get-in report [:pending_queue 0 :required_action]))))))

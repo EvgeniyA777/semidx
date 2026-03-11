@@ -379,6 +379,45 @@
   ([artifacts-dir manifest-name]
    (.getAbsolutePath (io/file artifacts-dir manifest-name))))
 
+(defn- retained-index-path [artifacts-dir index-name]
+  (.getAbsolutePath (io/file artifacts-dir index-name)))
+
+(defn- read-retained-index [artifacts-dir index-name]
+  (or (read-json-if-exists (retained-index-path artifacts-dir index-name))
+      {:schema_version "1.0"
+       :runs []}))
+
+(defn- artifact-exists? [path]
+  (and (seq (str path))
+       (.exists (io/file path))))
+
+(defn- select-retained-runs [runs retention-runs]
+  (let [keep-count (when retention-runs (max 0 (long retention-runs)))]
+    (cond->> (sort-by :generated_at runs)
+      keep-count (take-last keep-count)
+      true vec)))
+
+(defn- write-retained-index!
+  [{:keys [artifacts_dir index_name generated_at retention_runs run_summary run_key_fn]}]
+  (let [index-path (retained-index-path artifacts_dir index_name)
+        current-index (read-retained-index artifacts_dir index_name)
+        current-runs (:runs current-index)
+        deduped-runs (reduce (fn [acc run]
+                               (assoc acc (run_key_fn run) run))
+                             {}
+                             current-runs)
+        runs-with-new (assoc deduped-runs (run_key_fn run_summary) run_summary)
+        live-runs (->> (vals runs-with-new)
+                       (filter #(artifact-exists? (get-in % [:artifact_paths :primary])))
+                       vec)
+        retained-runs (select-retained-runs live-runs retention_runs)
+        retained-index {:schema_version "1.0"
+                        :updated_at generated_at
+                        :runs retained-runs}]
+    (write-json-file! index-path retained-index)
+    {:path index-path
+     :index retained-index}))
+
 (defn- derive-since [{:keys [since lookback_days manifest]}]
   (cond
     since since
@@ -655,6 +694,41 @@
                                                                         retention_runs
                                                                         "shadow-review-"
                                                                         "policy-review-manifest.json"))})
+        run-id artifact-token
+        review-run-summary {:run_id run-id
+                            :generated_at generated-at
+                            :scope {:root_path root_path
+                                    :surface surface
+                                    :tenant_id tenant_id
+                                    :since since*}
+                            :artifact_paths {:primary artifact-path
+                                             :policy_review_bundle artifact-path
+                                             :weekly_review weekly-review-path
+                                             :protected_replay_dataset protected-dataset-path
+                                             :shadow_review shadow-review-path}
+                            :weekly_review_summary {:total_queries (get-in bundle [:weekly_review_report :summary :total_queries] 0)
+                                                    :protected_queries (count (filter :protected_case
+                                                                                      (get-in bundle [:protected_replay_dataset :queries] [])))}
+                            :protected_replay_summary {:total_queries (count (get-in bundle [:protected_replay_dataset :queries] []))
+                                                       :protected_queries (count (filter :protected_case
+                                                                                         (get-in bundle [:protected_replay_dataset :queries] [])))}
+                            :shadow_review_summary {:skipped (boolean (get-in bundle [:shadow_review_report :skipped]))
+                                                    :reason (get-in bundle [:shadow_review_report :reason])
+                                                    :shadow_candidates (get-in bundle [:shadow_review_report :summary :shadow_candidates] 0)
+                                                    :ready_for_promotion (get-in bundle [:shadow_review_report :summary :ready_for_promotion] 0)
+                                                    :ready_for_auto_promotion (get-in bundle [:shadow_review_report :summary :ready_for_auto_promotion] 0)
+                                                    :manual_review_candidates (->> (get-in bundle [:shadow_review_report :shadow_candidates] [])
+                                                                                   (filter :manual_review_required)
+                                                                                   (mapv :policy_summary))
+                                                    :governance_blocked_candidates (->> (get-in bundle [:shadow_review_report :shadow_candidates] [])
+                                                                                        (filter :blocked_by_governance)
+                                                                                        (mapv :policy_summary))}}
+        review-index-write (write-retained-index! {:artifacts_dir artifacts-dir*
+                                                   :index_name "review-run-index.json"
+                                                   :generated_at generated-at
+                                                   :retention_runs retention_runs
+                                                   :run_summary review-run-summary
+                                                   :run_key_fn :run_id})
         manifest-data {:schema_version "1.0"
                        :updated_at generated-at
                        :last_run_at generated-at
@@ -667,6 +741,8 @@
                        :latest_weekly_review_path weekly-review-path
                        :latest_protected_replay_dataset_path protected-dataset-path
                        :latest_shadow_review_path shadow-review-path
+                       :latest_run_id run-id
+                       :review_index_path (:path review-index-write)
                        :retention_runs retention_runs
                        :lookback_days lookback_days
                        :write_registry write_registry}
@@ -674,6 +750,7 @@
         _ (write-json-file! manifest-path* manifest-data)]
     {:schema_version "1.0"
      :scheduled_run {:generated_at generated-at
+                     :run_id run-id
                      :since since*
                      :lookback_days lookback_days
                      :retention_runs retention_runs
@@ -686,8 +763,11 @@
                      :weekly_review_deleted_artifacts (:weekly_review_deleted_artifacts retention)
                      :protected_replay_dataset_deleted_artifacts (:protected_replay_dataset_deleted_artifacts retention)
                      :shadow_review_deleted_artifacts (:shadow_review_deleted_artifacts retention)
+                     :review_index_path (:path review-index-write)
                      :write_registry write_registry}
      :bundle bundle
+     :review_run_summary review-run-summary
+     :review_index (:index review-index-write)
      :manifest manifest-data}))
 
 (defn- candidate-ranking-vector [candidate]
@@ -891,16 +971,54 @@
                                            (str "governance-cycle-"
                                                 (instant->artifact-token (iso->instant generated-at))
                                                 ".json")))
-        _ (write-json-file! governance-artifact-path
-                            {:schema_version "1.0"
+        review-run-ref {:run_id (get-in review-run [:scheduled_run :run_id])
+                        :artifact_path (get-in review-run [:scheduled_run :artifact_path])
+                        :weekly_review_path (get-in review-run [:scheduled_run :weekly_review_path])
+                        :protected_replay_dataset_path (get-in review-run [:scheduled_run :protected_replay_dataset_path])
+                        :shadow_review_path (get-in review-run [:scheduled_run :shadow_review_path])}
+        governance-artifact {:schema_version "1.0"
                              :generated_at generated-at
+                             :review_run_ref review-run-ref
                              :review_run review-run
                              :promotion promotion
-                             :registry final-registry})
+                             :registry final-registry}
+        _ (write-json-file! governance-artifact-path governance-artifact)
         governance-retention (prune-artifacts! (or artifacts_dir ".tmp/policy-review")
                                                retention_runs
                                                "governance-cycle-"
                                                "governance-cycle-manifest.json")
+        governance-run-summary {:run_id (instant->artifact-token (iso->instant generated-at))
+                                :generated_at generated-at
+                                :scope {:root_path root_path
+                                        :surface surface
+                                        :tenant_id tenant_id
+                                        :since (get-in review-run [:scheduled_run :since])}
+                                :artifact_paths {:primary governance-artifact-path
+                                                 :governance_cycle governance-artifact-path
+                                                 :policy_review_bundle (:artifact_path review-run-ref)
+                                                 :weekly_review (:weekly_review_path review-run-ref)
+                                                 :protected_replay_dataset (:protected_replay_dataset_path review-run-ref)
+                                                 :shadow_review (:shadow_review_path review-run-ref)}
+                                :review_run_ref review-run-ref
+                                :promotion_summary {:skipped (boolean (:skipped promotion))
+                                                    :promoted (boolean (:promoted? promotion))
+                                                    :reason (:reason promotion)
+                                                    :selection_mode (:selection_mode promotion)
+                                                    :selected_candidate (:selected_candidate promotion)
+                                                    :selected_policy_id (get-in promotion [:selected_candidate :policy_id])
+                                                    :selected_version (get-in promotion [:selected_candidate :version])
+                                                    :selected_approval_tier (get-in promotion [:selected_candidate :approval_tier])
+                                                    :selected_promotion_mode (get-in promotion [:selected_candidate :promotion_mode])
+                                                    :candidate_ranking_size (count (or (:candidate_ranking promotion) candidate-ranking []))
+                                                    :eligible_candidates (mapv identity (or (:eligible_candidates promotion) []))
+                                                    :manual_review_candidates (mapv identity (or (:manual_review_candidates promotion) []))
+                                                    :governance_blocked_candidates (mapv identity (or (:governance_blocked_candidates promotion) []))}}
+        governance-index-write (write-retained-index! {:artifacts_dir (or artifacts_dir ".tmp/policy-review")
+                                                       :index_name "governance-run-index.json"
+                                                       :generated_at generated-at
+                                                       :retention_runs retention_runs
+                                                       :run_summary governance-run-summary
+                                                       :run_key_fn :run_id})
         governance-manifest {:schema_version "1.0"
                              :updated_at generated-at
                              :last_run_at generated-at
@@ -910,6 +1028,12 @@
                              :since (get-in review-run [:scheduled_run :since])
                              :artifacts_dir (.getAbsolutePath (io/file (or artifacts_dir ".tmp/policy-review")))
                              :latest_artifact_path governance-artifact-path
+                             :latest_run_id (:run_id governance-run-summary)
+                             :latest_review_run_id (:run_id review-run-ref)
+                             :latest_policy_review_artifact_path (:artifact_path review-run-ref)
+                             :latest_protected_replay_dataset_path (:protected_replay_dataset_path review-run-ref)
+                             :latest_shadow_review_path (:shadow_review_path review-run-ref)
+                             :governance_index_path (:path governance-index-write)
                              :retention_runs retention_runs
                              :lookback_days lookback_days
                              :write_registry write_registry
@@ -923,50 +1047,86 @@
         _ (write-json-file! governance-manifest-path* governance-manifest)]
     {:schema_version "1.0"
      :scheduled_run {:generated_at generated-at
+                     :run_id (:run_id governance-run-summary)
                      :artifact_path governance-artifact-path
                      :manifest_path governance-manifest-path*
                      :deleted_artifacts (:deleted_artifacts governance-retention)
+                     :governance_index_path (:path governance-index-write)
                      :auto_promote auto_promote
                      :select_best_candidate select_best_candidate
                      :history_aware_selection history_aware_selection
                      :required_candidate_streak_runs required_candidate_streak_runs
                      :promotion_cooldown_runs promotion_cooldown_runs}
      :review_run review-run
+     :review_run_ref review-run-ref
      :candidate_ranking candidate-ranking
      :promotion promotion
      :registry final-registry
+     :governance_run_summary governance-run-summary
+     :governance_index (:index governance-index-write)
      :manifest governance-manifest}))
+
+(defn- legacy-governance-runs
+  [{:keys [artifacts_dir limit]
+    :or {artifacts_dir ".tmp/policy-review"}}]
+  (let [files (artifact-files artifacts_dir "governance-cycle-" "governance-cycle-manifest.json")
+        selected-files (if limit
+                         (take-last (max 0 (long limit)) files)
+                         files)]
+    (mapv (fn [file]
+            (let [artifact (read-json (.getAbsolutePath file))
+                  promotion (:promotion artifact)
+                  selected-candidate (:selected_candidate promotion)]
+              {:run_id (or (get-in artifact [:scheduled_run :run_id])
+                           (instant->artifact-token (iso->instant (or (:generated_at artifact)
+                                                                      (get-in artifact [:scheduled_run :generated_at])))))
+               :generated_at (or (:generated_at artifact)
+                                 (get-in artifact [:scheduled_run :generated_at]))
+               :artifact_path (.getAbsolutePath file)
+               :artifact_paths {:primary (.getAbsolutePath file)
+                                :governance_cycle (.getAbsolutePath file)}
+               :review_run_ref (:review_run_ref artifact)
+               :promoted (boolean (:promoted? promotion))
+               :skipped (boolean (:skipped promotion))
+               :selection_mode (:selection_mode promotion)
+               :promotion_reason (:reason promotion)
+               :selected_candidate selected-candidate
+               :selected_policy_id (:policy_id selected-candidate)
+               :selected_version (:version selected-candidate)
+               :selected_approval_tier (:approval_tier selected-candidate)
+               :selected_promotion_mode (:promotion_mode selected-candidate)
+               :candidate_ranking_size (count (or (:candidate_ranking artifact)
+                                                  (get promotion :candidate_ranking)
+                                                  []))}))
+          selected-files)))
 
 (defn governance-history-report
   [{:keys [artifacts_dir limit]
     :or {artifacts_dir ".tmp/policy-review"}}]
   (let [manifest* (or (read-json-if-exists (manifest-path artifacts_dir "governance-cycle-manifest.json")) {})
-        files (artifact-files artifacts_dir "governance-cycle-" "governance-cycle-manifest.json")
-        selected-files (if limit
-                         (take-last (max 0 (long limit)) files)
-                         files)
-        runs (mapv (fn [file]
-                     (let [artifact (read-json (.getAbsolutePath file))
-                           promotion (:promotion artifact)
-                           selected-candidate (:selected_candidate promotion)
-                           skipped? (boolean (:skipped promotion))
-                           promoted? (boolean (:promoted? promotion))]
-                       {:generated_at (or (:generated_at artifact)
-                                          (get-in artifact [:scheduled_run :generated_at]))
-                        :artifact_path (.getAbsolutePath file)
-                        :promoted promoted?
-                        :skipped skipped?
-                        :selection_mode (:selection_mode promotion)
-                        :promotion_reason (:reason promotion)
-                        :selected_candidate selected-candidate
-                        :selected_policy_id (:policy_id selected-candidate)
-                        :selected_version (:version selected-candidate)
-                        :selected_approval_tier (:approval_tier selected-candidate)
-                        :selected_promotion_mode (:promotion_mode selected-candidate)
-                        :candidate_ranking_size (count (or (:candidate_ranking artifact)
-                                                           (get promotion :candidate_ranking)
-                                                           []))}))
-                   selected-files)
+        indexed-runs (->> (get-in (read-retained-index artifacts_dir "governance-run-index.json") [:runs])
+                          (mapv (fn [run]
+                                  {:run_id (:run_id run)
+                                   :generated_at (:generated_at run)
+                                   :artifact_path (get-in run [:artifact_paths :governance_cycle])
+                                   :artifact_paths (:artifact_paths run)
+                                   :review_run_ref (:review_run_ref run)
+                                   :promoted (get-in run [:promotion_summary :promoted])
+                                   :skipped (get-in run [:promotion_summary :skipped])
+                                   :selection_mode (get-in run [:promotion_summary :selection_mode])
+                                   :promotion_reason (get-in run [:promotion_summary :reason])
+                                   :selected_candidate (get-in run [:promotion_summary :selected_candidate])
+                                   :selected_policy_id (get-in run [:promotion_summary :selected_policy_id])
+                                   :selected_version (get-in run [:promotion_summary :selected_version])
+                                   :selected_approval_tier (get-in run [:promotion_summary :selected_approval_tier])
+                                   :selected_promotion_mode (get-in run [:promotion_summary :selected_promotion_mode])
+                                   :candidate_ranking_size (get-in run [:promotion_summary :candidate_ranking_size])})))
+        runs (let [source-runs (if (seq indexed-runs)
+                                 indexed-runs
+                                 (legacy-governance-runs {:artifacts_dir artifacts_dir :limit nil}))]
+               (if limit
+                 (vec (take-last (max 0 (long limit)) source-runs))
+                 (vec source-runs)))
         summary {:total_runs (count runs)
                  :promoted_runs (count (filter :promoted runs))
                  :skipped_runs (count (filter :skipped runs))
@@ -994,6 +1154,7 @@
     {:schema_version "1.0"
      :artifacts_dir (.getAbsolutePath (io/file artifacts_dir))
      :manifest manifest*
+     :index_used (boolean (seq indexed-runs))
      :summary summary
      :runs runs}))
 
@@ -1018,6 +1179,136 @@
   (let [cooldown (max 0 (long (or promotion-cooldown-runs 0)))]
     (when (pos? cooldown)
       (some :promoted (take-last cooldown runs)))))
+
+(defn phase5-review-queue
+  [{:keys [artifacts_dir limit]
+    :or {artifacts_dir ".tmp/policy-review"}}]
+  (let [review-runs (->> (get-in (read-retained-index artifacts_dir "review-run-index.json") [:runs])
+                         (sort-by :generated_at)
+                         vec)
+        governance-runs (:runs (governance-history-report {:artifacts_dir artifacts_dir
+                                                           :limit nil}))
+        review-items (reduce (fn [acc run]
+                               (let [base-item {:generated_at (:generated_at run)
+                                                :scope (:scope run)
+                                                :artifact_paths (:artifact_paths run)}
+                                     with-gap-item (if (= "no_protected_queries" (get-in run [:shadow_review_summary :reason]))
+                                                     (conj acc
+                                                           (merge base-item
+                                                                  {:item_id (str (:run_id run) ":no_protected_queries")
+                                                                   :item_key [:no_protected_queries
+                                                                              (get-in run [:scope :root_path])
+                                                                              (get-in run [:scope :surface])
+                                                                              (get-in run [:scope :tenant_id])]
+                                                                   :reason_code "no_protected_queries"
+                                                                   :required_action "collect_more_feedback"}))
+                                                     acc)]
+                                 (into with-gap-item
+                                       (for [candidate (get-in run [:shadow_review_summary :manual_review_candidates])]
+                                         (merge base-item
+                                                {:item_id (str (:run_id run) ":manual:" (:policy_id candidate) ":" (:version candidate))
+                                                 :item_key [:manual_approval_required (:policy_id candidate) (:version candidate)]
+                                                 :policy_summary candidate
+                                                 :reason_code "manual_approval_required"
+                                                 :required_action "review_candidate_and_decide_promotion"})))))
+                             []
+                             review-runs)
+        governance-items (reduce (fn [acc run]
+                                   (let [reason (:promotion_reason run)
+                                         base-item {:generated_at (:generated_at run)
+                                                    :artifact_paths (:artifact_paths run)
+                                                    :review_run_ref (:review_run_ref run)}]
+                                     (case reason
+                                       "multiple_eligible_candidates"
+                                       (conj acc (merge base-item
+                                                        {:item_id (str (:run_id run) ":multiple_eligible_candidates")
+                                                         :item_key [:multiple_eligible_candidates
+                                                                    (get-in run [:review_run_ref :run_id])]
+                                                         :reason_code reason
+                                                         :required_action "choose_best_candidate_from_ranking"}))
+
+                                       "insufficient_candidate_streak"
+                                       (conj acc (merge base-item
+                                                        {:item_id (str (:run_id run) ":insufficient_candidate_streak")
+                                                         :item_key [:insufficient_candidate_streak
+                                                                    (:selected_policy_id run)
+                                                                    (:selected_version run)]
+                                                         :policy_summary {:policy_id (:selected_policy_id run)
+                                                                          :version (:selected_version run)}
+                                                         :reason_code reason
+                                                         :required_action "wait_for_next_consistent_review_run"}))
+
+                                       "promotion_cooldown_active"
+                                       (conj acc (merge base-item
+                                                        {:item_id (str (:run_id run) ":promotion_cooldown_active")
+                                                         :item_key [:promotion_cooldown_active
+                                                                    (:selected_policy_id run)
+                                                                    (:selected_version run)]
+                                                         :policy_summary {:policy_id (:selected_policy_id run)
+                                                                          :version (:selected_version run)}
+                                                         :reason_code reason
+                                                         :required_action "wait_for_cooldown_window_to_expire"}))
+
+                                       "all_candidates_blocked_by_governance"
+                                       (conj acc (merge base-item
+                                                        {:item_id (str (:run_id run) ":all_candidates_blocked_by_governance")
+                                                         :item_key [:all_candidates_blocked_by_governance
+                                                                    (get-in run [:review_run_ref :run_id])]
+                                                         :reason_code reason
+                                                         :required_action "review_governance_tier_and_candidate_policy"}))
+                                       acc)))
+                                 []
+                                 governance-runs)
+        latest-items (->> (concat review-items governance-items)
+                          (sort-by :generated_at)
+                          (reduce (fn [acc item]
+                                    (assoc acc (:item_key item) (dissoc item :item_key)))
+                                  {})
+                          vals
+                          (sort-by :generated_at)
+                          vec)
+        items (if limit
+                (vec (take-last (max 0 (long limit)) latest-items))
+                latest-items)
+        summary {:total_items (count items)
+                 :reason_counts (->> items
+                                     (map :reason_code)
+                                     frequencies
+                                     (into (sorted-map)))
+                 :latest_item_at (some-> items last :generated_at)}]
+    {:schema_version "1.0"
+     :artifacts_dir (.getAbsolutePath (io/file artifacts_dir))
+     :summary summary
+     :items items}))
+
+(defn phase5-status-report
+  [{:keys [artifacts_dir limit]
+    :or {artifacts_dir ".tmp/policy-review"
+         limit 20}}]
+  (let [review-runs (->> (get-in (read-retained-index artifacts_dir "review-run-index.json") [:runs])
+                         (sort-by :generated_at)
+                         vec)
+        selected-review-runs (vec (take-last (max 0 (long limit)) review-runs))
+        governance-history (governance-history-report {:artifacts_dir artifacts_dir
+                                                       :limit limit})
+        queue (phase5-review-queue {:artifacts_dir artifacts_dir
+                                    :limit limit})
+        summary {:review_runs (count selected-review-runs)
+                 :governance_runs (count (:runs governance-history))
+                 :pending_queue_items (get-in queue [:summary :total_items] 0)
+                 :protected_queries_total (reduce + 0 (map #(get-in % [:protected_replay_summary :protected_queries] 0)
+                                                           selected-review-runs))
+                 :latest_review_at (some-> selected-review-runs last :generated_at)
+                 :latest_governance_at (get-in governance-history [:summary :latest_run_at])
+                 :pending_reason_counts (get-in queue [:summary :reason_counts] {})
+                 :promoted_runs (get-in governance-history [:summary :promoted_runs] 0)
+                 :skipped_runs (get-in governance-history [:summary :skipped_runs] 0)}]
+    {:schema_version "1.0"
+     :artifacts_dir (.getAbsolutePath (io/file artifacts_dir))
+     :summary summary
+     :review_runs selected-review-runs
+     :governance_runs (:runs governance-history)
+     :pending_queue (:items queue)}))
 
 (defn- parse-bool [value]
   (contains? #{"1" "true" "yes" "on"} (str/lower-case (str (or value "")))))
@@ -1314,6 +1605,24 @@
     (print-or-write! out_path result)
     (System/exit 0)))
 
+(defn- run-phase5-review-queue-command [{:keys [artifacts_dir limit out_path]}]
+  (when-not artifacts_dir
+    (println "Usage: clojure -M:eval phase5-review-queue --artifacts-dir <dir> [--limit <n>] [--out <output.json>]")
+    (System/exit 1))
+  (let [result (phase5-review-queue {:artifacts_dir artifacts_dir
+                                     :limit limit})]
+    (print-or-write! out_path result)
+    (System/exit 0)))
+
+(defn- run-phase5-status-report-command [{:keys [artifacts_dir limit out_path]}]
+  (when-not artifacts_dir
+    (println "Usage: clojure -M:eval phase5-status-report --artifacts-dir <dir> [--limit <n>] [--out <output.json>]")
+    (System/exit 1))
+  (let [result (phase5-status-report {:artifacts_dir artifacts_dir
+                                      :limit limit})]
+    (print-or-write! out_path result)
+    (System/exit 0)))
+
 (defn -main [& args]
   (let [[command & rest-args] args]
     (case command
@@ -1329,4 +1638,6 @@
       "scheduled-policy-review" (run-scheduled-policy-review-command (parse-args rest-args))
       "scheduled-governance-cycle" (run-scheduled-governance-cycle-command (parse-args rest-args))
       "governance-history-report" (run-governance-history-report-command (parse-args rest-args))
+      "phase5-review-queue" (run-phase5-review-queue-command (parse-args rest-args))
+      "phase5-status-report" (run-phase5-status-report-command (parse-args rest-args))
       (run-replay-command (parse-args args)))))

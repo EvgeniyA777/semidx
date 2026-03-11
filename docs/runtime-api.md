@@ -811,9 +811,49 @@ clojure -M:eval governance-history-report \
 Current report behavior:
 
 - reads retained `governance-cycle-*.json` artifacts from `--artifacts-dir`
+- uses `governance-run-index.json` as the primary retained run source when present and falls back to raw artifact scanning for backward compatibility
 - uses `governance-cycle-manifest.json` as the current scope/retention pointer when present
 - aggregates `promoted_runs`, `skipped_runs`, `selection_mode_counts`, `promotion_reason_counts`, `selected_policy_counts`, and selected governance-tier summaries
-- returns recent `runs` entries with `generated_at`, `artifact_path`, `selection_mode`, `promotion_reason`, selected policy identity, and selected governance metadata when one exists
+- returns recent `runs` entries with `generated_at`, `artifact_path`, source `review_run_ref`, `selection_mode`, `promotion_reason`, selected policy identity, and selected governance metadata when one exists
+
+### Phase 5 review queue
+
+You can also derive the current operator follow-up queue from retained Phase 5 artifacts.
+
+CLI:
+
+```bash
+clojure -M:eval phase5-review-queue \
+  --artifacts-dir "${TMPDIR:-.tmp}/policy-review" \
+  --limit 20 \
+  --out "${TMPDIR:-.tmp}/sci-phase5-review-queue.json"
+```
+
+Current queue behavior:
+
+- derives pending operator actions from retained review and governance artifacts instead of storing mutable queue state
+- emits queue items for `no_protected_queries`, `manual_approval_required`, `multiple_eligible_candidates`, `insufficient_candidate_streak`, `promotion_cooldown_active`, and `all_candidates_blocked_by_governance`
+- includes direct artifact pointers so the operator can jump straight to the relevant retained review/governance files
+- latest retained run supersedes older queue items for the same candidate or scope key
+
+### Phase 5 status report
+
+You can also aggregate retained review runs, governance runs, and the derived operator queue into one compact status report.
+
+CLI:
+
+```bash
+clojure -M:eval phase5-status-report \
+  --artifacts-dir "${TMPDIR:-.tmp}/policy-review" \
+  --limit 20 \
+  --out "${TMPDIR:-.tmp}/sci-phase5-status-report.json"
+```
+
+Current status behavior:
+
+- summarizes retained review runs, governance runs, pending queue items, and protected-query volume
+- includes pending reason counts so operators can see whether the loop is blocked by feedback gaps, manual approval, or promotion gating
+- reuses retained review and governance indexes rather than recomputing governance logic from scratch
 
 ## Offline Replay Evaluation
 
