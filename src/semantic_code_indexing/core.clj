@@ -488,6 +488,18 @@
   ([usage-metrics-sink opts]
    (usage/weekly-review-report usage-metrics-sink opts)))
 
+(defn compact-mcp-query-memory
+  "Build a compact memory artifact for successful MCP resolve_context calls.
+
+  Options:
+  - :surface optional usage surface filter, defaults to \"mcp\"
+  - :tenant_id optional tenant filter
+  - :since optional ISO timestamp lower bound"
+  ([usage-metrics-sink]
+   (usage/compact-mcp-query-memory usage-metrics-sink))
+  ([usage-metrics-sink opts]
+   (usage/compact-mcp-query-memory usage-metrics-sink opts)))
+
 (defn review-report->protected-replay-dataset
   "Convert a weekly review artifact into a protected replay dataset compatible with governed policy tooling."
   [review-report]

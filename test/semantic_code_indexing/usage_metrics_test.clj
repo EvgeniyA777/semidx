@@ -35,6 +35,10 @@
            :request_id "usage-metrics-test-001"
            :actor_id "test_runner"}})
 
+(def sample-shorthand-query
+  {:intent "Find the main orchestration flow for process-order."
+   :targets {:paths ["src/my/app/order.clj"]}})
+
 (deftest library-usage-metrics-flow-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-usage-metrics-lib" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
@@ -147,6 +151,44 @@
     (testing "tool responses are still successful"
       (is (not (true? (get-in create-response [:structuredContent :isError]))))
       (is (not (true? (get-in cached-response [:structuredContent :isError])))))))
+
+(deftest compact-mcp-query-memory-summarizes-normalized-resolve-context-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-usage-metrics-mcp-memory" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        allowed-root (.getCanonicalPath (io/file tmp-root))
+        sink (sci/in-memory-usage-metrics)
+        state (atom {:allowed-roots [allowed-root]
+                     :max-indexes 4
+                     :session_id "mcp-session-memory-001"
+                     :usage_metrics sink
+                     :selection_cache (atom {})
+                     :indexes-by-id {}
+                     :cache-key->index-id {}
+                     :client-info {:name "codex-test-client"}})
+        create-response (#'mcp-server/handle-tools-call state {:name "create_index"
+                                                               :arguments {:root_path tmp-root}})
+        index-id (get-in create-response [:structuredContent :index_id])
+        _resolve-response (#'mcp-server/handle-tools-call state {:name "resolve_context"
+                                                                 :arguments {:index_id index-id
+                                                                             :query sample-shorthand-query}})
+        memory (sci/compact-mcp-query-memory sink)
+        entry (first (:entries memory))]
+    (testing "report scope and counts stay compact and MCP-specific"
+      (is (= "mcp" (get-in memory [:scope :surface])))
+      (is (= 1 (get-in memory [:summary :entries])))
+      (is (= {"mcp_shorthand" 1}
+             (get-in memory [:summary :ingress_mode_counts]))))
+    (testing "entries retain normalized summary and continuation artifact"
+      (is (= "mcp_shorthand" (:query_ingress_mode entry)))
+      (is (true? (:query_normalized entry)))
+      (is (= "code_understanding"
+             (get-in entry [:normalized_query_summary :purpose])))
+      (is (= ["paths"]
+             (get-in entry [:normalized_query_summary :target_keys])))
+      (is (= "expand_context"
+             (get-in entry [:continuation :recommended_next_step])))
+      (is (string? (get-in entry [:continuation :selection_id])))
+      (is (string? (get-in entry [:continuation :snapshot_id]))))))
 
 (deftest slo-report-aggregates-operational-metrics-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-usage-metrics-slo" (make-array java.nio.file.attribute.FileAttribute 0)))

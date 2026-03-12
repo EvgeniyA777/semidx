@@ -929,6 +929,53 @@
       :calibration calibration
       :entries entries})))
 
+(defn compact-mcp-query-memory
+  ([sink]
+   (compact-mcp-query-memory sink {}))
+  ([sink opts]
+   (let [event-opts (merge {:surface "mcp" :operation "resolve_context"} opts)
+         events (->> (sink-events sink event-opts)
+                     (filter #(= "success" (:status %)))
+                     (keep (fn [event]
+                             (let [payload (:payload event)
+                                   summary (:normalized_query_summary payload)]
+                               (when (map? summary)
+                                 {:query_id (or (:request_id event) (:event_id event))
+                                  :surface (:surface event)
+                                  :occurred_at (:occurred_at event)
+                                  :root_path_hash (:root_path_hash event)
+                                  :trace {:trace_id (:trace_id event)
+                                          :request_id (:request_id event)
+                                          :session_id (:session_id event)
+                                          :task_id (:task_id event)
+                                          :actor_id (:actor_id event)
+                                          :tenant_id (:tenant_id event)}
+                                  :query_ingress_mode (:query_ingress_mode payload)
+                                  :query_normalized (boolean (:query_normalized payload))
+                                  :task_class (or (:task_class payload)
+                                                  (:purpose summary)
+                                                  "code_understanding")
+                                  :normalized_query_summary summary
+                                  :continuation {:selection_id (:selection_id payload)
+                                                 :snapshot_id (:snapshot_id payload)
+                                                 :recommended_next_step (or (:recommended_next_step payload)
+                                                                            (:recommended_action payload)
+                                                                            "expand_context")}}))))
+                     vec)
+         by-ingress-mode (->> events
+                              (map :query_ingress_mode)
+                              (remove nil?)
+                              frequencies
+                              (into (sorted-map)))]
+     {:schema_version "1.0"
+      :generated_at (now-iso)
+      :scope {:surface (:surface event-opts)
+              :tenant_id (:tenant_id event-opts)
+              :since (:since event-opts)}
+      :summary {:entries (count events)
+                :ingress_mode_counts by-ingress-mode}
+      :entries events})))
+
 (defn- strongest-confidence-level [levels]
   (->> levels
        (filter #(contains? confidence-level-rank %))
