@@ -14,6 +14,8 @@
 - If MCP returns `language_refresh_required`, rerun `create_index`.
 - If MCP returns `language_activation_in_progress`, wait and retry the same request.
 - A successful `create_index` is not a reason to switch to filesystem exploration; continue with `repo_map` and semantic retrieval.
+- For `resolve_context`, use the structured retrieval contract by default. Only the narrow `query.intent` shorthand is accepted for first contact.
+- After `resolve_context` succeeds, continue with `selection_id` and `snapshot_id` instead of expanding the prompt manually.
 - Do not silently abandon MCP. If it fails, say so explicitly, then use manual repo inspection.
 - Send `clientInfo` as an object and `tools/call.arguments` as an object.
 - Canonical prompt snippets live in `docs/mcp-agent-prompts.md`.

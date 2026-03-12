@@ -133,6 +133,7 @@ Canonical MCP retrieval flow is:
 5. optional `fetch_context_detail`
 
 `resolve_context` returns a compact selection artifact. Rich retrieval detail is intentionally delayed to `fetch_context_detail`.
+The canonical contract remains a full structured retrieval query, but MCP also accepts one narrow shorthand ingress for first-contact IDE agents: `query.intent` may be a string or a partial `{purpose, details}` object, and the server fills safe defaults for the remaining retrieval sections.
 
 ### `create_index`
 
@@ -203,6 +204,16 @@ Inputs:
 - `query`
 - `retrieval_policy` - optional registry-backed selector object such as `{ "policy_id": "...", "version": "..." }`
 
+Canonical `query` shape is the same structured retrieval contract used by the library/runtime surfaces.
+
+MCP-only shorthand is intentionally narrow:
+
+- `query.intent` may be a string, for example `{ "intent": "Find the main orchestration flow." }`
+- `query.intent` may be a partial object such as `{ "intent": { "purpose": "code_understanding", "details": "..." } }`
+- when shorthand is used, MCP fills deterministic defaults for `api_version`, `schema_version`, `targets.paths`, `constraints`, `hints`, `options`, and `trace`
+
+MCP does not support an open-ended natural-language query language beyond this narrow shorthand.
+
 Returns:
 
 - `index_id`
@@ -215,11 +226,16 @@ Returns:
 - `focus`
 - `next_step`
 - `project_context`
+- `query_normalized`
+- `query_ingress_mode`
+- `normalized_query_summary`
+- `compact_continuation`
 - `recommended_next_step`
 - `recommended_flow`
 - `usage_hint`
 
 `next_step` tells the client whether it should stay compact, expand the structural view, or fetch rich detail.
+`compact_continuation` is the machine-readable handoff artifact for the next stage. Reuse `selection_id` + `snapshot_id` from that artifact instead of resending a larger prompt or regenerating a larger query body.
 
 Because MCP uses the same core retrieval runtime as the library and service edges, recent semantic-core improvements still flow through `resolve_context` here:
 
@@ -254,6 +270,7 @@ Returns:
 - `skeletons`
 - optional `impact_hints`
 - `project_context`
+- `compact_continuation`
 - `recommended_next_step`
 - `recommended_flow`
 - `usage_hint`
@@ -282,6 +299,7 @@ Returns:
 - `diagnostics_trace`
 - `stage_events`
 - `project_context`
+- `compact_continuation`
 - `recommended_next_step`
 - `recommended_flow`
 - `usage_hint`
@@ -329,7 +347,21 @@ Returns:
 - If a retained selection artifact is missing or evicted, the server returns `selection_not_found` or `selection_evicted`.
 - `resolve_context` defaults missing `api_version` to `"1.0"` and rejects unsupported values with `unsupported_api_version`.
 - MCP tool errors now carry canonical taxonomy fields in `structuredContent.details`: `code` and `category`.
+- invalid `resolve_context` requests now carry repair-oriented details, including `missing_sections`, `invalid_field_paths`, `minimal_query_skeleton`, and `recommended_next_step: retry_resolve_context_with_structured_query`
 - `no_supported_languages_found` errors also carry `supported_languages`, `selection_hint`, and optional `recommended_core_language` in `structuredContent.details.details`.
 - `language_refresh_required` indicates that the request references a supported language outside the current active lane set; the client should rerun `create_index`.
 - Streamable HTTP session bootstrap is explicit: only `initialize` creates a new session. Other methods must reuse `Mcp-Session-Id`.
 - SSE sessions also expire after inactivity; clients should reconnect and reinitialize if they receive `unknown_session`.
+
+## Compact MCP Memory
+
+If MCP usage metrics are enabled, successful normalized `resolve_context` calls now retain compact query summaries in the usage stream. The library helper `semantic-code-indexing.core/compact-mcp-query-memory` can read those summaries back from either:
+
+- in-memory usage metrics
+- PostgreSQL-backed usage metrics
+
+That helper is intended for compact reuse and observability:
+
+- it returns normalized query summaries rather than full free-form prompts
+- it keeps continuation state compact via `selection_id`, `snapshot_id`, and `recommended_next_step`
+- it does not change the canonical retrieval contract or silently override future queries

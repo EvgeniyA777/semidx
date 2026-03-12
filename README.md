@@ -56,6 +56,7 @@ Canonical retrieval flow is compact-first staged retrieval:
 - `resolve_context` returns a compact selection artifact (`selection_id`, `snapshot_id`, `focus`, `next_step`)
 - `expand_context` widens that selection with skeletons and optional impact hints
 - `fetch_context_detail` produces the rich detail payload on the exact retained selection artifact
+- MCP `resolve_context` keeps the same canonical structured retrieval contract, but also accepts one narrow first-contact shorthand (`query.intent` as a string or partial `{purpose, details}` object) and returns `compact_continuation` so later MCP stages can reuse `selection_id` + `snapshot_id` instead of growing the prompt
 - `resolve-context-detail` remains a convenience helper for callers that still need a one-shot rich result
 - Unit/integration tests: `clojure -M:test`
 - Setup tree-sitter grammars (optional but reproducible; Clojure/Java/TypeScript): `./scripts/setup-tree-sitter-grammars.sh`
@@ -83,6 +84,7 @@ Canonical retrieval flow is compact-first staged retrieval:
 - Run MCP over local Streamable HTTP + SSE: `SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" clojure -M:mcp-http --host 127.0.0.1 --port 8791`
 - Enable MCP usage metrics persistence: `SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index clojure -M:mcp`
 - Enable HTTP/gRPC usage metrics persistence: `SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index clojure -M:runtime-http` or `clojure -M:runtime-grpc`
+- Summarize compact normalized MCP retrieval memory from a usage-metrics sink in library code: `(sci/compact-mcp-query-memory usage-metrics-sink {:surface "mcp"})`
 - If `SCI_MCP_ALLOWED_ROOTS` is missing, the MCP server now defaults the allowlist to the current `cwd` and prints a warning with explicit override examples; it does not prompt interactively because MCP uses stdio transport
 - MCP HTTP server defaults to `127.0.0.1` and supports `--transport-mode dual|streamable|sse`; Streamable HTTP uses `POST /mcp` with `Mcp-Session-Id`, while legacy SSE uses `GET /mcp/sse` plus `POST /mcp/messages`
 - Run minimal HTTP edge: `clojure -M:runtime-http --host 127.0.0.1 --port 8787`
@@ -133,6 +135,8 @@ Recommended first-pass behavior:
 3. `resolve_context`
 4. optional `expand_context`
 5. optional `fetch_context_detail`
+
+For `resolve_context`, the canonical request is the structured retrieval query. MCP also accepts one narrow first-contact shorthand through `query.intent`, but it does not expose a second free-form query language. After a successful `resolve_context`, agents should keep the context compact by reusing `selection_id` and `snapshot_id`.
 
 Canonical English prompt snippets for Antigravity-style IDEs, Codex, Claude-style agents, and generic MCP-capable clients live in [docs/mcp-agent-prompts.md](docs/mcp-agent-prompts.md).
 
@@ -185,6 +189,7 @@ Roadmap status is tracked separately in [docs/roadmap-status.md](docs/roadmap-st
 - late raw-code escalation stage is implemented and controlled by query options/constraints
 - PostgreSQL persistence adapter stores snapshots plus unit/call-edge graph projections
 - optional usage metrics sinks capture normalized `library`, `http`, `grpc`, and `mcp` usage events plus structured feedback for relevance tracking
+- MCP-first retrieval hardening now makes `resolve_context` self-describing for first-contact agents, accepts only a narrow shorthand ingress for `query.intent`, returns repair-oriented invalid-query guidance, exposes compact continuation artifacts for `selection_id`/`snapshot_id` handoff, and retains normalized query summaries that can be read back through `sci/compact-mcp-query-memory` on in-memory or PostgreSQL usage metrics sinks
 - Phase 5 now has a full retained self-improvement loop: `resolve_context` usage events retain query/outcome snapshots, replay datasets can be harvested automatically from usage metrics plus structured feedback, difficult cases become `protected_case`, real-feedback calibration reports are available, weekly review artifacts link `query -> selected context -> feedback -> outcome`, those review artifacts can be converted back into protected replay datasets for governance, `policy-review-pipeline` can bundle that flow into a single review artifact plus `shadow-review` handoff, `scheduled-policy-review` can retain timestamped review bundles plus standalone weekly/protected/shadow artifacts and a rolling manifest for recurring runs, `scheduled-governance-cycle` can turn that cadence into retained promotion decisions with optional auto-promotion, deterministic best-candidate selection, history-aware selection, streak gating, cooldown gating, and governance-tier allow/block constraints, `governance-history-report` can summarize promotion/skipped trends across retained runs, Phase 5 exposes a derived operator queue plus an aggregate status report over those retained artifacts, and `scheduled-phase5-cycle` packages the full retained orchestration loop into one first-class artifact stream
 - queryable graph access API is available via storage adapters (`query-units`, `query-callers`, `query-callees`)
 - fixture-driven retrieval benchmarks are integrated into local and CI gates
