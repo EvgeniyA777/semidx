@@ -91,11 +91,11 @@
 
 (def ^:private purpose-token-budgets
   {"code_understanding" 3200
-   "change_impact"      2400
-   "edit_preparation"   1600
-   "test_targeting"     2400
-   "review_support"     3200
-   "bug_investigation"  2400})
+   "change_impact" 2400
+   "edit_preparation" 1600
+   "test_targeting" 2400
+   "review_support" 3200
+   "bug_investigation" 2400})
 
 (def ^:private mcp-query-default-hints
   {:prefer_definitions_over_callers true
@@ -174,19 +174,11 @@
 (defn current-working-directory []
   (canonical-path (System/getProperty "user.dir" ".")))
 
-(defn default-allowed-roots-warning [cwd]
+(defn default-allowed-roots-warning []
   (str
-   "SCI_MCP_ALLOWED_ROOTS is not set; defaulting the MCP allowlist to the current working directory.\n"
-   "If you want a different allowlist, set SCI_MCP_ALLOWED_ROOTS or pass --allowed-roots explicitly.\n"
-   "\n"
-   "Current working directory: " cwd "\n"
-   "Current default:\n"
-   "   SCI_MCP_ALLOWED_ROOTS=" cwd " clojure -M:mcp\n"
-   "Explicit custom root:\n"
-   "   SCI_MCP_ALLOWED_ROOTS=<repo-root> clojure -M:mcp\n"
-   "CLI override:\n"
-   "   clojure -M:mcp --allowed-roots " cwd "\n"
-   "\n"
+   "SCI_MCP_ALLOWED_ROOTS is not set; MCP root_path allowlist enforcement is disabled.\n"
+   "Any existing directory path may be indexed by this MCP process.\n"
+   "Set SCI_MCP_ALLOWED_ROOTS or pass --allowed-roots to re-enable repository scoping.\n"
    "The server does not prompt interactively because stdin/stdout are reserved for the MCP protocol."))
 
 (defn resolve-allowed-roots [allowed-roots-arg]
@@ -195,11 +187,10 @@
                         (map canonical-path)
                         distinct
                         vec)]
-    (if (seq configured)
-      configured
-      (let [cwd (current-working-directory)]
-        (log! (default-allowed-roots-warning cwd))
-        [cwd]))))
+    (when-not (seq configured)
+      (log! (default-allowed-roots-warning)))
+    (when (seq configured)
+      configured)))
 
 (defn normalize-rel-path [path]
   (let [normalized (-> (str path)
@@ -292,13 +283,15 @@
 (defn validate-root-path! [state root-path]
   (let [provided (ensure-string root-path "root_path")
         canonical (canonical-path provided)
-        file (io/file canonical)]
+        file (io/file canonical)
+        allowed-roots (:allowed-roots @state)]
     (when-not (.exists file)
       (invalid-request "root_path must exist"))
     (when-not (.isDirectory file)
       (invalid-request "root_path must be a directory"))
-    (when-not (some #(path-within-root? % canonical) (:allowed-roots @state))
-      (forbidden-root canonical (:allowed-roots @state)))
+    (when (seq allowed-roots)
+      (when-not (some #(path-within-root? % canonical) allowed-roots)
+        (forbidden-root canonical allowed-roots)))
     canonical))
 
 (defn index-summary [entry cache-hit?]
@@ -625,10 +618,10 @@
                                      :query_normalized query_normalized
                                      :query_ingress_mode query_ingress_mode
                                      :compact_continuation (compact-continuation
-                                                           (:selection_id resolved)
-                                                           (:snapshot_id resolved)
-                                                           "expand_context"
-                                                           continuation-summary))
+                                                            (:selection_id resolved)
+                                                            (:snapshot_id resolved)
+                                                            "expand_context"
+                                                            continuation-summary))
                          continuation-summary (assoc :normalized_query_summary continuation-summary))
                        (add-next-step-guidance "expand_context"))
             result-meta (meta result)]
@@ -673,9 +666,9 @@
                    (assoc :index_id (:index_id entry)
                           :project_context (project-context-for-entry entry)
                           :compact_continuation (compact-continuation
-                                                selection-id
-                                                snapshot-id
-                                                "fetch_context_detail"))
+                                                 selection-id
+                                                 snapshot-id
+                                                 "fetch_context_detail"))
                    (add-next-step-guidance "fetch_context_detail"))]
     (with-usage-event
       result
@@ -708,9 +701,9 @@
                    (assoc :index_id (:index_id entry)
                           :project_context (project-context-for-entry entry)
                           :compact_continuation (compact-continuation
-                                                selection-id
-                                                snapshot-id
-                                                "resolve_context"))
+                                                 selection-id
+                                                 snapshot-id
+                                                 "resolve_context"))
                    (add-next-step-guidance "resolve_context"))]
     (with-usage-event
       result

@@ -81,17 +81,19 @@ Canonical retrieval flow is compact-first staged retrieval:
 - Emit the derived Phase 5 operator follow-up queue from retained review/governance artifacts: `clojure -M:eval phase5-review-queue --artifacts-dir "${TMPDIR:-.tmp}/policy-review" --limit 20 --out "${TMPDIR:-.tmp}/sci-phase5-review-queue.json"`
 - Emit the aggregate Phase 5 status report over retained review, governance, and queue artifacts: `clojure -M:eval phase5-status-report --artifacts-dir "${TMPDIR:-.tmp}/policy-review" --limit 20 --out "${TMPDIR:-.tmp}/sci-phase5-status-report.json"`
 - Resolve context from query file: `clojure -M:runtime --root . --query contracts/examples/queries/symbol-target.json --out "${TMPDIR:-.tmp}/sci.json"`
-- Run stdio MCP server: `SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" clojure -M:mcp`
+- Run stdio MCP server without root restrictions: `clojure -M:mcp`
+- Run stdio MCP server with an explicit root allowlist: `SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" clojure -M:mcp`
 - Initialize committed code-context artifacts plus pre-push hook: `clojure -M:ccc init --root .`
 - Refresh code-context artifacts only when relevant files changed: `clojure -M:ccc refresh --root . --changed`
 - Check whether committed code-context artifacts are stale: `clojure -M:ccc check --root .`
 - Print bounded code-context summary to stdout: `clojure -M:ccc summary --root .`
 - Export code-context artifact on demand: `clojure -M:ccc export --root . --format markdown|json|edn|dot --out path/to/file`
-- Run MCP over local Streamable HTTP + SSE: `SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" clojure -M:mcp-http --host 127.0.0.1 --port 8791`
+- Run MCP over local Streamable HTTP + SSE without root restrictions: `clojure -M:mcp-http --host 127.0.0.1 --port 8791`
+- Run MCP over local Streamable HTTP + SSE with an explicit root allowlist: `SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" clojure -M:mcp-http --host 127.0.0.1 --port 8791`
 - Enable MCP usage metrics persistence: `SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index clojure -M:mcp`
 - Enable HTTP/gRPC usage metrics persistence: `SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index clojure -M:runtime-http` or `clojure -M:runtime-grpc`
 - Summarize compact normalized MCP retrieval memory from a usage-metrics sink in library code: `(sci/compact-mcp-query-memory usage-metrics-sink {:surface "mcp"})`
-- If `SCI_MCP_ALLOWED_ROOTS` is missing, the MCP server now defaults the allowlist to the current `cwd` and prints a warning with explicit override examples; it does not prompt interactively because MCP uses stdio transport
+- If `SCI_MCP_ALLOWED_ROOTS` is missing, the MCP server runs without `root_path` allowlist enforcement and logs a warning explaining how to re-enable repository scoping; it does not prompt interactively because MCP uses stdio transport
 - Client-facing MCP responses do not echo the configured allowlist values: `health` omits `allowed_roots`, and `forbidden_root` errors return only the requested `root_path` plus a remediation hint
 - MCP HTTP server defaults to `127.0.0.1` and supports `--transport-mode dual|streamable|sse`; Streamable HTTP uses `POST /mcp` with `Mcp-Session-Id`, while legacy SSE uses `GET /mcp/sse` plus `POST /mcp/messages`
 - Run minimal HTTP edge: `clojure -M:runtime-http --host 127.0.0.1 --port 8787`
@@ -100,7 +102,7 @@ Canonical retrieval flow is compact-first staged retrieval:
 - Optional host-integrated authz policy file: `--authz-policy-file /path/to/authz-policy.edn` (or env `SCI_RUNTIME_AUTHZ_POLICY_FILE`)
 - Optional runtime policy registry file for HTTP/gRPC: `--policy-registry-file /path/to/policy-registry.edn` (or env `SCI_RUNTIME_POLICY_REGISTRY_FILE`)
 - Optional language activation policy file for HTTP/gRPC: `--language-policy-file /path/to/language-policy.edn` (or env `SCI_RUNTIME_LANGUAGE_POLICY_FILE`)
-- MCP server optionally accepts `SCI_MCP_ALLOWED_ROOTS`; if omitted, it defaults to the process `cwd`. `SCI_MCP_MAX_INDEXES` defaults to `8`.
+- MCP server optionally accepts `SCI_MCP_ALLOWED_ROOTS`; if omitted, `create_index` accepts any existing directory visible to the MCP process. `SCI_MCP_MAX_INDEXES` defaults to `8`.
 - MCP optionally accepts `SCI_MCP_POLICY_REGISTRY_FILE` for active-policy defaults and selector-based `resolve_context` lookup.
 - gRPC edge now uses dedicated runtime protobuf request/response messages for unary methods.
 - Full MVP gates: `./scripts/run-mvp-gates.sh`

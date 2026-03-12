@@ -14,7 +14,5 @@ if [ -z "${clojure_bin:-}" ]; then
   exit 1
 fi
 
-export SCI_MCP_ALLOWED_ROOTS="${SCI_MCP_ALLOWED_ROOTS:-$REPO_ROOT}"
-
 cd "$REPO_ROOT"
 exec "$clojure_bin" -M:mcp "$@"

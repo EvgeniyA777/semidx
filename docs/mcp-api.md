@@ -9,8 +9,12 @@
 ## Start
 
 ```bash
+clojure -M:mcp
+
 SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" \
 clojure -M:mcp
+
+clojure -M:mcp-http --host 127.0.0.1 --port 8791 --transport-mode dual
 
 SCI_MCP_ALLOWED_ROOTS="<repo-a-root>:<repo-b-root>" \
 clojure -M:mcp-http --host 127.0.0.1 --port 8791 --transport-mode dual
@@ -27,11 +31,10 @@ Environment and flags:
 - `--host` / `--port` - only for `clojure -M:mcp-http`; defaults `127.0.0.1:8791`
 - `--transport-mode dual|streamable|sse` - only for `clojure -M:mcp-http`; default `dual`
 
-If `SCI_MCP_ALLOWED_ROOTS` is missing, the server defaults the allowlist to the current working directory of the MCP process and prints a warning with:
+If `SCI_MCP_ALLOWED_ROOTS` is missing, the server does not enforce a `root_path` allowlist and prints a warning explaining that:
 
-- the current working directory seen by the JVM
-- an example command that makes that directory explicit
-- an example command that uses an explicit custom path
+- any existing directory visible to the MCP process may be indexed
+- setting `SCI_MCP_ALLOWED_ROOTS` or `--allowed-roots` re-enables repository scoping
 
 The server does not prompt interactively for this choice because `stdin`/`stdout` are reserved for MCP transport.
 
@@ -344,7 +347,7 @@ Returns:
 
 ## Operational Notes
 
-- Every `root_path` must be inside `SCI_MCP_ALLOWED_ROOTS`.
+- When `SCI_MCP_ALLOWED_ROOTS` is configured, every `root_path` must be inside that allowlist.
 - `paths` must be relative and must not contain traversal segments such as `..`.
 - Client-facing MCP responses do not disclose the configured `SCI_MCP_ALLOWED_ROOTS` values.
 - Cached indexes are evicted by LRU when the process exceeds `SCI_MCP_MAX_INDEXES`.

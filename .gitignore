@@ -23,6 +23,10 @@ tmp/
 .tree-sitter-grammars/
 .tree-sitter.env
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Editor/IDE
 .idea/
 .vscode/

@@ -108,7 +108,6 @@ def read_stderr(proc: subprocess.Popen[bytes]) -> str:
 def run_healthcheck(command: list[str], timeout_sec: float, protocol_version: str) -> tuple[bool, str]:
     started_at = time.monotonic()
     env = os.environ.copy()
-    env.setdefault("SCI_MCP_ALLOWED_ROOTS", str(REPO_ROOT))
     proc = subprocess.Popen(
         command,
         stdin=subprocess.PIPE,

@@ -625,17 +625,27 @@
       (finally
         (destroy-process! handle)))))
 
-(deftest resolve-allowed-roots-defaults-to-cwd-test
-  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-mcp-server-cwd-test" (make-array java.nio.file.attribute.FileAttribute 0)))
-        canonical-tmp-root (.getCanonicalPath (io/file tmp-root))
-        original-user-dir (System/getProperty "user.dir")]
+(deftest resolve-allowed-roots-defaults-to-unrestricted-mode-test
+  (testing "blank allowlist config disables MCP root_path enforcement"
+    (is (nil? (#'mcp-server/resolve-allowed-roots "")))))
+
+(deftest runtime-mcp-server-without-allowlist-allows-external-root-test
+  (let [target-root (str (java.nio.file.Files/createTempDirectory "sci-mcp-unrestricted-root" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! target-root)
+        handle (start-mcp-process! {:directory "."})]
     (try
-      (System/setProperty "user.dir" tmp-root)
-      (testing "blank allowlist config falls back to the current working directory"
-        (is (= [canonical-tmp-root]
-               (#'mcp-server/resolve-allowed-roots ""))))
+      (initialize! handle)
+      (let [create-response (call-tool! handle 901 "create_index" {:root_path target-root})
+            create-data (get-in create-response [:result :structuredContent])]
+        (testing "create_index succeeds for a directory outside the MCP process cwd when no allowlist is configured"
+          (is (string? (:index_id create-data)))
+          (is (= (.getCanonicalPath (io/file target-root))
+                 (:root_path create-data))))
+        (testing "server logs the unrestricted-mode warning"
+          (is (some #(str/includes? % "allowlist enforcement is disabled")
+                    @(:stderr-lines handle)))))
       (finally
-        (System/setProperty "user.dir" original-user-dir)))))
+        (destroy-process! handle)))))
 
 (deftest initialize-preserves-client-protocol-version-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-mcp-server-version-test" (make-array java.nio.file.attribute.FileAttribute 0)))

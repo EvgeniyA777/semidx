@@ -14,12 +14,11 @@
 (def ^:private default-port 8791)
 
 (defn- normalized-allowed-roots [allowed-roots]
-  (if (seq allowed-roots)
+  (when (seq allowed-roots)
     (->> allowed-roots
          (map core/canonical-path)
          distinct
-         vec)
-    (core/resolve-allowed-roots nil)))
+         vec)))
 
 (defn- parse-args [args]
   (loop [m {:host default-host
@@ -291,7 +290,7 @@
   (let [{:keys [host port allowed_roots max_indexes policy_registry_file transport_mode]} (parse-args args)
         allowed-roots (core/resolve-allowed-roots allowed_roots)
         policy-registry (core/load-policy-registry (or policy_registry_file
-                                                     (System/getenv "SCI_MCP_POLICY_REGISTRY_FILE")))
+                                                       (System/getenv "SCI_MCP_POLICY_REGISTRY_FILE")))
         max-indexes (or max_indexes
                         (some-> (System/getenv "SCI_MCP_MAX_INDEXES") parse-long)
                         core/default-max-indexes)
