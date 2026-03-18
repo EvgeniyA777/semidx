@@ -1,6 +1,6 @@
 # Code Context: SemanticCodeIndexing
 
-- fingerprint: abf3eeedbf02abca02766db4a4261795ab131d51
+- fingerprint: 5d502be0638c8c41742cbc0a80944d03d43c6256
 
 ## Tree
 ```text
@@ -170,11 +170,11 @@ SemanticCodeIndexing
 - default-host [section]
 - ^:private [section]
 - default-port [section]
-- normalized-allowed-roots [function]
 - parse-args [function]
 - request-method [function]
 - request-uri [function]
 - request-path [function]
+- request-header [function]
 ### semantic-code-indexing.mcp.server
 - path: src/semantic_code_indexing/mcp/server.clj
 - requires: clojure.java.io, clojure.string, semantic-code-indexing.core, semantic-code-indexing.mcp.core, semantic-code-indexing.runtime.retrieval-policy, semantic-code-indexing.runtime.usage-metrics
@@ -182,12 +182,12 @@ SemanticCodeIndexing
 - symbols:
 - ^:private [section]
 - default-max-indexes [section]
-- resolve-allowed-roots [function]
 - parse-args [function]
 - handle-tools-call [function]
 - headers-complete? [function]
 - header-terminator-length [function]
 - read-header-block [function]
+- read-json-line-text [function]
 ### semantic-code-indexing.mcp.session-registry
 - path: src/semantic_code_indexing/mcp/session_registry.clj
 - requires: semantic-code-indexing.mcp.core
