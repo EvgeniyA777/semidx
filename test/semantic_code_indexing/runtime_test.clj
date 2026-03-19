@@ -531,6 +531,28 @@
     (is nested-normalize-id)
     (is (some #(= "MyApp.NestedClient/process_nested" (:symbol %)) callers))))
 
+(deftest elixir-tree-sitter-falls-back-with-diagnostics-when-grammar-is-missing-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-elixir-tree-sitter-fallback" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage (sci/in-memory-storage)
+        index (sci/create-index {:root_path tmp-root
+                                 :storage storage
+                                 :parser_opts {:elixir_engine :tree-sitter}})
+        order-file (get-in index [:files "lib/my_app/order.ex"])
+        validator-units (sci/query-units storage tmp-root {:module "MyApp.Validator" :limit 20})
+        validate-unit-id (some->> validator-units
+                                  (filter #(= "MyApp.Validator/validate" (:symbol %)))
+                                  first
+                                  :unit_id)
+        callers (sci/query-callers storage tmp-root validate-unit-id {:limit 20})
+        diag-codes (set (map :code (:diagnostics order-file)))]
+    (is (= "elixir" (:language order-file)))
+    (is (= "full" (:parser_mode order-file)))
+    (is (or (contains? diag-codes "tree_sitter_missing_grammar")
+            (contains? diag-codes "tree_sitter_unavailable")))
+    (is validate-unit-id)
+    (is (some #(= "MyApp.Order/process_order" (:symbol %)) callers))))
+
 (deftest java-overload-unit-identity-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-java-overload-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
@@ -1590,25 +1612,69 @@
 (deftest tree-sitter-parser-path-test
   (let [clj-grammar (System/getenv "SCI_TREE_SITTER_CLOJURE_GRAMMAR_PATH")
         java-grammar (System/getenv "SCI_TREE_SITTER_JAVA_GRAMMAR_PATH")
+        elixir-grammar (System/getenv "SCI_TREE_SITTER_ELIXIR_GRAMMAR_PATH")
         ts-grammar (System/getenv "SCI_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH")]
-    (if (and (seq clj-grammar) (seq java-grammar) (seq ts-grammar))
+    (if (and (seq clj-grammar) (seq java-grammar) (seq elixir-grammar) (seq ts-grammar))
       (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-tree-sitter-test" (make-array java.nio.file.attribute.FileAttribute 0)))
             _ (create-sample-repo! tmp-root)
             index (sci/create-index {:root_path tmp-root
                                      :parser_opts {:clojure_engine :tree-sitter
+                                                   :elixir_engine :tree-sitter
                                                    :java_engine :tree-sitter
                                                    :typescript_engine :tree-sitter
                                                    :tree_sitter_enabled true
                                                    :tree_sitter_grammars {:clojure clj-grammar
+                                                                          :elixir elixir-grammar
                                                                           :java java-grammar
                                                                           :typescript ts-grammar}}})
             clj-diags (get-in index [:files "src/my/app/order.clj" :diagnostics])
+            ex-diags (get-in index [:files "lib/my_app/order.ex" :diagnostics])
             java-diags (get-in index [:files "src/com/acme/CheckoutService.java" :diagnostics])
             ts-diags (get-in index [:files "src/example/main.ts" :diagnostics])]
         (is (some #(= "tree_sitter_active" (:code %)) clj-diags))
+        (is (some #(= "tree_sitter_active" (:code %)) ex-diags))
         (is (some #(= "tree_sitter_active" (:code %)) java-diags))
         (is (some #(= "tree_sitter_active" (:code %)) ts-diags)))
-      (is true "Tree-sitter grammar paths are not configured for Clojure/Java/TypeScript; skipping tree-sitter parser test."))))
+      (is true "Tree-sitter grammar paths are not configured for Clojure/Elixir/Java/TypeScript; skipping tree-sitter parser test."))))
+
+(deftest tree-sitter-elixir-parity-test
+  (let [elixir-grammar (System/getenv "SCI_TREE_SITTER_ELIXIR_GRAMMAR_PATH")]
+    (if (seq elixir-grammar)
+      (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-tree-sitter-elixir-parity" (make-array java.nio.file.attribute.FileAttribute 0)))
+            _ (create-sample-repo! tmp-root)
+            storage (sci/in-memory-storage)
+            _index (sci/create-index {:root_path tmp-root
+                                      :storage storage
+                                      :parser_opts {:elixir_engine :tree-sitter
+                                                    :tree_sitter_enabled true
+                                                    :tree_sitter_grammars {:elixir elixir-grammar}}})
+            local-units (sci/query-units storage tmp-root {:module "MyApp.PipelineFormatter" :limit 20})
+            formatter-units (sci/query-units storage tmp-root {:module "MyApp.Formatter" :limit 20})
+            nested-units (sci/query-units storage tmp-root {:module "MyApp.NestedClient.Nested" :limit 20})
+            local-normalize-id (some->> local-units
+                                        (filter #(= "MyApp.PipelineFormatter/normalize" (:symbol %)))
+                                        first
+                                        :unit_id)
+            imported-normalize-id (some->> formatter-units
+                                           (filter #(= "MyApp.Formatter/normalize" (:symbol %)))
+                                           first
+                                           :unit_id)
+            nested-normalize-id (some->> nested-units
+                                         (filter #(= "MyApp.NestedClient.Nested/normalize" (:symbol %)))
+                                         first
+                                         :unit_id)
+            local-callers (sci/query-callers storage tmp-root local-normalize-id {:limit 20})
+            imported-callers (sci/query-callers storage tmp-root imported-normalize-id {:limit 20})
+            nested-callers (sci/query-callers storage tmp-root nested-normalize-id {:limit 20})]
+        (is local-normalize-id)
+        (is imported-normalize-id)
+        (is nested-normalize-id)
+        (is (some #(= "MyApp.PipelineFormatter/process_pipeline" (:symbol %)) local-callers))
+        (is (some #(= "MyApp.PipelineFormatter/process_with" (:symbol %)) local-callers))
+        (is (some #(= "MyApp.PipelineFormatter/process_capture" (:symbol %)) local-callers))
+        (is (not-any? #(= "MyApp.PipelineFormatter/process_capture" (:symbol %)) imported-callers))
+        (is (some #(= "MyApp.NestedClient/process_nested" (:symbol %)) nested-callers)))
+      (is true "SCI_TREE_SITTER_ELIXIR_GRAMMAR_PATH is not set; skipping Elixir tree-sitter parity test."))))
 
 (deftest tree-sitter-typescript-advanced-surface-parity-test
   (let [ts-grammar (System/getenv "SCI_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH")]

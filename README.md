@@ -180,7 +180,7 @@ Roadmap status is tracked separately in [docs/roadmap-status.md](docs/roadmap-st
 - language entry namespaces now exist for `Clojure`, `Java`, `Elixir`, `Python`, and `TypeScript`, while `runtime/adapters` remains the thin public facade over those parser entrypoints
 - multi-language call/symbol resolution has module/class-aware normalization for Java, Elixir, Python, TypeScript
 - import-aware and owner-aware disambiguation is applied when resolving ambiguous call targets
-- optional tree-sitter extraction path is available for Clojure/Java/TypeScript (grammar-path configured)
+- optional tree-sitter extraction path is available for Clojure/Elixir/Java/TypeScript (grammar-path configured)
 - tiered structural-first ranking and non-compensating confidence model implemented
 - capabilities now emit per-language strength plus a capability-driven `confidence_ceiling`, and guardrails/scorecards account for that ceiling during retrieval evaluation
 - index lifecycle metadata now emits TTL/staleness/provenance signals (`index_lifecycle`, stale pinned snapshots, rebuild reasons) across library/runtime surfaces

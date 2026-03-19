@@ -289,6 +289,7 @@
       (get parser-opts (keyword (str "tree_sitter_" (name lang) "_grammar")))
       (System/getenv (case lang
                        :clojure "SCI_TREE_SITTER_CLOJURE_GRAMMAR_PATH"
+                       :elixir "SCI_TREE_SITTER_ELIXIR_GRAMMAR_PATH"
                        :java "SCI_TREE_SITTER_JAVA_GRAMMAR_PATH"
                        :typescript "SCI_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH"
                        nil))))
@@ -325,7 +326,7 @@
        :err (or err "tree-sitter parse failed")})))
 
 (defn- add-tree-sitter-diag [parsed enabled? language]
-  (if (and enabled? (#{"clojure" "java" "typescript"} language))
+  (if (and enabled? (#{"clojure" "elixir" "java" "typescript"} language))
     (if (tree-sitter-available?)
       (update parsed :diagnostics conj {:code "tree_sitter_probe"
                                         :summary "tree-sitter CLI detected."})
@@ -2128,7 +2129,7 @@
            vec)
       [])))
 
-(defn parse-elixir-file [path lines]
+(defn- parse-elixir-regex [path lines]
   (let [line-count (count lines)
         module-name (some (fn [line] (some-> (re-find ex-module-re line) second)) lines)
         alias-map (ex-alias-map lines)
@@ -2229,6 +2230,49 @@
      :units units
      :diagnostics []
      :parser_mode "full"}))
+
+(defn- parse-elixir-tree-sitter [root-path path src-lines parser-opts]
+  (let [grammar-path (parser-grammar-path parser-opts :elixir)
+        abs (-> (io/file root-path path) .getCanonicalPath)]
+    (cond
+      (not (tree-sitter-available?))
+      {:ok? false
+       :reason {:code "tree_sitter_unavailable"
+                :summary "tree-sitter CLI is unavailable for elixir tree-sitter parser."}}
+
+      (str/blank? (str grammar-path))
+      {:ok? false
+       :reason {:code "tree_sitter_missing_grammar"
+                :summary "No tree-sitter Elixir grammar path configured."}}
+
+      :else
+      (let [{:keys [ok? err]} (tree-sitter-cst abs grammar-path)]
+        (if-not ok?
+          {:ok? false
+           :reason {:code "tree_sitter_parse_failed"
+                    :summary (str "tree-sitter parse failed: " (subs (str err) 0 (min 220 (count (str err)))))}}
+          (let [parsed (parse-elixir-regex path src-lines)]
+            (if (seq (:units parsed))
+              {:ok? true
+               :result (update parsed :diagnostics conj
+                               {:code "tree_sitter_active"
+                                :summary "Elixir analyzed using tree-sitter-validated adapter extraction."})}
+              {:ok? false
+               :reason {:code "tree_sitter_no_units"
+                        :summary "tree-sitter did not extract Elixir units."}})))))))
+
+(defn parse-elixir-file [root-path path lines {:keys [elixir_engine tree_sitter_enabled]
+                                               :or {elixir_engine :regex}
+                                               :as parser-opts}]
+  (let [engine (if (true? tree_sitter_enabled) :tree-sitter elixir_engine)
+        parsed (if (= engine :tree-sitter)
+                 (let [{:keys [ok? result reason]} (parse-elixir-tree-sitter root-path path lines parser-opts)]
+                   (if ok?
+                     result
+                     (-> (parse-elixir-regex path lines)
+                         (update :diagnostics conj reason))))
+                 (parse-elixir-regex path lines))]
+    (add-tree-sitter-diag parsed (or tree_sitter_enabled (= engine :tree-sitter)) "elixir")))
 
 (defn- py-module-name [path]
   (-> path
@@ -3407,7 +3451,7 @@
          (->> (case language
                 "clojure" (parse-clojure-file root-path file-path lines parser-opts)
                 "java" (parse-java-file root-path file-path lines parser-opts)
-                "elixir" (parse-elixir-file file-path lines)
+                "elixir" (parse-elixir-file root-path file-path lines parser-opts)
                 "python" (parse-python-file file-path lines)
                 "typescript" (ts-language/parse-file root-path file-path lines parser-opts)
                 "lua" (parse-lua file-path lines)

@@ -10,7 +10,7 @@ This document describes the current MVP in-memory library API.
 
 - Clojure (`.clj/.cljc/.cljs`) via `clj-kondo` primary path and regex fallback
 - Java (`.java`) via lightweight regex parser
-- Elixir (`.ex/.exs`) via lightweight regex parser
+- Elixir (`.ex/.exs`) via lightweight regex parser with optional tree-sitter path
 - Python (`.py`) via lightweight regex parser
 - TypeScript (`.ts/.tsx`) via lightweight regex parser
 - Lua (`.lua`) via lightweight regex parser
@@ -43,9 +43,10 @@ Options:
 Example with parser options:
 
 ```clojure
-(sci/create-index
+ (sci/create-index
  {:root_path "."
   :parser_opts {:clojure_engine :clj-kondo
+                :elixir_engine :regex
                 :java_engine :regex
                 :typescript_engine :regex
                 :tree_sitter_enabled false}})
@@ -54,13 +55,15 @@ Example with parser options:
 Tree-sitter extraction path (optional):
 
 ```clojure
-(sci/create-index
+ (sci/create-index
  {:root_path "."
   :parser_opts {:clojure_engine :tree-sitter
+                :elixir_engine :tree-sitter
                 :java_engine :tree-sitter
                 :typescript_engine :tree-sitter
                 :tree_sitter_enabled true
                 :tree_sitter_grammars {:clojure ".tree-sitter-grammars/tree-sitter-clojure"
+                                       :elixir "/path/to/tree-sitter-elixir"
                                        :java ".tree-sitter-grammars/tree-sitter-java"
                                        :typescript ".tree-sitter-grammars/tree-sitter-typescript/typescript"}}})
 ```
@@ -1211,8 +1214,8 @@ Transport mapping for authz denials:
 - TypeScript semantic-core now emits object-literal methods, class field arrow methods, default-export alias indirection, and direct re-export alias units through the dedicated TypeScript language module, with regex/tree-sitter parity for those advanced surfaces while still treating the overall language lane as conservative `low`-ceiling coverage.
 - Parsed files and units now also carry additive `semantic_pipeline` metadata, which is the internal anchor for the new semantic stabilization tranche; this does not change the public retrieval schema roots.
 - Language-specific parser entrypoints now live under `semantic-code-indexing.runtime.languages.*`, while `semantic-code-indexing.runtime.adapters/parse-file` remains the canonical facade used by index creation.
-- Java, Elixir, and Python parsers are lightweight regex-based in MVP; TypeScript is regex-first with an optional tree-sitter path.
-- `tree-sitter` extraction is implemented for Clojure, Java, and TypeScript when corresponding grammar paths are configured.
+- Java and Python parsers are lightweight regex-based in MVP; Elixir and TypeScript are regex-first with optional tree-sitter paths.
+- `tree-sitter` extraction is implemented for Clojure, Elixir, Java, and TypeScript when corresponding grammar paths are configured.
 - If tree-sitter is requested but unavailable/misconfigured, runtime falls back with diagnostics (`tree_sitter_*` codes).
 - Raw-code escalation stage is late and opt-in via query options (`allow_raw_code_escalation`) and bounded by `constraints.max_raw_code_level`.
 - Ranking is structural-first and tiered, with hard ceilings when Tier1 evidence is missing.

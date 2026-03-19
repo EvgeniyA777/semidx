@@ -1,6 +1,6 @@
 # Code Context: SemanticCodeIndexing
 
-- fingerprint: f16b1a485320a590ef4f2bdc475b93a8cac27e4b
+- fingerprint: 21b41cd572b243454ff210daa0fdfdf8dc8e590f
 
 ## Tree
 ```text
