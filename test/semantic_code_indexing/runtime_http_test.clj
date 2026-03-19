@@ -221,7 +221,7 @@
         (is (= 400 (:status resp)))
         (is (= "no_supported_languages_found" (get-in resp [:json :error_code])))
         (is (= "awaiting_language_selection" (get-in resp [:json :details :activation_state])))
-        (is (= ["clojure" "java" "elixir" "python" "typescript"]
+        (is (= ["clojure" "java" "elixir" "python" "typescript" "lua"]
                (get-in resp [:json :details :supported_languages]))))
       (finally
         (.stop server 0)))))

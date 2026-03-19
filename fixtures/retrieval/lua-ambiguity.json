@@ -1,0 +1,49 @@
+{
+  "fixture_id": "retrieval_lua_ambiguity_001",
+  "category": "lua_ambiguity",
+  "purpose": "Lua broad path-targeting should stay ambiguity-aware when dot-call and method-call surfaces coexist.",
+  "adr_refs": ["ADR-005", "ADR-008", "ADR-014", "ADR-022", "ADR-027"],
+  "snapshot_ref": "seed-lua-app@rev-001",
+  "input": {
+    "query": {
+      "api_version": "1.0",
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "bug_investigation",
+        "details": "Investigate ambiguous behavior around Lua run and normalize_local changes across source and tests."
+      },
+      "targets": {
+        "paths": ["app/main.lua", "test/main_test.lua"],
+        "diff_summary": "Changed Lua run flow and a nearby method-style helper while touching the closest test wrapper."
+      },
+      "constraints": {
+        "token_budget": 1400,
+        "language_allowlist": ["lua"],
+        "allowed_path_prefixes": ["app/", "test/"],
+        "max_raw_code_level": "enclosing_unit",
+        "freshness": "current_snapshot"
+      },
+      "hints": {
+        "preferred_paths": ["app/main.lua", "test/main_test.lua"],
+        "preferred_modules": ["app.main", "test.main_test"],
+        "prefer_definitions_over_callers": false,
+        "prefer_breadth_over_depth": true
+      },
+      "options": {
+        "include_tests": true,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": false
+      },
+      "trace": {
+        "trace_id": "34343434-5656-4789-8899-101010101010",
+        "request_id": "fixture-lua-ambiguity-001"
+      }
+    }
+  },
+  "expected": {
+    "must_include_paths": ["app/main.lua", "test/main_test.lua"],
+    "must_include_warning_codes": ["capability_ceiling"],
+    "confidence_level": "low",
+    "autonomy_posture": "autonomy_blocked"
+  }
+}

@@ -67,6 +67,18 @@
       "category": "typescript_ambiguity",
       "path": "typescript-ambiguity.json",
       "purpose": "TypeScript broad path targeting should remain ambiguity-aware and plan-safe."
+    },
+    {
+      "fixture_id": "retrieval_lua_happy_path_001",
+      "category": "lua_onboarding",
+      "path": "lua-happy-path.json",
+      "purpose": "Lua exact symbol targeting should keep authority units in top_authority with high confidence."
+    },
+    {
+      "fixture_id": "retrieval_lua_ambiguity_001",
+      "category": "lua_ambiguity",
+      "path": "lua-ambiguity.json",
+      "purpose": "Lua broad path targeting should remain ambiguity-aware and plan-safe."
     }
   ]
 }

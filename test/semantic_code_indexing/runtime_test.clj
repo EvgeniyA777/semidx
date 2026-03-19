@@ -9,6 +9,7 @@
             [semantic-code-indexing.runtime.languages.clojure :as clj-language]
             [semantic-code-indexing.runtime.languages.elixir :as ex-language]
             [semantic-code-indexing.runtime.languages.java :as java-language]
+            [semantic-code-indexing.runtime.languages.lua :as lua-language]
             [semantic-code-indexing.runtime.languages.python :as py-language]
             [semantic-code-indexing.runtime.languages.typescript :as ts-language]
             [semantic-code-indexing.runtime.retrieval-policy :as rp]))
@@ -1696,6 +1697,17 @@
                                            "  end"
                                            "end"]
                                           {})
+        lua-parsed (lua-language/parse-file "." "app/example.lua"
+                                            ["local helpers = require(\"app.helpers\")"
+                                             ""
+                                             "local M = {}"
+                                             ""
+                                             "function M.run(value)"
+                                             "  return helpers.normalize(value)"
+                                             "end"
+                                             ""
+                                             "return M"]
+                                            {})
         py-parsed (py-language/parse-file "." "app/example.py"
                                           ["def run(value):"
                                            "    return normalize(value)"
@@ -1706,7 +1718,35 @@
     (is (= "clojure" (:language clj-parsed)))
     (is (= "java" (:language java-parsed)))
     (is (= "elixir" (:language ex-parsed)))
+    (is (= "lua" (:language lua-parsed)))
     (is (= "python" (:language py-parsed)))))
+
+(deftest lua-parser-module-table-and-method-linking-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-lua-parser-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (write-file! tmp-root "app/helpers.lua"
+                       "local M = {}\n\nfunction M.normalize(value)\n  return value\nend\n\nreturn M\n")
+        _ (write-file! tmp-root "app/main.lua"
+                       "local helpers = require(\"app.helpers\")\n\nlocal M = {}\n\nfunction M:normalize_local(value)\n  return value\nend\n\nfunction M.call_local(self, value)\n  return self:normalize_local(value)\nend\n\nfunction M.run(value)\n  return helpers.normalize(value)\nend\n\nreturn M\n")
+        storage (sci/in-memory-storage)
+        index (sci/create-index {:root_path tmp-root :storage storage})
+        main-units (sci/query-units storage tmp-root {:module "app.main" :limit 20})
+        helper-id (some->> (sci/query-units storage tmp-root {:module "app.helpers" :limit 20})
+                           (filter #(= "app.helpers/normalize" (:symbol %)))
+                           first
+                           :unit_id)
+        method-id (some->> main-units
+                           (filter #(= "app.main#normalize_local" (:symbol %)))
+                           first
+                           :unit_id)
+        helper-callers (sci/query-callers storage tmp-root helper-id {:limit 20})
+        method-callers (sci/query-callers storage tmp-root method-id {:limit 20})]
+    (is (= "lua" (get-in index [:files "app/main.lua" :language])))
+    (is (= ["app.helpers"] (get-in index [:files "app/main.lua" :imports])))
+    (is (some #(= "app.main/run" (:symbol %)) main-units))
+    (is (some #(= "app.main/call_local" (:symbol %)) main-units))
+    (is (some #(= "app.main#normalize_local" (:symbol %)) main-units))
+    (is (some #(= "app.main/run" (:symbol %)) helper-callers))
+    (is (some #(= "app.main/call_local" (:symbol %)) method-callers))))
 
 (deftest current-repo-create-index-does-not-crash-test
   (let [root-path (-> (io/file ".") .getCanonicalPath)
@@ -1750,7 +1790,7 @@
     (is ex)
     (is (= :no_supported_languages_found (:type (ex-data ex))))
     (is (= "awaiting_language_selection" (get-in (ex-data ex) [:details :activation_state])))
-    (is (= ["clojure" "java" "elixir" "python" "typescript"]
+    (is (= ["clojure" "java" "elixir" "python" "typescript" "lua"]
            (get-in (ex-data ex) [:details :supported_languages])))
     (is (string? (get-in (ex-data ex) [:details :selection_hint])))))
 

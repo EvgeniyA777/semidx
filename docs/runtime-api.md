@@ -13,7 +13,8 @@ This document describes the current MVP in-memory library API.
 - Elixir (`.ex/.exs`) via lightweight regex parser
 - Python (`.py`) via lightweight regex parser
 - TypeScript (`.ts/.tsx`) via lightweight regex parser
-- Java/Elixir/Python/TypeScript call tokens are normalized for module/class-aware call graph linking
+- Lua (`.lua`) via lightweight regex parser
+- Java/Elixir/Python/TypeScript/Lua call tokens are normalized for module/class-aware call graph linking
 
 ## Public Functions
 

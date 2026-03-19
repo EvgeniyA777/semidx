@@ -50,6 +50,13 @@
     (write-file! root "app/workflow.py"
                  "from app.orders import process_order\n\n\ndef run(order):\n    return process_order(order)\n")
 
+    (write-file! root "app/helpers.lua"
+                 "local M = {}\n\nfunction M.normalize(value)\n  return value\nend\n\nreturn M\n")
+    (write-file! root "app/main.lua"
+                 "local helpers = require(\"app.helpers\")\n\nlocal M = {}\n\nfunction M:normalize_local(value)\n  return value\nend\n\nfunction M.call_local(self, value)\n  return self:normalize_local(value)\nend\n\nfunction M.run(value)\n  return helpers.normalize(value)\nend\n\nreturn M\n")
+    (write-file! root "test/main_test.lua"
+                 "local main = require(\"app.main\")\n\nlocal function test_run()\n  return main.run(\"A-1\")\nend\n\nreturn { test_run = test_run }\n")
+
     (write-file! root "src/example/normalize.ts"
                  "export function normalizeOrder(orderId: string): string {\n  return (orderId || \"\").trim().toLowerCase();\n}\n")
     (write-file! root "src/example/main.ts"
@@ -102,6 +109,9 @@
 (defn- evaluate-fixture [index fixture]
   (let [fixture-id (:fixture_id fixture)
         query (get-in fixture [:input :query])
+        query (cond-> query
+                (get-in query [:constraints :snapshot_id])
+                (assoc-in [:constraints :snapshot_id] (:snapshot_id index)))
         expected (:expected fixture)
         result (sci/resolve-context-detail index query)
         packet (:context_packet result)

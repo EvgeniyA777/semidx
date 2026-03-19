@@ -4,7 +4,7 @@
             [semantic-code-indexing.runtime.adapters :as adapters]))
 
 (def ^:private supported-language-order
-  ["clojure" "java" "elixir" "python" "typescript"])
+  ["clojure" "java" "elixir" "python" "typescript" "lua"])
 
 (def ^:private manifest-hints
   [{:path "deps.edn" :language "clojure"}

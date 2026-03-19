@@ -1,6 +1,6 @@
 # Code Context: SemanticCodeIndexing
 
-- fingerprint: 5d502be0638c8c41742cbc0a80944d03d43c6256
+- fingerprint: f16b1a485320a590ef4f2bdc475b93a8cac27e4b
 
 ## Tree
 ```text
@@ -17,6 +17,7 @@ SemanticCodeIndexing
   └ semantic_code_indexing
     ├ compression_test.clj
     ├ evaluation_test.clj
+    ├ lua_onboarding_test.clj
     ├ mcp_http_server_test.clj
     ├ mcp_server_test.clj
     ├ policy_governance_test.clj
@@ -53,13 +54,13 @@ SemanticCodeIndexing
 ### test
 - semantic-code-indexing.compression-test
 - semantic-code-indexing.evaluation-test
+- semantic-code-indexing.lua-onboarding-test
 - semantic-code-indexing.mcp-http-server-test
 - semantic-code-indexing.mcp-server-test
 - semantic-code-indexing.policy-governance-test
 - semantic-code-indexing.project-context-test
 - semantic-code-indexing.runtime-grpc-test
-- semantic-code-indexing.runtime-http-test
-- ... +3 more
+- ... +4 more
 ### other
 - semantic-code-indexing.contracts.cli
 - semantic-code-indexing.contracts.schemas
@@ -69,7 +70,7 @@ SemanticCodeIndexing
 - semantic-code-indexing.mcp.session-registry
 - semantic-code-indexing.runtime.adapters
 - semantic-code-indexing.runtime.authz
-- ... +23 more
+- ... +24 more
 
 ## Domain Model
 - IndexStorage [protocol]
@@ -101,7 +102,7 @@ SemanticCodeIndexing
 - semantic-code-indexing.core -> semantic-code-indexing.runtime.storage
 - semantic-code-indexing.core -> semantic-code-indexing.runtime.usage-metrics
 - semantic-code-indexing.evaluation-test -> clojure.java.io
-- ... +172 more
+- ... +178 more
 
 ## Namespaces
 ### semantic-code-indexing.contracts.cli

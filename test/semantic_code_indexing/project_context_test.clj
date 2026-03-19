@@ -14,7 +14,7 @@
    :snapshot_id snapshot-id
    :detected_languages active-languages
    :active_languages active-languages
-   :supported_languages ["clojure" "java" "elixir" "python" "typescript"]
+   :supported_languages ["clojure" "java" "elixir" "python" "typescript" "lua"]
    :language_fingerprint (str snapshot-id "-fp")
    :activation_state "ready"
    :selection_hint "Choose a core project language from the supported list. Additional languages can be activated later via refresh or prewarm."

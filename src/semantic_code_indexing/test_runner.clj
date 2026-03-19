@@ -6,6 +6,7 @@
             [semantic-code-indexing.policy-governance-test]
             [semantic-code-indexing.runtime-grpc-test]
             [semantic-code-indexing.runtime-http-test]
+            [semantic-code-indexing.lua-onboarding-test]
             [semantic-code-indexing.typescript-onboarding-test]
             [semantic-code-indexing.runtime-test]
             [semantic-code-indexing.usage-metrics-test]))
@@ -18,6 +19,7 @@
                             'semantic-code-indexing.runtime-test
                             'semantic-code-indexing.runtime-grpc-test
                             'semantic-code-indexing.runtime-http-test
+                            'semantic-code-indexing.lua-onboarding-test
                             'semantic-code-indexing.typescript-onboarding-test
                             'semantic-code-indexing.usage-metrics-test)
         failures (+ (:fail result) (:error result))]
