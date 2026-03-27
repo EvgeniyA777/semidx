@@ -3,4 +3,4 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-clojure -M:bench
+clojure -M:bench "$@"

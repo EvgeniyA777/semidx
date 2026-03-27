@@ -1,6 +1,6 @@
 # Code Context: SemanticCodeIndexing
 
-- fingerprint: 21b41cd572b243454ff210daa0fdfdf8dc8e590f
+- fingerprint: 21d29779a473c2504e17b22fc3fe21c1d6f742e6
 
 ## Tree
 ```text
@@ -236,11 +236,11 @@ SemanticCodeIndexing
 - read-json [function]
 - write-file! [function]
 - build-benchmark-repo! [function]
+- parse-engine [function]
+- parse-args [function]
 - parser-opts-for [function]
 - confidence-rank [section]
 - raw-rank [section]
-- extract-codes [function]
-- subset-check [function]
 ### semantic-code-indexing.runtime.cli
 - path: src/semantic_code_indexing/runtime/cli.clj
 - requires: clojure.data.json, clojure.java.io, semantic-code-indexing.core

@@ -71,12 +71,40 @@
     (write-file! root "test/my_app/order_test.exs"
                  "defmodule MyApp.OrderTest do\n  use ExUnit.Case, async: true\n  alias MyApp.Order\n\n  test \"process order uses billing adapter\" do\n    assert {:ok, _} = Order.charge(%{id: 1})\n  end\nend\n")))
 
-(defn- parser-opts-for [fixture]
-  (if (= "partial_parser" (:category fixture))
-    {:clojure_engine :regex
-     :tree_sitter_enabled false}
-    {:clojure_engine :clj-kondo
-     :tree_sitter_enabled true}))
+(defn- parse-engine [value]
+  (let [value* (some-> value str str/lower-case)]
+    (case value*
+      "regex" :regex
+      "tree-sitter" :tree-sitter
+      "tree_sitter" :tree-sitter
+      nil)))
+
+(defn- parse-args [args]
+  (loop [remaining args
+         opts {:fixture_prefix nil
+               :elixir_engine nil}]
+    (if-let [arg (first remaining)]
+      (case arg
+        "--fixture-prefix"
+        (recur (nnext remaining) (assoc opts :fixture_prefix (second remaining)))
+
+        "--elixir-engine"
+        (recur (nnext remaining) (assoc opts :elixir_engine (parse-engine (second remaining))))
+
+        (throw (ex-info (str "unknown argument: " arg) {:arg arg})))
+      opts)))
+
+(defn- parser-opts-for [fixture {:keys [elixir_engine]}]
+  (let [base-opts (if (= "partial_parser" (:category fixture))
+                    {:clojure_engine :regex
+                     :tree_sitter_enabled false}
+                    {:clojure_engine :clj-kondo
+                     :tree_sitter_enabled true})]
+    (if elixir_engine
+      (assoc base-opts
+             :tree_sitter_enabled false
+             :elixir_engine elixir_engine)
+      base-opts)))
 
 (def confidence-rank {"low" 0 "medium" 1 "high" 2})
 (def raw-rank {"none" 0 "target_span" 1 "enclosing_unit" 2 "local_neighborhood" 3 "whole_file" 4})
@@ -200,19 +228,23 @@
       :else
       (pass fixture-id))))
 
-(defn- load-fixtures []
+(defn- load-fixtures [{:keys [fixture_prefix]}]
   (let [corpus (read-json "fixtures/retrieval/corpus.json")]
     (mapv (fn [{:keys [path]}]
             (read-json (str "fixtures/retrieval/" path)))
-          (:fixtures corpus))))
+          (cond->> (:fixtures corpus)
+            (seq fixture_prefix)
+            (filter #(str/starts-with? (str (:fixture_id %)) fixture_prefix))))))
 
-(defn run-benchmarks []
+(defn run-benchmarks
+  ([] (run-benchmarks {}))
+  ([opts]
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-bench-repo" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (build-benchmark-repo! tmp-root)
-        fixtures (load-fixtures)
+        fixtures (load-fixtures opts)
         results (mapv (fn [fixture]
                         (let [index (sci/create-index {:root_path tmp-root
-                                                       :parser_opts (parser-opts-for fixture)})]
+                                                       :parser_opts (parser-opts-for fixture opts)})]
                           (evaluate-fixture index fixture)))
                       fixtures)
         failures (filterv (complement :ok) results)]
@@ -223,9 +255,10 @@
     {:total (count results)
      :passed (- (count results) (count failures))
      :failed (count failures)
-     :failures failures}))
+     :failures failures})))
 
-(defn -main [& _]
-  (let [{:keys [total passed failed]} (run-benchmarks)]
+(defn -main [& args]
+  (let [opts (parse-args args)
+        {:keys [total passed failed]} (run-benchmarks opts)]
     (println (str "benchmark_summary total=" total " passed=" passed " failed=" failed))
     (System/exit (if (zero? failed) 0 1))))

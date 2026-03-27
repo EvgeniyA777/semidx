@@ -1199,7 +1199,7 @@ Transport mapping for authz denials:
 
 - Contracts only: `./scripts/validate-contracts.sh`
 - Tests: `clojure -M:test`
-- Benchmarks: `./scripts/run-benchmarks.sh`
+- Benchmarks: `./scripts/run-benchmarks.sh` (`--fixture-prefix retrieval_elixir_ --elixir-engine regex` runs the Elixir regex baseline subset)
 - Full MVP gates: `./scripts/run-mvp-gates.sh`
 - Language onboarding scaffold: `./scripts/new-language-adapter.sh <language> --ext .ext1,.ext2`
 - Language onboarding validator: `./scripts/validate-language-onboarding.sh <language>` (use `--skip-gates` for structural checks only)
