@@ -1,6 +1,6 @@
 # Code Context: SemanticCodeIndexing
 
-- fingerprint: dfe79d88a3768bb4f75b7eb9fefe8d19334d4198
+- fingerprint: 86d6971510b263dc4c26e25884ef9c489686fc4a
 
 ## Tree
 ```text
@@ -70,7 +70,7 @@ SemanticCodeIndexing
 - semantic-code-indexing.mcp.session-registry
 - semantic-code-indexing.runtime.adapters
 - semantic-code-indexing.runtime.authz
-- ... +26 more
+- ... +27 more
 
 ## Domain Model
 - IndexStorage [protocol]
@@ -102,7 +102,7 @@ SemanticCodeIndexing
 - semantic-code-indexing.core -> semantic-code-indexing.runtime.storage
 - semantic-code-indexing.core -> semantic-code-indexing.runtime.usage-metrics
 - semantic-code-indexing.evaluation-test -> clojure.java.io
-- ... +184 more
+- ... +187 more
 
 ## Namespaces
 ### semantic-code-indexing.contracts.cli

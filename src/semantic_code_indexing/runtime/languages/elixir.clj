@@ -2,7 +2,8 @@
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as sh]
             [clojure.string :as str]
-            [semantic-code-indexing.runtime.languages.elixir.regex :as regex]))
+            [semantic-code-indexing.runtime.languages.elixir.regex :as regex]
+            [semantic-code-indexing.runtime.languages.elixir.tree-sitter :as tree-sitter]))
 
 (defonce ^:private tree-sitter-availability (atom nil))
 
@@ -25,8 +26,14 @@
 (def ^:private ts-line-re
   #"^\s*(\d+):(\d+)\s*-\s*(\d+):(\d+)(\s+)(.+?)\s*$")
 
+(def ^:private ansi-escape-re
+  #"\u001B\[[0-9;]*m")
+
+(defonce ^:private tree-sitter-config-cache (atom {}))
+
 (defn- parse-ts-line [line]
-  (when-let [[_ sr sc er ec spacing text] (re-find ts-line-re line)]
+  (let [clean-line (str/replace (str line) ansi-escape-re "")]
+    (when-let [[_ sr sc er ec spacing text] (re-find ts-line-re clean-line)]
     (let [plain (str/trim (first (str/split text #"`")))
           source (if (str/includes? plain ":")
                    (second (str/split plain #":\s*" 2))
@@ -40,12 +47,28 @@
        :end-col (parse-long ec)
        :text text
        :node-type node-type
-       :value value})))
+       :value value}))))
+
+(defn- tree-sitter-config-path [grammar-path]
+  (let [parser-dir (some-> grammar-path io/file .getCanonicalFile .getParent)
+        escaped-dir (-> (str parser-dir)
+                        (str/replace "\\" "\\\\")
+                        (str/replace "\"" "\\\""))]
+    (or (get @tree-sitter-config-cache parser-dir)
+        (let [config-file (io/file (System/getProperty "java.io.tmpdir")
+                                   (format "sci-tree-sitter-elixir-%s.json" (Math/abs (hash (str parser-dir)))))]
+          (spit config-file (format "{\"parser-directories\":[\"%s\"]}" escaped-dir))
+          (swap! tree-sitter-config-cache assoc parser-dir (.getPath config-file))
+          (.getPath config-file)))))
 
 (defn- tree-sitter-cst [abs-path grammar-path]
-  (let [{:keys [exit out err]}
+  (let [config-path (tree-sitter-config-path grammar-path)
+        {:keys [exit out err]}
         (try
-          (sh/sh "tree-sitter" "parse" "--cst" "--grammar-path" grammar-path abs-path)
+          (sh/sh "tree-sitter" "parse" "--cst" "--config-path" config-path "--grammar-path" grammar-path abs-path
+                 :env (cond-> {"XDG_CACHE_HOME" (or (System/getenv "XDG_CACHE_HOME")
+                                                   (System/getProperty "java.io.tmpdir"))}
+                        (System/getenv "HOME") (assoc "HOME" (System/getenv "HOME"))))
           (catch Exception e
             {:exit 127 :out "" :err (.getMessage e)}))]
     (if (zero? (int exit))
@@ -80,20 +103,12 @@
                 :summary "No tree-sitter Elixir grammar path configured."}}
 
       :else
-      (let [{:keys [ok? err]} (tree-sitter-cst abs grammar-path)]
+      (let [{:keys [ok? err lines]} (tree-sitter-cst abs grammar-path)]
         (if-not ok?
           {:ok? false
            :reason {:code "tree_sitter_parse_failed"
                     :summary (str "tree-sitter parse failed: " (subs (str err) 0 (min 220 (count (str err)))))}}
-          (let [parsed (regex/parse-file path src-lines)]
-            (if (seq (:units parsed))
-              {:ok? true
-               :result (update parsed :diagnostics conj
-                               {:code "tree_sitter_active"
-                                :summary "Elixir analyzed using tree-sitter-validated adapter extraction."})}
-              {:ok? false
-               :reason {:code "tree_sitter_no_units"
-                        :summary "tree-sitter did not extract Elixir units."}})))))))
+          (tree-sitter/parse-file path src-lines lines))))))
 
 (defn parse-file [root-path path lines {:keys [elixir_engine tree_sitter_enabled]
                                         :or {elixir_engine :regex}
