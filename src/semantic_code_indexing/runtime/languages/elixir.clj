@@ -63,11 +63,13 @@
 
 (defn- tree-sitter-cst [abs-path grammar-path]
   (let [config-path (tree-sitter-config-path grammar-path)
+        tmpdir (System/getProperty "java.io.tmpdir")
         {:keys [exit out err]}
         (try
           (sh/sh "tree-sitter" "parse" "--cst" "--config-path" config-path "--grammar-path" grammar-path abs-path
                  :env (cond-> {"XDG_CACHE_HOME" (or (System/getenv "XDG_CACHE_HOME")
-                                                   (System/getProperty "java.io.tmpdir"))}
+                                                   tmpdir)
+                               "TMPDIR" tmpdir}
                         (System/getenv "HOME") (assoc "HOME" (System/getenv "HOME"))))
           (catch Exception e
             {:exit 127 :out "" :err (.getMessage e)}))]

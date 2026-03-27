@@ -11,7 +11,8 @@
            second))
 
 (defn- annotate-tree [nodes]
-  (loop [remaining (map-indexed (fn [idx node] (assoc node :idx idx)) nodes)
+  (let [indexed-nodes (vec (map-indexed (fn [idx node] (assoc node :idx idx)) nodes))]
+    (loop [remaining indexed-nodes
          stack []
          parents {}
          children {}]
@@ -30,9 +31,9 @@
                (cond-> parents
                  (some? parent-idx) (assoc (:idx node) parent-idx))
                children*))
-      {:nodes (vec nodes)
+      {:nodes indexed-nodes
        :parents parents
-       :children children})))
+       :children children}))))
 
 (defn- node-by-idx [tree idx]
   (nth (:nodes tree) idx))
@@ -83,9 +84,9 @@
        (contains? def-like-targets (direct-target-value tree (:idx node)))))
 
 (defn- module-raw-name [src-lines start-row]
-  (some-> (nth src-lines start-row "")
-          (re-find shared/ex-module-re)
-          second))
+  (some->> (nth src-lines start-row "")
+           (re-find shared/ex-module-re)
+           second))
 
 (defn- module-full-name [tree module-map node src-lines]
   (let [idx (:idx node)
@@ -102,9 +103,8 @@
   (subvec src-lines (:start-row node) (inc (:end-row node))))
 
 (defn- signature-call [tree idx]
-  (some-> (find-child tree idx #(= "arguments" (:node-type %)))
-          :idx
-          (first-descendant tree #(= "call" (:node-type %)))))
+  (when-let [arguments-node (find-child tree idx #(= "arguments" (:node-type %)))]
+    (first-descendant tree (:idx arguments-node) #(= "call" (:node-type %)))))
 
 (defn- signature-name [tree idx]
   (when-let [sig (signature-call tree idx)]
@@ -157,6 +157,19 @@
         def-nodes (filterv #(and (definition-call? tree %)
                                  (not= "defmodule" (direct-target-value tree (:idx %))))
                            (:nodes tree))
+        local-call-arities (reduce
+                            (fn [acc node]
+                              (let [form (direct-target-value tree (:idx node))
+                                    signature-line (nth src-lines (:start-row node) "")
+                                    method-arity (when-not (= "test" form)
+                                                   (shared/ex-def-arity signature-line))
+                                    fn-name (when-not (= "test" form)
+                                              (signature-name tree (:idx node)))]
+                                (if (seq fn-name)
+                                  (update acc fn-name (fnil conj #{}) method-arity)
+                                  acc)))
+                            {}
+                            def-nodes)
         unit-records
         (mapv
          (fn [node]
@@ -179,11 +192,7 @@
                              (str (or owner-module "Elixir.Unknown") "/" (signature-name tree (:idx node))))
                  call-arity-index (if (= "defdelegate" form)
                                     {}
-                                    (shared/ex-call-arity-index body))
-                 local-call-arities (cond-> {}
-                                      (and (not= "test" form) (seq (signature-name tree (:idx node))))
-                                      (assoc (signature-name tree (:idx node)) (cond-> #{}
-                                                                                  (some? method-arity) (conj method-arity))))]
+                                    (shared/ex-call-arity-index body))]
              {:unit {:unit_id (cond-> (str path "::" unit-name)
                                 (some? method-arity) (str "$arity" method-arity))
                      :kind (if (= "test" form)
