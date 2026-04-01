@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://semantic-code-indexing.example/contracts/schemas/common.schema.json",
+  "$id": "https://semidx.example/contracts/schemas/common.schema.json",
   "title": "Semantic Code Indexing Common Definitions",
   "description": "Shared definitions for retrieval contracts and diagnostics.",
   "$defs": {

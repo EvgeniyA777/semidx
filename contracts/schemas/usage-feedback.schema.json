@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://semantic-code-indexing.example/contracts/schemas/usage-feedback.schema.json",
+  "$id": "https://semidx.example/contracts/schemas/usage-feedback.schema.json",
   "title": "Usage Feedback",
   "description": "Bounded explicit feedback record for correlated usage telemetry flows.",
   "type": "object",

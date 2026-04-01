@@ -131,7 +131,7 @@ def run_healthcheck(command: list[str], timeout_sec: float, protocol_version: st
                 "params": {
                     "protocolVersion": protocol_version,
                     "capabilities": {},
-                    "clientInfo": {"name": "semantic-code-indexing-healthcheck", "version": "1.0"},
+                    "clientInfo": {"name": "semidx-healthcheck", "version": "1.0"},
                 },
             },
         )
@@ -164,7 +164,7 @@ def run_healthcheck(command: list[str], timeout_sec: float, protocol_version: st
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Health-check semantic-code-indexing MCP startup over stdio."
+        description="Health-check semidx MCP startup over stdio."
     )
     parser.add_argument(
         "--timeout-sec",

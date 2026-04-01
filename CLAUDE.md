@@ -12,7 +12,7 @@ Before first-pass repo exploration:
 
 ## MCP-first workflow (mandatory)
 
-When `semantic-code-indexing` MCP is available, ALWAYS use it as the primary codebase exploration tool.
+When `semidx` MCP is available, ALWAYS use it as the primary codebase exploration tool.
 NEVER use Glob, Grep, or Read for first-pass codebase exploration when SCI MCP is available.
 
 ### Required startup sequence

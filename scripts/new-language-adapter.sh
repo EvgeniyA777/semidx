@@ -135,13 +135,13 @@ build_ext_cond_expr() {
   printf '%s' "$expr"
 }
 
-ADAPTERS_FILE="src/semantic_code_indexing/runtime/adapters.clj"
-TEST_RUNNER_FILE="src/semantic_code_indexing/test_runner.clj"
+ADAPTERS_FILE="src/semidx/runtime/adapters.clj"
+TEST_RUNNER_FILE="src/semidx/test_runner.clj"
 CORPUS_FILE="fixtures/retrieval/corpus.json"
 FIXTURE_HAPPY="fixtures/retrieval/${LANG_ID}-happy-path.json"
 FIXTURE_AMBIG="fixtures/retrieval/${LANG_ID}-ambiguity.json"
 DOC_ONBOARDING="docs/language-onboarding/${LANG_ID}.md"
-TEST_FILE="test/semantic_code_indexing/${LANG_ID}_onboarding_test.clj"
+TEST_FILE="test/semidx/${LANG_ID}_onboarding_test.clj"
 
 EXT_EXPR="$(build_ext_cond_expr)"
 
@@ -209,7 +209,7 @@ else
 fi
 
 TEST_CONTENT="$(cat <<EOF
-(ns semantic-code-indexing.${LANG_NS}-onboarding-test
+(ns semidx.${LANG_NS}-onboarding-test
   (:require [clojure.test :refer [deftest is]]))
 
 (deftest ${LANG_ID}-adapter-onboarding-scaffold-test
@@ -218,25 +218,25 @@ EOF
 )"
 write_file "$TEST_FILE" "$TEST_CONTENT"
 
-if ! grep -q "semantic-code-indexing.${LANG_NS}-onboarding-test" "$TEST_RUNNER_FILE"; then
+if ! grep -q "semidx.${LANG_NS}-onboarding-test" "$TEST_RUNNER_FILE"; then
   update_file_with_awk "$TEST_RUNNER_FILE" \
-    -v require_line="            [semantic-code-indexing.${LANG_NS}-onboarding-test]" '
+    -v require_line="            [semidx.${LANG_NS}-onboarding-test]" '
       BEGIN { inserted=0 }
-      /^[[:space:]]*\[semantic-code-indexing\.runtime-test\]\)\)$/ && inserted==0 {
+      /^[[:space:]]*\[semidx\.runtime-test\]\)\)$/ && inserted==0 {
         print require_line
         inserted=1
       }
       { print }
     '
 else
-  log "skip test-runner require, appears present: semantic-code-indexing.${LANG_NS}-onboarding-test"
+  log "skip test-runner require, appears present: semidx.${LANG_NS}-onboarding-test"
 fi
 
-if ! grep -q "'semantic-code-indexing.${LANG_NS}-onboarding-test" "$TEST_RUNNER_FILE"; then
+if ! grep -q "'semidx.${LANG_NS}-onboarding-test" "$TEST_RUNNER_FILE"; then
   update_file_with_awk "$TEST_RUNNER_FILE" \
-    -v test_line="                            'semantic-code-indexing.${LANG_NS}-onboarding-test" '
+    -v test_line="                            'semidx.${LANG_NS}-onboarding-test" '
       BEGIN { inserted=0 }
-      index($0, "'\''semantic-code-indexing.runtime-http-test)") > 0 && inserted==0 {
+      index($0, "'\''semidx.runtime-http-test)") > 0 && inserted==0 {
         sub(/\)$/, "")
         print
         print test_line ")"
@@ -246,7 +246,7 @@ if ! grep -q "'semantic-code-indexing.${LANG_NS}-onboarding-test" "$TEST_RUNNER_
       { print }
     '
 else
-  log "skip test-runner run-tests entry, appears present: semantic-code-indexing.${LANG_NS}-onboarding-test"
+  log "skip test-runner run-tests entry, appears present: semidx.${LANG_NS}-onboarding-test"
 fi
 
 FIXTURE_HAPPY_CONTENT="$(cat <<EOF

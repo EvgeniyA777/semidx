@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://semantic-code-indexing.example/contracts/schemas/retrieval-stage-event.schema.json",
+  "$id": "https://semidx.example/contracts/schemas/retrieval-stage-event.schema.json",
   "title": "Retrieval Stage Event",
   "description": "Canonical telemetry event emitted for a retrieval stage transition.",
   "type": "object",

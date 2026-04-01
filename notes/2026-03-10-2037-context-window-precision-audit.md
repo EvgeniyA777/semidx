@@ -207,12 +207,12 @@ Fixtures тоже прямо описаны как compact and repository-agnost
 
 - `README.md`
 - `contracts/schemas/retrieval-query.schema.json`
-- `src/semantic_code_indexing/runtime/retrieval.clj`
-- `src/semantic_code_indexing/runtime/index.clj`
-- `src/semantic_code_indexing/runtime/adapters.clj`
-- `src/semantic_code_indexing/runtime/retrieval_policy.clj`
-- `src/semantic_code_indexing/runtime/evaluation.clj`
-- `test/semantic_code_indexing/runtime_test.clj`
+- `src/semidx/runtime/retrieval.clj`
+- `src/semidx/runtime/index.clj`
+- `src/semidx/runtime/adapters.clj`
+- `src/semidx/runtime/retrieval_policy.clj`
+- `src/semidx/runtime/evaluation.clj`
+- `test/semidx/runtime_test.clj`
 - `fixtures/README.md`
 
 ## Канонические соседние артефакты

@@ -20,7 +20,7 @@
 - `./scripts/agent-bootstrap.sh` is the canonical bootstrap entrypoint; it runs `clojure -M:ccc init --root . --skip-hook` only when the CCC artifacts are missing.
 - Do not refresh CCC artifacts on every task by default; only refresh them when a task explicitly needs regenerated compression outputs or when the user asks for it.
 
-- If the `semantic-code-indexing` MCP server is available, do not begin with `Analyze`, directory listing, wildcard search, or broad manual file crawling.
+- If the `semidx` MCP server is available, do not begin with `Analyze`, directory listing, wildcard search, or broad manual file crawling.
 - Use MCP before manual file crawling.
 - First-pass flow is strict:
   1. `create_index`

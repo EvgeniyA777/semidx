@@ -15,7 +15,7 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 
 - Contract layer is established (`contracts/schemas`, `contracts/examples`, `fixtures/retrieval`).
 - Clojure-side contract mirror is implemented with `malli`.
-- MVP runtime is implemented with public API in `semantic-code-indexing.core`.
+- MVP runtime is implemented with public API in `semidx.core`.
 - Clojure parser path supports `clj-kondo` primary with regex fallback and optional tree-sitter extraction mode.
 - Clojure fallback parsing now rewrites alias-qualified calls (`order/validate-order` -> `my.app.order/validate-order`), ignores nested defs inside wrapper forms such as `comment`, links test namespaces back to source namespaces for stronger `related_tests` hints including one helper-namespace hop inside `test/`, emits dispatch-aware `defmethod` unit identities, can rank the correct multimethod implementation from dispatch hints in the query text, and adds recursive graph-level inherited caller edges for custom macros across syntax-quote, list-built, local-helper-generated, top-level-helper-generated, and common composed expansions without leaking plain macro helper functions or unioning conflicting branch-only generated calls.
 - Java parser path supports regex mode and optional tree-sitter extraction mode.
@@ -39,10 +39,10 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 - Reproducible tree-sitter grammar bootstrap script exists (`scripts/setup-tree-sitter-grammars.sh`) with pinned grammar refs (Clojure/Java/TypeScript).
 - CI runtime gates now install tree-sitter CLI + grammars before running tests.
 - Minimal HTTP runtime edge exists (`clojure -M:runtime-http`) and boundary ADR is documented (`ADR-018`).
-- HTTP boundary conformance tests exist and run in standard `clojure -M:test` gates (`semantic-code-indexing.runtime-http-test`).
-- Minimal gRPC runtime edge exists (`clojure -M:runtime-grpc`) with parity tests in standard `clojure -M:test` gates (`semantic-code-indexing.runtime-grpc-test`).
+- HTTP boundary conformance tests exist and run in standard `clojure -M:test` gates (`semidx.runtime-http-test`).
+- Minimal gRPC runtime edge exists (`clojure -M:runtime-grpc`) with parity tests in standard `clojure -M:test` gates (`semidx.runtime-grpc-test`).
 - Service-mode policy boundary is documented in `ADR-019` and implemented as optional API-key + tenant gate on HTTP/gRPC edges.
-- gRPC transport now uses dedicated runtime protobuf envelope messages defined in `proto/semantic_code_indexing/runtime/grpc/v1/runtime.proto`.
+- gRPC transport now uses dedicated runtime protobuf envelope messages defined in `proto/semidx/runtime/grpc/v1/runtime.proto`.
 - Host-integrated authz policy contract is implemented on HTTP/gRPC edges via `:authz_check` callback and optional EDN policy adapter (`--authz-policy-file`, `ADR-021`).
 - Language onboarding automation scripts now scaffold and validate adapter integration steps (`scripts/new-language-adapter.sh`, `scripts/validate-language-onboarding.sh`, `ADR-022`).
 - Java method unit identities are signature/arity-sensitive (`...$arityN$sigXXXX`) to disambiguate overloads.

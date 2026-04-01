@@ -41,7 +41,7 @@ We still need one explicit follow-up run proving that Antigravity:
 Use this prompt on the next Antigravity pass:
 
 ```text
-Stay on the semantic-code-indexing MCP flow only.
+Stay on the semidx MCP flow only.
 Do not browse files manually unless an MCP tool fails.
 
 Find the main orchestration flow in this repository.

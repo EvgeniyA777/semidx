@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://semantic-code-indexing.example/contracts/schemas/context-packet.schema.json",
+  "$id": "https://semidx.example/contracts/schemas/context-packet.schema.json",
   "title": "Context Packet",
   "description": "Canonical context packet returned by the retrieval library before any optional raw-code escalation.",
   "type": "object",

@@ -1,6 +1,6 @@
 # MCP Agent Prompts
 
-These prompts are the canonical copy-ready snippets for IDEs and coding agents that should use `semantic-code-indexing` correctly on the first pass.
+These prompts are the canonical copy-ready snippets for IDEs and coding agents that should use `semidx` correctly on the first pass.
 
 Use them when:
 
@@ -16,7 +16,7 @@ Design goal:
 ## Universal Strict Prompt
 
 ```text
-Use the `semantic-code-indexing` MCP server as the primary tool for first-pass repository understanding.
+Use the `semidx` MCP server as the primary tool for first-pass repository understanding.
 
 Operational rules:
 1. Always call `create_index` first for the repository root.
@@ -44,7 +44,7 @@ Retrieval-query rule:
 ## Codex Prompt
 
 ```text
-For this repository, use `semantic-code-indexing` in MCP-first mode.
+For this repository, use `semidx` in MCP-first mode.
 
 Required first-pass workflow:
 1. `create_index`
@@ -72,7 +72,7 @@ Protocol rules:
 ## Claude / IDE-Agent Prompt
 
 ```text
-Use the `semantic-code-indexing` MCP server first, not manual repo browsing, for initial codebase understanding.
+Use the `semidx` MCP server first, not manual repo browsing, for initial codebase understanding.
 
 Workflow:
 1. call `create_index`
@@ -103,7 +103,7 @@ Protocol constraints:
 ## Generic IDE Field Prompt
 
 ```text
-Use semantic-code-indexing in MCP-first mode: do not start with Analyze, directory listing, wildcard search, or broad manual repo browsing. Call create_index, then repo_map, then use resolve_context -> expand_context -> fetch_context_detail. After a successful create_index, stay on the MCP flow instead of switching back to filesystem inspection. Treat no_supported_languages_found as a prompt to ask for the core language, language_refresh_required as rerun-create_index, and language_activation_in_progress as wait-and-retry. Report MCP failure explicitly before falling back to manual repo inspection. Send clientInfo and tools/call.arguments as JSON objects, not strings.
+Use semidx in MCP-first mode: do not start with Analyze, directory listing, wildcard search, or broad manual repo browsing. Call create_index, then repo_map, then use resolve_context -> expand_context -> fetch_context_detail. After a successful create_index, stay on the MCP flow instead of switching back to filesystem inspection. Treat no_supported_languages_found as a prompt to ask for the core language, language_refresh_required as rerun-create_index, and language_activation_in_progress as wait-and-retry. Report MCP failure explicitly before falling back to manual repo inspection. Send clientInfo and tools/call.arguments as JSON objects, not strings.
 
 `resolve_context` accepts a flat `intent` string (simplest): `{"index_id": "...", "intent": "your task"}`. The structured `query` object is also supported for advanced use.
 ```
@@ -111,7 +111,7 @@ Use semantic-code-indexing in MCP-first mode: do not start with Analyze, directo
 ## Antigravity / MCP-Only Prompt
 
 ```text
-Use the semantic-code-indexing MCP server only for the first repository pass.
+Use the semidx MCP server only for the first repository pass.
 
 Do not start with Analyze, directory listing, wildcard search, or broad file reading.
 

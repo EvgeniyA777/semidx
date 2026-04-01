@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://semantic-code-indexing.example/contracts/schemas/override-record.schema.json",
+  "$id": "https://semidx.example/contracts/schemas/override-record.schema.json",
   "title": "Override Record",
   "description": "Canonical record for a host override that weakens or bypasses a library recommendation.",
   "type": "object",

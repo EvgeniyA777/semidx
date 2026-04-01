@@ -53,14 +53,14 @@ find src test -name '*.clj' -exec wc -l {} + | sort -rn
 Cost: **1 tool call, ~200 tokens of output.** The agent gets a complete picture:
 
 ```
-3062  src/semantic_code_indexing/runtime/adapters.clj
-1811  src/semantic_code_indexing/runtime/evaluation.clj
-1316  src/semantic_code_indexing/runtime/retrieval.clj
-1027  src/semantic_code_indexing/mcp/core.clj
-1015  src/semantic_code_indexing/runtime/usage_metrics.clj
- 671  src/semantic_code_indexing/runtime/languages/typescript.clj
- 634  src/semantic_code_indexing/runtime/index.clj
- 574  src/semantic_code_indexing/core.clj
+3062  src/semidx/runtime/adapters.clj
+1811  src/semidx/runtime/evaluation.clj
+1316  src/semidx/runtime/retrieval.clj
+1027  src/semidx/mcp/core.clj
+1015  src/semidx/runtime/usage_metrics.clj
+ 671  src/semidx/runtime/languages/typescript.clj
+ 634  src/semidx/runtime/index.clj
+ 574  src/semidx/core.clj
   ...everything else under 500 lines
 ```
 

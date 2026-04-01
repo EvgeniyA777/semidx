@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://semantic-code-indexing.example/contracts/schemas/diagnostics-trace.schema.json",
+  "$id": "https://semidx.example/contracts/schemas/diagnostics-trace.schema.json",
   "title": "Diagnostics Trace",
   "description": "Canonical diagnostics trace for a retrieval flow.",
   "type": "object",

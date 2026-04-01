@@ -5,7 +5,7 @@ on:
     paths:
       - "contracts/**"
       - "fixtures/**"
-      - "src/semantic_code_indexing/contracts/**"
+      - "src/semidx/contracts/**"
       - "deps.edn"
       - "scripts/validate-contracts.sh"
       - ".github/workflows/contracts-validation.yml"
@@ -14,7 +14,7 @@ on:
     paths:
       - "contracts/**"
       - "fixtures/**"
-      - "src/semantic_code_indexing/contracts/**"
+      - "src/semidx/contracts/**"
       - "deps.edn"
       - "scripts/validate-contracts.sh"
       - ".github/workflows/contracts-validation.yml"

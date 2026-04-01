@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://semantic-code-indexing.example/contracts/schemas/retrieval-query.schema.json",
+  "$id": "https://semidx.example/contracts/schemas/retrieval-query.schema.json",
   "title": "Retrieval Query",
   "description": "Canonical host query for requesting retrieval results from the semantic indexing library.",
   "type": "object",

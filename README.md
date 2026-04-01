@@ -41,8 +41,8 @@ Current scope is contract architecture plus a working MVP runtime implementation
 - `contracts/examples/` - canonical examples for contract families
 - `docs/semantic-stabilization-plan.md` - next internal semantic architecture tranche
 - `fixtures/retrieval/` - retrieval fixture corpus (behavior bands)
-- `src/semantic_code_indexing/contracts/` - Clojure `malli` mirror and validator CLI
-- `src/semantic_code_indexing/mcp/` - MCP core plus stdio and HTTP transports over the core library API
+- `src/semidx/contracts/` - Clojure `malli` mirror and validator CLI
+- `src/semidx/mcp/` - MCP core plus stdio and HTTP transports over the core library API
 - `scripts/` - local validation entrypoints
 
 ## Contract Validation
@@ -132,7 +132,7 @@ Canonical retrieval flow is compact-first staged retrieval:
 
 If an IDE or coding agent supports MCP plus repo-local instructions, this repo is intended to be used in `MCP-first` mode, not manual file-first mode.
 
-Agents should not begin with directory listing, wildcard search, or broad file crawling if the `semantic-code-indexing` MCP server is available and healthy.
+Agents should not begin with directory listing, wildcard search, or broad file crawling if the `semidx` MCP server is available and healthy.
 A successful `create_index` should be followed by `repo_map`, not by switching back to manual repository inspection.
 
 Recommended first-pass behavior:
@@ -166,8 +166,8 @@ Roadmap status is tracked separately in [docs/roadmap-status.md](docs/roadmap-st
 - contract layer established (`contracts/schemas`)
 - canonical example set established (`contracts/examples`)
 - seed fixture corpus established (`fixtures/retrieval`)
-- Clojure validation gate implemented (`src/semantic_code_indexing/contracts`)
-- MVP runtime implemented (`src/semantic_code_indexing/core.clj`, `src/semantic_code_indexing/runtime/*`)
+- Clojure validation gate implemented (`src/semidx/contracts`)
+- MVP runtime implemented (`src/semidx/core.clj`, `src/semidx/runtime/*`)
 - Clojure retrieval uses `clj-kondo` as primary parser with fallback path
 - Clojure semantic-core now includes alias-aware fallback call resolution, top-level-aware fallback parsing for macro/comment wrappers, namespace-linked `related_tests` hints for direct and helper-mediated test namespaces, dispatch-aware `defmethod` unit identities, dispatch-sensitive multimethod ranking, literal-dispatch caller targeting onto specific `defmethod` implementations, first-class `defprotocol` method units, same-name var disambiguation across aliased namespaces, and recursive graph-level macro-generated ownership for syntax-quote, list-built, top-level helper-generated, threading-macro-generated, and common composed macro expansions such as `concat`, `apply list`, `into`, and conditional branches, with ambiguous branch-only and ambiguous threaded generated calls held back conservatively instead of over-claiming ownership
 - Clojure semantic-core now also respects lexical local bindings more accurately in fallback extraction, so params, destructured locals, `when-let` / comprehension bindings, `as->` locals, and `letfn` helper names no longer leak false same-name caller edges toward namespace vars

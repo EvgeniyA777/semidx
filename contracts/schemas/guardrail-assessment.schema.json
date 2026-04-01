@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://semantic-code-indexing.example/contracts/schemas/guardrail-assessment.schema.json",
+  "$id": "https://semidx.example/contracts/schemas/guardrail-assessment.schema.json",
   "title": "Guardrail Assessment",
   "description": "Retrieval-scoped autonomy guardrail companion contract.",
   "type": "object",

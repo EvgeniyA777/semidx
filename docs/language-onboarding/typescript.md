@@ -6,7 +6,7 @@ Created with `scripts/new-language-adapter.sh` and now upgraded with strategic s
 
 - Language key: `typescript`
 - File extensions: `.ts,.tsx`
-- Parser function: `semantic-code-indexing.runtime.languages.typescript/parse-file` (regex default, tree-sitter optional)
+- Parser function: `semidx.runtime.languages.typescript/parse-file` (regex default, tree-sitter optional)
 - Fixture files:
   - `fixtures/retrieval/typescript-happy-path.json`
   - `fixtures/retrieval/typescript-ambiguity.json`

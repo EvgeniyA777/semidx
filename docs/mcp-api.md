@@ -114,7 +114,7 @@ Shorter version for clients with tight field limits:
 Minimal onboarding snippet for clients that support only a short instruction field:
 
 ```text
-Use semantic-code-indexing in MCP-first mode: do not start with Analyze, directory listing, wildcard search, or broad manual repo browsing. Call create_index, then repo_map, then use resolve_context -> expand_context -> fetch_context_detail. After a successful create_index, stay on the MCP flow instead of switching back to filesystem inspection. Treat language_refresh_required as rerun-create_index, language_activation_in_progress as wait-and-retry, and only fall back to manual repo inspection after you report the MCP failure explicitly.
+Use semidx in MCP-first mode: do not start with Analyze, directory listing, wildcard search, or broad manual repo browsing. Call create_index, then repo_map, then use resolve_context -> expand_context -> fetch_context_detail. After a successful create_index, stay on the MCP flow instead of switching back to filesystem inspection. Treat language_refresh_required as rerun-create_index, language_activation_in_progress as wait-and-retry, and only fall back to manual repo inspection after you report the MCP failure explicitly.
 ```
 
 ## Tools
@@ -364,7 +364,7 @@ Returns:
 
 ## Compact MCP Memory
 
-If MCP usage metrics are enabled, successful normalized `resolve_context` calls now retain compact query summaries in the usage stream. The library helper `semantic-code-indexing.core/compact-mcp-query-memory` can read those summaries back from either:
+If MCP usage metrics are enabled, successful normalized `resolve_context` calls now retain compact query summaries in the usage stream. The library helper `semidx.core/compact-mcp-query-memory` can read those summaries back from either:
 
 - in-memory usage metrics
 - PostgreSQL-backed usage metrics

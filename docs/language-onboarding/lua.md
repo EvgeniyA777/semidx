@@ -6,7 +6,7 @@ Created as a dedicated Lua lane following `ADR-022` and concretized by `ADR-027`
 
 - Language key: `lua`
 - File extensions: `.lua`
-- Parser function: `semantic-code-indexing.runtime.languages.lua/parse-file` (regex default)
+- Parser function: `semidx.runtime.languages.lua/parse-file` (regex default)
 - Fixture files:
   - `fixtures/retrieval/lua-happy-path.json`
   - `fixtures/retrieval/lua-ambiguity.json`

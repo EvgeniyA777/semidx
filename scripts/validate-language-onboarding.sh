@@ -49,9 +49,9 @@ done
 LANG_ID="$(echo "$LANG_INPUT" | tr '[:upper:]-' '[:lower:]_' | sed 's/[^a-z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_//;s/_$//')"
 LANG_NS="$(echo "$LANG_ID" | tr '_' '-')"
 
-ADAPTERS_FILE="src/semantic_code_indexing/runtime/adapters.clj"
-TEST_RUNNER_FILE="src/semantic_code_indexing/test_runner.clj"
-TEST_FILE="test/semantic_code_indexing/${LANG_ID}_onboarding_test.clj"
+ADAPTERS_FILE="src/semidx/runtime/adapters.clj"
+TEST_RUNNER_FILE="src/semidx/test_runner.clj"
+TEST_FILE="test/semidx/${LANG_ID}_onboarding_test.clj"
 DOC_FILE="docs/language-onboarding/${LANG_ID}.md"
 FIXTURE_HAPPY="fixtures/retrieval/${LANG_ID}-happy-path.json"
 FIXTURE_AMBIG="fixtures/retrieval/${LANG_ID}-ambiguity.json"
@@ -100,8 +100,8 @@ check_contains "\"${LANG_ID}\"" "$ADAPTERS_FILE" "language key registered in ada
 check_contains "\\(defn- parse-${LANG_ID} " "$ADAPTERS_FILE" "parse function scaffold exists"
 check_contains "\"${LANG_ID}\" \\(parse-${LANG_ID} " "$ADAPTERS_FILE" "parse-file branch wired"
 
-check_contains "semantic-code-indexing\\.${LANG_NS}-onboarding-test" "$TEST_RUNNER_FILE" "test runner requires onboarding test ns"
-check_contains "'semantic-code-indexing\\.${LANG_NS}-onboarding-test" "$TEST_RUNNER_FILE" "test runner executes onboarding test ns"
+check_contains "semidx\\.${LANG_NS}-onboarding-test" "$TEST_RUNNER_FILE" "test runner requires onboarding test ns"
+check_contains "'semidx\\.${LANG_NS}-onboarding-test" "$TEST_RUNNER_FILE" "test runner executes onboarding test ns"
 
 check_contains "\"retrieval_${LANG_ID}_happy_path_001\"" "$FIXTURE_HAPPY" "happy fixture id is correct"
 check_contains "\"retrieval_${LANG_ID}_ambiguity_001\"" "$FIXTURE_AMBIG" "ambiguity fixture id is correct"

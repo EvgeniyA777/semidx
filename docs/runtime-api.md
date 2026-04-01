@@ -4,7 +4,7 @@ This document describes the current MVP in-memory library API.
 
 ## Namespace
 
-- `semantic-code-indexing.core`
+- `semidx.core`
 
 ## Language Coverage (MVP)
 
@@ -23,7 +23,7 @@ This document describes the current MVP in-memory library API.
 Creates a new in-memory index.
 
 ```clojure
-(require '[semantic-code-indexing.core :as sci])
+(require '[semidx.core :as sci])
 
 (def index
   (sci/create-index {:root_path "."}))
@@ -775,8 +775,8 @@ You can also run the current Phase 5 operational loop as one batch artifact.
 Library API:
 
 ```clojure
-(require '[semantic-code-indexing.runtime.evaluation :as eval]
-         '[semantic-code-indexing.runtime.retrieval-policy :as rp])
+(require '[semidx.runtime.evaluation :as eval]
+         '[semidx.runtime.retrieval-policy :as rp])
 
 (eval/policy-review-pipeline
  {:root_path "."
@@ -1089,7 +1089,7 @@ SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index \
 clojure -M:runtime-grpc --host 127.0.0.1 --port 8789
 ```
 
-Service: `semantic_code_indexing.RuntimeService`
+Service: `semidx.RuntimeService`
 
 Unary methods:
 
@@ -1097,7 +1097,7 @@ Unary methods:
 - `CreateIndex` (`CreateIndexRequest` -> `CreateIndexResponse`)
 - `ResolveContext` (`ResolveContextRequest` -> `ResolveContextResponse`)
 
-Proto schema source: `proto/semantic_code_indexing/runtime/grpc/v1/runtime.proto`
+Proto schema source: `proto/semidx/runtime/grpc/v1/runtime.proto`
 
 Current gRPC transport uses dedicated runtime protobuf envelope messages while preserving HTTP/library semantics:
 
@@ -1213,7 +1213,7 @@ Transport mapping for authz denials:
 - Elixir semantic-core now treats pipeline calls and local captures as arity-aware callers and keeps `__MODULE__.Nested.foo(...)` linked to nested local-module targets instead of flattening them into imported collisions.
 - TypeScript semantic-core now emits object-literal methods, class field arrow methods, default-export alias indirection, and direct re-export alias units through the dedicated TypeScript language module, with regex/tree-sitter parity for those advanced surfaces while still treating the overall language lane as conservative `low`-ceiling coverage.
 - Parsed files and units now also carry additive `semantic_pipeline` metadata, which is the internal anchor for the new semantic stabilization tranche; this does not change the public retrieval schema roots.
-- Language-specific parser entrypoints now live under `semantic-code-indexing.runtime.languages.*`, while `semantic-code-indexing.runtime.adapters/parse-file` remains the canonical facade used by index creation.
+- Language-specific parser entrypoints now live under `semidx.runtime.languages.*`, while `semidx.runtime.adapters/parse-file` remains the canonical facade used by index creation.
 - Java and Python parsers are lightweight regex-based in MVP; Elixir and TypeScript are regex-first with optional tree-sitter paths.
 - `tree-sitter` extraction is implemented for Clojure, Elixir, Java, and TypeScript when corresponding grammar paths are configured.
 - If tree-sitter is requested but unavailable/misconfigured, runtime falls back with diagnostics (`tree_sitter_*` codes).

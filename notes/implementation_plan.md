@@ -53,7 +53,7 @@ The delivered implementation now provides:
 - repair-oriented invalid-query details with a minimal skeleton and retry guidance
 - compact continuation artifacts for staged retrieval handoff
 - a compact MCP query-memory helper over usage metrics:
-  - `semantic-code-indexing.core/compact-mcp-query-memory`
+  - `semidx.core/compact-mcp-query-memory`
 
 ## Why This Note Is Archived
 
