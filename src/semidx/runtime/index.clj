@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [semidx.runtime.adapters :as adapters]
             [semidx.runtime.language-activation :as activation]
+            [semidx.runtime.semantic-id :as semantic-id]
             [semidx.runtime.storage :as storage]))
 
 (defn- now-iso []
@@ -422,7 +423,7 @@
   ([root-path files-data]
    (build-index-state root-path files-data {}))
   ([root-path files-data lifecycle-opts]
-   (let [units (:units files-data)
+   (let [units (semantic-id/enrich-units (:units files-data))
          units-by-id (into {} (map (juxt :unit_id identity) units))
          activation-metadata (:activation_metadata lifecycle-opts)
          callers-index (build-callers-index units (:files files-data))
@@ -456,7 +457,8 @@
     (storage/init-storage! storage-adapter)
     (cond
       (seq pinned_snapshot_id)
-      (or (storage/load-index-by-snapshot storage-adapter root-path pinned_snapshot_id)
+      (or (some-> (storage/load-index-by-snapshot storage-adapter root-path pinned_snapshot_id)
+                  semantic-id/enrich-index)
           (throw (ex-info "requested pinned snapshot was not found"
                           {:type :invalid_request
                            :message "requested pinned snapshot was not found"
@@ -464,7 +466,8 @@
                                      :snapshot_id pinned_snapshot_id}})))
 
       load_latest
-      (storage/load-latest-index storage-adapter root-path)
+      (some-> (storage/load-latest-index storage-adapter root-path)
+              semantic-id/enrich-index)
 
       :else nil)))
 

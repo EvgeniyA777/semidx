@@ -12,7 +12,8 @@
             [semidx.runtime.languages.lua :as lua-language]
             [semidx.runtime.languages.python :as py-language]
             [semidx.runtime.languages.typescript :as ts-language]
-            [semidx.runtime.retrieval-policy :as rp]))
+            [semidx.runtime.retrieval-policy :as rp]
+            [semidx.runtime.storage :as storage]))
 
 (defn- write-file! [root rel-path content]
   (let [f (io/file root rel-path)]
@@ -1069,7 +1070,74 @@
         ;; load_latest should return previously persisted snapshot
         index-b (sci/create-index {:root_path tmp-root :storage storage :load_latest true})]
     (is (= (:snapshot_id index-a) (:snapshot_id index-b)))
-    (is (= (count (:units index-a)) (count (:units index-b))))))
+    (is (= (count (:units index-a)) (count (:units index-b))))
+    (is (every? #(seq (:semantic_id %)) (vals (:units index-b))))
+    (is (every? #(= "v1" (:semantic_id_version %)) (vals (:units index-b))))
+    (is (every? #(seq (:semantic_fingerprint %)) (vals (:units index-b))))))
+
+(deftest semantic-id-foundation-fields-are-present-and-stable-across-noop-edits-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-semantic-id-foundation" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        index-a (sci/create-index {:root_path tmp-root})
+        process-a (->> (vals (:units index-a))
+                       (filter #(= "my.app.order/process-order" (:symbol %)))
+                       first)
+        validate-a (->> (vals (:units index-a))
+                        (filter #(= "my.app.order/validate-order" (:symbol %)))
+                        first)
+        _ (write-file! tmp-root
+                       "src/my/app/order.clj"
+                       "(ns my.app.order\n  (:require [clojure.string :as str]))\n\n;; comment-only semantic noop\n(defn process-order [ctx order]\n  (validate-order order)\n  (str/join \"-\" [\"ok\" (:id order)]))\n\n(defn validate-order [order]\n  (if (:id order)\n    order\n    (throw (ex-info \"invalid\" {}))))\n")
+        index-b (sci/update-index index-a {:changed_paths ["src/my/app/order.clj"]})
+        process-b (->> (vals (:units index-b))
+                       (filter #(= "my.app.order/process-order" (:symbol %)))
+                       first)
+        validate-b (->> (vals (:units index-b))
+                        (filter #(= "my.app.order/validate-order" (:symbol %)))
+                        first)]
+    (testing "semantic foundation fields are emitted for normalized units"
+      (is (seq (:semantic_id process-a)))
+      (is (= "v1" (:semantic_id_version process-a)))
+      (is (seq (:semantic_fingerprint process-a)))
+      (is (seq (:language process-a))))
+    (testing "comment-only edits preserve semantic slot identity"
+      (is (= (:semantic_id process-a) (:semantic_id process-b)))
+      (is (= (:semantic_id validate-a) (:semantic_id validate-b))))
+    (testing "no-op edits preserve current implementation fingerprint"
+      (is (= (:semantic_fingerprint process-a) (:semantic_fingerprint process-b)))
+      (is (= (:semantic_fingerprint validate-a) (:semantic_fingerprint validate-b))))))
+
+(deftest legacy-storage-loads-backfill-semantic-id-fields-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-semantic-id-legacy-storage" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage-adapter (sci/in-memory-storage)
+        index (sci/create-index {:root_path tmp-root})
+        legacy-index (-> index
+                         (update :units
+                                 (fn [units]
+                                   (into {}
+                                         (map (fn [[unit-id unit]]
+                                                [unit-id (dissoc unit :semantic_id
+                                                                      :semantic_id_version
+                                                                      :semantic_fingerprint)])
+                                              units)))))
+        _ (storage/init-storage! storage-adapter)
+        _ (storage/save-index! storage-adapter legacy-index)
+        loaded (sci/create-index {:root_path tmp-root
+                                  :storage storage-adapter
+                                  :load_latest true})
+        persisted-units (sci/query-units storage-adapter tmp-root {:snapshot_id (:snapshot_id loaded)
+                                                                   :module "my.app.order"})]
+    (testing "load_latest backfills semantic metadata for legacy snapshots"
+      (is (= (:snapshot_id index) (:snapshot_id loaded)))
+      (is (every? #(seq (:semantic_id %)) (vals (:units loaded))))
+      (is (every? #(= "v1" (:semantic_id_version %)) (vals (:units loaded))))
+      (is (every? #(seq (:semantic_fingerprint %)) (vals (:units loaded)))))
+    (testing "query-units also returns enriched legacy payloads"
+      (is (seq persisted-units))
+      (is (every? #(seq (:semantic_id %)) persisted-units))
+      (is (every? #(= "v1" (:semantic_id_version %)) persisted-units))
+      (is (every? #(seq (:semantic_fingerprint %)) persisted-units)))))
 
 (deftest index-lifecycle-reuse-staleness-and-pinning-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-storage-lifecycle-test" (make-array java.nio.file.attribute.FileAttribute 0)))
