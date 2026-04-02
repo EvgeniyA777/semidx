@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: e1014e591d38348ab4dfaed5789bad8b08e9168f
+- fingerprint: aa0fde3aa278b406cafa2ccbc67a1587c38d1004
 
 ## Tree
 ```text
@@ -70,7 +70,7 @@ semidx
 - semidx.mcp.session-registry
 - semidx.runtime.adapters
 - semidx.runtime.authz
-- ... +28 more
+- ... +29 more
 
 ## Domain Model
 - IndexStorage [protocol]
@@ -102,7 +102,7 @@ semidx
 - semidx.core -> semidx.runtime.retrieval-policy
 - semidx.core -> semidx.runtime.storage
 - semidx.core -> semidx.runtime.usage-metrics
-- ... +191 more
+- ... +196 more
 
 ## Namespaces
 ### semidx.contracts.cli
