@@ -171,13 +171,12 @@
                      :unchanged (get frequencies* :unchanged 0)}
      :total_changes (count changes)}))
 
-(defn snapshot-diff
-  ([index]
-   (snapshot-diff index {}))
-  ([index opts]
-   (let [baseline-index (load-baseline-index index opts)
-         baseline-units (ordered-units baseline-index)
-         current-units (ordered-units index)
+(defn snapshot-diff-between
+  ([baseline-index current-index]
+   (snapshot-diff-between baseline-index current-index {}))
+  ([baseline-index current-index opts]
+   (let [baseline-units (ordered-units baseline-index)
+         current-units (ordered-units current-index)
          baseline-by-slot (group-by :semantic_id baseline-units)
          current-by-slot (group-by :semantic_id current-units)
          same-slot-ids (->> (keys baseline-by-slot)
@@ -227,6 +226,13 @@
          ordered (deterministic-order filtered)]
      {:api_version api-version
       :baseline_snapshot_id (:snapshot_id baseline-index)
-      :current_snapshot_id (:snapshot_id index)
+      :current_snapshot_id (:snapshot_id current-index)
       :summary (summary ordered)
       :changes ordered})))
+
+(defn snapshot-diff
+  ([index]
+   (snapshot-diff index {}))
+  ([index opts]
+   (let [baseline-index (load-baseline-index index opts)]
+     (snapshot-diff-between baseline-index index opts))))

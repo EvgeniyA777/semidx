@@ -209,6 +209,40 @@
       (is (string? (get-in entry [:continuation :selection_id])))
       (is (string? (get-in entry [:continuation :snapshot_id]))))))
 
+(deftest semantic-quality-report-records-usage-event-test
+  (let [baseline-root (str (java.nio.file.Files/createTempDirectory "sci-usage-semantic-quality-base" (make-array java.nio.file.attribute.FileAttribute 0)))
+        current-root (str (java.nio.file.Files/createTempDirectory "sci-usage-semantic-quality-current" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (write-file! baseline-root
+                       "src/my/app/order.clj"
+                       "(ns my.app.order)\n\n(defn process-order [ctx order]\n  (validate-order order))\n\n(defn validate-order [order]\n  order)\n")
+        _ (write-file! current-root
+                       "src/my/app/order.clj"
+                       "(ns my.app.order)\n\n(defn process-order [ctx order]\n  (let [validated (validate-order order)]\n    validated))\n\n(defn validate-order [order]\n  order)\n")
+        sink (sci/in-memory-usage-metrics)
+        baseline-index (sci/create-index {:root_path baseline-root})
+        current-index (sci/create-index {:root_path current-root
+                                         :usage_metrics sink
+                                         :usage_context {:session_id "session-semantic-quality"}})
+        report (sci/semantic-quality-report current-index
+                                            {:baseline_index baseline-index
+                                             :expected_changes [{:change_type "implementation_changed"
+                                                                 :path "src/my/app/order.clj"
+                                                                 :symbol "my.app.order/process-order"}]})
+        semantic-event (last (filter #(= "semantic_quality_report" (:operation %))
+                                     (usage/emitted-events sink)))]
+    (testing "semantic quality report returns aggregated metrics"
+      (is (= 1 (get-in report [:summary :expected_changes])))
+      (is (= 1 (get-in report [:summary :exact_matches])))
+      (is (= 1.0 (get-in report [:summary :metrics :expected_change_match_rate]))))
+    (testing "semantic quality report emits a dedicated usage event"
+      (is (= "semantic_quality_report" (:operation semantic-event)))
+      (is (= "success" (:status semantic-event)))
+      (is (= "session-semantic-quality" (:session_id semantic-event)))
+      (is (= 1 (get-in semantic-event [:payload :expected_changes])))
+      (is (= 1.0 (get-in semantic-event [:payload :identity_stability_rate])))
+      (is (= 1.0 (get-in semantic-event [:payload :implementation_vs_meaning_accuracy])))
+      (is (true? (get-in semantic-event [:payload :eligible?]))))))
+
 (deftest slo-report-aggregates-operational-metrics-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-usage-metrics-slo" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)

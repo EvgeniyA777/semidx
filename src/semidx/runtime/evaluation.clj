@@ -5,6 +5,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [semidx.core :as sci]
+            [semidx.runtime.semantic-quality :as semantic-quality]
             [semidx.runtime.retrieval-policy :as rp]))
 
 (def ^:private confidence-rank {"low" 0 "medium" 1 "high" 2})
@@ -1451,6 +1452,33 @@
      :phase5_index (:index phase5-index-write)
      :manifest manifest-data}))
 
+(defn semantic-quality-report-from-dataset [{:keys [cases parser_opts thresholds review_case_limit]}]
+  (let [global-parser-opts parser_opts
+        prepared-cases
+        (mapv (fn [{:keys [case_id baseline_root current_root expected_changes paths include_unchanged? parser_opts]
+                    :as case}]
+                (when-not (and baseline_root current_root)
+                  (throw (ex-info "semantic quality cases require baseline_root and current_root"
+                                  {:type :invalid_request
+                                   :message "semantic quality cases require baseline_root and current_root"
+                                   :case_id case_id})))
+                (let [parser-opts* (or parser_opts global-parser-opts)
+                      baseline-index (sci/create-index {:root_path baseline_root
+                                                        :parser_opts parser-opts*})
+                      current-index (sci/create-index {:root_path current_root
+                                                       :parser_opts parser-opts*})]
+                  (cond-> {:case_id (or case_id
+                                        (str baseline_root "->" current_root))
+                            :baseline_index baseline-index
+                            :current_index current-index
+                            :expected_changes expected_changes}
+                    (seq paths) (assoc :paths paths)
+                    (contains? case :include_unchanged?) (assoc :include_unchanged? include_unchanged?))))
+              cases)]
+    (semantic-quality/semantic-quality-report {:cases prepared-cases
+                                               :thresholds thresholds
+                                               :review_case_limit review_case_limit})))
+
 (defn- parse-bool [value]
   (contains? #{"1" "true" "yes" "on"} (str/lower-case (str (or value "")))))
 
@@ -1663,6 +1691,15 @@
     (print-or-write! out_path result)
     (System/exit 0)))
 
+(defn- run-semantic-quality-report-command [{:keys [dataset_path out_path]}]
+  (when-not dataset_path
+    (println "Usage: clojure -M:eval semantic-quality-report --dataset <quality-dataset.json> [--out <output.json>]")
+    (System/exit 1))
+  (let [dataset (read-json dataset_path)
+        result (semantic-quality-report-from-dataset dataset)]
+    (print-or-write! out_path result)
+    (System/exit (if (get-in result [:gate_decision :eligible?]) 0 1))))
+
 (defn- run-policy-review-pipeline-command [{:keys [root_path usage_metrics_jdbc_url registry_path surface tenant_id since out_path write_registry]}]
   (when-not (and root_path usage_metrics_jdbc_url registry_path)
     (println "Usage: clojure -M:eval policy-review-pipeline --root <repo-root> --usage-metrics-jdbc-url <jdbc-url> --registry <registry.edn> [--surface <surface>] [--tenant-id <tenant>] [--since <iso-timestamp>] [--write-registry] [--out <output.json>]")
@@ -1801,6 +1838,7 @@
       "calibration-report" (run-calibration-report-command (parse-args rest-args))
       "weekly-review-report" (run-weekly-review-report-command (parse-args rest-args))
       "protected-replay-dataset" (run-protected-replay-dataset-command (parse-args rest-args))
+      "semantic-quality-report" (run-semantic-quality-report-command (parse-args rest-args))
       "policy-review-pipeline" (run-policy-review-pipeline-command (parse-args rest-args))
       "scheduled-policy-review" (run-scheduled-policy-review-command (parse-args rest-args))
       "scheduled-governance-cycle" (run-scheduled-governance-cycle-command (parse-args rest-args))

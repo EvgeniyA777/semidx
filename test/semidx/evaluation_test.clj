@@ -54,3 +54,51 @@
       (is (= 1 (:passed_queries result)))
       (is (zero? (:failed_queries result)))
       (is (= "heuristic_v1" (get-in result [:results 0 :retrieval_policy :policy_id]))))))
+
+(deftest semantic-quality-report-from-dataset-test
+  (let [impl-baseline (str (java.nio.file.Files/createTempDirectory "sci-semantic-quality-impl-base" (make-array java.nio.file.attribute.FileAttribute 0)))
+        impl-current (str (java.nio.file.Files/createTempDirectory "sci-semantic-quality-impl-current" (make-array java.nio.file.attribute.FileAttribute 0)))
+        rename-baseline (str (java.nio.file.Files/createTempDirectory "sci-semantic-quality-rename-base" (make-array java.nio.file.attribute.FileAttribute 0)))
+        rename-current (str (java.nio.file.Files/createTempDirectory "sci-semantic-quality-rename-current" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (write-file! impl-baseline
+                       "src/my/app/order.clj"
+                       "(ns my.app.order)\n\n(defn process-order [ctx order]\n  (validate-order order))\n\n(defn validate-order [order]\n  order)\n")
+        _ (write-file! impl-current
+                       "src/my/app/order.clj"
+                       "(ns my.app.order)\n\n(defn process-order [ctx order]\n  (let [validated (validate-order order)]\n    validated))\n\n(defn validate-order [order]\n  order)\n")
+        _ (write-file! rename-baseline
+                       "src/my/app/order.clj"
+                       "(ns my.app.order)\n\n(defn process-order [ctx order]\n  order)\n")
+        _ (write-file! rename-current
+                       "src/my/app/checkout.clj"
+                       "(ns my.app.checkout)\n\n(defn process-order [ctx order]\n  order)\n")
+        report (evaluation/semantic-quality-report-from-dataset
+                {:thresholds {:identity_stability_rate 1.0
+                              :move_rename_recovery_rate 1.0
+                              :implementation_vs_meaning_accuracy 1.0
+                              :expected_change_match_rate 1.0
+                              :unmatched_rate 0.0}
+                 :cases [{:case_id "implementation-change"
+                          :baseline_root impl-baseline
+                          :current_root impl-current
+                          :expected_changes [{:change_type "implementation_changed"
+                                              :path "src/my/app/order.clj"
+                                              :symbol "my.app.order/process-order"}]}
+                         {:case_id "rename-recovery"
+                          :baseline_root rename-baseline
+                          :current_root rename-current
+                          :expected_changes [{:change_type "moved_or_renamed"
+                                              :baseline_path "src/my/app/order.clj"
+                                              :path "src/my/app/checkout.clj"}]}]})]
+    (testing "semantic quality report aggregates fixture cases"
+      (is (= 2 (get-in report [:summary :cases])))
+      (is (= 2 (get-in report [:summary :expected_changes])))
+      (is (= 2 (get-in report [:summary :exact_matches])))
+      (is (= 1.0 (get-in report [:summary :metrics :expected_change_match_rate])))
+      (is (= 1.0 (get-in report [:summary :metrics :identity_stability_rate])))
+      (is (= 1.0 (get-in report [:summary :metrics :move_rename_recovery_rate])))
+      (is (= 1.0 (get-in report [:summary :metrics :implementation_vs_meaning_accuracy])))
+      (is (= 0.0 (get-in report [:summary :metrics :unmatched_rate]))))
+    (testing "quality gate passes when thresholds are met"
+      (is (true? (get-in report [:gate_decision :eligible?])))
+      (is (every? :passed? (get-in report [:gate_decision :checks]))))))

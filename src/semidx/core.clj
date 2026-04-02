@@ -5,6 +5,7 @@
             [semidx.runtime.literal-slice :as literal-slice]
             [semidx.runtime.retrieval :as retrieval]
             [semidx.runtime.retrieval-policy :as rp]
+            [semidx.runtime.semantic-quality :as semantic-quality]
             [semidx.runtime.snapshot-diff :as snapshot-diff]
             [semidx.runtime.storage :as storage]
             [semidx.runtime.usage-metrics :as usage]))
@@ -434,6 +435,71 @@
             sink
             (merge usage-context
                    {:operation "snapshot_diff"
+                    :status "error"
+                    :latency_ms (- (now-ms) start-ms)
+                    :root_path_hash (usage/hash-root-path (:root_path index))
+                    :payload (error-payload e)})))
+         (throw (errors/normalize-exception e)))))))
+
+(defn semantic-quality-report
+  "Evaluate semantic diff quality against expected change fixtures.
+
+  Options:
+  - :baseline_index optional already-built baseline index
+  - :baseline_snapshot_id optional baseline snapshot id when loading via storage
+  - :storage optional storage adapter for baseline snapshot loading
+  - :paths optional path filter passed through to snapshot diff
+  - :include_unchanged? optional inclusion of unchanged changes
+  - :expected_changes vector of expected change descriptors
+  - :thresholds optional quality gate thresholds
+  - :review_case_limit optional mismatch sample cap"
+  ([index]
+   (semantic-quality-report index {}))
+  ([index opts]
+   (let [sink (resolve-usage-metrics index opts)
+         usage-context (resolve-usage-context index opts)
+         case-config (cond-> {:current_index index
+                              :expected_changes (:expected_changes opts)}
+                       (:baseline_index opts) (assoc :baseline_index (:baseline_index opts))
+                       (:baseline_snapshot_id opts) (assoc :baseline_snapshot_id (:baseline_snapshot_id opts))
+                       (:storage opts) (assoc :storage (:storage opts))
+                       (and (nil? (:storage opts))
+                            (:storage_adapter (meta index)))
+                       (assoc :storage (:storage_adapter (meta index)))
+                       (seq (:paths opts)) (assoc :paths (:paths opts))
+                       (contains? opts :include_unchanged?) (assoc :include_unchanged? (:include_unchanged? opts))
+                       (:case_id opts) (assoc :case_id (:case_id opts)))
+         report-opts (cond-> {:cases [case-config]}
+                       (:thresholds opts) (assoc :thresholds (:thresholds opts))
+                       (:review_case_limit opts) (assoc :review_case_limit (:review_case_limit opts)))
+         start-ms (now-ms)]
+     (try
+       (let [result (semantic-quality/semantic-quality-report report-opts)]
+         (when (should-record-usage? sink opts)
+           (usage/safe-record-event!
+            sink
+            (merge usage-context
+                   {:operation "semantic_quality_report"
+                    :status "success"
+                    :latency_ms (- (now-ms) start-ms)
+                    :root_path_hash (usage/hash-root-path (:root_path index))
+                    :payload {:current_snapshot_id (:snapshot_id index)
+                              :expected_changes (get-in result [:summary :expected_changes])
+                              :exact_matches (get-in result [:summary :exact_matches])
+                              :unexpected_actual_changes (get-in result [:summary :unexpected_actual_changes])
+                              :identity_stability_rate (get-in result [:summary :metrics :identity_stability_rate])
+                              :move_rename_recovery_rate (get-in result [:summary :metrics :move_rename_recovery_rate])
+                              :implementation_vs_meaning_accuracy (get-in result [:summary :metrics :implementation_vs_meaning_accuracy])
+                              :expected_change_match_rate (get-in result [:summary :metrics :expected_change_match_rate])
+                              :unmatched_rate (get-in result [:summary :metrics :unmatched_rate])
+                              :eligible? (get-in result [:gate_decision :eligible?])}})))
+         result)
+       (catch Exception e
+         (when (should-record-usage? sink opts)
+           (usage/safe-record-event!
+            sink
+            (merge usage-context
+                   {:operation "semantic_quality_report"
                     :status "error"
                     :latency_ms (- (now-ms) start-ms)
                     :root_path_hash (usage/hash-root-path (:root_path index))
