@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: b709a08b230e3d0599847800f07ee284060e3655
+- fingerprint: f342a126a55ad42b4efba40cc2172d8536e78531
 
 ## Tree
 ```text
@@ -70,7 +70,7 @@ semidx
 - semidx.mcp.session-registry
 - semidx.runtime.adapters
 - semidx.runtime.authz
-- ... +30 more
+- ... +31 more
 
 ## Domain Model
 - IndexStorage [protocol]
@@ -100,9 +100,9 @@ semidx
 - semidx.core -> semidx.runtime.literal-slice
 - semidx.core -> semidx.runtime.retrieval
 - semidx.core -> semidx.runtime.retrieval-policy
+- semidx.core -> semidx.runtime.semantic-quality
 - semidx.core -> semidx.runtime.snapshot-diff
-- semidx.core -> semidx.runtime.storage
-- ... +204 more
+- ... +208 more
 
 ## Namespaces
 ### semidx.contracts.cli
@@ -139,8 +139,8 @@ semidx
 - schema-key-for-path [function]
 ### semidx.core
 - path: src/semidx/core.clj
-- requires: semidx.runtime.compression, semidx.runtime.errors, semidx.runtime.index, semidx.runtime.literal-slice, semidx.runtime.retrieval, semidx.runtime.retrieval-policy, semidx.runtime.snapshot-diff, semidx.runtime.storage, semidx.runtime.usage-metrics
-- aliases: compression -> semidx.runtime.compression, errors -> semidx.runtime.errors, idx -> semidx.runtime.index, literal-slice -> semidx.runtime.literal-slice, retrieval -> semidx.runtime.retrieval, rp -> semidx.runtime.retrieval-policy, snapshot-diff -> semidx.runtime.snapshot-diff, storage -> semidx.runtime.storage, usage -> semidx.runtime.usage-metrics
+- requires: semidx.runtime.compression, semidx.runtime.errors, semidx.runtime.index, semidx.runtime.literal-slice, semidx.runtime.retrieval, semidx.runtime.retrieval-policy, semidx.runtime.semantic-quality, semidx.runtime.snapshot-diff, semidx.runtime.storage, semidx.runtime.usage-metrics
+- aliases: compression -> semidx.runtime.compression, errors -> semidx.runtime.errors, idx -> semidx.runtime.index, literal-slice -> semidx.runtime.literal-slice, retrieval -> semidx.runtime.retrieval, rp -> semidx.runtime.retrieval-policy, semantic-quality -> semidx.runtime.semantic-quality, snapshot-diff -> semidx.runtime.snapshot-diff, storage -> semidx.runtime.storage, usage -> semidx.runtime.usage-metrics
 - symbols:
 - now-ms [function]
 - attach-runtime-context [function]
