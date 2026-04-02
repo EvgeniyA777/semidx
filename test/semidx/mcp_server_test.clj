@@ -357,6 +357,8 @@
             (is (seq (:files repo-map-data)))
             (is (map? (:index_lifecycle repo-map-data)))
             (is (string? (:summary repo-map-data)))
+            (is (= "structural" (:projection_profile repo-map-data)))
+            (is (= "selection" (:recommended_projection_profile repo-map-data)))
             (is (= "resolve_context" (:recommended_next_step repo-map-data)))))
 
         (testing "resolve_context returns compact selection"
@@ -379,6 +381,8 @@
                    (get-in resolve-data [:compact_continuation :next_tool])))
             (is (= ["expand_context" "fetch_context_detail"]
                    (get-in resolve-data [:next_step :available_actions])))
+            (is (= "selection" (:projection_profile resolve-data)))
+            (is (= "api_shape" (:recommended_projection_profile resolve-data)))
             (is (some #(= "my.app.order/process-order" (:symbol %))
                       (:focus resolve-data)))))
 
@@ -476,6 +480,8 @@
             (is (= index-id (:index_id expand-data)))
             (is (seq (:skeletons expand-data)))
             (is (map? (:impact_hints expand-data)))
+            (is (= "api_shape" (:projection_profile expand-data)))
+            (is (= "detail" (:recommended_projection_profile expand-data)))
             (is (= "fetch_context_detail" (:recommended_next_step expand-data)))
             (is (= "fetch_context_detail"
                    (get-in expand-data [:compact_continuation :next_tool])))
@@ -487,6 +493,8 @@
             (is (map? (:context_packet detail-data)))
             (is (map? (:guardrail_assessment detail-data)))
             (is (vector? (:stage_events detail-data)))
+            (is (= "detail" (:projection_profile detail-data)))
+            (is (nil? (:recommended_projection_profile detail-data)))
             (is (= "resolve_context" (:recommended_next_step detail-data)))
             (is (= "resolve_context"
                    (get-in detail-data [:compact_continuation :next_tool])))
@@ -524,6 +532,7 @@
             (is (= (:index_id rebuilt-data) (:index_id diff-data)))
             (is (= baseline-snapshot-id (:baseline_snapshot_id diff-data)))
             (is (= (:snapshot_id rebuilt-data) (:current_snapshot_id diff-data)))
+            (is (= "diff" (:projection_profile diff-data)))
             (is (= 1 (get-in diff-data [:summary :change_counts :added])))
             (is (= 1 (get-in diff-data [:summary :total_changes])))
             (is (= "added" (get-in diff-data [:changes 0 :change_type])))
@@ -542,7 +551,9 @@
                                                                      :paths ["src/my/app/order.clj"]})
                 skeletons-data (get-in skeletons-response [:result :structuredContent])]
             (is (= index-id (:index_id skeletons-data)))
-            (is (seq (:skeletons skeletons-data)))))
+            (is (seq (:skeletons skeletons-data)))
+            (is (= "api_shape" (:projection_profile skeletons-data)))
+            (is (= "detail" (:recommended_projection_profile skeletons-data)))))
 
         (testing "force_rebuild returns a new handle"
           (let [rebuild-response (call-tool! handle 9 "create_index" {:root_path tmp-root

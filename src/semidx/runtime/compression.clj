@@ -2,7 +2,8 @@
   (:require [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [semidx.runtime.projections :as projections])
   (:import [java.math BigInteger]
            [java.security MessageDigest]
            [java.nio.charset StandardCharsets]))
@@ -360,10 +361,13 @@
                    :domain_model domain-model
                    :namespace_categories (category-map namespaces)}]
      (let [summary (summary-lines artifact)]
-       (assoc artifact
-              :summary_lines summary
-              :summary_markdown (render-markdown (assoc artifact :summary_lines summary))
-              :dependency_graph_dot (render-dot artifact))))))
+       (projections/with-projection
+        (assoc artifact
+               :summary_lines summary
+               :summary_markdown (render-markdown (assoc artifact :summary_lines summary))
+               :dependency_graph_dot (render-dot artifact))
+        :summary
+        :selection)))))
 
 (defn compression-drift-report
   ([index] (compression-drift-report index {}))

@@ -858,8 +858,10 @@
       (invalid-request "skeletons requires paths or unit_ids"))
     (let [skeletons (sci/skeletons (:index entry) selector {:suppress_usage_metrics true})]
       (with-usage-event
-        {:index_id (:index_id entry)
-         :skeletons skeletons}
+        (merge {:index_id (:index_id entry)
+                :skeletons skeletons}
+               (select-keys (meta skeletons)
+                            [:projection_profile :recommended_projection_profile]))
         {:root_path_hash (usage/hash-root-path (:root_path entry))
          :payload {:index_id (:index_id entry)
                    :skeleton_count (count skeletons)

@@ -1,5 +1,8 @@
 (ns semidx.evaluation-test
-  (:require [clojure.java.io :as io]
+  (:require [clojure.data.json :as json]
+            [clojure.java.io :as io]
+            [clojure.java.shell :as sh]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [semidx.runtime.evaluation :as evaluation]))
 
@@ -102,3 +105,37 @@
     (testing "quality gate passes when thresholds are met"
       (is (true? (get-in report [:gate_decision :eligible?])))
       (is (every? :passed? (get-in report [:gate_decision :checks]))))))
+
+(deftest semantic-quality-advisory-fixture-dataset-test
+  (let [dataset (json/read-str (slurp "fixtures/semantic-quality/report-dataset.json") :key-fn keyword)
+        report (evaluation/semantic-quality-report-from-dataset dataset)]
+    (testing "fixture corpus is deterministic and intentionally advisory-failing"
+      (is (= 6 (get-in report [:summary :cases])))
+      (is (false? (get-in report [:gate_decision :eligible?])))
+      (is (pos? (get-in report [:summary :classification_mismatches])))
+      (is (some #(= :move_rename_recovery_rate (:metric %))
+                (get-in report [:gate_decision :checks]))))
+    (testing "review samples surface the intentional mismatch"
+      (is (seq (get-in report [:cases 5 :review_samples :classification_mismatches]))))))
+
+(deftest semantic-quality-advisory-runner-script-test
+  (let [tmp-dir (str (java.nio.file.Files/createTempDirectory "sci-semantic-quality-runner" (make-array java.nio.file.attribute.FileAttribute 0)))
+        out-path (str tmp-dir "/semantic-quality-report.json")
+        summary-path (str tmp-dir "/semantic-quality-report-summary.md")
+        {:keys [exit out err]} (sh/sh "bash"
+                                      "scripts/run-semantic-quality-report.sh"
+                                      "fixtures/semantic-quality/report-dataset.json"
+                                      out-path
+                                      summary-path
+                                      :dir (.getCanonicalPath (io/file ".")))
+        report (json/read-str (slurp out-path) :key-fn keyword)
+        summary (slurp summary-path)]
+    (testing "runner succeeds in report-only mode"
+      (is (zero? exit))
+      (is (false? (get-in report [:gate_decision :eligible?])))
+      (is (str/includes? out "semantic_quality_gate=advisory_failure"))
+      (is (str/blank? err)))
+    (testing "runner writes a concise markdown summary"
+      (is (str/includes? summary "Semantic Quality Report"))
+      (is (str/includes? summary "gate_eligible"))
+      (is (str/includes? summary "expected_change_match_rate")))))

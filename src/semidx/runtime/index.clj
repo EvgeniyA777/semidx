@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [semidx.runtime.adapters :as adapters]
             [semidx.runtime.language-activation :as activation]
+            [semidx.runtime.projections :as projections]
             [semidx.runtime.semantic-id :as semantic-id]
             [semidx.runtime.storage :as storage]))
 
@@ -629,9 +630,12 @@
                       sort
                       (take max_modules)
                       vec)]
-     {:snapshot_id (:snapshot_id index)
-      :indexed_at (:indexed_at index)
-      :index_lifecycle (:index_lifecycle index)
-      :files files
-      :modules modules
-      :summary (str "Indexed " (count (:files index)) " files and " (count (:units index)) " units.")})))
+     (projections/with-projection
+      {:snapshot_id (:snapshot_id index)
+       :indexed_at (:indexed_at index)
+       :index_lifecycle (:index_lifecycle index)
+       :files files
+       :modules modules
+       :summary (str "Indexed " (count (:files index)) " files and " (count (:units index)) " units.")}
+      :structural
+      :selection))))

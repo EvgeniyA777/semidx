@@ -5,6 +5,7 @@
             [malli.error :as me]
             [semidx.contracts.schemas :as contracts]
             [semidx.runtime.index :as idx]
+            [semidx.runtime.projections :as projections]
             [semidx.runtime.retrieval-policy :as rp]))
 
 (defn- now-iso []
@@ -1000,14 +1001,17 @@
                    :result_status status}]
     (put-selection! index selection)
     (with-meta
-      {:api_version default-api-version
-       :selection_id selection-id
-       :snapshot_id (:snapshot_id index)
-       :result_status status
-       :confidence_level (:level confidence)
-       :budget_summary (:budget selection)
-       :focus (mapv compact-focus-unit focus)
-       :next_step (next-step status focus confidence)}
+      (projections/with-projection
+       {:api_version default-api-version
+        :selection_id selection-id
+        :snapshot_id (:snapshot_id index)
+        :result_status status
+        :confidence_level (:level confidence)
+        :budget_summary (:budget selection)
+        :focus (mapv compact-focus-unit focus)
+        :next_step (next-step status focus confidence)}
+       :selection
+       :api-shape)
       {:retrieval_policy (rp/policy-summary policy)
        :capabilities capabilities
        :confidence confidence})))
@@ -1218,14 +1222,16 @@
       (throw (ex-info "invalid context packet generated" {:type :internal_contract_error :errors (me/humanize explain)})))
     (when-let [explain (m/explain (:example/diagnostics-trace contracts/contracts) diagnostics)]
       (throw (ex-info "invalid diagnostics trace generated" {:type :internal_contract_error :errors (me/humanize explain)})))
-    {:api_version default-api-version
-     :selection_id (:selection_id selection)
-     :snapshot_id (:snapshot_id selection)
-     :raw_context (:raw_context raw-fetch)
-     :context_packet context-packet
-     :guardrail_assessment guardrails
-     :diagnostics_trace diagnostics
-     :stage_events events}))
+    (projections/with-projection
+     {:api_version default-api-version
+      :selection_id (:selection_id selection)
+      :snapshot_id (:snapshot_id selection)
+      :raw_context (:raw_context raw-fetch)
+      :context_packet context-packet
+      :guardrail_assessment guardrails
+      :diagnostics_trace diagnostics
+      :stage_events events}
+     :detail)))
 
 (defn resolve-context
   ([index query]
@@ -1273,17 +1279,20 @@
          returned (+ (:used_tokens skeleton-fit)
                      (if include-impact? impact-tokens 0))
          result-status (stage-result-status selected-source selected truncation-flags)]
-     {:api_version default-api-version
-      :selection_id selection_id
-      :snapshot_id snapshot_id
-      :result_status result-status
-      :budget_summary {:reserved_tokens expansion-budget
-                       :estimated_tokens estimated
-                       :returned_tokens returned
-                       :within_budget (<= estimated expansion-budget)
-                       :truncation_flags truncation-flags}
-      :skeletons (mapv compact-skeleton selected)
-      :impact_hints impact})))
+     (projections/with-projection
+      {:api_version default-api-version
+       :selection_id selection_id
+       :snapshot_id snapshot_id
+       :result_status result-status
+       :budget_summary {:reserved_tokens expansion-budget
+                        :estimated_tokens estimated
+                        :returned_tokens returned
+                        :within_budget (<= estimated expansion-budget)
+                        :truncation_flags truncation-flags}
+       :skeletons (mapv compact-skeleton selected)
+       :impact_hints impact}
+      :api-shape
+      :detail))))
 
 (defn fetch-context-detail
   ([index selector]
@@ -1313,4 +1322,5 @@
                 (seq unit_ids) (idx/units-by-ids index unit_ids)
                 (seq paths) (->> paths (mapcat #(idx/units-for-path index %)) distinct vec)
                 :else (->> (idx/all-units index) (take 20) vec))]
-    (mapv compact-skeleton units)))
+    (with-meta (mapv compact-skeleton units)
+      (projections/projection-meta :api-shape :detail))))

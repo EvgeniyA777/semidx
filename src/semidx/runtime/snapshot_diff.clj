@@ -1,6 +1,7 @@
 (ns semidx.runtime.snapshot-diff
   (:require [clojure.string :as str]
             [semidx.runtime.index :as idx]
+            [semidx.runtime.projections :as projections]
             [semidx.runtime.semantic-id :as semantic-id]
             [semidx.runtime.storage :as storage]))
 
@@ -224,11 +225,13 @@
                        vec)
          filtered (filter-changes-by-paths changes* paths)
          ordered (deterministic-order filtered)]
-     {:api_version api-version
-      :baseline_snapshot_id (:snapshot_id baseline-index)
-      :current_snapshot_id (:snapshot_id current-index)
-      :summary (summary ordered)
-      :changes ordered})))
+     (projections/with-projection
+      {:api_version api-version
+       :baseline_snapshot_id (:snapshot_id baseline-index)
+       :current_snapshot_id (:snapshot_id current-index)
+       :summary (summary ordered)
+       :changes ordered}
+      :diff))))
 
 (defn snapshot-diff
   ([index]

@@ -1381,6 +1381,48 @@
     (is (= 400 (:line_count result)))
     (is (= {:start_line 2 :end_line 401} (:returned_range result)))))
 
+(deftest projection-profile-rollout-is-additive-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-projection-profile-rollout" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! tmp-root)
+        storage-adapter (sci/in-memory-storage)
+        baseline (sci/create-index {:root_path tmp-root
+                                    :storage storage-adapter})
+        repo-map (sci/repo-map baseline)
+        compression (sci/compress-project baseline)
+        selection (sci/resolve-context baseline sample-query)
+        expansion (sci/expand-context baseline {:selection_id (:selection_id selection)
+                                                :snapshot_id (:snapshot_id selection)})
+        detail (sci/fetch-context-detail baseline {:selection_id (:selection_id selection)
+                                                   :snapshot_id (:snapshot_id selection)})
+        detail-one-shot (sci/resolve-context-detail baseline sample-query)
+        skeletons (sci/skeletons baseline {:paths ["src/my/app/order.clj"]})
+        _ (write-file! tmp-root
+                       "src/my/app/order.clj"
+                       "(ns my.app.order\n  (:require [clojure.string :as str]))\n\n(defn process-order [ctx order]\n  (let [validated (validate-order order)]\n    (str/join \"-\" [\"ok\" (:id validated)])))\n\n(defn validate-order [order]\n  (if (:id order)\n    order\n    (throw (ex-info \"invalid\" {}))))\n")
+        updated (sci/create-index {:root_path tmp-root
+                                   :storage storage-adapter})
+        diff (sci/snapshot-diff updated {:baseline_snapshot_id (:snapshot_id baseline)})]
+    (testing "map-returning surfaces expose projection metadata directly"
+      (is (= "structural" (:projection_profile repo-map)))
+      (is (= "selection" (:recommended_projection_profile repo-map)))
+      (is (= "summary" (:projection_profile compression)))
+      (is (= "selection" (:recommended_projection_profile compression)))
+      (is (= "selection" (:projection_profile selection)))
+      (is (= "api_shape" (:recommended_projection_profile selection)))
+      (is (= "api_shape" (:projection_profile expansion)))
+      (is (= "detail" (:recommended_projection_profile expansion)))
+      (is (= "detail" (:projection_profile detail)))
+      (is (nil? (:recommended_projection_profile detail)))
+      (is (= "detail" (:projection_profile detail-one-shot)))
+      (is (nil? (:recommended_projection_profile detail-one-shot)))
+      (is (= "diff" (:projection_profile diff)))
+      (is (nil? (:recommended_projection_profile diff))))
+    (testing "vector-returning skeletons remain backward-compatible via metadata"
+      (is (vector? skeletons))
+      (is (seq skeletons))
+      (is (= "api_shape" (:projection_profile (meta skeletons))))
+      (is (= "detail" (:recommended_projection_profile (meta skeletons)))))))
+
 (deftest selection-cache-eviction-surfaces-explicit-error-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-selection-eviction" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
