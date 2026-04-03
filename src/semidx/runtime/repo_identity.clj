@@ -25,14 +25,6 @@
 (defn normalize-remote-url [remote-url]
   (when-let [remote* (trim-to-nil remote-url)]
     (or
-     (when-let [[_ host path] (re-matches #"(?i)(?:ssh://)?(?:[^@]+@)?([^:\/]+):/?(.+)" remote*)]
-       (let [path* (-> path
-                       trim-to-nil
-                       strip-git-suffix
-                       (str/replace #"^/+" "")
-                       (str/replace #"/+$" ""))]
-         (when (and (seq host) (seq path*))
-           (str (str/lower-case host) "/" path*))))
      (try
        (let [uri (URI. remote*)
              host (some-> (.getHost uri) str/lower-case)
@@ -44,7 +36,15 @@
          (when (and (seq host) (seq path))
            (str host "/" path)))
        (catch Exception _
-         nil)))))
+         nil))
+     (when-let [[_ host path] (re-matches #"(?i)(?:[^@]+@)?([^:\/]+):/?(.+)" remote*)]
+       (let [path* (-> path
+                       trim-to-nil
+                       strip-git-suffix
+                       (str/replace #"^/+" "")
+                       (str/replace #"/+$" ""))]
+         (when (and (seq host) (seq path*))
+           (str (str/lower-case host) "/" path*)))))))
 
 (defn- run-git [root-path & args]
   (apply sh/sh "git" "-C" root-path args))

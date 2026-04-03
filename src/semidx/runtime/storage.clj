@@ -136,6 +136,67 @@
 (defn- resolve-snapshot-id [datasource root-path snapshot-id]
   (or snapshot-id (latest-snapshot-id datasource root-path)))
 
+(defn- save-index-tx! [tx index]
+  (jdbc/execute! tx
+                 ["insert into semantic_index_snapshots(root_path, snapshot_id, repo_key, workspace_path, workspace_key, git_branch, git_commit, git_dirty, identity_source, payload)
+                   values (?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb))
+                   on conflict (root_path, snapshot_id)
+                   do update set
+                     repo_key = excluded.repo_key,
+                     workspace_path = excluded.workspace_path,
+                     workspace_key = excluded.workspace_key,
+                     git_branch = excluded.git_branch,
+                     git_commit = excluded.git_commit,
+                     git_dirty = excluded.git_dirty,
+                     identity_source = excluded.identity_source,
+                     payload = excluded.payload,
+                     indexed_at = now()"
+                  (:root_path index)
+                  (:snapshot_id index)
+                  (:repo_key index)
+                  (:workspace_path index)
+                  (:workspace_key index)
+                  (:git_branch index)
+                  (:git_commit index)
+                  (:git_dirty index)
+                  (:identity_source index)
+                  (->json index)])
+  (jdbc/execute! tx
+                 ["delete from semantic_index_units where root_path = ? and snapshot_id = ?"
+                  (:root_path index)
+                  (:snapshot_id index)])
+  (jdbc/execute! tx
+                 ["delete from semantic_index_call_edges where root_path = ? and snapshot_id = ?"
+                  (:root_path index)
+                  (:snapshot_id index)])
+  (doseq [u (ordered-units index)]
+    (jdbc/execute! tx
+                   ["insert into semantic_index_units
+                     (root_path, snapshot_id, unit_id, semantic_id, semantic_id_version, semantic_fingerprint, path, module, symbol, kind, start_line, end_line, parser_mode, payload)
+                     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb))"
+                    (:root_path index)
+                    (:snapshot_id index)
+                    (:unit_id u)
+                    (:semantic_id u)
+                    (:semantic_id_version u)
+                    (:semantic_fingerprint u)
+                    (:path u)
+                    (:module u)
+                    (:symbol u)
+                    (:kind u)
+                    (:start_line u)
+                    (:end_line u)
+                    (:parser_mode u)
+                    (->json u)]))
+  (doseq [{:keys [caller callee]} (call-edge-rows index)]
+    (jdbc/execute! tx
+                   ["insert into semantic_index_call_edges(root_path, snapshot_id, caller_unit_id, callee_unit_id)
+                     values (?, ?, ?, ?)"
+                    (:root_path index)
+                    (:snapshot_id index)
+                    caller
+                    callee])))
+
 (defrecord PostgresStorage [datasource]
   IndexStorage
   (init-storage! [_]
@@ -144,12 +205,49 @@
                        id bigserial primary key,
                        root_path text not null,
                        snapshot_id text not null,
+                       repo_key text,
+                       workspace_path text,
+                       workspace_key text,
+                       git_branch text,
+                       git_commit text,
+                       git_dirty boolean,
+                       identity_source text,
                        indexed_at timestamptz not null default now(),
                        payload jsonb not null
                      )"])
     (jdbc/execute! datasource
+                   ["alter table semantic_index_snapshots
+                     add column if not exists repo_key text"])
+    (jdbc/execute! datasource
+                   ["alter table semantic_index_snapshots
+                     add column if not exists workspace_path text"])
+    (jdbc/execute! datasource
+                   ["alter table semantic_index_snapshots
+                     add column if not exists workspace_key text"])
+    (jdbc/execute! datasource
+                   ["alter table semantic_index_snapshots
+                     add column if not exists git_branch text"])
+    (jdbc/execute! datasource
+                   ["alter table semantic_index_snapshots
+                     add column if not exists git_commit text"])
+    (jdbc/execute! datasource
+                   ["alter table semantic_index_snapshots
+                     add column if not exists git_dirty boolean"])
+    (jdbc/execute! datasource
+                   ["alter table semantic_index_snapshots
+                     add column if not exists identity_source text"])
+    (jdbc/execute! datasource
                    ["create index if not exists idx_semantic_index_snapshots_root_path_id
                      on semantic_index_snapshots(root_path, id desc)"])
+    (jdbc/execute! datasource
+                   ["create index if not exists idx_semantic_index_snapshots_repo_key_id
+                     on semantic_index_snapshots(repo_key, id desc)"])
+    (jdbc/execute! datasource
+                   ["create index if not exists idx_semantic_index_snapshots_repo_branch_id
+                     on semantic_index_snapshots(repo_key, git_branch, id desc)"])
+    (jdbc/execute! datasource
+                   ["create index if not exists idx_semantic_index_snapshots_repo_commit
+                     on semantic_index_snapshots(repo_key, git_commit)"])
     (jdbc/execute! datasource
                    ["create unique index if not exists uq_semantic_index_snapshots_root_snapshot
                      on semantic_index_snapshots(root_path, snapshot_id)"])
@@ -203,49 +301,7 @@
     true)
   (save-index! [_ index]
     (jdbc/with-transaction [tx datasource]
-      (jdbc/execute! tx
-                     ["insert into semantic_index_snapshots(root_path, snapshot_id, payload)
-                       values (?, ?, cast(? as jsonb))
-                       on conflict (root_path, snapshot_id)
-                       do update set payload = excluded.payload, indexed_at = now()"
-                      (:root_path index)
-                      (:snapshot_id index)
-                      (->json index)])
-      (jdbc/execute! tx
-                     ["delete from semantic_index_units where root_path = ? and snapshot_id = ?"
-                      (:root_path index)
-                      (:snapshot_id index)])
-      (jdbc/execute! tx
-                     ["delete from semantic_index_call_edges where root_path = ? and snapshot_id = ?"
-                      (:root_path index)
-                      (:snapshot_id index)])
-      (doseq [u (ordered-units index)]
-        (jdbc/execute! tx
-                       ["insert into semantic_index_units
-                         (root_path, snapshot_id, unit_id, semantic_id, semantic_id_version, semantic_fingerprint, path, module, symbol, kind, start_line, end_line, parser_mode, payload)
-                         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb))"
-                        (:root_path index)
-                        (:snapshot_id index)
-                        (:unit_id u)
-                        (:semantic_id u)
-                        (:semantic_id_version u)
-                        (:semantic_fingerprint u)
-                        (:path u)
-                        (:module u)
-                        (:symbol u)
-                        (:kind u)
-                        (:start_line u)
-                        (:end_line u)
-                        (:parser_mode u)
-                        (->json u)]))
-      (doseq [{:keys [caller callee]} (call-edge-rows index)]
-        (jdbc/execute! tx
-                       ["insert into semantic_index_call_edges(root_path, snapshot_id, caller_unit_id, callee_unit_id)
-                         values (?, ?, ?, ?)"
-                        (:root_path index)
-                        (:snapshot_id index)
-                        caller
-                        callee])))
+      (save-index-tx! tx index))
     true)
   (load-latest-index [_ root-path]
     (when-let [row (first (jdbc/execute! datasource

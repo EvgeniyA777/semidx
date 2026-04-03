@@ -4,9 +4,11 @@
             [semidx.mcp-http-server-test]
             [semidx.mcp-server-test]
             [semidx.policy-governance-test]
+            [semidx.repo-identity-test]
             [semidx.runtime-grpc-test]
             [semidx.runtime-http-test]
             [semidx.lua-onboarding-test]
+            [semidx.storage-test]
             [semidx.typescript-onboarding-test]
             [semidx.runtime-test]
             [semidx.usage-metrics-test]))
@@ -16,10 +18,12 @@
                             'semidx.mcp-http-server-test
                             'semidx.evaluation-test
                             'semidx.policy-governance-test
+                            'semidx.repo-identity-test
                             'semidx.runtime-test
                             'semidx.runtime-grpc-test
                             'semidx.runtime-http-test
                             'semidx.lua-onboarding-test
+                            'semidx.storage-test
                             'semidx.typescript-onboarding-test
                             'semidx.usage-metrics-test)
         failures (+ (:fail result) (:error result))]

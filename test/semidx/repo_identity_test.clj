@@ -27,8 +27,8 @@
                    ["rev-parse" "--abbrev-ref" "HEAD"] {:exit 0 :out "dev\n"}
                    ["rev-parse" "HEAD"] {:exit 0 :out "abc123\n"}
                    ["status" "--porcelain"] {:exit 0 :out ""}}]
-    (with-redefs [#'repo-identity/run-git (fn [_root-path & args]
-                                            (get responses (vec args) {:exit 1 :out "" :err ""}))]
+    (with-redefs [semidx.runtime.repo-identity/run-git (fn [_root-path & args]
+                                                         (get responses (vec args) {:exit 1 :out "" :err ""}))]
       (let [identity (repo-identity/resolve-repo-identity root)]
         (testing "git remote drives logical repo identity"
           (is (= "git_remote" (:identity_source identity)))
@@ -43,8 +43,8 @@
 (deftest resolve-repo-identity-falls-back-to-repo-id-file-test
   (let [root (sample-root!)]
     (write-file! root ".ccc/repo-id" "repo-123\n")
-    (with-redefs [#'repo-identity/run-git (fn [_root-path & _args]
-                                            {:exit 1 :out "" :err "not a git repo"})]
+    (with-redefs [semidx.runtime.repo-identity/run-git (fn [_root-path & _args]
+                                                         {:exit 1 :out "" :err "not a git repo"})]
       (let [identity (repo-identity/resolve-repo-identity root)]
         (is (= "repo_id_file" (:identity_source identity)))
         (is (string? (:repo_key identity)))

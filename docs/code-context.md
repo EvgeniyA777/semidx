@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: e30ed5da3eca58d6bbd8793e02471e4560b8933f
+- fingerprint: fbc61ca8894190a568cdd48df3ef8a45e74d712f
 
 ## Tree
 ```text
@@ -26,6 +26,7 @@ semidx
     ├ runtime_grpc_test.clj
     ├ runtime_http_test.clj
     ├ runtime_test.clj
+    ├ storage_test.clj
     ├ typescript_onboarding_test.clj
     └ usage_metrics_test.clj
 ```
@@ -61,7 +62,7 @@ semidx
 - semidx.policy-governance-test
 - semidx.project-context-test
 - semidx.repo-identity-test
-- ... +5 more
+- ... +6 more
 ### other
 - semidx.contracts.cli
 - semidx.contracts.schemas
@@ -103,7 +104,7 @@ semidx
 - semidx.core -> semidx.runtime.semantic-quality
 - semidx.core -> semidx.runtime.snapshot-diff
 - semidx.core -> semidx.runtime.storage
-- ... +223 more
+- ... +231 more
 
 ## Namespaces
 ### semidx.contracts.cli
