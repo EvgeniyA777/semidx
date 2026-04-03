@@ -4,6 +4,7 @@
             [semidx.runtime.adapters :as adapters]
             [semidx.runtime.language-activation :as activation]
             [semidx.runtime.projections :as projections]
+            [semidx.runtime.repo-identity :as repo-identity]
             [semidx.runtime.semantic-id :as semantic-id]
             [semidx.runtime.storage :as storage]))
 
@@ -423,6 +424,7 @@
       :age_seconds age
       :max_snapshot_age_seconds max_snapshot_age_seconds
       :rebuild_reason rebuild_reason
+      :repo_identity (:repo_identity index)
       :provenance {:source provenance_source
                    :parent_snapshot_id parent_snapshot_id
                    :requested_snapshot_id requested_snapshot_id}}
@@ -438,12 +440,21 @@
    (let [units (semantic-id/enrich-units (:units files-data))
          units-by-id (into {} (map (juxt :unit_id identity) units))
          activation-metadata (:activation_metadata lifecycle-opts)
+         repo-identity* (repo-identity/resolve-repo-identity root-path)
          callers-index (build-callers-index units (:files files-data))
          callees-index (build-callees-index callers-index)]
      (attach-lifecycle
      {:root_path root-path
        :snapshot_id (uuid)
        :indexed_at (now-iso)
+       :repo_identity repo-identity*
+       :repo_key (:repo_key repo-identity*)
+       :workspace_path (:workspace_path repo-identity*)
+       :workspace_key (:workspace_key repo-identity*)
+       :git_branch (:git_branch repo-identity*)
+       :git_commit (:git_commit repo-identity*)
+       :git_dirty (:git_dirty repo-identity*)
+       :identity_source (:identity_source repo-identity*)
        :files (:files files-data)
        :file_snapshots (build-file-snapshots root-path (:files files-data))
        :diagnostics (:diagnostics files-data)
