@@ -7,10 +7,26 @@
   (init-storage! [storage])
   (save-index! [storage index])
   (load-latest-index [storage root-path])
+  (load-latest-index-by-repo [storage repo-key])
+  (load-latest-index-by-repo-branch [storage repo-key git-branch])
+  (load-index-by-repo-commit [storage repo-key git-commit])
   (load-index-by-snapshot [storage root-path snapshot-id])
   (fetch-units [storage root-path opts])
   (fetch-callers [storage root-path unit-id opts])
   (fetch-callees [storage root-path unit-id opts]))
+
+(defn- all-snapshots [entries]
+  (->> entries
+       vals
+       (mapcat (comp vals :snapshots))
+       (remove nil?)))
+
+(defn- latest-matching-index [entries pred]
+  (some->> (all-snapshots entries)
+           (filter pred)
+           seq
+           (sort-by #(or (:indexed_at %) ""))
+           last))
 
 (defrecord InMemoryStorage [state]
   IndexStorage
@@ -26,6 +42,14 @@
   (load-latest-index [_ root-path]
     (let [entry (get @state root-path)]
       (get-in entry [:snapshots (:latest_snapshot_id entry)])))
+  (load-latest-index-by-repo [_ repo-key]
+    (latest-matching-index @state #(= repo-key (:repo_key %))))
+  (load-latest-index-by-repo-branch [_ repo-key git-branch]
+    (latest-matching-index @state #(and (= repo-key (:repo_key %))
+                                        (= git-branch (:git_branch %)))))
+  (load-index-by-repo-commit [_ repo-key git-commit]
+    (latest-matching-index @state #(and (= repo-key (:repo_key %))
+                                        (= git-commit (:git_commit %)))))
   (load-index-by-snapshot [_ root-path snapshot-id]
     (get-in @state [root-path :snapshots snapshot-id]))
   (fetch-units [_ root-path {:keys [snapshot_id module symbol limit] :or {limit 100}}]
@@ -132,6 +156,11 @@
                                         root-path]))]
     (or (:semantic_index_snapshots/snapshot_id row)
         (:snapshot_id row))))
+
+(defn- load-first-index [datasource sql-params]
+  (when-let [row (first (jdbc/execute! datasource sql-params))]
+    (some-> (parse-json (:semantic_index_snapshots/payload row (:payload row)))
+            semantic-id/enrich-index)))
 
 (defn- resolve-snapshot-id [datasource root-path snapshot-id]
   (or snapshot-id (latest-snapshot-id datasource root-path)))
@@ -304,25 +333,47 @@
       (save-index-tx! tx index))
     true)
   (load-latest-index [_ root-path]
-    (when-let [row (first (jdbc/execute! datasource
-                                         ["select payload
-                                           from semantic_index_snapshots
-                                           where root_path = ?
-                                           order by id desc
-                                           limit 1"
-                                          root-path]))]
-      (some-> (parse-json (:semantic_index_snapshots/payload row (:payload row)))
-              semantic-id/enrich-index)))
+    (load-first-index datasource
+                      ["select payload
+                        from semantic_index_snapshots
+                        where root_path = ?
+                        order by id desc
+                        limit 1"
+                       root-path]))
+  (load-latest-index-by-repo [_ repo-key]
+    (load-first-index datasource
+                      ["select payload
+                        from semantic_index_snapshots
+                        where repo_key = ?
+                        order by id desc
+                        limit 1"
+                       repo-key]))
+  (load-latest-index-by-repo-branch [_ repo-key git-branch]
+    (load-first-index datasource
+                      ["select payload
+                        from semantic_index_snapshots
+                        where repo_key = ?
+                          and git_branch = ?
+                        order by id desc
+                        limit 1"
+                       repo-key git-branch]))
+  (load-index-by-repo-commit [_ repo-key git-commit]
+    (load-first-index datasource
+                      ["select payload
+                        from semantic_index_snapshots
+                        where repo_key = ?
+                          and git_commit = ?
+                        order by id desc
+                        limit 1"
+                       repo-key git-commit]))
   (load-index-by-snapshot [_ root-path snapshot-id]
-    (when-let [row (first (jdbc/execute! datasource
-                                         ["select payload
-                                           from semantic_index_snapshots
-                                           where root_path = ?
-                                             and snapshot_id = ?
-                                           limit 1"
-                                          root-path snapshot-id]))]
-      (some-> (parse-json (:semantic_index_snapshots/payload row (:payload row)))
-              semantic-id/enrich-index)))
+    (load-first-index datasource
+                      ["select payload
+                        from semantic_index_snapshots
+                        where root_path = ?
+                          and snapshot_id = ?
+                        limit 1"
+                       root-path snapshot-id]))
   (fetch-units [_ root-path {:keys [snapshot_id module symbol limit] :or {limit 100}}]
     (if-let [sid (resolve-snapshot-id datasource root-path snapshot_id)]
       (let [sql (str "select payload
@@ -380,6 +431,18 @@
 (defn query-units [storage root-path opts]
   (init-storage! storage)
   (fetch-units storage root-path opts))
+
+(defn load-latest-by-repo [storage repo-key]
+  (init-storage! storage)
+  (load-latest-index-by-repo storage repo-key))
+
+(defn load-latest-by-repo-branch [storage repo-key git-branch]
+  (init-storage! storage)
+  (load-latest-index-by-repo-branch storage repo-key git-branch))
+
+(defn load-by-repo-commit [storage repo-key git-commit]
+  (init-storage! storage)
+  (load-index-by-repo-commit storage repo-key git-commit))
 
 (defn query-callers [storage root-path unit-id opts]
   (init-storage! storage)

@@ -715,6 +715,23 @@
   [storage-adapter root-path opts]
   (storage/query-units storage-adapter root-path opts))
 
+(defn load-latest-by-repo
+  "Load the latest persisted snapshot for a logical repository key.
+
+  This is additive shadow-lookup API and does not change root_path-scoped create-index behavior."
+  [storage-adapter repo-key]
+  (storage/load-latest-by-repo storage-adapter repo-key))
+
+(defn load-latest-by-repo-branch
+  "Load the latest persisted snapshot for a logical repository key scoped to a git branch."
+  [storage-adapter repo-key git-branch]
+  (storage/load-latest-by-repo-branch storage-adapter repo-key git-branch))
+
+(defn load-by-repo-commit
+  "Load a persisted snapshot for a logical repository key scoped to an exact git commit."
+  [storage-adapter repo-key git-commit]
+  (storage/load-by-repo-commit storage-adapter repo-key git-commit))
+
 (defn query-callers
   "Query persisted callers for a unit id."
   [storage-adapter root-path unit-id opts]
