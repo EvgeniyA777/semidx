@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: 4c2c800fa18701b47eff69cc17c1949e0cb3ecd1
+- fingerprint: 917cae46c7e2814b70bf762ce8eeea1c414bf5a4
 
 ## Tree
 ```text
@@ -86,7 +86,6 @@ semidx
 - semidx.compression-test -> clojure.string
 - semidx.compression-test -> clojure.test
 - semidx.compression-test -> semidx.core
-- semidx.compression-test -> semidx.runtime.compression
 - semidx.contracts.cli -> semidx.contracts.validator
 - semidx.contracts.validator -> clojure.data.json
 - semidx.contracts.validator -> clojure.java.io
@@ -102,7 +101,8 @@ semidx
 - semidx.core -> semidx.runtime.retrieval-policy
 - semidx.core -> semidx.runtime.semantic-quality
 - semidx.core -> semidx.runtime.snapshot-diff
-- ... +215 more
+- semidx.core -> semidx.runtime.storage
+- ... +211 more
 
 ## Namespaces
 ### semidx.contracts.cli
@@ -174,21 +174,21 @@ semidx
 - parse-args [function]
 - request-method [function]
 - request-uri [function]
-- request-path [function]
 - request-header [function]
+- write-json! [function]
 ### semidx.mcp.server
 - path: src/semidx/mcp/server.clj
-- requires: clojure.java.io, clojure.string, semidx.core, semidx.mcp.core, semidx.runtime.retrieval-policy, semidx.runtime.usage-metrics
-- aliases: core -> semidx.mcp.core, io -> clojure.java.io, rp -> semidx.runtime.retrieval-policy, sci -> semidx.core, str -> clojure.string, usage -> semidx.runtime.usage-metrics
+- requires: clojure.data.json, clojure.string, semidx.core, semidx.mcp.core, semidx.runtime.retrieval-policy, semidx.runtime.usage-metrics
+- aliases: core -> semidx.mcp.core, json -> clojure.data.json, rp -> semidx.runtime.retrieval-policy, sci -> semidx.core, str -> clojure.string, usage -> semidx.runtime.usage-metrics
 - symbols:
 - ^:private [section]
 - default-max-indexes [section]
 - parse-args [function]
-- handle-tools-call [function]
 - headers-complete? [function]
 - header-terminator-length [function]
 - read-header-block [function]
 - read-json-line-text [function]
+- read-next-byte [function]
 ### semidx.mcp.session-registry
 - path: src/semidx/mcp/session_registry.clj
 - requires: semidx.mcp.core
