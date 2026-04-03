@@ -35,16 +35,29 @@ Current scope is contract architecture plus a working MVP runtime implementation
 
 ## Repository Layout
 
-- `adr/` - architecture decisions (`ADR-001` .. `ADR-025`)
-- `docs/` - runtime API and operational docs
+- `adr/` - architecture decisions and ADR policy/template
+- `docs/` - durable product, API, operational, and onboarding documentation
+- `docs/language-onboarding/` - language-specific onboarding and readiness docs
 - `docs/roadmap-status.md` - canonical in-repo roadmap status checklist
+- `ideas/` - idea-stage and conceptual source documents that are not decisions of record
+- `notes/` - dated working notes, reviews, and investigation artifacts
+- `plans/` - execution-oriented plans and planning docs
+- `plans/architecture/` - cross-cutting architecture or stabilization plans
+- `plans/archive/` - archived plans kept only for historical traceability
 - `contracts/schemas/` - JSON Schema contracts (external source of truth)
 - `contracts/examples/` - canonical examples for contract families
-- `docs/semantic-stabilization-plan.md` - next internal semantic architecture tranche
 - `fixtures/retrieval/` - retrieval fixture corpus (behavior bands)
 - `src/semidx/contracts/` - Clojure `malli` mirror and validator CLI
 - `src/semidx/mcp/` - MCP core plus stdio and HTTP transports over the core library API
 - `scripts/` - local validation entrypoints
+
+Root should stay limited to project entrypoints and repo-wide control files such as:
+
+- `README.md`
+- `LICENSE`
+- `deps.edn`
+- agent instruction files like `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`
+- repo-wide config such as `.gitignore`, `.mcp.json`, `.pre-commit-config.yaml`
 
 ## Contract Validation
 
@@ -113,9 +126,9 @@ Canonical retrieval flow is compact-first staged retrieval:
 - Agent MCP prompts: [docs/mcp-agent-prompts.md](docs/mcp-agent-prompts.md)
 - Roadmap status checklist: [docs/roadmap-status.md](docs/roadmap-status.md)
 - ADR for projection profiles and advisory semantic-quality gates: [adr/029-standardize-projection-profiles-and-advisory-semantic-quality-gates.md](adr/029-standardize-projection-profiles-and-advisory-semantic-quality-gates.md)
-- Compact-first staged retrieval execution plan: [docs/compact-first-staged-retrieval-plan.md](docs/compact-first-staged-retrieval-plan.md)
-- Post-roadmap semantic deepening plan (delivered tranche): [docs/post-roadmap-semantic-deepening-plan.md](docs/post-roadmap-semantic-deepening-plan.md)
-- Semantic stabilization plan (active tranche): [docs/semantic-stabilization-plan.md](docs/semantic-stabilization-plan.md)
+- Compact-first staged retrieval execution plan: [plans/architecture/compact-first-staged-retrieval-plan.md](plans/architecture/compact-first-staged-retrieval-plan.md)
+- Post-roadmap semantic deepening plan (delivered tranche): [plans/architecture/post-roadmap-semantic-deepening-plan.md](plans/architecture/post-roadmap-semantic-deepening-plan.md)
+- Semantic stabilization plan (delivered tranche): [plans/architecture/semantic-stabilization-plan.md](plans/architecture/semantic-stabilization-plan.md)
 
 ## Agent Limit Policy
 

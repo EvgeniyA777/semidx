@@ -7,7 +7,7 @@ language: en
 status: archived
 ---
 
-# Archived Note: First-Contact MCP Query Hardening
+# Archived Plan: First-Contact MCP Query Hardening
 
 Superseded by the delivered implementation now reflected in the runtime, tests, and canonical docs. This note remains only as a historical checkpoint for the original implementation sketch.
 

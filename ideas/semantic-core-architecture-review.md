@@ -1,7 +1,7 @@
 # Architecture Review: Semantic Core
 
-> Target: `Idea/semantic-core-architecture.md`
-> Reference: `Idea/semantic-code-manifesto.md`
+> Target: `ideas/semantic-core-architecture.md`
+> Reference: `ideas/semantic-code-manifesto.md`
 > Focus: all (SRP, OCP, LSP, ISP, DIP + structural integrity)
 > Mode: review + refactoring directions
 > Posture: adversarial — find everything that collapses under implementation pressure

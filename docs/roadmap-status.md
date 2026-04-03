@@ -44,13 +44,13 @@ Legend:
 
 ## Current Focus
 
-The compact-first staged retrieval refactor captured in [docs/compact-first-staged-retrieval-plan.md](/Users/ae/workspaces/SemanticCodeIndexing/docs/compact-first-staged-retrieval-plan.md) is now complete and should be treated as delivered.
+The compact-first staged retrieval refactor captured in [plans/architecture/compact-first-staged-retrieval-plan.md](/Users/ae/workspaces/semidx/plans/architecture/compact-first-staged-retrieval-plan.md) is now complete and should be treated as delivered.
 
 The roadmap through Phase 5 is now effectively delivered for the current scope.
 
-The post-roadmap semantic tranche in [docs/post-roadmap-semantic-deepening-plan.md](/Users/ae/workspaces/SemanticCodeIndexing/docs/post-roadmap-semantic-deepening-plan.md) is now also complete.
+The post-roadmap semantic tranche in [plans/architecture/post-roadmap-semantic-deepening-plan.md](/Users/ae/workspaces/semidx/plans/architecture/post-roadmap-semantic-deepening-plan.md) is now also complete.
 
-The semantic stabilization tranche captured in [docs/semantic-stabilization-plan.md](/Users/ae/workspaces/SemanticCodeIndexing/docs/semantic-stabilization-plan.md) is now delivered for the current scope:
+The semantic stabilization tranche captured in [plans/architecture/semantic-stabilization-plan.md](/Users/ae/workspaces/semidx/plans/architecture/semantic-stabilization-plan.md) is now delivered for the current scope:
 
 - internal semantic IR now exists between extraction and resolver narrowing
 - TypeScript now runs through its dedicated language module with advanced-surface regex/tree-sitter parity
