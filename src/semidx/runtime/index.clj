@@ -415,20 +415,20 @@
 (defn- lifecycle-summary
   [index {:keys [provenance_source parent_snapshot_id requested_snapshot_id
                  reused_snapshot snapshot_pinned max_snapshot_age_seconds rebuild_reason
-                 activation_metadata]}]
+                 activation_metadata shadow_reuse]}]
   (let [age (age-seconds (:indexed_at index))]
-    (merge
-     {:reused_snapshot (boolean reused_snapshot)
-      :snapshot_pinned (boolean snapshot_pinned)
-      :stale (boolean (stale? age max_snapshot_age_seconds))
-      :age_seconds age
-      :max_snapshot_age_seconds max_snapshot_age_seconds
-      :rebuild_reason rebuild_reason
-      :repo_identity (:repo_identity index)
-      :provenance {:source provenance_source
-                   :parent_snapshot_id parent_snapshot_id
-                   :requested_snapshot_id requested_snapshot_id}}
-     activation_metadata)))
+    (cond-> {:reused_snapshot (boolean reused_snapshot)
+             :snapshot_pinned (boolean snapshot_pinned)
+             :stale (boolean (stale? age max_snapshot_age_seconds))
+             :age_seconds age
+             :max_snapshot_age_seconds max_snapshot_age_seconds
+             :rebuild_reason rebuild_reason
+             :repo_identity (:repo_identity index)
+             :provenance {:source provenance_source
+                          :parent_snapshot_id parent_snapshot_id
+                          :requested_snapshot_id requested_snapshot_id}}
+      activation_metadata (merge activation_metadata)
+      shadow_reuse (assoc :shadow_reuse shadow_reuse))))
 
 (defn- attach-lifecycle [index lifecycle-opts]
   (assoc index :index_lifecycle (lifecycle-summary index lifecycle-opts)))
@@ -476,24 +476,89 @@
        :manual_language_selection (:manual_language_selection activation-metadata)}
       lifecycle-opts))))
 
-(defn- maybe-load-index [storage-adapter root-path {:keys [load_latest pinned_snapshot_id]}]
-  (when storage-adapter
-    (storage/init-storage! storage-adapter)
+(defn- shadow-reuse-mode? [mode]
+  (contains? #{:shadow "shadow"} mode))
+
+(defn- repo-shadow-candidate [storage-adapter root-path]
+  (let [repo-identity* (repo-identity/resolve-repo-identity root-path)
+        repo-key (:repo_key repo-identity*)
+        git-commit (:git_commit repo-identity*)
+        git-branch (:git_branch repo-identity*)]
     (cond
+      (and (seq repo-key) (seq git-commit))
+      {:lookup_strategy "repo_commit"
+       :candidate (storage/load-index-by-repo-commit storage-adapter repo-key git-commit)}
+
+      (and (seq repo-key) (seq git-branch))
+      {:lookup_strategy "repo_branch"
+       :candidate (storage/load-latest-index-by-repo-branch storage-adapter repo-key git-branch)}
+
+      (seq repo-key)
+      {:lookup_strategy "repo_latest"
+       :candidate (storage/load-latest-index-by-repo storage-adapter repo-key)}
+
+      :else
+      {:lookup_strategy nil
+       :candidate nil})))
+
+(defn- shadow-reuse-summary [storage-adapter root-path {:keys [load_latest pinned_snapshot_id repo_identity_reuse_mode]}]
+  (when (shadow-reuse-mode? repo_identity_reuse_mode)
+    (cond
+      (nil? storage-adapter)
+      {:mode "shadow"
+       :eligible false
+       :reason "no_storage"}
+
       (seq pinned_snapshot_id)
-      (or (some-> (storage/load-index-by-snapshot storage-adapter root-path pinned_snapshot_id)
-                  semantic-id/enrich-index)
-          (throw (ex-info "requested pinned snapshot was not found"
-                          {:type :invalid_request
-                           :message "requested pinned snapshot was not found"
-                           :details {:root_path root-path
-                                     :snapshot_id pinned_snapshot_id}})))
+      {:mode "shadow"
+       :eligible false
+       :reason "pinned_snapshot"}
 
-      load_latest
-      (some-> (storage/load-latest-index storage-adapter root-path)
-              semantic-id/enrich-index)
+      (not load_latest)
+      {:mode "shadow"
+       :eligible false
+       :reason "load_latest_disabled"}
 
-      :else nil)))
+      :else
+      (let [{:keys [lookup_strategy candidate]} (repo-shadow-candidate storage-adapter root-path)]
+        {:mode "shadow"
+         :eligible true
+         :reason (if candidate "candidate_found" "no_candidate")
+         :lookup_strategy lookup_strategy
+         :candidate_found (boolean candidate)
+         :candidate_snapshot_id (:snapshot_id candidate)
+         :candidate_root_path (:root_path candidate)
+         :candidate_workspace_path (:workspace_path candidate)
+         :candidate_git_branch (:git_branch candidate)
+         :candidate_git_commit (:git_commit candidate)
+         :candidate_matches_root_path (boolean (= root-path (:root_path candidate)))
+         :would_change_lookup (boolean (and candidate
+                                            (not= root-path (:root_path candidate))))}))))
+
+(defn- maybe-load-index [storage-adapter root-path opts]
+  (if storage-adapter
+    (do
+      (storage/init-storage! storage-adapter)
+      (let [{:keys [load_latest pinned_snapshot_id]} opts
+            shadow-reuse (shadow-reuse-summary storage-adapter root-path opts)
+            loaded (cond
+                     (seq pinned_snapshot_id)
+                     (or (some-> (storage/load-index-by-snapshot storage-adapter root-path pinned_snapshot_id)
+                                 semantic-id/enrich-index)
+                         (throw (ex-info "requested pinned snapshot was not found"
+                                         {:type :invalid_request
+                                          :message "requested pinned snapshot was not found"
+                                          :details {:root_path root-path
+                                                    :snapshot_id pinned_snapshot_id}})))
+
+                     load_latest
+                     (some-> (storage/load-latest-index storage-adapter root-path)
+                             semantic-id/enrich-index)
+
+                     :else nil)]
+        {:loaded loaded
+         :shadow_reuse shadow-reuse}))
+    {}))
 
 (defn- maybe-save-index! [storage-adapter index]
   (when storage-adapter
@@ -509,6 +574,7 @@
 
 (defn create-index
   [{:keys [root_path paths parser_opts storage load_latest pinned_snapshot_id
+           repo_identity_reuse_mode
            max_snapshot_age_seconds rebuild_reason language_policy]
     :or {root_path "."
          parser_opts {:clojure_engine :clj-kondo
@@ -532,10 +598,12 @@
                       {:type :no_supported_languages_found
                        :message "no supported languages were detected for this project"
                        :details (activation/no-supported-languages-details discovery activation-state)})))
-    (if-let [loaded (maybe-load-index storage root_path {:load_latest load_latest
-                                                         :pinned_snapshot_id pinned_snapshot_id})]
-      (let [loaded-activation (merge activation-metadata
-                                     (select-keys loaded
+    (let [{:keys [loaded shadow_reuse]} (maybe-load-index storage root_path {:load_latest load_latest
+                                                                             :pinned_snapshot_id pinned_snapshot_id
+                                                                             :repo_identity_reuse_mode repo_identity_reuse_mode})]
+      (if loaded
+        (let [loaded-activation (merge activation-metadata
+                                       (select-keys loaded
                                                   [:detected_languages
                                                    :active_languages
                                                    :language_fingerprint
@@ -543,47 +611,50 @@
                                                    :supported_languages
                                                    :selection_hint
                                                    :manual_language_selection]))
-            loaded* (attach-lifecycle loaded {:provenance_source (if (seq pinned_snapshot_id)
-                                                                   "storage_pinned"
-                                                                   "storage_latest")
+              loaded* (attach-lifecycle loaded {:provenance_source (if (seq pinned_snapshot_id)
+                                                                     "storage_pinned"
+                                                                     "storage_latest")
+                                                :requested_snapshot_id pinned_snapshot_id
+                                                :reused_snapshot true
+                                                :snapshot_pinned (boolean (seq pinned_snapshot_id))
+                                                :max_snapshot_age_seconds max_snapshot_age_seconds
+                                                :activation_metadata loaded-activation
+                                                :shadow_reuse shadow_reuse})
+              stale-loaded? (get-in loaded* [:index_lifecycle :stale])]
+          (if (and stale-loaded? (not (seq pinned_snapshot_id)))
+            (let [discovered (if (seq paths)
+                               (filtered-paths (normalize-paths paths) (:active_languages activation-state))
+                               (activation/active-source-paths discovery activation-state))
+                  files-data (parse-files root_path discovered parser_opts)
+                  rebuilt (build-index-state root_path
+                                             files-data
+                                             {:provenance_source "fresh_build"
+                                              :parent_snapshot_id (:snapshot_id loaded*)
                                               :requested_snapshot_id pinned_snapshot_id
-                                              :reused_snapshot true
-                                              :snapshot_pinned (boolean (seq pinned_snapshot_id))
                                               :max_snapshot_age_seconds max_snapshot_age_seconds
-                                              :activation_metadata loaded-activation})
-            stale-loaded? (get-in loaded* [:index_lifecycle :stale])]
-        (if (and stale-loaded? (not (seq pinned_snapshot_id)))
-          (let [discovered (if (seq paths)
-                             (filtered-paths (normalize-paths paths) (:active_languages activation-state))
-                             (activation/active-source-paths discovery activation-state))
-                files-data (parse-files root_path discovered parser_opts)
-                rebuilt (build-index-state root_path
-                                           files-data
-                                           {:provenance_source "fresh_build"
-                                            :parent_snapshot_id (:snapshot_id loaded*)
-                                            :requested_snapshot_id pinned_snapshot_id
-                                            :max_snapshot_age_seconds max_snapshot_age_seconds
-                                            :activation_metadata activation-metadata
-                                            :rebuild_reason "snapshot_stale"})]
-            (maybe-save-index! storage rebuilt))
-          loaded*))
-      (let [discovered (if (seq paths)
-                         (filtered-paths (normalize-paths paths) (:active_languages activation-state))
-                         (activation/active-source-paths discovery activation-state))
-            files-data (parse-files root_path discovered parser_opts)
-            index (build-index-state root_path
-                                     files-data
-                                     {:provenance_source "fresh_build"
-                                      :requested_snapshot_id pinned_snapshot_id
-                                      :max_snapshot_age_seconds max_snapshot_age_seconds
-                                      :activation_metadata activation-metadata
-                                      :rebuild_reason (or rebuild_reason
-                                                          (cond
-                                                            (:manual_language_selection activation-state) "manual_language_selection"
-                                                            (seq paths) "paths_subset_requested"
-                                                            load_latest "storage_latest_missing"
-                                                            :else "initial_build"))})]
-        (maybe-save-index! storage index)))))
+                                              :activation_metadata activation-metadata
+                                              :shadow_reuse shadow_reuse
+                                              :rebuild_reason "snapshot_stale"})]
+              (maybe-save-index! storage rebuilt))
+            loaded*))
+        (let [discovered (if (seq paths)
+                           (filtered-paths (normalize-paths paths) (:active_languages activation-state))
+                           (activation/active-source-paths discovery activation-state))
+              files-data (parse-files root_path discovered parser_opts)
+              index (build-index-state root_path
+                                       files-data
+                                       {:provenance_source "fresh_build"
+                                        :requested_snapshot_id pinned_snapshot_id
+                                        :max_snapshot_age_seconds max_snapshot_age_seconds
+                                        :activation_metadata activation-metadata
+                                        :shadow_reuse shadow_reuse
+                                        :rebuild_reason (or rebuild_reason
+                                                            (cond
+                                                              (:manual_language_selection activation-state) "manual_language_selection"
+                                                              (seq paths) "paths_subset_requested"
+                                                              load_latest "storage_latest_missing"
+                                                              :else "initial_build"))})]
+          (maybe-save-index! storage index))))))
 
 (defn- remove-paths-from-index [index paths]
   (let [path-set (set paths)

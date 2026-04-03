@@ -20,6 +20,9 @@
     (.mkdirs (.getParentFile f))
     (spit f content)))
 
+(defn- write-repo-id! [root repo-id]
+  (write-file! root ".ccc/repo-id" repo-id))
+
 (defn- create-sample-repo! [root]
   (write-file! root "src/my/app/order.clj"
                "(ns my.app.order\n  (:require [clojure.string :as str]))\n\n(defn process-order [ctx order]\n  (validate-order order)\n  (str/join \"-\" [\"ok\" (:id order)]))\n\n(defn validate-order [order]\n  (if (:id order)\n    order\n    (throw (ex-info \"invalid\" {}))))\n")
@@ -1298,6 +1301,36 @@
         (is (= "storage_pinned" (get-in pinned [:index_lifecycle :provenance :source])))
         (is (= (:index_lifecycle pinned)
                (:index_lifecycle (sci/repo-map pinned))))))))
+
+(deftest shadow-reuse-diagnostics-preserve-root-path-load-latest-test
+  (let [root-a (str (java.nio.file.Files/createTempDirectory "sci-shadow-reuse-a" (make-array java.nio.file.attribute.FileAttribute 0)))
+        root-b (str (java.nio.file.Files/createTempDirectory "sci-shadow-reuse-b" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! root-a)
+        _ (create-sample-repo! root-b)
+        _ (write-repo-id! root-a "shared-runtime-shadow-repo")
+        _ (write-repo-id! root-b "shared-runtime-shadow-repo")
+        storage (sci/in-memory-storage)
+        index-a (sci/create-index {:root_path root-a :storage storage})]
+    (Thread/sleep 10)
+    (let [index-b (sci/create-index {:root_path root-b :storage storage})
+          reused (sci/create-index {:root_path root-a
+                                    :storage storage
+                                    :load_latest true
+                                    :repo_identity_reuse_mode :shadow})]
+      (testing "actual lookup remains scoped to the current workspace root path"
+        (is (= (:snapshot_id index-a) (:snapshot_id reused)))
+        (is (= "storage_latest" (get-in reused [:index_lifecycle :provenance :source]))))
+      (testing "shadow diagnostics report the cross-workspace repo-aware candidate"
+        (is (= "shadow" (get-in reused [:index_lifecycle :shadow_reuse :mode])))
+        (is (= "candidate_found" (get-in reused [:index_lifecycle :shadow_reuse :reason])))
+        (is (= "repo_latest" (get-in reused [:index_lifecycle :shadow_reuse :lookup_strategy])))
+        (is (true? (get-in reused [:index_lifecycle :shadow_reuse :candidate_found])))
+        (is (= (:snapshot_id index-b)
+               (get-in reused [:index_lifecycle :shadow_reuse :candidate_snapshot_id])))
+        (is (= root-b
+               (get-in reused [:index_lifecycle :shadow_reuse :candidate_root_path])))
+        (is (false? (get-in reused [:index_lifecycle :shadow_reuse :candidate_matches_root_path])))
+        (is (true? (get-in reused [:index_lifecycle :shadow_reuse :would_change_lookup])))))))
 
 (deftest stale-index-freshness-guardrail-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-stale-guardrail-test" (make-array java.nio.file.attribute.FileAttribute 0)))
