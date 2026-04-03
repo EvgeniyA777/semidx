@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: 455b974ed1d7366d857422759ed328e0b9d8819e
+- fingerprint: 25b50bd3101b5f54c3124044da3954e8a590653b
 
 ## Tree
 ```text
@@ -70,7 +70,7 @@ semidx
 - semidx.mcp.session-registry
 - semidx.runtime.adapters
 - semidx.runtime.authz
-- ... +32 more
+- ... +33 more
 
 ## Domain Model
 - IndexStorage [protocol]
@@ -102,7 +102,7 @@ semidx
 - semidx.core -> semidx.runtime.semantic-quality
 - semidx.core -> semidx.runtime.snapshot-diff
 - semidx.core -> semidx.runtime.storage
-- ... +211 more
+- ... +213 more
 
 ## Namespaces
 ### semidx.contracts.cli
@@ -152,8 +152,8 @@ semidx
 - error-payload [function]
 ### semidx.mcp.core
 - path: src/semidx/mcp/core.clj
-- requires: clojure.data.json, clojure.java.io, clojure.string, semidx.core, semidx.runtime.errors, semidx.runtime.language-activation, semidx.runtime.retrieval-policy, semidx.runtime.storage, semidx.runtime.usage-metrics
-- aliases: activation -> semidx.runtime.language-activation, errors -> semidx.runtime.errors, io -> clojure.java.io, json -> clojure.data.json, rp -> semidx.runtime.retrieval-policy, sci -> semidx.core, storage -> semidx.runtime.storage, str -> clojure.string, usage -> semidx.runtime.usage-metrics
+- requires: clojure.data.json, clojure.java.io, clojure.string, semidx.core, semidx.runtime.errors, semidx.runtime.language-activation, semidx.runtime.query-anchors, semidx.runtime.retrieval-policy, semidx.runtime.storage, semidx.runtime.usage-metrics
+- aliases: activation -> semidx.runtime.language-activation, errors -> semidx.runtime.errors, io -> clojure.java.io, json -> clojure.data.json, query-anchors -> semidx.runtime.query-anchors, rp -> semidx.runtime.retrieval-policy, sci -> semidx.core, storage -> semidx.runtime.storage, str -> clojure.string, usage -> semidx.runtime.usage-metrics
 - symbols:
 - default-protocol-version [section]
 - server-name [section]
