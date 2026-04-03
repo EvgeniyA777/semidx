@@ -71,10 +71,6 @@
        (take 20)
        vec))
 
-(defn- lexical-match? [u tokens]
-  (let [hay (str/lower-case (str (:signature u) " " (:summary u) " " (:symbol u)))]
-    (some #(str/includes? hay %) tokens)))
-
 (defn- dispatch-match? [u tokens]
   (let [dispatch (some-> (:dispatch_value u) str str/lower-case)]
     (and (seq dispatch)
@@ -1058,18 +1054,18 @@
                                   (get-in query [:targets :changed_spans])]))]
     (and (not explicit-targets?)
          (contains? warning-codes "no_tier1_evidence")
-         (contains? warning-codes "target_ambiguous"))))
+                  (contains? warning-codes "target_ambiguous"))))
 
 (defn- next-step [status focus confidence query]
   (let [target-unit-ids (mapv :unit_id focus)]
-    (case status
-      "insufficient_evidence"
+    (cond
+      (= status "insufficient_evidence")
       {:recommended_action "expand_query_scope"
        :available_actions []
        :reason "No structurally relevant units were found."
        :target_unit_ids []}
 
-      "budget_exhausted_at_selection"
+      (= status "budget_exhausted_at_selection")
       {:recommended_action "raise_token_budget"
        :available_actions []
        :reason "Selection payload could not fit into the reserved selection budget."
@@ -1081,6 +1077,7 @@
        :reason "Retrieval is ambiguous without explicit structural targets; narrow the query or provide paths, modules, or symbols."
        :target_unit_ids target-unit-ids}
 
+      :else
       {:recommended_action (if (= "low" (:level confidence)) "fetch_context_detail" "expand_context")
        :available_actions ["expand_context" "fetch_context_detail"]
        :reason (if (= "low" (:level confidence))

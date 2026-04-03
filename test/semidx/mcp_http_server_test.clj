@@ -1,6 +1,7 @@
 (ns semidx.mcp-http-server-test
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [semidx.mcp.http-server :as mcp-http])
   (:import [java.io BufferedReader InputStreamReader OutputStreamWriter]
@@ -217,7 +218,7 @@
             (is (= 200 (:status resolve-response)))
             (is (seq focus))
             (is (some #(= "src/my/app/order.clj" (:path %)) focus))
-            (is (not-any? #(clojure.string/starts-with? (:path %) ".tree-sitter-grammars/") focus))))
+            (is (not-any? #(str/starts-with? (:path %) ".tree-sitter-grammars/") focus))))
         (testing "invalid shorthand returns repair-oriented error over streamable HTTP"
           (let [create-response (request! "POST"
                                           (str base-url "/mcp")
