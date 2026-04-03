@@ -61,8 +61,6 @@ with open(summary_path, "w", encoding="utf-8") as fh:
 
 status = "eligible" if gate else "advisory_failure"
 print(f"semantic_quality_gate={status}")
-print(f"semantic_quality_report={out_path}")
-print(f"semantic_quality_summary={summary_path}")
 PY
 
 if [[ "$cli_status" -ne 0 ]] && ! python3 - "$tmp_report" <<'PY'
@@ -82,5 +80,8 @@ fi
 
 mv "$tmp_report" "$OUT_PATH"
 mv "$tmp_summary" "$SUMMARY_PATH"
+
+echo "semantic_quality_report=$OUT_PATH"
+echo "semantic_quality_summary=$SUMMARY_PATH"
 
 exit 0

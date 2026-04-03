@@ -134,6 +134,8 @@
       (is (zero? exit))
       (is (false? (get-in report [:gate_decision :eligible?])))
       (is (str/includes? out "semantic_quality_gate=advisory_failure"))
+      (is (str/includes? out (str "semantic_quality_report=" out-path)))
+      (is (str/includes? out (str "semantic_quality_summary=" summary-path)))
       (is (not (str/includes? out "semantic_quality_report_advisory_only=true")))
       (is (str/blank? err)))
     (testing "runner writes a concise markdown summary"
