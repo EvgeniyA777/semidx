@@ -37,6 +37,8 @@
                  "(ns my.app.order-test\n  (:require [clojure.test :refer [deftest is]]\n            [my.app.order :as order]))\n\n(deftest process-order-test\n  (is (map? (order/validate-order {:id 1}))))\n")
     (write-file! root "test/my/app/checkout_test.clj"
                  "(ns my.app.checkout-test\n  (:require [clojure.test :refer [deftest is]]\n            [my.app.checkout :as checkout]))\n\n(deftest submit-order-test\n  (is (map? (checkout/submit-order! {} {:id 1}))))\n")
+    (write-file! root ".tree-sitter-grammars/tree-sitter-java/bindings/python/tree_sitter_java/__init__.py"
+                 "def process_order(value):\n    return value\n\n\ndef validate_order(value):\n    return value\n")
 
     (write-file! root "src/com/acme/CheckoutService.java"
                  "package com.acme;\n\nimport com.acme.audit.AuditNormalizer;\nimport com.acme.text.Normalizer;\n\npublic class CheckoutService {\n  public String processOrder(String raw) {\n    String normalized = Normalizer.normalize(raw);\n    return AuditNormalizer.normalize(normalized);\n  }\n}\n")
@@ -159,6 +161,10 @@
       (and (seq (:must_include_paths expected))
            (not (subset-check relevant-paths (:must_include_paths expected))))
       (fail fixture-id (str "missing required paths: " (:must_include_paths expected)))
+
+      (and (seq (:must_exclude_paths expected))
+           (some #(contains? relevant-paths %) (:must_exclude_paths expected)))
+      (fail fixture-id (str "found excluded paths: " (:must_exclude_paths expected)))
 
       (and (seq (:must_include_selection_reason_codes expected))
            (not (subset-check reason-codes (:must_include_selection_reason_codes expected))))

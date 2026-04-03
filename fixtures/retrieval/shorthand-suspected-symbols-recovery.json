@@ -1,0 +1,45 @@
+{
+  "fixture_id": "retrieval_shorthand_suspected_symbols_recovery_001",
+  "category": "shorthand_symbol_hints",
+  "purpose": "Suspected symbol hints should pull source authority units ahead of vendored lexical noise without claiming exact target resolution.",
+  "adr_refs": ["ADR-005", "ADR-008", "ADR-024"],
+  "snapshot_ref": "seed-polyglot-app@rev-010",
+  "input": {
+    "query": {
+      "api_version": "1.0",
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "code_understanding",
+        "details": "Find process_order validation flow and key entrypoints."
+      },
+      "targets": {
+        "diff_summary": "Find process_order validation flow and key entrypoints."
+      },
+      "constraints": {
+        "token_budget": 1600,
+        "max_raw_code_level": "enclosing_unit",
+        "freshness": "current_snapshot"
+      },
+      "hints": {
+        "suspected_symbols": ["process_order", "validate_order"],
+        "prefer_definitions_over_callers": true
+      },
+      "options": {
+        "include_tests": false,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": false
+      },
+      "trace": {
+        "trace_id": "99999999-0000-4000-8000-000000000002",
+        "request_id": "fixture-shorthand-suspected-symbols-001"
+      }
+    }
+  },
+  "expected": {
+    "must_include_paths": ["src/my/app/order.clj"],
+    "must_exclude_paths": [".tree-sitter-grammars/tree-sitter-java/bindings/python/tree_sitter_java/__init__.py"],
+    "must_include_selection_reason_codes": ["hint_suspected_symbol_exact"],
+    "result_status_allowed": ["completed", "degraded"],
+    "autonomy_posture_allowed": ["plan_safe", "draft_patch_safe"]
+  }
+}

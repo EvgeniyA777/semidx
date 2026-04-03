@@ -1,0 +1,43 @@
+{
+  "fixture_id": "retrieval_shorthand_vendored_noise_001",
+  "category": "shorthand_noise",
+  "purpose": "Broad shorthand-style retrieval should stay in source code and avoid vendored tree-sitter noise.",
+  "adr_refs": ["ADR-005", "ADR-008", "ADR-024"],
+  "snapshot_ref": "seed-polyglot-app@rev-009",
+  "input": {
+    "query": {
+      "api_version": "1.0",
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "code_understanding",
+        "details": "Find the process validation flow and key entrypoints."
+      },
+      "targets": {
+        "diff_summary": "Find the process validation flow and key entrypoints."
+      },
+      "constraints": {
+        "token_budget": 1600,
+        "max_raw_code_level": "enclosing_unit",
+        "freshness": "current_snapshot"
+      },
+      "hints": {
+        "prefer_definitions_over_callers": true
+      },
+      "options": {
+        "include_tests": false,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": false
+      },
+      "trace": {
+        "trace_id": "99999999-0000-4000-8000-000000000001",
+        "request_id": "fixture-shorthand-vendored-noise-001"
+      }
+    }
+  },
+  "expected": {
+    "must_exclude_paths": [".tree-sitter-grammars/tree-sitter-java/bindings/python/tree_sitter_java/__init__.py"],
+    "must_include_warning_codes": ["no_tier1_evidence", "target_ambiguous"],
+    "result_status_allowed": ["completed", "degraded"],
+    "autonomy_posture_allowed": ["autonomy_blocked", "plan_safe"]
+  }
+}

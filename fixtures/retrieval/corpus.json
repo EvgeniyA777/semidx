@@ -79,6 +79,18 @@
       "category": "lua_ambiguity",
       "path": "lua-ambiguity.json",
       "purpose": "Lua broad path targeting should remain ambiguity-aware and plan-safe."
+    },
+    {
+      "fixture_id": "retrieval_shorthand_vendored_noise_001",
+      "category": "shorthand_noise",
+      "path": "shorthand-vendored-noise.json",
+      "purpose": "Broad shorthand-style retrieval should avoid vendored tree-sitter noise and remain source-oriented."
+    },
+    {
+      "fixture_id": "retrieval_shorthand_suspected_symbols_recovery_001",
+      "category": "shorthand_symbol_hints",
+      "path": "shorthand-suspected-symbols-recovery.json",
+      "purpose": "Suspected symbol hints should recover source authority units without promoting vendored lexical matches."
     }
   ]
 }
