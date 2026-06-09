@@ -38,7 +38,13 @@
 - `resolve_context` accepts a flat top-level `intent` string (simplest: `{"index_id": "...", "intent": "your task"}`), a `query.intent` shorthand, or the full structured `query` object.
 - After a successful `resolve_context`, keep the context compact: continue with `selection_id` and `snapshot_id` for `expand_context` / `fetch_context_detail` instead of restating a larger prompt.
 - Do not silently fall back to manual inspection if MCP fails; state that MCP failed, then continue manually if needed.
-- MCP wire-shape requirements:
-  - `initialize.params.clientInfo` must be an object, not a string.
-  - `tools/call.arguments` must be a JSON object, not a JSON-encoded string.
+
+## Preferred Usage vs Other MCPs
+- **High-Level Context**: Use `semidx` (this server) for overall project mapping and finding connections between files.
+- **Local Details/REPL**: Once the context is resolved, switch to `clojure-mcp` for REPL evaluation or `elixir_mcp` for sandboxed Elixir testing.
+- **Clojure Formatting**: Prefer `clojure_edit` from `clojure-mcp` for structural Clojure edits; use `semidx` for retrieval only.
+
+## MCP Wire-shape requirements:
+- `initialize.params.clientInfo` must be an object, not a string.
+- `tools/call.arguments` must be a JSON object, not a JSON-encoded string.
 - Canonical client prompts live in [docs/mcp-agent-prompts.md](docs/mcp-agent-prompts.md).
