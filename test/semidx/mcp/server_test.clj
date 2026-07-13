@@ -1,4 +1,4 @@
-(ns semidx.mcp-server-test
+(ns semidx.mcp.server-test
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]

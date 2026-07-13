@@ -1,4 +1,4 @@
-(ns semidx.lua-onboarding-test
+(ns semidx.integration.lua-onboarding-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [semidx.core :as sci]))

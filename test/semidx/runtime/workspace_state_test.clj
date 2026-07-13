@@ -1,4 +1,4 @@
-(ns semidx.workspace-state-test
+(ns semidx.runtime.workspace-state-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [semidx.runtime.workspace-state :as ws]))

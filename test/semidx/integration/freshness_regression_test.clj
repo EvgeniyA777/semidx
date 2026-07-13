@@ -1,4 +1,4 @@
-(ns semidx.freshness-regression-test
+(ns semidx.integration.freshness-regression-test
   "Regression tests for review findings H1-H3 (see
   reports/005_stage_0_1_workspace_freshness_progress_log.md)."
   (:require [clojure.java.io :as io]

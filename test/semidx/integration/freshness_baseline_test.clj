@@ -1,4 +1,4 @@
-(ns semidx.freshness-baseline-test
+(ns semidx.integration.freshness-baseline-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [semidx.core :as sci]))

@@ -1,4 +1,4 @@
-(ns semidx.language-registry-test
+(ns semidx.runtime.language-registry-test
   (:require [clojure.test :refer [deftest is testing]]
             [semidx.runtime.adapters :as adapters]
             [semidx.runtime.language-activation :as activation]

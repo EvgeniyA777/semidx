@@ -1,4 +1,4 @@
-(ns semidx.runtime-grpc-test
+(ns semidx.runtime.grpc-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [semidx.core :as sci]

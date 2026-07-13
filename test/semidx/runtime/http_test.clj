@@ -1,4 +1,4 @@
-(ns semidx.runtime-http-test
+(ns semidx.runtime.http-test
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]

@@ -1,4 +1,4 @@
-(ns semidx.policy-governance-test
+(ns semidx.integration.policy-governance-test
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]

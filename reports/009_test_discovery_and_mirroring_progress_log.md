@@ -14,8 +14,8 @@ Companion progress log for [012_test_discovery_and_mirroring_plan.md](../plans/0
 ## Status Summary
 
 - [x] **Step 1 (Auto-discovery)**: Implemented
-- [ ] **Step 2 (Mirror test namespaces to src)**: Not started
-- [ ] **Step 3 (Record convention in RULES.md)**: Not started
+- [x] **Step 2 (Mirror test namespaces to src)**: Implemented
+- [x] **Step 3 (Record convention in RULES.md)**: Implemented
 
 ## Details of Changes
 
@@ -40,10 +40,38 @@ Companion progress log for [012_test_discovery_and_mirroring_plan.md](../plans/0
   - shuffled-order run: 214 tests, 1544 assertions, 0 failures.
 
 ### Step 2 — Mirror test namespaces to src
-- **Status**: Not started
+- **Status**: Implemented
+- **Changes**: moved all 22 test files into a layout that mirrors the code they
+  cover and renamed their namespaces accordingly:
+  - `test/semidx/runtime/` (11): compression, evaluation, freshness,
+    language_registry, project_context, repo_identity, storage, usage_metrics,
+    workspace_state, grpc (was runtime_grpc), http (was runtime_http).
+  - `test/semidx/mcp/` (2): server (was mcp_server), http_server
+    (was mcp_http_server).
+  - `test/semidx/integration/` (9): the five language onboarding suites,
+    freshness_baseline, freshness_regression, policy_governance, and the broad
+    runtime_test end-to-end suite.
+- **Safe-rename check**: no code references the old test namespaces, and no test
+  requires another test namespace, so discovery (Step 1) finds them wherever they
+  live. `git mv` preserved history.
+- **Verification**: `clojure -M:test` → 214 tests, 1544 assertions, 0 failures.
 
 ### Step 3 — Record convention in RULES.md
-- **Status**: Not started
+- **Status**: Implemented
+- **Changes**: `Repository Shape` now states test namespaces mirror `src` paths
+  (`semidx.runtime.X` → `test/semidx/runtime/X_test.clj`), with MCP under
+  `test/semidx/mcp/` and cross-cutting/integration under `test/semidx/integration/`.
+  `Testing And Verification` now states tests are auto-discovered (no manual
+  registration) and must stay order-independent.
+
+## Known Follow-ups
+
+- **`scripts/new-language-adapter.sh` is now stale (Step 1 fallout).** It still
+  tries to insert a new onboarding test namespace into the removed manual list in
+  `test_runner.clj` (anchored on `semidx.runtime-http-test`). With auto-discovery
+  this insertion is unnecessary and no longer matches the file; the scaffolding
+  step should be updated to drop the list edit (a scaffolded `*-test` namespace is
+  found automatically). Tracked here; not fixed in this plan.
 
 ## Notes
 

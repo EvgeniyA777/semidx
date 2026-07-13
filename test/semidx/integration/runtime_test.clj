@@ -1,4 +1,4 @@
-(ns semidx.runtime-test
+(ns semidx.integration.runtime-test
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]

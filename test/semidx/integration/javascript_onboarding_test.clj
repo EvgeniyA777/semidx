@@ -1,4 +1,4 @@
-(ns semidx.javascript-onboarding-test
+(ns semidx.integration.javascript-onboarding-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [semidx.core :as sci]))

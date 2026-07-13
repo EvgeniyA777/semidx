@@ -1,4 +1,4 @@
-(ns semidx.repo-identity-test
+(ns semidx.runtime.repo-identity-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [semidx.core :as sci]

@@ -1,4 +1,4 @@
-(ns semidx.freshness-test
+(ns semidx.runtime.freshness-test
   (:require [clojure.test :refer [deftest is testing]]
             [semidx.runtime.freshness :as freshness]))
 

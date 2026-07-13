@@ -1,4 +1,4 @@
-(ns semidx.evaluation-test
+(ns semidx.runtime.evaluation-test
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.java.shell :as sh]

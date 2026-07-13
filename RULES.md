@@ -25,7 +25,7 @@
 - `src/semidx/contracts/` contains the Clojure validation layer for external contracts.
 - `contracts/schemas/` and `contracts/examples/` are external contract artifacts.
 - `fixtures/` contains retrieval and semantic-quality fixtures.
-- `test/semidx/` contains the Clojure test suite run by `clojure -M:test`.
+- `test/semidx/` contains the Clojure test suite run by `clojure -M:test`. Test namespaces mirror the code they cover: a unit test for `semidx.runtime.X` lives at `test/semidx/runtime/X_test.clj` (namespace `semidx.runtime.X-test`), MCP tests under `test/semidx/mcp/`, and cross-cutting/integration suites (language onboarding, end-to-end create-index/retrieval flows) under `test/semidx/integration/`.
 - `docs/code-context.md` and `.ccc/state.edn` are committed Code Context Compressor artifacts used for agent bootstrap.
 
 ## Skill And Mode Activation
@@ -103,6 +103,7 @@
 ## Testing And Verification
 
 - Verify changes with the narrowest meaningful command first.
+- Tests are auto-discovered: `clojure -M:test` runs every `*-test` namespace found under `test/`, so a new test needs no manual registration. Keep tests order-independent — they must not rely on namespace run order or shared mutable state between namespaces.
 - Common local checks:
   - `clojure -M:test`
   - `./scripts/validate-contracts.sh`

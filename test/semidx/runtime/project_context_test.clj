@@ -1,4 +1,4 @@
-(ns semidx.project-context-test
+(ns semidx.runtime.project-context-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [semidx.core :as sci]
