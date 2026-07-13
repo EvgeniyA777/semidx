@@ -50,8 +50,8 @@ LANG_ID="$(echo "$LANG_INPUT" | tr '[:upper:]-' '[:lower:]_' | sed 's/[^a-z0-9_]
 LANG_NS="$(echo "$LANG_ID" | tr '_' '-')"
 
 ADAPTERS_FILE="src/semidx/runtime/adapters.clj"
-TEST_RUNNER_FILE="src/semidx/test_runner.clj"
-TEST_FILE="test/semidx/${LANG_ID}_onboarding_test.clj"
+REGISTRY_FILE="src/semidx/runtime/language_registry.clj"
+TEST_FILE="test/semidx/integration/${LANG_ID}_onboarding_test.clj"
 DOC_FILE="docs/language-onboarding/${LANG_ID}.md"
 FIXTURE_HAPPY="fixtures/retrieval/${LANG_ID}-happy-path.json"
 FIXTURE_AMBIG="fixtures/retrieval/${LANG_ID}-ambiguity.json"
@@ -89,19 +89,18 @@ check_contains() {
 }
 
 check_file "$ADAPTERS_FILE"
-check_file "$TEST_RUNNER_FILE"
+check_file "$REGISTRY_FILE"
 check_file "$TEST_FILE"
 check_file "$DOC_FILE"
 check_file "$FIXTURE_HAPPY"
 check_file "$FIXTURE_AMBIG"
 check_file "$CORPUS_FILE"
 
-check_contains "\"${LANG_ID}\"" "$ADAPTERS_FILE" "language key registered in adapters"
+check_contains "\"${LANG_ID}\"" "$REGISTRY_FILE" "language lane registered in registry"
 check_contains "\\(defn- parse-${LANG_ID} " "$ADAPTERS_FILE" "parse function scaffold exists"
 check_contains "\"${LANG_ID}\" \\(parse-${LANG_ID} " "$ADAPTERS_FILE" "parse-file branch wired"
 
-check_contains "semidx\\.${LANG_NS}-onboarding-test" "$TEST_RUNNER_FILE" "test runner requires onboarding test ns"
-check_contains "'semidx\\.${LANG_NS}-onboarding-test" "$TEST_RUNNER_FILE" "test runner executes onboarding test ns"
+check_contains "ns semidx\\.integration\\.${LANG_NS}-onboarding-test" "$TEST_FILE" "onboarding test uses mirrored integration namespace (auto-discovered)"
 
 check_contains "\"retrieval_${LANG_ID}_happy_path_001\"" "$FIXTURE_HAPPY" "happy fixture id is correct"
 check_contains "\"retrieval_${LANG_ID}_ambiguity_001\"" "$FIXTURE_AMBIG" "ambiguity fixture id is correct"

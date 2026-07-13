@@ -121,38 +121,49 @@ update_file_with_awk() {
   log "patched: $path"
 }
 
-build_ext_cond_expr() {
-  if [[ "${#EXTS[@]}" -eq 1 ]]; then
-    printf '(str/ends-with? path "%s")' "${EXTS[0]}"
-    return 0
-  fi
-  local expr="(or"
+build_ext_vec() {
+  local out=""
   local ext
   for ext in "${EXTS[@]}"; do
-    expr="$expr (str/ends-with? path \"$ext\")"
+    if [[ -z "$out" ]]; then
+      out="\"$ext\""
+    else
+      out="$out \"$ext\""
+    fi
   done
-  expr="$expr)"
-  printf '%s' "$expr"
+  printf '[%s]' "$out"
 }
 
 ADAPTERS_FILE="src/semidx/runtime/adapters.clj"
+REGISTRY_FILE="src/semidx/runtime/language_registry.clj"
 CORPUS_FILE="fixtures/retrieval/corpus.json"
 FIXTURE_HAPPY="fixtures/retrieval/${LANG_ID}-happy-path.json"
 FIXTURE_AMBIG="fixtures/retrieval/${LANG_ID}-ambiguity.json"
 DOC_ONBOARDING="docs/language-onboarding/${LANG_ID}.md"
 TEST_FILE="test/semidx/integration/${LANG_ID}_onboarding_test.clj"
 
-EXT_EXPR="$(build_ext_cond_expr)"
+EXT_VEC="$(build_ext_vec)"
 
-if ! grep -q "\"${LANG_ID}\"" "$ADAPTERS_FILE"; then
-  update_file_with_awk "$ADAPTERS_FILE" \
-    -v insert_line="    ${EXT_EXPR} \"${LANG_ID}\"" '
-      BEGIN { inserted=0 }
-      /^    :else nil\)\)$/ && inserted==0 { print insert_line; inserted=1 }
-      { print }
-    '
+# Language detection lives in the language registry (single source of truth since
+# plan 011). Insert a lane map (language + extensions + provider metadata) before
+# the registry's insertion marker. adapters/language-by-path delegates to it, and
+# supported-language-order / provider-catalog are derived from it.
+if ! grep -q "\"${LANG_ID}\"" "$REGISTRY_FILE"; then
+  LANE_BLOCK="$(printf '   {:language "%s"\n    :extensions %s\n    :provider {:provider_id "%s-native" :provider_version "1" :classification "source"}}' "$LANG_ID" "$EXT_VEC" "$LANG_ID")"
+  block_file="$(mktemp)"
+  printf '%s\n' "$LANE_BLOCK" > "$block_file"
+  update_file_with_awk "$REGISTRY_FILE" -v block_file="$block_file" '
+    BEGIN {
+      inserted=0
+      while ((getline line < block_file) > 0) { block = block line ORS }
+      close(block_file)
+    }
+    /New language lanes are inserted above this marker/ && inserted==0 { printf "%s", block; inserted=1 }
+    { print }
+  '
+  rm -f "$block_file"
 else
-  log "skip language-by-path mapping, appears present for: $LANG_ID"
+  log "skip registry lane, appears present for: $LANG_ID"
 fi
 
 if ! grep -q "(defn- parse-${LANG_ID} " "$ADAPTERS_FILE"; then

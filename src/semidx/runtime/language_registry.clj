@@ -28,7 +28,9 @@
     :provider {:provider_id "html-native" :provider_version "1" :classification "source"}}
    {:language "css"
     :extensions [".css"]
-    :provider {:provider_id "css-native" :provider_version "1" :classification "source"}}])
+    :provider {:provider_id "css-native" :provider_version "1" :classification "source"}}
+   ;; New language lanes are inserted above this marker by scripts/new-language-adapter.sh.
+   ])
 
 (def supported-language-order
   (mapv :language language-lanes))

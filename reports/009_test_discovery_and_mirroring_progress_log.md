@@ -64,15 +64,39 @@ Companion progress log for [012_test_discovery_and_mirroring_plan.md](../plans/0
   `Testing And Verification` now states tests are auto-discovered (no manual
   registration) and must stay order-independent.
 
-## Known Follow-ups
+## Onboarding-tooling regressions (found in review, now fixed)
 
-- **`scripts/new-language-adapter.sh` updated (Step 1 fallout — fixed).** The
-  scaffolder no longer edits the removed manual list in `test_runner.clj`; both
-  insertion blocks and the unused `TEST_RUNNER_FILE` var were dropped (a
-  scaffolded `*-test` namespace is auto-discovered). It now also scaffolds the
-  onboarding test at the mirrored location `test/semidx/integration/<lang>_onboarding_test.clj`
-  with namespace `semidx.integration.<lang>-onboarding-test`, matching Step 2.
-  Verified with `bash -n` and a `--dry-run` for a sample language.
+The first pass at aligning `new-language-adapter.sh` was **incomplete**: it only
+addressed the test path + `test_runner.clj` insertion, and never re-ran
+`validate-language-onboarding.sh`. A follow-up review caught two blocking
+regressions against plan 012's acceptance criterion ("scripts invoking
+`clojure -M:test` / onboarding validation must keep working"). Both are now fixed
+and empirically verified.
+
+- **R1 — `validate-language-onboarding.sh` was stale (High).** It expected
+  `test/semidx/<lang>_onboarding_test.clj` and manual `test_runner.clj`
+  registration, so `./scripts/validate-language-onboarding.sh javascript` (and
+  `typescript`) failed after plan 012 (`errors=3`). Fix: expected test path now
+  `test/semidx/integration/<lang>_onboarding_test.clj`; the two manual-registration
+  checks are replaced with a discovery smoke that asserts the test declares the
+  `semidx.integration.<lang>-onboarding-test` namespace; the "language registered"
+  check now targets the registry.
+- **R2 — `new-language-adapter.sh` was incompatible with the plan 011 registry
+  (High).** It still inserted the extension mapping into `adapters/language-by-path`
+  `:else nil))`, which plan 011 removed (detection moved to
+  `semidx.runtime.language-registry`). The awk therefore hit the first unrelated
+  `:else nil))` in `adapters.clj` (~line 897), corrupting an unrelated form and
+  **not** registering the lane. Fix: the scaffolder now inserts a lane map
+  (`:language` + `:extensions` + `:provider`) into `language-registry/language-lanes`
+  at a dedicated insertion marker; the parser stub and `parse-file` dispatch stay
+  in `adapters.clj`.
+
+- **Verification**: `./scripts/validate-language-onboarding.sh {javascript,typescript} --skip-gates`
+  now pass. A real `./scripts/new-language-adapter.sh ruby --ext .rb` run added the
+  lane to the registry (before the marker), left `adapters.clj:897` intact,
+  detected `x.rb` → `"ruby"`, and passed `validate-language-onboarding.sh ruby`;
+  the scaffold was then reverted. `clojure -M:test` → 214 tests, 1544 assertions,
+  0 failures.
 
 ## Notes
 
