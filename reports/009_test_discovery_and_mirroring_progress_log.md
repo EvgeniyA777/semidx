@@ -66,12 +66,13 @@ Companion progress log for [012_test_discovery_and_mirroring_plan.md](../plans/0
 
 ## Known Follow-ups
 
-- **`scripts/new-language-adapter.sh` is now stale (Step 1 fallout).** It still
-  tries to insert a new onboarding test namespace into the removed manual list in
-  `test_runner.clj` (anchored on `semidx.runtime-http-test`). With auto-discovery
-  this insertion is unnecessary and no longer matches the file; the scaffolding
-  step should be updated to drop the list edit (a scaffolded `*-test` namespace is
-  found automatically). Tracked here; not fixed in this plan.
+- **`scripts/new-language-adapter.sh` updated (Step 1 fallout — fixed).** The
+  scaffolder no longer edits the removed manual list in `test_runner.clj`; both
+  insertion blocks and the unused `TEST_RUNNER_FILE` var were dropped (a
+  scaffolded `*-test` namespace is auto-discovered). It now also scaffolds the
+  onboarding test at the mirrored location `test/semidx/integration/<lang>_onboarding_test.clj`
+  with namespace `semidx.integration.<lang>-onboarding-test`, matching Step 2.
+  Verified with `bash -n` and a `--dry-run` for a sample language.
 
 ## Notes
 
