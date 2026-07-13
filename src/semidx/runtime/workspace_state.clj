@@ -3,21 +3,14 @@
             [clojure.string :as str]
             [clojure.set :as set]
             [semidx.runtime.adapters :as adapters]
-            [semidx.runtime.language-activation :as activation]))
+            [semidx.runtime.language-activation :as activation]
+            [semidx.runtime.language-registry :as language-registry]))
 
 (def provider-registry-version "3")
 (def semantic-pipeline-version "1")
 
 (def provider-catalog
-  {"clojure"    {:provider_id "clojure-native"    :provider_version "1" :classification "source"}
-   "java"       {:provider_id "java-native"       :provider_version "1" :classification "source"}
-   "elixir"     {:provider_id "elixir-native"     :provider_version "1" :classification "source"}
-   "python"     {:provider_id "python-native"     :provider_version "1" :classification "source"}
-   "typescript" {:provider_id "typescript-native" :provider_version "1" :classification "source"}
-   "javascript" {:provider_id "javascript-native" :provider_version "1" :classification "source"}
-   "lua"        {:provider_id "lua-native"        :provider_version "1" :classification "source"}
-   "html"       {:provider_id "html-native"       :provider_version "1" :classification "source"}
-   "css"        {:provider_id "css-native"        :provider_version "1" :classification "source"}})
+  language-registry/provider-catalog)
 
 (defn sha256-hex [^String s]
   (let [digest (java.security.MessageDigest/getInstance "SHA-256")

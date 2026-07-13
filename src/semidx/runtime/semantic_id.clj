@@ -1,5 +1,6 @@
 (ns semidx.runtime.semantic-id
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [semidx.runtime.language-registry :as language-registry]))
 
 (def ^:private semantic-id-version "v1")
 
@@ -47,26 +48,8 @@
 
 (defn- infer-language [unit]
   (or (:language unit)
-      (let [path (str (:path unit))]
-        (cond
-          (or (str/ends-with? path ".clj")
-              (str/ends-with? path ".cljc")
-              (str/ends-with? path ".cljs")) "clojure"
-          (str/ends-with? path ".java") "java"
-          (or (str/ends-with? path ".ex")
-              (str/ends-with? path ".exs")) "elixir"
-          (str/ends-with? path ".py") "python"
-          (or (str/ends-with? path ".ts")
-              (str/ends-with? path ".tsx")) "typescript"
-          (or (str/ends-with? path ".js")
-              (str/ends-with? path ".jsx")
-              (str/ends-with? path ".mjs")
-              (str/ends-with? path ".cjs")) "javascript"
-          (str/ends-with? path ".lua") "lua"
-          (or (str/ends-with? path ".html")
-              (str/ends-with? path ".htm")) "html"
-          (str/ends-with? path ".css") "css"
-          :else "unknown"))))
+      (language-registry/language-by-path (:path unit))
+      "unknown"))
 
 (defn- symbol-owner [symbol]
   (let [symbol* (str (or symbol ""))]

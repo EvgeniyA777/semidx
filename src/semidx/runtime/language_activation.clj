@@ -1,10 +1,11 @@
 (ns semidx.runtime.language-activation
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [semidx.runtime.adapters :as adapters]))
+            [semidx.runtime.adapters :as adapters]
+            [semidx.runtime.language-registry :as language-registry]))
 
 (def ^:private supported-language-order
-  ["clojure" "java" "elixir" "python" "typescript" "javascript" "lua" "html" "css"])
+  language-registry/supported-language-order)
 
 (def ^:private manifest-hints
   [{:path "deps.edn" :language "clojure"}

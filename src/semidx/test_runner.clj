@@ -11,6 +11,7 @@
             [semidx.html-onboarding-test]
             [semidx.css-onboarding-test]
             [semidx.javascript-onboarding-test]
+            [semidx.language-registry-test]
             [semidx.storage-test]
             [semidx.typescript-onboarding-test]
             [semidx.runtime-test]
@@ -33,6 +34,7 @@
                             'semidx.html-onboarding-test
                             'semidx.css-onboarding-test
                             'semidx.javascript-onboarding-test
+                            'semidx.language-registry-test
                             'semidx.storage-test
                             'semidx.typescript-onboarding-test
                             'semidx.usage-metrics-test

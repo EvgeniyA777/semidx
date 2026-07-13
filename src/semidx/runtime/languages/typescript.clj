@@ -1,7 +1,8 @@
 (ns semidx.runtime.languages.typescript
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as sh]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [semidx.runtime.language-registry :as language-registry]))
 
 (def ^:private ts-import-clause-re #"^\s*import\s+(.+?)\s+from\s+['\"]([^'\"]+)['\"]")
 (def ^:private ts-import-bare-re #"^\s*import\s+['\"]([^'\"]+)['\"]")
@@ -38,9 +39,13 @@
     (nth lines (dec n))))
 
 (defn- ts-strip-ext [path]
-  (-> (str path)
-      (str/replace #"\.(ts|tsx|js|jsx|mjs|cjs)$" "")
-      (str/replace #"/index$" "")))
+  (let [path* (str path)
+        extension (some #(when (str/ends-with? path* %) %)
+                        language-registry/ecmascript-source-extensions)]
+    (-> (if extension
+          (subs path* 0 (- (count path*) (count extension)))
+          path*)
+      (str/replace #"/index$" ""))))
 
 (defn- ts-module-name [path]
   (-> path
@@ -180,26 +185,7 @@
     parsed))
 
 (defn- ts-test-path? [path]
-  (let [p (str/lower-case (str path))]
-    (or (str/includes? p "/test/")
-        (str/ends-with? p ".test.ts")
-        (str/ends-with? p ".test.tsx")
-        (str/ends-with? p ".test.js")
-        (str/ends-with? p ".test.jsx")
-        (str/ends-with? p ".test.mjs")
-        (str/ends-with? p ".test.cjs")
-        (str/ends-with? p ".spec.ts")
-        (str/ends-with? p ".spec.tsx")
-        (str/ends-with? p ".spec.js")
-        (str/ends-with? p ".spec.jsx")
-        (str/ends-with? p ".spec.mjs")
-        (str/ends-with? p ".spec.cjs")
-        (str/ends-with? p "_test.ts")
-        (str/ends-with? p "_test.tsx")
-        (str/ends-with? p "_test.js")
-        (str/ends-with? p "_test.jsx")
-        (str/ends-with? p "_test.mjs")
-        (str/ends-with? p "_test.cjs"))))
+  (language-registry/ecmascript-test-path? path))
 
 (defn- ts-kind [path name method?]
   (if (or (ts-test-path? path)

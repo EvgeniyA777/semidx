@@ -132,7 +132,7 @@ Verification (reviewer, independent re-run):
   (matches the implementer's Verification Summary above).
 
 ### L1 — [Low, tech-debt] Extension→language mapping is duplicated
-- **Status**: Deferred to
+- **Status**: Fixed by
   [011_language_lane_registry_dedup_plan.md](../plans/011_language_lane_registry_dedup_plan.md).
 - **Evidence**: the extension→language mapping lives in both
   `adapters/language-by-path` and `src/semidx/runtime/semantic_id.clj`, and the
@@ -141,6 +141,10 @@ Verification (reviewer, independent re-run):
   for JavaScript this time, but the duplication invites future drift.
 - **Decision**: do not fix in the JavaScript lane commit. Consolidating language
   metadata is a cross-lane refactor and should land as a focused follow-up.
+- **Fix summary**: plan 011 added `semidx.runtime.language-registry` and routed
+  adapter detection, semantic-ID fallback inference, supported language order,
+  provider catalog, and JS/TS test suffix classification through it. Verification
+  passed in `reports/008_language_lane_registry_dedup_progress_log.md`.
 
 ### L2 — [Low, edge case] `.ts`/`.js` module-identity collision
 - **Status**: Accepted known limitation.

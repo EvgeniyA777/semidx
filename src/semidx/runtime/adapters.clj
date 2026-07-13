@@ -8,6 +8,7 @@
             [semidx.runtime.languages.html :as html-language]
             [semidx.runtime.languages.javascript :as js-language]
             [semidx.runtime.languages.typescript :as ts-language]
+            [semidx.runtime.language-registry :as language-registry]
             [semidx.runtime.semantic-ir :as semantic-ir]))
 
 (def ^:private clj-def-re
@@ -89,26 +90,10 @@
 (defonce ^:private tree-sitter-config-cache (atom {}))
 
 (defn language-by-path [path]
-  (cond
-    (or (str/ends-with? path ".clj")
-        (str/ends-with? path ".cljc")
-        (str/ends-with? path ".cljs")) "clojure"
-    (str/ends-with? path ".java") "java"
-    (or (str/ends-with? path ".ex")
-        (str/ends-with? path ".exs")) "elixir"
-    (str/ends-with? path ".py") "python"
-    (or (str/ends-with? path ".ts") (str/ends-with? path ".tsx")) "typescript"
-    (or (str/ends-with? path ".js")
-        (str/ends-with? path ".jsx")
-        (str/ends-with? path ".mjs")
-        (str/ends-with? path ".cjs")) "javascript"
-    (str/ends-with? path ".lua") "lua"
-    (or (str/ends-with? path ".html") (str/ends-with? path ".htm")) "html"
-    (str/ends-with? path ".css") "css"
-    :else nil))
+  (language-registry/language-by-path path))
 
 (defn source-path? [path]
-  (boolean (language-by-path path)))
+  (language-registry/source-path? path))
 
 (defn- slurp-lines [file]
   (-> file slurp str/split-lines vec))
@@ -2469,26 +2454,7 @@
   (parse-lua path lines))
 
 (defn- ts-test-path? [path]
-  (let [p (str/lower-case (str path))]
-    (or (str/includes? p "/test/")
-        (str/ends-with? p ".test.ts")
-        (str/ends-with? p ".test.tsx")
-        (str/ends-with? p ".test.js")
-        (str/ends-with? p ".test.jsx")
-        (str/ends-with? p ".test.mjs")
-        (str/ends-with? p ".test.cjs")
-        (str/ends-with? p ".spec.ts")
-        (str/ends-with? p ".spec.tsx")
-        (str/ends-with? p ".spec.js")
-        (str/ends-with? p ".spec.jsx")
-        (str/ends-with? p ".spec.mjs")
-        (str/ends-with? p ".spec.cjs")
-        (str/ends-with? p "_test.ts")
-        (str/ends-with? p "_test.tsx")
-        (str/ends-with? p "_test.js")
-        (str/ends-with? p "_test.jsx")
-        (str/ends-with? p "_test.mjs")
-        (str/ends-with? p "_test.cjs"))))
+  (language-registry/ecmascript-test-path? path))
 
 (defn- ts-kind [path name method?]
   (if (or (ts-test-path? path)
@@ -2980,9 +2946,9 @@
                :reason {:code "tree_sitter_no_units"
                         :summary "tree-sitter did not extract TypeScript units."}})))))))
 
-(defn- parse-typescript [root-path path lines {:keys [typescript_engine tree_sitter_enabled]
-                                               :or {typescript_engine :regex}
-                                               :as parser-opts}]
+(defn- parse-typescript-legacy [root-path path lines {:keys [typescript_engine tree_sitter_enabled]
+                                                      :or {typescript_engine :regex}
+                                                      :as parser-opts}]
   (let [engine (if (true? tree_sitter_enabled) :tree-sitter typescript_engine)
         parsed (if (= engine :tree-sitter)
                  (let [{:keys [ok? result reason]} (parse-typescript-tree-sitter root-path path lines parser-opts)]
@@ -2992,6 +2958,12 @@
                          (update :diagnostics conj reason))))
                  (parse-typescript-regex path lines))]
     (add-tree-sitter-diag parsed tree_sitter_enabled "typescript")))
+
+(defn- parse-typescript [root-path file-path lines parser-opts]
+  (try
+    (ts-language/parse-file root-path file-path lines parser-opts)
+    (catch Exception _
+      (parse-typescript-legacy root-path file-path lines parser-opts))))
 
 (defn- fallback-unit [path lines language reason]
   (let [line-count (max 1 (count lines))]
@@ -3042,10 +3014,7 @@
                 "java" (parse-java-file root-path file-path lines parser-opts)
                 "elixir" (parse-elixir-language-file root-path file-path lines parser-opts)
                 "python" (parse-python-file file-path lines)
-                "typescript" (try
-                               (ts-language/parse-file root-path file-path lines parser-opts)
-                               (catch Exception _
-                                 (parse-typescript root-path file-path lines parser-opts)))
+                "typescript" (parse-typescript root-path file-path lines parser-opts)
                 "javascript" (parse-javascript root-path file-path lines parser-opts)
                 "lua" (parse-lua file-path lines)
                 "html" (parse-html root-path file-path lines parser-opts)
