@@ -13,6 +13,13 @@ Status: Active
 Architecture reference:
   plans/007_semidx_extension_architecture_resolution_plan.md
 
+> Revision (2026-07-13): incorporates reviewer remediation priority 1–2 from
+> `reports/004_stage_0_1_workspace_freshness_consensus_claude.md` — `added_paths`
+> routing, `capture-workspace-state` prior-state arg + explicit STRICT/FAST
+> hashing stance, provider/pipeline version source, widened `update-index`
+> selector with preserved encapsulation, and single-writer atomic publication
+> with a fingerprint compare-and-set.
+
 ## Goal
 
 Fix the P0 correctness defect: `create_index` must never return a stale snapshot
@@ -53,8 +60,11 @@ Key functions:
 
 ```clojure
 (defn capture-workspace-state
-  [root-path discovery-profile provider-catalog-version]
-  ;; Returns WorkspaceState map)
+  [root-path discovery-profile provider-catalog-version & [prior-workspace-state]]
+  ;; Returns WorkspaceState map.
+  ;; `prior-workspace-state` is optional; it is consulted ONLY under the FAST
+  ;; hashing mode (see Rules) to reuse a previously computed content_digest for a
+  ;; file whose mtime AND size are unchanged.)
 
 (defn diff-workspace-state
   [previous current]
@@ -82,16 +92,31 @@ WorkspaceState shape:
 ```
 
 Rules:
-- `modified_at` + `size_bytes` are used only to skip hashing unmodified files.
-- `content_digest` is the authoritative identity.
-- A cache hit is valid only when `workspace_fingerprint` matches.
+- `content_digest` is the authoritative identity and is always computed from the
+  file bytes.
+- **Hashing mode (resolves the correctness vs. performance fork):**
+  - **STRICT (default, Stage 1 correctness path):** every indexable file is read
+    and hashed on every capture. This is what makes the "never stale" guarantee
+    literal — a content change is always detected regardless of mtime/size.
+  - **FAST (opt-in, off by default):** when `prior-workspace-state` is supplied,
+    reuse its `content_digest` for a file whose mtime AND size are both unchanged.
+    This is an explicitly accepted Make-level trade-off: a content change that
+    preserves both mtime and size is missed. FAST must never be the default and
+    must be documented at the call site; `force_rebuild` always bypasses it.
+- `modified_at` + `size_bytes` are acceleration hints used only by FAST mode.
+- A cache hit (`:reuse`) is valid only when `workspace_fingerprint` matches.
 - Sort file list by path before computing `workspace_fingerprint` for determinism.
 - Use `java.security.MessageDigest` (SHA-256) for all hashing.
 - Walk `root-path` via existing `adapters/source-files` until discovery is
   separated in Stage 3.
-- `provider_registry_version` and `semantic_pipeline_version` are constants in
-  this namespace; bump them in the same commit as any breaking change to parser
-  output or index schema.
+- **Provider/pipeline version source (Stage 1, catalog out of scope):**
+  `provider_registry_version`, `semantic_pipeline_version`, and per-file
+  `provider_id` / `provider_version` come from a single temporary constant table
+  in this namespace (the only source of truth until the provider registry lands).
+  A unit test asserts this table matches the adapters actually wired in
+  `default-parser-opts`, so a new/changed adapter fails loudly instead of
+  producing a fake or unstable fingerprint. Bump the versions in the same commit
+  as any breaking change to parser output or index schema.
 
 ### `src/semidx/runtime/freshness.clj`
 
@@ -103,6 +128,7 @@ Responsibility: pure function — decide reuse, incremental update, or rebuild.
   ;; Returns:
   ;; {:action         :reuse | :incremental_update | :full_rebuild
   ;;  :reason         "..."
+  ;;  :added_paths    [...]
   ;;  :changed_paths  [...]
   ;;  :deleted_paths  [...]
   ;;  :diagnostics    [...]})
@@ -117,9 +143,12 @@ Decision rules (in priority order):
 5. `provider_registry_version` or `semantic_pipeline_version` changed →
    `:full_rebuild "provider_or_pipeline_version_changed"`
 6. `workspace_fingerprint` matches → `:reuse "workspace_unchanged"`
-7. Delta file count > threshold (default 50% of total) →
+7. Delta file count > threshold (`freshness-delta-rebuild-ratio`, default 0.5 of
+   total; a named, configurable constant, not a magic number) →
    `:full_rebuild "delta_exceeds_threshold"`
-8. Otherwise → `:incremental_update` with `changed_paths` and `deleted_paths`
+8. Otherwise → `:incremental_update` with `added_paths`, `changed_paths`, and
+   `deleted_paths` (all three must be carried through; `added_paths` and
+   `changed_paths` take the same parse path, `deleted_paths` are removed).
 
 Zero side effects. Independently testable with plain maps.
 
@@ -144,13 +173,25 @@ Sequence:
 3. Call `freshness/decide-freshness`.
 4. Dispatch on action:
    - `:reuse` → return prior snapshot with lifecycle outcome attached.
-   - `:incremental_update` → call existing `runtime.index/update-index` with
-     computed `changed_paths`; handle `deleted_paths` via `remove-paths-from-index`.
-   - `:full_rebuild` → call existing `runtime.index` full-parse path.
+   - `:incremental_update` → call `runtime.index/update-index` with the widened
+     `{:added_paths :changed_paths :deleted_paths}` selector (see Modified Files).
+     Added and changed paths are re-parsed; deleted paths are removed. The
+     coordinator uses only the public `update-index` entry point and never
+     reaches into `runtime.index` private helpers.
+   - `:full_rebuild` → call the public `runtime.index` full build path.
 5. Embed `current-workspace-state` into snapshot payload as additive
    `:workspace_state` field.
-6. Persist via `storage/save-index!` if storage is configured.
-7. Publish under the existing project-registry refresh lock.
+6. **Single owner of persist + publish.** `update-index` / full build already
+   call `maybe-save-index!`; the coordinator must NOT persist a second time.
+   Persistence and publication happen exactly once, inside the critical section.
+7. **Atomic publication (concurrency).** The whole capture → decide → build →
+   persist → publish sequence runs under the existing project-registry
+   single-writer lock, for every entry surface (MCP, HTTP, gRPC, and direct
+   library calls — the lock lives in the coordinator, not in a transport). At
+   publish time apply a compare-and-set on `workspace_fingerprint`: if the
+   currently published snapshot's fingerprint no longer matches the state this
+   build started from, discard this build and re-run rather than overwrite a
+   newer snapshot (prevents the lost-update / TOCTOU case in gate #13).
 
 The coordinator does NOT touch MCP JSON, HTTP status codes, or transport fields.
 
@@ -161,7 +202,17 @@ The coordinator does NOT touch MCP JSON, HTTP status codes, or transport fields.
 - `create-index` delegates to `index-lifecycle/coordinate-index-lifecycle` for
   the full reuse/update/build decision.
 - Internal helpers (`parse-files`, `build-index-state`, `maybe-load-index`,
-  `maybe-save-index!`) remain and are called by the lifecycle coordinator.
+  `maybe-save-index!`, `remove-paths-from-index`) stay **private**. The
+  coordinator lives close to this namespace and interacts only through the
+  public `create-index` / `update-index` entry points, so encapsulation is
+  preserved (no `defn-` is promoted to public just to serve the coordinator).
+- `update-index` signature is widened from `{:changed_paths ...}` to
+  `{:added_paths :changed_paths :deleted_paths :parser_opts :storage}`. Added and
+  changed paths flow through the existing parse path; deleted paths go through the
+  private `remove-paths-from-index`. This keeps deletion/addition behavior behind
+  the runtime-index boundary and rebuilds the full caller/callee/module graph via
+  `build-index-state` over the merged unit set (preserving gate #10 equivalence,
+  which holds only when added + changed + deleted are all carried through).
 - `build-index-state` accepts an optional `:workspace_state` arg and stores it
   in the snapshot map (additive, no schema break for existing callers).
 
