@@ -100,7 +100,64 @@ Companion progress log for [009_html_css_language_lanes_plan.md](../plans/009_ht
 - `./scripts/validate-contracts.sh`: Passed (`checked_json_files=57`, `contracts_validation=ok`).
 - `clojure -M:test`: Passed. Ran 201 tests containing 1382 assertions, 0 failures, 0 errors.
 
+## Review Findings (in progress — 2026-07-13)
+
+Reviewer pass over the committed implementation (commit `556cfd4`) against
+`plans/009_html_css_language_lanes_plan.md`. **This review is incomplete** — it
+was interrupted before finishing `narrow-targets` analysis and before an
+independent full-suite re-run. Findings below are preliminary and not all
+verified; severities may change after verification. The implementer's own
+verification log reports `clojure -M:test` green (201 tests, 1382 assertions).
+
+Reviewed so far: `languages/html.clj`, `languages/css.clj` (full); the
+`adapters.clj` / `language_activation.clj` / `semantic_id.clj` diffs; and the
+HTML→CSS linking path (`build-call-token-index` + `symbol-call-tokens`).
+
+### RF1 — [Preliminary High — NEEDS VERIFICATION] Generic CSS selector/tail tokens may pollute the cross-language call graph
+- **Status**: Open, unverified (analysis interrupted at `narrow-targets`).
+- **Evidence**: CSS tag selectors produce very generic `:symbol` values (`a`,
+  `button`, `nav`, `main`, `body`, `form`) in `src/semidx/runtime/languages/css.clj:50-57`.
+  `symbol-call-tokens` (`src/semidx/runtime/index.clj`) additionally indexes each
+  symbol under its bare tail token (e.g. `.button` → also `button`). So a caller
+  in another language whose call token resolves to `button`/`a`/`form` could gain
+  a spurious edge to a CSS selector unit.
+- **Why it matters**: Cross-language false edges would degrade impact analysis and
+  ranking on mixed web+backend repos.
+- **Open question**: whether `narrow-targets` filters by language/module/import
+  and thereby suppresses these edges. Must be confirmed before assigning final
+  severity. If `narrow-targets` filters cross-file/cross-language candidates, this
+  may drop to Low.
+- **Suggested direction (pending verification)**: scope selector tokens so tag
+  selectors and tail-token expansion do not leak generic identifiers into the
+  shared token index, or confirm `narrow-targets` already isolates them.
+
+### RF2 — [Preliminary Medium-Low] HTML `href`/`src` file references are emitted as `:calls` but never resolve
+- **Status**: Open, unverified.
+- **Evidence**: `languages/html.clj:87,99` put normalized `href`/`src`/`action`
+  refs (e.g. `"styles.css"`) into a unit's `:calls`, but the CSS/JS module symbol
+  is `module/stylesheet` (or `module/document`), not the file path — so these
+  tokens resolve to nothing (dead tokens). File-level HTML→CSS linking claimed by
+  the plan's asset-reference contract is not actually wired.
+- **Why it matters**: The plan lists static asset references as a linking signal;
+  in practice only `.class`/`#id` selector linking works.
+- **Suggested direction**: either map file refs to the target module symbol, or
+  keep refs only in `:imports`/module graph and drop them from `:calls`.
+
+### RF3 — [Preliminary Low] Unstable HTML element symbols; dead parameter
+- **Status**: Open, unverified.
+- **Evidence**: `languages/html.clj:70-71` builds element symbols as
+  `module/tag-line-ordinal`, so every line shift changes symbols (index churn).
+  `element-symbol` also takes `attrs` but never uses it.
+- **Why it matters**: Line-based symbols are noisy across edits; low impact.
+
+### Review verification status
+- Independent full-suite re-run: **not run** (interrupted). Implementer reports
+  201 tests / 1382 assertions green in the Verification Log above.
+- `narrow-targets` cross-language filtering: **not yet analyzed** — gates RF1.
+
 ## Known Follow-ups
 
+- Complete the interrupted review: analyze `narrow-targets`, then verify or
+  downgrade RF1, and re-run `clojure -M:test` independently.
 - Tree-sitter HTML/CSS support remains deferred.
 - The generic `validate-language-onboarding.sh` gates were run with `--skip-gates` because full gates include benchmarks and MVP gates beyond the narrow implementation slice; full `clojure -M:test` and contract validation were run separately.

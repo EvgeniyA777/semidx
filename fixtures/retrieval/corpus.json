@@ -69,6 +69,18 @@
       "purpose": "TypeScript broad path targeting should remain ambiguity-aware and plan-safe."
     },
     {
+      "fixture_id": "retrieval_javascript_happy_path_001",
+      "category": "javascript_onboarding",
+      "path": "javascript-happy-path.json",
+      "purpose": "JavaScript exact symbol targeting should keep authority units in top_authority with high confidence."
+    },
+    {
+      "fixture_id": "retrieval_javascript_ambiguity_001",
+      "category": "javascript_ambiguity",
+      "path": "javascript-ambiguity.json",
+      "purpose": "JavaScript broad path targeting should remain ambiguity-aware and plan-safe."
+    },
+    {
       "fixture_id": "retrieval_lua_happy_path_001",
       "category": "lua_onboarding",
       "path": "lua-happy-path.json",

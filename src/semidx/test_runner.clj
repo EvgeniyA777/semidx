@@ -10,6 +10,7 @@
             [semidx.lua-onboarding-test]
             [semidx.html-onboarding-test]
             [semidx.css-onboarding-test]
+            [semidx.javascript-onboarding-test]
             [semidx.storage-test]
             [semidx.typescript-onboarding-test]
             [semidx.runtime-test]
@@ -31,6 +32,7 @@
                             'semidx.lua-onboarding-test
                             'semidx.html-onboarding-test
                             'semidx.css-onboarding-test
+                            'semidx.javascript-onboarding-test
                             'semidx.storage-test
                             'semidx.typescript-onboarding-test
                             'semidx.usage-metrics-test

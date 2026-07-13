@@ -4,7 +4,7 @@
             [semidx.runtime.adapters :as adapters]))
 
 (def ^:private supported-language-order
-  ["clojure" "java" "elixir" "python" "typescript" "lua" "html" "css"])
+  ["clojure" "java" "elixir" "python" "typescript" "javascript" "lua" "html" "css"])
 
 (def ^:private manifest-hints
   [{:path "deps.edn" :language "clojure"}

@@ -66,7 +66,8 @@
    "elixir" "medium"
    "java" "medium"
    "python" "medium"
-   "typescript" "low"})
+   "typescript" "low"
+   "javascript" "low"})
 
 (defn default-retrieval-policy []
   default-policy)

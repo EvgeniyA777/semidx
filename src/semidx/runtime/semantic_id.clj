@@ -58,6 +58,10 @@
           (str/ends-with? path ".py") "python"
           (or (str/ends-with? path ".ts")
               (str/ends-with? path ".tsx")) "typescript"
+          (or (str/ends-with? path ".js")
+              (str/ends-with? path ".jsx")
+              (str/ends-with? path ".mjs")
+              (str/ends-with? path ".cjs")) "javascript"
           (str/ends-with? path ".lua") "lua"
           (or (str/ends-with? path ".html")
               (str/ends-with? path ".htm")) "html"

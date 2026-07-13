@@ -67,8 +67,8 @@
 
     (testing "provider_registry_version bump -> appears in :compatibility_changes"
       (let [state1 (ws/capture-workspace-state tmp-root profile catalog-ver)
-            ;; We manually override the registry version in state2 to simulate a bump
-            state2 (assoc state1 :provider_registry_version "3")
+            ;; We manually override the registry version in state2 to simulate a bump.
+            state2 (assoc state1 :provider_registry_version "999")
             diff (ws/diff-workspace-state state1 state2)]
         (is (= [:provider_registry_version_changed] (:compatibility_changes diff)))))))
 

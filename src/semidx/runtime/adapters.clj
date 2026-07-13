@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [semidx.runtime.languages.css :as css-language]
             [semidx.runtime.languages.html :as html-language]
+            [semidx.runtime.languages.javascript :as js-language]
             [semidx.runtime.languages.typescript :as ts-language]
             [semidx.runtime.semantic-ir :as semantic-ir]))
 
@@ -97,6 +98,10 @@
         (str/ends-with? path ".exs")) "elixir"
     (str/ends-with? path ".py") "python"
     (or (str/ends-with? path ".ts") (str/ends-with? path ".tsx")) "typescript"
+    (or (str/ends-with? path ".js")
+        (str/ends-with? path ".jsx")
+        (str/ends-with? path ".mjs")
+        (str/ends-with? path ".cjs")) "javascript"
     (str/ends-with? path ".lua") "lua"
     (or (str/ends-with? path ".html") (str/ends-with? path ".htm")) "html"
     (str/ends-with? path ".css") "css"
@@ -259,6 +264,7 @@
                        :elixir "SEMIDX_TREE_SITTER_ELIXIR_GRAMMAR_PATH"
                        :java "SEMIDX_TREE_SITTER_JAVA_GRAMMAR_PATH"
                        :typescript "SEMIDX_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH"
+                       :javascript "SEMIDX_TREE_SITTER_JAVASCRIPT_GRAMMAR_PATH"
                        nil))))
 
 (defn- parse-ts-line [line]
@@ -312,7 +318,7 @@
        :err (or err "tree-sitter parse failed")})))
 
 (defn- add-tree-sitter-diag [parsed enabled? language]
-  (if (and enabled? (#{"clojure" "elixir" "java" "typescript"} language))
+  (if (and enabled? (#{"clojure" "elixir" "java" "typescript" "javascript"} language))
     (if (tree-sitter-available?)
       (update parsed :diagnostics conj {:code "tree_sitter_probe"
                                         :summary "tree-sitter CLI detected."})
@@ -2467,10 +2473,22 @@
     (or (str/includes? p "/test/")
         (str/ends-with? p ".test.ts")
         (str/ends-with? p ".test.tsx")
+        (str/ends-with? p ".test.js")
+        (str/ends-with? p ".test.jsx")
+        (str/ends-with? p ".test.mjs")
+        (str/ends-with? p ".test.cjs")
         (str/ends-with? p ".spec.ts")
         (str/ends-with? p ".spec.tsx")
+        (str/ends-with? p ".spec.js")
+        (str/ends-with? p ".spec.jsx")
+        (str/ends-with? p ".spec.mjs")
+        (str/ends-with? p ".spec.cjs")
         (str/ends-with? p "_test.ts")
-        (str/ends-with? p "_test.tsx"))))
+        (str/ends-with? p "_test.tsx")
+        (str/ends-with? p "_test.js")
+        (str/ends-with? p "_test.jsx")
+        (str/ends-with? p "_test.mjs")
+        (str/ends-with? p "_test.cjs"))))
 
 (defn- ts-kind [path name method?]
   (if (or (ts-test-path? path)
@@ -3009,6 +3027,9 @@
 (defn- parse-css [root-path file-path lines parser-opts]
   (css-language/parse-file root-path file-path lines parser-opts))
 
+(defn- parse-javascript [root-path file-path lines parser-opts]
+  (js-language/parse-file root-path file-path lines parser-opts))
+
 (defn parse-file
   ([root-path file-path] (parse-file root-path file-path {}))
   ([root-path file-path parser-opts]
@@ -3025,6 +3046,7 @@
                                (ts-language/parse-file root-path file-path lines parser-opts)
                                (catch Exception _
                                  (parse-typescript root-path file-path lines parser-opts)))
+                "javascript" (parse-javascript root-path file-path lines parser-opts)
                 "lua" (parse-lua file-path lines)
                 "html" (parse-html root-path file-path lines parser-opts)
                 "css" (parse-css root-path file-path lines parser-opts)
