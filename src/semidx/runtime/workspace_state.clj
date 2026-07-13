@@ -5,7 +5,7 @@
             [semidx.runtime.adapters :as adapters]
             [semidx.runtime.language-activation :as activation]))
 
-(def provider-registry-version "1")
+(def provider-registry-version "2")
 (def semantic-pipeline-version "1")
 
 (def provider-catalog
@@ -14,7 +14,9 @@
    "elixir"     {:provider_id "elixir-native"     :provider_version "1" :classification "source"}
    "python"     {:provider_id "python-native"     :provider_version "1" :classification "source"}
    "typescript" {:provider_id "typescript-native" :provider_version "1" :classification "source"}
-   "lua"        {:provider_id "lua-native"        :provider_version "1" :classification "source"}})
+   "lua"        {:provider_id "lua-native"        :provider_version "1" :classification "source"}
+   "html"       {:provider_id "html-native"       :provider_version "1" :classification "source"}
+   "css"        {:provider_id "css-native"        :provider_version "1" :classification "source"}})
 
 (defn sha256-hex [^String s]
   (let [digest (java.security.MessageDigest/getInstance "SHA-256")

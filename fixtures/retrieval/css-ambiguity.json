@@ -1,0 +1,49 @@
+{
+  "fixture_id": "retrieval_css_ambiguity_001",
+  "category": "css_ambiguity",
+  "purpose": "CSS broad selector targeting should remain ambiguity-aware across selectors and custom properties.",
+  "adr_refs": ["ADR-005", "ADR-008", "ADR-014", "ADR-022"],
+  "snapshot_ref": "seed-polyglot-app@rev-009",
+  "input": {
+    "query": {
+      "api_version": "1.0",
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "bug_investigation",
+        "details": "Investigate ambiguous selector and custom property changes in stylesheet context."
+      },
+      "targets": {
+        "paths": ["public/styles.css", "public/theme.css"],
+        "diff_summary": "Changed CTA selector and brand color custom property."
+      },
+      "constraints": {
+        "token_budget": 1400,
+        "language_allowlist": ["css"],
+        "allowed_path_prefixes": ["public/"],
+        "max_raw_code_level": "enclosing_unit",
+        "freshness": "current_snapshot"
+      },
+      "hints": {
+        "preferred_paths": ["public/styles.css", "public/theme.css"],
+        "preferred_modules": ["public.styles", "public.theme"],
+        "prefer_definitions_over_callers": false,
+        "prefer_breadth_over_depth": true
+      },
+      "options": {
+        "include_tests": false,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": false
+      },
+      "trace": {
+        "trace_id": "99444444-5555-4666-8777-888888888888",
+        "request_id": "fixture-css-ambiguity-001"
+      }
+    }
+  },
+  "expected": {
+    "must_include_paths": ["public/styles.css", "public/theme.css"],
+    "must_include_warning_codes": ["target_ambiguous"],
+    "confidence_level": "medium",
+    "autonomy_posture": "plan_safe"
+  }
+}

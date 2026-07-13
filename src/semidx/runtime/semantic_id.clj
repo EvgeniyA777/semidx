@@ -59,6 +59,9 @@
           (or (str/ends-with? path ".ts")
               (str/ends-with? path ".tsx")) "typescript"
           (str/ends-with? path ".lua") "lua"
+          (or (str/ends-with? path ".html")
+              (str/ends-with? path ".htm")) "html"
+          (str/ends-with? path ".css") "css"
           :else "unknown"))))
 
 (defn- symbol-owner [symbol]

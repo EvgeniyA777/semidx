@@ -1,0 +1,49 @@
+{
+  "fixture_id": "retrieval_css_happy_path_001",
+  "category": "css_onboarding",
+  "purpose": "CSS exact selector targeting should keep the selector unit in top_authority.",
+  "adr_refs": ["ADR-005", "ADR-008", "ADR-014", "ADR-022"],
+  "snapshot_ref": "seed-polyglot-app@rev-009",
+  "input": {
+    "query": {
+      "api_version": "1.0",
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "code_understanding",
+        "details": "Locate the authority CSS selector for the CTA button."
+      },
+      "targets": {
+        "symbols": [".cta-button"],
+        "paths": ["public/styles.css"]
+      },
+      "constraints": {
+        "token_budget": 1200,
+        "language_allowlist": ["css"],
+        "allowed_path_prefixes": ["public/"],
+        "max_raw_code_level": "enclosing_unit",
+        "freshness": "current_snapshot"
+      },
+      "hints": {
+        "preferred_paths": ["public/styles.css"],
+        "preferred_modules": ["public.styles"],
+        "prefer_definitions_over_callers": true
+      },
+      "options": {
+        "include_tests": false,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": false
+      },
+      "trace": {
+        "trace_id": "99333333-4444-4555-8666-777777777777",
+        "request_id": "fixture-css-happy-path-001"
+      }
+    }
+  },
+  "expected": {
+    "top_authority_units": ["public/styles.css::css-selector::1::0::.cta-button"],
+    "must_include_paths": ["public/styles.css"],
+    "must_include_selection_reason_codes": ["exact_target_resolved"],
+    "confidence_level": "high",
+    "autonomy_posture": "draft_patch_safe"
+  }
+}

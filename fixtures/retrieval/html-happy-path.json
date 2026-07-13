@@ -1,0 +1,49 @@
+{
+  "fixture_id": "retrieval_html_happy_path_001",
+  "category": "html_onboarding",
+  "purpose": "HTML exact symbol targeting should keep the document unit in top_authority.",
+  "adr_refs": ["ADR-005", "ADR-008", "ADR-014", "ADR-022"],
+  "snapshot_ref": "seed-polyglot-app@rev-009",
+  "input": {
+    "query": {
+      "api_version": "1.0",
+      "schema_version": "1.0",
+      "intent": {
+        "purpose": "code_understanding",
+        "details": "Locate the public landing page document and nearest element context."
+      },
+      "targets": {
+        "symbols": ["public/document"],
+        "paths": ["public/index.html"]
+      },
+      "constraints": {
+        "token_budget": 1200,
+        "language_allowlist": ["html"],
+        "allowed_path_prefixes": ["public/"],
+        "max_raw_code_level": "enclosing_unit",
+        "freshness": "current_snapshot"
+      },
+      "hints": {
+        "preferred_paths": ["public/index.html"],
+        "preferred_modules": ["public"],
+        "prefer_definitions_over_callers": true
+      },
+      "options": {
+        "include_tests": false,
+        "include_impact_hints": true,
+        "allow_raw_code_escalation": false
+      },
+      "trace": {
+        "trace_id": "99111111-2222-4333-8444-555555555555",
+        "request_id": "fixture-html-happy-path-001"
+      }
+    }
+  },
+  "expected": {
+    "top_authority_units": ["public/index.html::html-document"],
+    "must_include_paths": ["public/index.html"],
+    "must_include_selection_reason_codes": ["exact_target_resolved"],
+    "confidence_level": "high",
+    "autonomy_posture": "draft_patch_safe"
+  }
+}

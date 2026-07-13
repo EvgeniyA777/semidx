@@ -4,6 +4,8 @@
             [clojure.java.shell :as sh]
             [clojure.set :as set]
             [clojure.string :as str]
+            [semidx.runtime.languages.css :as css-language]
+            [semidx.runtime.languages.html :as html-language]
             [semidx.runtime.languages.typescript :as ts-language]
             [semidx.runtime.semantic-ir :as semantic-ir]))
 
@@ -96,6 +98,8 @@
     (str/ends-with? path ".py") "python"
     (or (str/ends-with? path ".ts") (str/ends-with? path ".tsx")) "typescript"
     (str/ends-with? path ".lua") "lua"
+    (or (str/ends-with? path ".html") (str/ends-with? path ".htm")) "html"
+    (str/ends-with? path ".css") "css"
     :else nil))
 
 (defn source-path? [path]
@@ -2999,6 +3003,12 @@
    lines
    parser-opts))
 
+(defn- parse-html [root-path file-path lines parser-opts]
+  (html-language/parse-file root-path file-path lines parser-opts))
+
+(defn- parse-css [root-path file-path lines parser-opts]
+  (css-language/parse-file root-path file-path lines parser-opts))
+
 (defn parse-file
   ([root-path file-path] (parse-file root-path file-path {}))
   ([root-path file-path parser-opts]
@@ -3016,6 +3026,8 @@
                                (catch Exception _
                                  (parse-typescript root-path file-path lines parser-opts)))
                 "lua" (parse-lua file-path lines)
+                "html" (parse-html root-path file-path lines parser-opts)
+                "css" (parse-css root-path file-path lines parser-opts)
                 (fallback-unit file-path lines language "unsupported_language"))
               (semantic-ir/finalize-parsed-file file-path language)))
        (catch Exception _

@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: 5e2e1a0ec2cffad95bcb0c9710908b5ae29c0f88
+- fingerprint: 4d9117a05cc7deb67187aca72ee17c9199837186
 
 ## Tree
 ```text
@@ -16,10 +16,12 @@ semidx
 └ test
   └ semidx
     ├ compression_test.clj
+    ├ css_onboarding_test.clj
     ├ evaluation_test.clj
     ├ freshness_baseline_test.clj
     ├ freshness_regression_test.clj
     ├ freshness_test.clj
+    ├ html_onboarding_test.clj
     ├ lua_onboarding_test.clj
     ├ mcp_http_server_test.clj
     ├ mcp_server_test.clj
@@ -59,14 +61,14 @@ semidx
 - none
 ### test
 - semidx.compression-test
+- semidx.css-onboarding-test
 - semidx.evaluation-test
 - semidx.freshness-baseline-test
 - semidx.freshness-regression-test
 - semidx.freshness-test
+- semidx.html-onboarding-test
 - semidx.lua-onboarding-test
-- semidx.mcp-http-server-test
-- semidx.mcp-server-test
-- ... +10 more
+- ... +12 more
 ### other
 - semidx.contracts.cli
 - semidx.contracts.schemas
@@ -76,7 +78,7 @@ semidx
 - semidx.mcp.session-registry
 - semidx.runtime.adapters
 - semidx.runtime.authz
-- ... +37 more
+- ... +39 more
 
 ## Domain Model
 - IndexStorage [protocol]
@@ -108,7 +110,7 @@ semidx
 - semidx.core -> semidx.runtime.semantic-quality
 - semidx.core -> semidx.runtime.snapshot-diff
 - semidx.core -> semidx.runtime.storage
-- ... +260 more
+- ... +273 more
 
 ## Namespaces
 ### semidx.contracts.cli
@@ -210,8 +212,8 @@ semidx
 - close-sse! [function]
 ### semidx.runtime.adapters
 - path: src/semidx/runtime/adapters.clj
-- requires: clojure.edn, clojure.java.io, clojure.java.shell, clojure.set, clojure.string, semidx.runtime.languages.typescript, semidx.runtime.semantic-ir
-- aliases: edn -> clojure.edn, io -> clojure.java.io, semantic-ir -> semidx.runtime.semantic-ir, set -> clojure.set, sh -> clojure.java.shell, str -> clojure.string, ts-language -> semidx.runtime.languages.typescript
+- requires: clojure.edn, clojure.java.io, clojure.java.shell, clojure.set, clojure.string, semidx.runtime.languages.css, semidx.runtime.languages.html, semidx.runtime.languages.typescript, semidx.runtime.semantic-ir
+- aliases: css-language -> semidx.runtime.languages.css, edn -> clojure.edn, html-language -> semidx.runtime.languages.html, io -> clojure.java.io, semantic-ir -> semidx.runtime.semantic-ir, set -> clojure.set, sh -> clojure.java.shell, str -> clojure.string, ts-language -> semidx.runtime.languages.typescript
 - symbols:
 - clj-def-re [section]
 - clj-call-re [section]

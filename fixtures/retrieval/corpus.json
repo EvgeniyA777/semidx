@@ -81,6 +81,30 @@
       "purpose": "Lua broad path targeting should remain ambiguity-aware and plan-safe."
     },
     {
+      "fixture_id": "retrieval_html_happy_path_001",
+      "category": "html_onboarding",
+      "path": "html-happy-path.json",
+      "purpose": "HTML exact symbol targeting should keep document units in top_authority with high confidence."
+    },
+    {
+      "fixture_id": "retrieval_html_ambiguity_001",
+      "category": "html_ambiguity",
+      "path": "html-ambiguity.json",
+      "purpose": "HTML broad selector targeting should remain ambiguity-aware across markup and stylesheet context."
+    },
+    {
+      "fixture_id": "retrieval_css_happy_path_001",
+      "category": "css_onboarding",
+      "path": "css-happy-path.json",
+      "purpose": "CSS exact selector targeting should keep selector units in top_authority with high confidence."
+    },
+    {
+      "fixture_id": "retrieval_css_ambiguity_001",
+      "category": "css_ambiguity",
+      "path": "css-ambiguity.json",
+      "purpose": "CSS broad selector targeting should remain ambiguity-aware across selectors and custom properties."
+    },
+    {
       "fixture_id": "retrieval_shorthand_vendored_noise_001",
       "category": "shorthand_noise",
       "path": "shorthand-vendored-noise.json",

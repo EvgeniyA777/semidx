@@ -2218,7 +2218,7 @@
     (is ex)
     (is (= :no_supported_languages_found (:type (ex-data ex))))
     (is (= "awaiting_language_selection" (get-in (ex-data ex) [:details :activation_state])))
-    (is (= ["clojure" "java" "elixir" "python" "typescript" "lua"]
+    (is (= ["clojure" "java" "elixir" "python" "typescript" "lua" "html" "css"]
            (get-in (ex-data ex) [:details :supported_languages])))
     (is (string? (get-in (ex-data ex) [:details :selection_hint])))))
 
