@@ -52,9 +52,14 @@
     (str "sha256:" (sha256-hex serialized))))
 
 (defn capture-workspace-state
-  [root-path discovery-profile provider-catalog-version & [prior-workspace-state]]
+  [root-path discovery-profile provider-catalog-version & [prior-workspace-state allowed-paths]]
+  ;; `allowed-paths`, when supplied, restricts the manifest to the exact set of
+  ;; paths the indexer will actually index (i.e. the active language set). This
+  ;; keeps freshness deltas from including files excluded by `:language_policy`.
   (let [discovery-profile-hash (sha256-hex (pr-str discovery-profile))
-        paths (activation/source-files root-path)
+        allowed (when (seq allowed-paths) (set allowed-paths))
+        paths (cond->> (activation/source-files root-path)
+                allowed (filter allowed))
         prior-files (when prior-workspace-state
                       (into {} (map (juxt :path identity) (:files prior-workspace-state))))
         files (keep (fn [path]

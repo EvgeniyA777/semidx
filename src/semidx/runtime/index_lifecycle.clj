@@ -162,22 +162,46 @@
                              :root_path root-path}))
             (let [language-policy (get-opt opts :language_policy)
                   discovery-profile {:paths paths :language_policy language-policy}
-                  
+
+                  ;; Resolve language activation once, up front. Used to (a) restrict
+                  ;; the workspace manifest to the active language set so freshness
+                  ;; deltas never include files excluded by :language_policy, and
+                  ;; (b) preserve activation metadata through incremental updates.
+                  discovery (activation/discover-languages root-path)
+                  activation-state (activation/resolve-activation discovery language-policy)
+                  activation-metadata (activation/activation-metadata discovery activation-state)
+                  active-paths (activation/active-source-paths discovery activation-state)
+
                   ;; Resolve shadow reuse diagnostics
                   shadow-reuse (shadow-reuse-summary storage root-path opts)
-                  
+
                   ;; 2. Load prior snapshot from storage
                   prior-snapshot (load-prior-snapshot storage root-path opts)
-                  
-                  ;; 1. Capture current workspace state
-                  current-workspace-state (ws/capture-workspace-state
-                                           root-path
-                                           discovery-profile
-                                           "1"
-                                           (some-> prior-snapshot :workspace_state))
-                  
-                  ;; 3. Decide freshness
-                  freshness-decision (freshness/decide-freshness prior-snapshot current-workspace-state opts)
+
+                  ;; A pinned snapshot must be returned exactly; a missing one is invalid.
+                  _ (when (and (seq pinned-id) (nil? prior-snapshot))
+                      (throw (ex-info "pinned snapshot not found"
+                                      {:type :invalid_request
+                                       :message "pinned snapshot not found"
+                                       :details {:pinned_snapshot_id pinned-id}})))
+
+                  ;; 1. Capture current workspace state (skipped for pinned reuse).
+                  current-workspace-state (when-not (seq pinned-id)
+                                            (ws/capture-workspace-state
+                                             root-path
+                                             discovery-profile
+                                             "1"
+                                             (some-> prior-snapshot :workspace_state)
+                                             active-paths))
+
+                  ;; 3. Decide freshness. Pinned requests short-circuit to reuse and
+                  ;; never run rebuild/update, per the runtime API contract.
+                  freshness-decision (if (seq pinned-id)
+                                       {:action :reuse
+                                        :reason "pinned_snapshot"
+                                        :added_paths [] :changed_paths [] :deleted_paths []
+                                        :diagnostics ["Pinned snapshot requested; returning exact stored snapshot."]}
+                                       (freshness/decide-freshness prior-snapshot current-workspace-state opts))
                   action (:action freshness-decision)
                   reason (:reason freshness-decision)
                   diagnostics (:diagnostics freshness-decision)]
@@ -209,6 +233,7 @@
                                            :deleted_paths (:deleted_paths freshness-decision)
                                            :parser_opts (get-opt opts :parser_opts)
                                            :storage storage
+                                           :activation_metadata activation-metadata
                                            :workspace_state current-workspace-state}
                                     (get-opt opts :policy_registry)
                                     (assoc :policy_registry (get-opt opts :policy_registry))
@@ -240,9 +265,6 @@
                 
                 :full_rebuild
                 (let [create-index-fn (requiring-resolve 'semidx.runtime.index/create-index)
-                      discovery (activation/discover-languages root-path)
-                      activation-state (activation/resolve-activation discovery language-policy)
-                      
                       ;; Resolve specific rebuild reason
                       resolved-rebuild-reason (cond
                                                 (= reason "force_rebuild_requested") "force_rebuild_requested"

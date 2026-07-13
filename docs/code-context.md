@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: f0e5a5e091592cdd47c6a74623c5bb810cdcf3f0
+- fingerprint: 5e2e1a0ec2cffad95bcb0c9710908b5ae29c0f88
 
 ## Tree
 ```text
@@ -18,6 +18,7 @@ semidx
     ├ compression_test.clj
     ├ evaluation_test.clj
     ├ freshness_baseline_test.clj
+    ├ freshness_regression_test.clj
     ├ freshness_test.clj
     ├ lua_onboarding_test.clj
     ├ mcp_http_server_test.clj
@@ -60,12 +61,12 @@ semidx
 - semidx.compression-test
 - semidx.evaluation-test
 - semidx.freshness-baseline-test
+- semidx.freshness-regression-test
 - semidx.freshness-test
 - semidx.lua-onboarding-test
 - semidx.mcp-http-server-test
 - semidx.mcp-server-test
-- semidx.policy-governance-test
-- ... +9 more
+- ... +10 more
 ### other
 - semidx.contracts.cli
 - semidx.contracts.schemas
@@ -107,7 +108,7 @@ semidx
 - semidx.core -> semidx.runtime.semantic-quality
 - semidx.core -> semidx.runtime.snapshot-diff
 - semidx.core -> semidx.runtime.storage
-- ... +256 more
+- ... +260 more
 
 ## Namespaces
 ### semidx.contracts.cli

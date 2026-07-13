@@ -2,7 +2,7 @@
 title: "Stage 0+1 Workspace Freshness Progress Log"
 doc_type: "progress_log"
 lifecycle: "active"
-status: "review_findings_open"
+status: "review_findings_partially_resolved"
 agent_action: "reference_for_context"
 updated: "2026-07-13"
 ---
@@ -70,25 +70,28 @@ snapshot on modify/add/delete, `force_rebuild`. Core P0 fix confirmed working.
 Disposition ∈ {accepted, rejected, deferred, fixed}.
 
 ### H1 — [High] Pinned snapshot flow can rebuild or fail instead of returning the exact stored snapshot
-- **Status**: Open (Pass A)
+- **Status**: Fixed (Pass A finding, Pass B fix)
 - **Evidence**: `src/semidx/runtime/index_lifecycle.clj` loads the pinned prior snapshot, then still runs freshness and rebuild/update decisions. The post-publish verification reloads through the same pinned options, so changed or missing pinned snapshots can loop until `:concurrency_failure`.
 - **Why it matters**: The runtime API contract says `:pinned_snapshot_id` reuses the exact stored snapshot even if stale and marks it pinned.
 - **Suggested fix**: When `:pinned_snapshot_id` is present, load that exact snapshot, throw `:invalid_request` if missing, and return it with pinned lifecycle metadata without freshness rebuild/update.
-- **Verification**: `clojure -M:test` passed, but an additional one-off check reproduced `:concurrency_failure` for a changed workspace with a pinned snapshot.
+- **Fix**: `coordinate-index-lifecycle` now short-circuits pinned requests to `:reuse` (skipping capture, freshness, and the rebuild/update+TOCTOU paths) and throws `:invalid_request` when the pinned snapshot is absent.
+- **Verification**: `pinned-snapshot-returns-exact-snapshot-after-change-test` in `test/semidx/freshness_regression_test.clj` (changed workspace returns the exact pinned snapshot; missing pinned → `:invalid_request`). `clojure -M:test` → 197 tests, 1344 assertions, 0 failures.
 
 ### H2 — [High] Incremental freshness can violate `:language_policy`
-- **Status**: Open (Pass A)
+- **Status**: Fixed (Pass A finding, Pass B fix)
 - **Evidence**: `src/semidx/runtime/workspace_state.clj` captures all `activation/source-files`, while `src/semidx/runtime/index.clj` parses incremental `added_paths` and `changed_paths` without filtering by the active language set.
 - **Why it matters**: A repository indexed with `:language_policy {:allow_languages ["clojure"]}` can later add an excluded Python file during incremental update.
 - **Suggested fix**: Build workspace state from the same active source paths used by indexing, or filter freshness deltas through the resolved active language set before calling `update-index`.
-- **Verification**: `clojure -M:test` passed, but an additional one-off check showed `src/b.py` appearing after incremental update despite a Clojure-only language policy.
+- **Fix**: The coordinator resolves activation up front and passes the active source-path set into `capture-workspace-state`, which now restricts the manifest (new optional `allowed-paths` arg) to those paths. Excluded-language files never enter the manifest, so they cannot appear in a freshness delta.
+- **Verification**: `incremental-update-respects-language-policy-test` (adding `src/intruder.py` under a Clojure-only policy leaves it out of `:files`). `clojure -M:test` → 197 tests, 0 failures.
 
 ### H3 — [High] Incremental update drops language activation metadata
-- **Status**: Open (Pass A)
+- **Status**: Fixed (Pass A finding, Pass B fix)
 - **Evidence**: `coordinate-index-lifecycle` calls `update-index` without activation metadata, and `update-index` rebuilds index state without passing `:activation_metadata`, leaving fields such as `:active_languages` unset.
 - **Why it matters**: MCP/project context and retrieval guardrails depend on activation metadata remaining present after incremental updates.
 - **Suggested fix**: Preserve activation metadata from the prior snapshot or recompute and pass current activation metadata through the incremental `update-index` path.
-- **Verification**: The same one-off language-policy check showed `:active_languages nil` on the incremental result.
+- **Fix**: The coordinator threads the freshly resolved `:activation_metadata` into the incremental `update-index` call; `update-index` passes it to `build-index-state` (falling back to the prior snapshot's activation fields when not supplied).
+- **Verification**: `incremental-update-preserves-activation-metadata-test` (a single-file change yields `lifecycle_action "incremental_update"` with `:active_languages` preserved). `clojure -M:test` → 197 tests, 0 failures.
 
 ### M1 — [Medium] Compare-and-set publication is not atomic (publish precedes the check)
 - **Evidence**: `src/semidx/runtime/index_lifecycle.clj:219-239` (incremental) and `:265-287`
@@ -149,7 +152,23 @@ lifecycle fields propagate through the existing snapshot payload and `:index_lif
 
 ## Review Verification
 
-- `clojure -M:test`: Passed. Ran 194 tests containing 1335 assertions, 0 failures, 0 errors.
-- Pass A one-off pinned snapshot check: Failed as expected with `:concurrency_failure`, confirming H1.
-- Pass A one-off language-policy incremental check: Failed as expected by adding an excluded Python
-  file and dropping `:active_languages`, confirming H2 and H3.
+- Pre-fix `clojure -M:test`: Passed (194 tests, 1335 assertions). Pass A one-off checks reproduced
+  the H1 (`:concurrency_failure` on pinned+changed workspace) and H2/H3 (excluded `.py` indexed,
+  `:active_languages nil`) defects.
+- Post-fix `clojure -M:test`: Passed. Ran 197 tests containing 1344 assertions, 0 failures, 0 errors.
+  The three new regression tests in `test/semidx/freshness_regression_test.clj` cover H1–H3 and now pass.
+
+## Fix Summary (2026-07-13)
+
+High-severity findings H1–H3 fixed in Pass B; regression tests added. Remaining open items:
+M1 (deferred — needs a decision on CAS-before-publish vs. restating Gate #13 as single-process),
+M3 (catalog/adapter alignment test), L1 (staleness-rule deviation), L2 (cleanliness). M2 already fixed.
+
+- `src/semidx/runtime/index_lifecycle.clj`: activation resolved up front; pinned short-circuit
+  (H1); active-path-restricted capture (H2); `:activation_metadata` threaded into incremental
+  update (H3); removed duplicate discovery in the rebuild branch.
+- `src/semidx/runtime/workspace_state.clj`: `capture-workspace-state` gains an optional
+  `allowed-paths` arg restricting the manifest to the active language set (H2).
+- `src/semidx/runtime/index.clj`: `update-index` accepts/forwards `:activation_metadata`,
+  falling back to the prior snapshot's activation fields (H3).
+- `test/semidx/freshness_regression_test.clj` (new) + `src/semidx/test_runner.clj` registration.

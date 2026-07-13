@@ -631,7 +631,12 @@
                         {:clojure_engine :clj-kondo
                          :tree_sitter_enabled false})
         storage (or (:storage opts) (:storage_adapter opts))
-        workspace-state (:workspace_state opts)]
+        workspace-state (:workspace_state opts)
+        activation-metadata (or (:activation_metadata opts)
+                                (select-keys index [:detected_languages :active_languages
+                                                    :language_fingerprint :activation_state
+                                                    :supported_languages :selection_hint
+                                                    :manual_language_selection]))]
     (if (and (empty? added-paths) (empty? changed-paths) (empty? deleted-paths))
       (create-index {:root_path (:root_path index)
                      :parser_opts parser-opts
@@ -652,6 +657,7 @@
                                        {:provenance_source "incremental_update"
                                         :parent_snapshot_id (:snapshot_id index)
                                         :rebuild_reason "changed_paths_update"
+                                        :activation_metadata activation-metadata
                                         :workspace_state workspace-state})]
         (maybe-save-index! storage updated)))))
 

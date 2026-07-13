@@ -14,7 +14,8 @@
             [semidx.usage-metrics-test]
             [semidx.freshness-baseline-test]
             [semidx.workspace-state-test]
-            [semidx.freshness-test]))
+            [semidx.freshness-test]
+            [semidx.freshness-regression-test]))
 
 (defn -main [& _]
   (let [result (t/run-tests 'semidx.mcp-server-test
@@ -31,6 +32,7 @@
                             'semidx.usage-metrics-test
                             'semidx.freshness-baseline-test
                             'semidx.workspace-state-test
-                            'semidx.freshness-test)
+                            'semidx.freshness-test
+                            'semidx.freshness-regression-test)
         failures (+ (:fail result) (:error result))]
     (System/exit (if (zero? failures) 0 1))))
