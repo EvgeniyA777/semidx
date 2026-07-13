@@ -1,12 +1,12 @@
 # Plans
 
-This directory holds execution-oriented plans.
+This directory holds execution-oriented plans in a single flat chronological sequence.
 
-Use the subfolders by intent:
+Plan filenames use `NNN_slug.md`, where `NNN` is unique within this directory and increases over time. Do not create plan subdirectories for lifecycle or intent. Use frontmatter instead:
 
-- `plans/architecture/` for cross-cutting architecture or stabilization plans
-- `plans/archive/` for historical plans that are no longer active but are still worth preserving
-- `plans/` root for active implementation plans that are still directly actionable
+- `doc_type` distinguishes architecture plans from implementation plans.
+- `lifecycle` distinguishes active, completed, superseded, and archived plans.
+- `agent_action` tells agents whether a plan is current context or historical reference.
 
 Use `plans/` when the document is primarily about sequencing work.
 

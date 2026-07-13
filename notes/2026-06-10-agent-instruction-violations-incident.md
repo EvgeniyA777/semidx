@@ -13,7 +13,7 @@ status: resolved
 session_id: 4113f999-6f77-4cba-a83c-1f382fcccdaf
 related:
   - notes/2026-06-09-solid-architecture-review.md
-  - plans/003_stage_0_1_workspace_freshness.md
+  - plans/008_stage_0_1_workspace_freshness.md
 ---
 
 # Инцидент: нарушения инструкций агентом — сессия 2026-06-09/10

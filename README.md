@@ -41,9 +41,7 @@ Current scope is contract architecture plus a working MVP runtime implementation
 - `docs/roadmap-status.md` - canonical in-repo roadmap status checklist
 - `ideas/` - idea-stage and conceptual source documents that are not decisions of record
 - `notes/` - dated working notes, reviews, and investigation artifacts
-- `plans/` - execution-oriented plans and planning docs
-- `plans/architecture/` - cross-cutting architecture or stabilization plans
-- `plans/archive/` - archived plans kept only for historical traceability
+- `plans/` - execution-oriented plans and planning docs in one numbered sequence
 - `contracts/schemas/` - JSON Schema contracts (external source of truth)
 - `contracts/examples/` - canonical examples for contract families
 - `fixtures/retrieval/` - retrieval fixture corpus (behavior bands)
@@ -126,9 +124,9 @@ Canonical retrieval flow is compact-first staged retrieval:
 - Agent MCP prompts: [docs/mcp-agent-prompts.md](docs/mcp-agent-prompts.md)
 - Roadmap status checklist: [docs/roadmap-status.md](docs/roadmap-status.md)
 - ADR for projection profiles and advisory semantic-quality gates: [adr/029-standardize-projection-profiles-and-advisory-semantic-quality-gates.md](adr/029-standardize-projection-profiles-and-advisory-semantic-quality-gates.md)
-- Compact-first staged retrieval execution plan: [plans/architecture/001_compact_first_staged_retrieval_plan.md](plans/architecture/001_compact_first_staged_retrieval_plan.md)
-- Post-roadmap semantic deepening plan (delivered tranche): [plans/architecture/002_post_roadmap_semantic_deepening_plan.md](plans/architecture/002_post_roadmap_semantic_deepening_plan.md)
-- Semantic stabilization plan (delivered tranche): [plans/architecture/003_semantic_stabilization_plan.md](plans/architecture/003_semantic_stabilization_plan.md)
+- Compact-first staged retrieval execution plan: [plans/002_compact_first_staged_retrieval_plan.md](plans/002_compact_first_staged_retrieval_plan.md)
+- Post-roadmap semantic deepening plan (delivered tranche): [plans/003_post_roadmap_semantic_deepening_plan.md](plans/003_post_roadmap_semantic_deepening_plan.md)
+- Semantic stabilization plan (delivered tranche): [plans/004_semantic_stabilization_plan.md](plans/004_semantic_stabilization_plan.md)
 
 ## Agent Limit Policy
 
