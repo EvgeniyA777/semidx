@@ -1,3 +1,12 @@
+---
+title: "Post-Roadmap Semantic Deepening Plan"
+doc_type: "architecture_plan"
+lifecycle: "completed"
+status: "delivered"
+agent_action: "historical_reference_only"
+updated: "2026-07-13"
+---
+
 # Post-Roadmap Semantic Deepening Plan
 
 Execution plan for the next semantic tranche after the main roadmap phases (`Phase 3` through `Phase 5`) were closed.

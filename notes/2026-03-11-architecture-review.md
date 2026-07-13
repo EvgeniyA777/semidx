@@ -173,6 +173,6 @@ Semantic deepening приносит ценность только если ре�
 
 - `MEMORY.md`
 - `docs/roadmap-status.md`
-- `plans/architecture/post-roadmap-semantic-deepening-plan.md`
+- `plans/architecture/002_post_roadmap_semantic_deepening_plan.md`
 - `src/semidx/runtime/adapters.clj`
 - `src/semidx/runtime/index.clj`

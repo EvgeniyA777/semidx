@@ -1,4 +1,9 @@
 ---
+title: "First-Contact MCP Query Hardening"
+doc_type: "implementation_plan"
+lifecycle: "archived"
+agent_action: "historical_reference_only"
+updated: "2026-07-13"
 file_type: working-note
 topic: first-contact-mcp-query-hardening
 created_at: 2026-03-11T15:30:00-0700

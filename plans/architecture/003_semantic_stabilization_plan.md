@@ -1,3 +1,12 @@
+---
+title: "Semantic Stabilization Plan"
+doc_type: "architecture_plan"
+lifecycle: "completed"
+status: "delivered"
+agent_action: "historical_reference_only"
+updated: "2026-07-13"
+---
+
 # Semantic Stabilization Plan
 
 This tranche shifted the repo from "more heuristics" toward internal architectural stabilization.

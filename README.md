@@ -126,9 +126,9 @@ Canonical retrieval flow is compact-first staged retrieval:
 - Agent MCP prompts: [docs/mcp-agent-prompts.md](docs/mcp-agent-prompts.md)
 - Roadmap status checklist: [docs/roadmap-status.md](docs/roadmap-status.md)
 - ADR for projection profiles and advisory semantic-quality gates: [adr/029-standardize-projection-profiles-and-advisory-semantic-quality-gates.md](adr/029-standardize-projection-profiles-and-advisory-semantic-quality-gates.md)
-- Compact-first staged retrieval execution plan: [plans/architecture/compact-first-staged-retrieval-plan.md](plans/architecture/compact-first-staged-retrieval-plan.md)
-- Post-roadmap semantic deepening plan (delivered tranche): [plans/architecture/post-roadmap-semantic-deepening-plan.md](plans/architecture/post-roadmap-semantic-deepening-plan.md)
-- Semantic stabilization plan (delivered tranche): [plans/architecture/semantic-stabilization-plan.md](plans/architecture/semantic-stabilization-plan.md)
+- Compact-first staged retrieval execution plan: [plans/architecture/001_compact_first_staged_retrieval_plan.md](plans/architecture/001_compact_first_staged_retrieval_plan.md)
+- Post-roadmap semantic deepening plan (delivered tranche): [plans/architecture/002_post_roadmap_semantic_deepening_plan.md](plans/architecture/002_post_roadmap_semantic_deepening_plan.md)
+- Semantic stabilization plan (delivered tranche): [plans/architecture/003_semantic_stabilization_plan.md](plans/architecture/003_semantic_stabilization_plan.md)
 
 ## Agent Limit Policy
 

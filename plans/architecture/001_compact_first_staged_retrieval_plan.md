@@ -1,3 +1,12 @@
+---
+title: "Compact-First Staged Retrieval Plan"
+doc_type: "architecture_plan"
+lifecycle: "completed"
+status: "delivered"
+agent_action: "historical_reference_only"
+updated: "2026-07-13"
+---
+
 # Compact-First Staged Retrieval Plan
 
 Execution plan for finishing the clean-break retrieval line centered on compact selection, staged expansion/detail fetches, and snapshot-bound selection artifacts.

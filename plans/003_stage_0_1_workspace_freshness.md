@@ -11,7 +11,7 @@ updated: "2026-07-13"
 
 Status: Active
 Architecture reference:
-  plans/architecture/semidx-extension-architecture-resolution-plan.md
+  plans/architecture/004_semidx_extension_architecture_resolution_plan.md
 
 ## Goal
 

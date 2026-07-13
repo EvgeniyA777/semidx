@@ -1,3 +1,12 @@
+---
+title: "semidx Extension Architecture Resolution Plan"
+doc_type: "architecture_plan"
+lifecycle: "active"
+status: "draft"
+agent_action: "reference_for_context"
+updated: "2026-07-13"
+---
+
 # Semidx Extension Architecture Resolution Plan
 
 Status: Active architecture plan
