@@ -94,6 +94,20 @@
           (str/split #"/" 2)
           second))
 
+(defn- symbol-exact-match?
+  "True when any candidate matches the unit symbol exactly, comparing on the
+  normalized fully-qualified symbol or its normalized tail (the segment after
+  `/`). Lets callers pass a bare name (e.g. `normalize-mcp-query`) or a
+  namespace-qualified one (`semidx.mcp.core/normalize-mcp-query`)."
+  [unit-symbol candidates]
+  (let [normalized-symbol (normalize-symbolish unit-symbol)
+        normalized-tail (some-> unit-symbol symbol-tail normalize-symbolish)]
+    (boolean
+     (some #(let [candidate (normalize-symbolish %)]
+              (or (= normalized-symbol candidate)
+                  (and normalized-tail (= normalized-tail candidate))))
+           candidates))))
+
 (defn- path-class [path]
   (let [p (some-> path str str/lower-case)]
     (cond
@@ -203,10 +217,7 @@
         normalized-symbol (normalize-symbolish (:symbol u))
         normalized-tail (some-> (:symbol u) symbol-tail normalize-symbolish)
         exact? (and eligible?
-                    (some #(let [candidate (normalize-symbolish %)]
-                             (or (= normalized-symbol candidate)
-                                 (and normalized-tail (= normalized-tail candidate))))
-                          suspected-symbols))
+                    (symbol-exact-match? (:symbol u) suspected-symbols))
         segment? (and eligible?
                       (not exact?)
                       (some #(let [candidate (normalize-symbolish %)]
@@ -225,7 +236,7 @@
         target-modules (get-in query [:targets :modules] [])
         target-tests (set (get-in query [:targets :tests] []))
         changed-spans (get-in query [:targets :changed_spans] [])
-        by-symbol (some #(= (:symbol u) %) target-symbols)
+        by-symbol (symbol-exact-match? (:symbol u) target-symbols)
         by-path (contains? target-paths (:path u))
         by-module (some #(module-prefix-match? u %) target-modules)
         by-test (contains? target-tests (:path u))

@@ -861,21 +861,38 @@
   (when-not (map? args)
     (invalid-request "impact_analysis arguments must be an object"))
   (let [entry (resolve-entry! state args)
-        query (ensure-map-or-nil (:query args) "query")]
-    (when-not query
-      (invalid-request "query is required"))
-    (let [impact-hints (sci/impact-analysis (:index entry) query {:suppress_usage_metrics true})]
-      (with-usage-event
-        {:index_id (:index_id entry)
-         :impact_hints impact-hints}
-        (merge
-         (usage-fields-for-query query)
-         {:root_path_hash (usage/hash-root-path (:root_path entry))
-          :payload {:index_id (:index_id entry)
-                    :callers_count (count (:callers impact-hints))
-                    :dependents_count (count (:dependents impact-hints))
-                    :related_tests_count (count (:related_tests impact-hints))
-                    :risky_neighbors_count (count (:risky_neighbors impact-hints))}})))))
+        intent-promoted? (and (string? (:intent args))
+                              (not (contains? args :query)))
+        args (if intent-promoted?
+               (assoc args :query {:intent (:intent args)})
+               args)
+        raw-query (ensure-map-or-nil (:query args) "query")]
+    (when-not raw-query
+      (invalid-request "either intent (string) or query (object) is required"))
+    (let [normalized (normalize-mcp-query state raw-query)
+          query (:query (or normalized {:query raw-query}))]
+      (when (and (not normalized)
+                 (not (canonical-query-shape? query)))
+        (throw (enrich-invalid-query
+                "impact_analysis query shorthand could not be normalized safely"
+                query)))
+      (let [impact-hints (try
+                           (sci/impact-analysis (:index entry) query {:suppress_usage_metrics true})
+                           (catch Exception e
+                             (if (= :invalid_query (:type (ex-data e)))
+                               (throw (enrich-invalid-query "invalid retrieval query" query (ex-data e)))
+                               (throw e))))]
+        (with-usage-event
+          {:index_id (:index_id entry)
+           :impact_hints impact-hints}
+          (merge
+           (usage-fields-for-query query)
+           {:root_path_hash (usage/hash-root-path (:root_path entry))
+            :payload {:index_id (:index_id entry)
+                      :callers_count (count (:callers impact-hints))
+                      :dependents_count (count (:dependents impact-hints))
+                      :related_tests_count (count (:related_tests impact-hints))
+                      :risky_neighbors_count (count (:risky_neighbors impact-hints))}}))))))
 
 (defn tool-skeletons [state args]
   (when-not (map? args)
@@ -925,6 +942,7 @@
                                "query" mcp-retrieval-query-schema
                                "retrieval_policy" {:type "object"}}
                   :required ["index_id"]
+                  :oneOf [{:required ["intent"]} {:required ["query"]}]
                   :additionalProperties false}}
    {:name "expand_context"
     :description "Widen a resolve_context selection with lightweight skeletons and impact hints. Use INSTEAD OF reading multiple files manually. Requires selection_id and snapshot_id from resolve_context."
@@ -968,11 +986,14 @@
                   :required ["index_id"]
                   :additionalProperties false}}
    {:name "impact_analysis"
-    :description "Estimate blast radius: which files, symbols, and tests are affected by a proposed change. Use for change planning, refactoring scope, or bug triage."
+    :description "Estimate blast radius: which files, symbols, and tests are affected by a proposed change. Pass EITHER `intent` (a plain string describing the change — simplest) OR `query` (a structured retrieval object). Use for change planning, refactoring scope, or bug triage."
     :inputSchema {:type "object"
                   :properties {"index_id" {:type "string"}
-                               "query" {:type "object"}}
-                  :required ["index_id" "query"]
+                               "intent" {:type "string"
+                                         :description "Plain-text description of the proposed change. Simplest way to call this tool. Mutually exclusive with query."}
+                               "query" mcp-retrieval-query-schema}
+                  :required ["index_id"]
+                  :oneOf [{:required ["intent"]} {:required ["query"]}]
                   :additionalProperties false}}
    {:name "skeletons"
     :description "Return lightweight code skeletons (signatures, structure) for files or units. Use INSTEAD OF reading full source files when you only need API shapes."
