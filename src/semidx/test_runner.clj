@@ -1,46 +1,26 @@
 (ns semidx.test-runner
-  (:require [clojure.test :as t]
-            [semidx.evaluation-test]
-            [semidx.mcp-http-server-test]
-            [semidx.mcp-server-test]
-            [semidx.policy-governance-test]
-            [semidx.repo-identity-test]
-            [semidx.runtime-grpc-test]
-            [semidx.runtime-http-test]
-            [semidx.lua-onboarding-test]
-            [semidx.html-onboarding-test]
-            [semidx.css-onboarding-test]
-            [semidx.javascript-onboarding-test]
-            [semidx.language-registry-test]
-            [semidx.storage-test]
-            [semidx.typescript-onboarding-test]
-            [semidx.runtime-test]
-            [semidx.usage-metrics-test]
-            [semidx.freshness-baseline-test]
-            [semidx.workspace-state-test]
-            [semidx.freshness-test]
-            [semidx.freshness-regression-test]))
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.test :as t]
+            [clojure.tools.namespace.find :as ns-find]))
+
+(defn discover-test-namespaces
+  "Discover every `*-test` namespace under the `test` directory so new tests need
+  no manual registration. Sorted for a deterministic default order."
+  []
+  (->> (ns-find/find-namespaces-in-dir (io/file "test"))
+       (filter #(str/ends-with? (name %) "-test"))
+       distinct
+       sort
+       vec))
+
+(defn run [namespaces]
+  (run! require namespaces)
+  (apply t/run-tests namespaces))
 
 (defn -main [& _]
-  (let [result (t/run-tests 'semidx.mcp-server-test
-                            'semidx.mcp-http-server-test
-                            'semidx.evaluation-test
-                            'semidx.policy-governance-test
-                            'semidx.repo-identity-test
-                            'semidx.runtime-test
-                            'semidx.runtime-grpc-test
-                            'semidx.runtime-http-test
-                            'semidx.lua-onboarding-test
-                            'semidx.html-onboarding-test
-                            'semidx.css-onboarding-test
-                            'semidx.javascript-onboarding-test
-                            'semidx.language-registry-test
-                            'semidx.storage-test
-                            'semidx.typescript-onboarding-test
-                            'semidx.usage-metrics-test
-                            'semidx.freshness-baseline-test
-                            'semidx.workspace-state-test
-                            'semidx.freshness-test
-                            'semidx.freshness-regression-test)
-        failures (+ (:fail result) (:error result))]
-    (System/exit (if (zero? failures) 0 1))))
+  (let [namespaces (discover-test-namespaces)]
+    (println "Discovered" (count namespaces) "test namespaces")
+    (let [result (run namespaces)
+          failures (+ (:fail result) (:error result))]
+      (System/exit (if (zero? failures) 0 1)))))

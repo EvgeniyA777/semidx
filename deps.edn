@@ -29,4 +29,5 @@
   {:main-opts ["-m" "semidx.runtime.benchmarks"]}
   :test
   {:extra-paths ["test"]
+   :extra-deps {org.clojure/tools.namespace {:mvn/version "1.5.0"}}
    :main-opts ["-m" "semidx.test-runner"]}}}
