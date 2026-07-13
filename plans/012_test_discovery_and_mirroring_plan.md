@@ -1,13 +1,17 @@
 ---
 title: "Test Discovery and Mirroring Plan"
 doc_type: "implementation_plan"
-lifecycle: "active"
-status: "draft"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "implemented"
+agent_action: "historical_reference_only"
 updated: "2026-07-13"
 ---
 
 # Implementation Plan: Test Discovery and Mirroring
+
+Execution status: implemented on 2026-07-13 (commits `4919b82`, `108bbbd`). See
+[009_test_discovery_and_mirroring_progress_log.md](../reports/009_test_discovery_and_mirroring_progress_log.md)
+for the record and verification results.
 
 Prepare the test suite for the upcoming large refactor by removing the
 manual-test-list footgun, giving tests a 1:1 mapping to their source, and
