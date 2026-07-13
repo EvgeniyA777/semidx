@@ -1,3 +1,12 @@
+---
+title: "semidx Improvements for Agent-Driven Development"
+doc_type: "idea"
+lifecycle: "concept"
+status: "draft"
+agent_action: "use_as_input_for_future_plan_only"
+updated: "2026-07-13"
+---
+
 # Idea: semidx Improvements for Agent-Driven Development
 
 Source: conversation while working on JobApplicationTracker (2026-07-08)

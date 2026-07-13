@@ -129,6 +129,8 @@
 - Use parallel tool execution only for independent reads or checks, never for state-changing commands that depend on each other.
 - If uncommitted files remain in the repo from previous agent runs, explicitly surface them and offer to commit and push them separately.
 - Commit or push only when the user requests or approves it.
+- Do not auto-commit after every file edit. When committing, group related changes into coherent commits.
+- Before risky or multi-file changes, surface the dirty working tree and ask whether to checkpoint it first.
 - Do not revert existing user changes unless explicitly requested.
 
 ## Documentation Rules
@@ -136,8 +138,37 @@
 - Keep repository documentation, project rule files, and agent instruction files in English.
 - Agents may answer the user in Russian by default when the user writes in Russian, but committed documentation remains English.
 - Keep root entrypoint docs limited to stable project onboarding and repo-wide controls.
-- Do not opportunistically rename historical docs as part of unrelated feature work.
-- If documentation lifecycle/frontmatter conventions are introduced for a doc area, update the relevant indexes and links in the same change.
+- New or renamed non-system working documents under `ideas/`, `plans/`, `docs/adr/`, `docs/design/`, `docs/ideas/`, `docs/plans/`, and `docs/reports/` must use a chronological filename prefix scoped to that directory: `NNN_slug.md`.
+- New or renamed non-system working documents under `notes/` must use a date prefix: `YYYY-MM-DD_slug.md`.
+- Number sequences restart per numbered-document directory. Choose the next number by scanning the target directory for the highest existing numeric prefix, then incrementing it.
+- Do not reuse numbers and do not renumber existing prefixed documents casually.
+- These filename rules apply prospectively from the commit that introduces them.
+- If an unnumbered or differently prefixed working document is discovered later, treat it as legacy until a dedicated documentation migration renames it.
+- Do not opportunistically rename historical or legacy documents as part of unrelated feature work.
+- A documentation migration that renames legacy documents must update all Markdown links, `superseded_by` references, README indexes, and progress-log references in the same commit.
+- Non-system working documents under `ideas/`, `notes/`, `plans/`, `docs/adr/`, `docs/design/`, `docs/ideas/`, `docs/plans/`, and `docs/reports/` must use YAML frontmatter when they are newly created, renamed, or materially revised.
+- System, index, source-intake, generated, and sample files do not require frontmatter or numbered working-document filenames. Examples include root `README.md`, directory index files such as `plans/README.md` or `docs/README.md`, `RULES.md`, `AGENTS.md`, `CLAUDE.md`, `docs/code-context.md`, `.ccc/*`, `intake/*`, and sample `README.md` files.
+- Preferred frontmatter fields are `title`, `doc_type`, `lifecycle`, `status`, `agent_action`, and `updated`.
+- Use `agent_action` to make stale or completed documents unambiguous to future agents. Executed plans and progress logs must be marked as historical, not as active work queues.
+- When searching project documentation for implementation context, treat documents with `lifecycle: "active"` or `lifecycle: "accepted"` and `agent_action: "reference_for_context"` as current sources.
+- Treat documents with `lifecycle: "completed"`, `lifecycle: "archived"`, or `lifecycle: "superseded"` as historical records unless their `agent_action` explicitly says otherwise.
+- Do not use historical documents for implementation decisions unless the user explicitly asks for historical context.
+- If current and historical documents conflict, follow the current document. If multiple current documents conflict, ask for clarification before changing project behavior.
+- Common `lifecycle` values are `active`, `concept`, `accepted`, `completed`, `superseded`, and `archived`.
+- Common `agent_action` values are `reference_for_context`, `use_as_input_for_future_plan_only`, `historical_reference_only`, `do_not_implement_again`, and `do_not_use_for_current_work`.
+- When a document changes lifecycle state, update its frontmatter in the same commit.
+
+## Plan Execution Progress Logs
+
+- When executing a documented plan, create or update a companion progress log before or during the first implementation stage.
+- Store progress logs under `docs/reports/` unless the plan explicitly names another location.
+- Progress logs should use the standard documentation frontmatter described in this file.
+- If a plan is split into stages, update the progress log as each stage is completed.
+- Record stage status, meaningful summary of what changed, changed files or commit hash when available, verification commands and results, known blockers, skipped checks, and environment limitations.
+- Record review findings in the same progress log, including whether each finding was accepted, rejected, deferred, or fixed.
+- When fixing findings, record the fix summary, changed files or commit hash, and verification results.
+- Do not leave progress logs as stale checklists. If historical entries are backfilled, label them as historical notes instead of pretending they were updated live.
+- Keep progress-log updates in the same commit as the stage implementation when practical.
 
 ## Review Response Format
 

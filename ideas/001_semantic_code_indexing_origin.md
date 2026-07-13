@@ -1,3 +1,14 @@
+---
+title: "Semantic Code Indexing Origin"
+doc_type: "idea"
+lifecycle: "archived"
+status: "historical"
+agent_action: "historical_reference_only"
+updated: "2026-07-13"
+---
+
+# Semantic Code Indexing Origin
+
 Для создания системы, которая строит «каркас» (скелет) проекта без загрузки всего кода в контекст, эффективнее всего использовать подход **Semantic Code Indexing** на базе **Tree-sitter** и **графовых структур**.
 
 Вместо того чтобы скармливать LLM сырой текст, мы превращаем проект в дерево определений и ссылок.

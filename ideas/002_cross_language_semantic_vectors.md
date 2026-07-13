@@ -1,3 +1,12 @@
+---
+title: "Cross-Language Semantic Vectors"
+doc_type: "idea"
+lifecycle: "concept"
+status: "draft"
+agent_action: "use_as_input_for_future_plan_only"
+updated: "2026-07-13"
+---
+
 # Google Gemini
 
 ## User prompt

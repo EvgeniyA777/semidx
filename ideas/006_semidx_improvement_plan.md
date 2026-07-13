@@ -1,3 +1,12 @@
+---
+title: "semidx Improvement Plan"
+doc_type: "idea"
+lifecycle: "archived"
+status: "historical"
+agent_action: "historical_reference_only"
+updated: "2026-07-13"
+---
+
 # План улучшения Semantic Code Indexing (`semidx`)
 
 **Версия:** 1.0

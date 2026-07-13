@@ -1,6 +1,15 @@
+---
+title: "Agent Graph Intelligence Layer"
+doc_type: "idea"
+lifecycle: "concept"
+status: "draft"
+agent_action: "use_as_input_for_future_plan_only"
+updated: "2026-07-13"
+---
+
 # Idea: Agent Graph Intelligence Layer
 
-Source: research follow-up from `ideas/new_app.md`.
+Source: research follow-up from `ideas/010_repository_graph_tools_research.md`.
 Status: concept
 
 ## Summary

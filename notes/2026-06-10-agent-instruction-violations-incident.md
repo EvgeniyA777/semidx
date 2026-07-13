@@ -1,4 +1,9 @@
 ---
+title: "Agent Instruction Violations Incident"
+doc_type: "incident_report"
+lifecycle: "completed"
+agent_action: "historical_reference_only"
+updated: "2026-07-13"
 file_type: incident-report
 topic: agent-instruction-violations
 created_at: 2026-06-10T07:45:00-0700
@@ -8,7 +13,7 @@ status: resolved
 session_id: 4113f999-6f77-4cba-a83c-1f382fcccdaf
 related:
   - notes/2026-06-09-solid-architecture-review.md
-  - plans/2026-06-10-stage-0-1-workspace-freshness.md
+  - plans/003_stage_0_1_workspace_freshness.md
 ---
 
 # Инцидент: нарушения инструкций агентом — сессия 2026-06-09/10

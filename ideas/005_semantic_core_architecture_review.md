@@ -1,7 +1,16 @@
+---
+title: "Semantic Core Architecture Review"
+doc_type: "architecture_review"
+lifecycle: "concept"
+status: "draft"
+agent_action: "use_as_input_for_future_plan_only"
+updated: "2026-07-13"
+---
+
 # Architecture Review: Semantic Core
 
-> Target: `ideas/semantic-core-architecture.md`
-> Reference: `ideas/semantic-code-manifesto.md`
+> Target: `ideas/004_semantic_core_architecture.md`
+> Reference: `ideas/003_semantic_code_manifesto.md`
 > Focus: all (SRP, OCP, LSP, ISP, DIP + structural integrity)
 > Mode: review + refactoring directions
 > Posture: adversarial — find everything that collapses under implementation pressure

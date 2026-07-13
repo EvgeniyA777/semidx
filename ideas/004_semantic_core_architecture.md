@@ -1,3 +1,12 @@
+---
+title: "Semantic Core Architecture"
+doc_type: "architecture_plan"
+lifecycle: "concept"
+status: "draft"
+agent_action: "use_as_input_for_future_plan_only"
+updated: "2026-07-13"
+---
+
 # Architecture Plan: Semantic Core
 
 > Multidimensional code representation engine.

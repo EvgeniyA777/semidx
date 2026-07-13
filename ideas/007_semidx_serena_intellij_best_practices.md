@@ -1,3 +1,12 @@
+---
+title: "semidx Serena and IntelliJ Best Practices"
+doc_type: "idea"
+lifecycle: "archived"
+status: "historical"
+agent_action: "historical_reference_only"
+updated: "2026-07-13"
+---
+
 # semidx: лучшие практики Serena и IntelliJ
 
 **Date:** 2026-06-09

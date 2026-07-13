@@ -1,3 +1,14 @@
+---
+title: "Repository Graph Tools Research"
+doc_type: "research_note"
+lifecycle: "concept"
+status: "source_intake"
+agent_action: "use_as_input_for_future_plan_only"
+updated: "2026-07-13"
+---
+
+# Repository Graph Tools Research
+
 Вы, скорее всего, ищете [GitDiagram](https://news.ycombinator.com/item?id=42521769) или ставший вирусным инструмент [Code-Graph-RAG (gitcgr)](https://www.linkedin.com/posts/avi-chawla_visualise-any-github-repo-as-a-graph-simply-activity-7438947312392941568-Eloa). Оба проекта «взорвали» сообщество разработчиков благодаря киллер-фиче: возможности превратить любой репозиторий GitHub в интерактивный граф связей прямо в браузере с помощью простой замены букв в URL. [1, 2] 
 Ниже приведены главные проекты, которые подходят под ваше описание (все они начинались как MVP от независимых разработчиков и быстро обрели популярность): [1, 3] 
 ## 🚀 Главные тренды: граф репозитория в один клик

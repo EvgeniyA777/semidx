@@ -1,3 +1,12 @@
+---
+title: "resolve_context Implementation Plan"
+doc_type: "implementation_plan"
+lifecycle: "active"
+status: "draft"
+agent_action: "reference_for_context"
+updated: "2026-07-13"
+---
+
 # resolve_context Implementation Plan
 
 ## Goal
