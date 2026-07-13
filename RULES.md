@@ -138,7 +138,7 @@
 - Keep repository documentation, project rule files, and agent instruction files in English.
 - Agents may answer the user in Russian by default when the user writes in Russian, but committed documentation remains English.
 - Keep root entrypoint docs limited to stable project onboarding and repo-wide controls.
-- New or renamed non-system working documents under `ideas/`, `plans/`, `adr/`, `docs/adr/`, `docs/design/`, `docs/ideas/`, `docs/plans/`, and `docs/reports/` must use a chronological filename prefix scoped to that directory: `NNN_slug.md`.
+- New or renamed non-system working documents under `ideas/`, `plans/`, `reports/`, `adr/`, `docs/adr/`, `docs/design/`, `docs/ideas/`, and `docs/plans/` must use a chronological filename prefix scoped to that directory: `NNN_slug.md`.
 - New or renamed non-system working documents under `notes/` must use a date prefix: `YYYY-MM-DD_slug.md`.
 - Number sequences restart per numbered-document directory. Choose the next number by scanning the target directory for the highest existing numeric prefix, then incrementing it.
 - Do not reuse numbers and do not renumber existing prefixed documents casually.
@@ -146,7 +146,7 @@
 - If an unnumbered or differently prefixed working document is discovered later, treat it as legacy until a dedicated documentation migration renames it.
 - Do not opportunistically rename historical or legacy documents as part of unrelated feature work.
 - A documentation migration that renames legacy documents must update all Markdown links, `superseded_by` references, README indexes, and progress-log references in the same commit.
-- Non-system working documents under `ideas/`, `notes/`, `plans/`, `adr/`, `docs/adr/`, `docs/design/`, `docs/ideas/`, `docs/plans/`, and `docs/reports/` must use YAML frontmatter when they are newly created, renamed, or materially revised.
+- Non-system working documents under `ideas/`, `notes/`, `plans/`, `reports/`, `adr/`, `docs/adr/`, `docs/design/`, `docs/ideas/`, and `docs/plans/` must use YAML frontmatter when they are newly created, renamed, or materially revised.
 - System, index, source-intake, generated, and sample files do not require frontmatter or numbered working-document filenames. Examples include root `README.md`, directory index files such as `plans/README.md` or `docs/README.md`, `RULES.md`, `AGENTS.md`, `CLAUDE.md`, `docs/code-context.md`, `.ccc/*`, `intake/*`, and sample `README.md` files.
 - Preferred frontmatter fields are `title`, `doc_type`, `lifecycle`, `status`, `agent_action`, and `updated`.
 - Use `agent_action` to make stale or completed documents unambiguous to future agents. Executed plans and progress logs must be marked as historical, not as active work queues.
@@ -161,7 +161,7 @@
 ## Plan Execution Progress Logs
 
 - When executing a documented plan, create or update a companion progress log before or during the first implementation stage.
-- Store progress logs under `docs/reports/` unless the plan explicitly names another location.
+- Store progress logs under root `reports/` unless the plan explicitly names another location.
 - Progress logs should use the standard documentation frontmatter described in this file.
 - If a plan is split into stages, update the progress log as each stage is completed.
 - Record stage status, meaningful summary of what changed, changed files or commit hash when available, verification commands and results, known blockers, skipped checks, and environment limitations.
