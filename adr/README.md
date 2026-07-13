@@ -133,7 +133,7 @@ Optional sections are allowed when useful, but do not remove the core ones.
 
 ## Frontmatter Policy
 
-Each ADR should start with YAML frontmatter.
+Each ADR must start with YAML frontmatter.
 
 Purpose:
 

@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-002
+title: "Define a Small Public API and a Standard Context Packet for the Library"
+status: accepted
+date: 2026-03-07
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Define a Small Public API and a Standard Context Packet for the Library."
+agent_summary: "Read this ADR for the decision of record: Define a Small Public API and a Standard Context Packet for the Library. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-002: Define a Small Public API and a Standard Context Packet for the Library
 
 **Status**: Accepted  

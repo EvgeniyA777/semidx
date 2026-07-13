@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-023
+title: "Define Bounded Usage Metrics Contracts for Library and MCP"
+status: accepted
+date: 2026-03-10
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Define Bounded Usage Metrics Contracts for Library and MCP."
+agent_summary: "Read this ADR for the decision of record: Define Bounded Usage Metrics Contracts for Library and MCP. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-023: Define Bounded Usage Metrics Contracts for Library and MCP
 
 **Status**: Accepted  

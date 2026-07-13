@@ -15,7 +15,7 @@ agent_summary: Read this ADR before changing snapshot lookup behavior for multi-
 supersedes: []
 superseded_by: null
 links:
-  - plans/2026-04-03-multi-clone-repo-identity-rollout-plan.md
+  - plans/005_multi_clone_repo_identity_rollout_plan.md
   - src/semidx/runtime/storage.clj
   - src/semidx/runtime/index.clj
   - src/semidx/runtime/project_context.clj
@@ -114,7 +114,7 @@ No status change yet.
 
 ## References
 
-- [2026-04-03-multi-clone-repo-identity-rollout-plan.md](/Users/ae/workspaces/semidx/plans/2026-04-03-multi-clone-repo-identity-rollout-plan.md)
+- [005_multi_clone_repo_identity_rollout_plan.md](/Users/ae/workspaces/semidx/plans/005_multi_clone_repo_identity_rollout_plan.md)
 - [storage.clj](/Users/ae/workspaces/semidx/src/semidx/runtime/storage.clj)
 - [index.clj](/Users/ae/workspaces/semidx/src/semidx/runtime/index.clj)
 - [project_context.clj](/Users/ae/workspaces/semidx/src/semidx/runtime/project_context.clj)

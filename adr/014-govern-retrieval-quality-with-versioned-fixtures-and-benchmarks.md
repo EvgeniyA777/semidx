@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-014
+title: "Govern Retrieval Quality with Versioned Fixtures and Benchmarks"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Govern Retrieval Quality with Versioned Fixtures and Benchmarks."
+agent_summary: "Read this ADR for the decision of record: Govern Retrieval Quality with Versioned Fixtures and Benchmarks. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-014: Govern Retrieval Quality with Versioned Fixtures and Benchmarks
 
 **Status**: Accepted  

@@ -15,8 +15,8 @@ Status: Active architecture plan
 
 Resolve the structural gaps identified in:
 
-- [План работ: расширение `semidx`](../../notes/2026-06-09-1015-95e50b0e-5dfa-4033-bc2b-db6db47ffda4.md);
-- [SOLID-обзор: план расширения semidx](../../notes/2026-06-09-solid-architecture-review.md).
+- [План работ: расширение `semidx`](../notes/2026-06-09-1015-95e50b0e-5dfa-4033-bc2b-db6db47ffda4.md);
+- [SOLID-обзор: план расширения semidx](../notes/2026-06-09-solid-architecture-review.md).
 
 This document defines the architecture that later implementation plans must
 follow. It answers the open questions around:

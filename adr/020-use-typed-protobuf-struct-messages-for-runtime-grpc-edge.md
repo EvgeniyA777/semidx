@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-020
+title: "Use Typed Protobuf Struct Messages for the Runtime gRPC Edge"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Use Typed Protobuf Struct Messages for the Runtime gRPC Edge."
+agent_summary: "Read this ADR for the decision of record: Use Typed Protobuf Struct Messages for the Runtime gRPC Edge. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-020: Use Typed Protobuf Struct Messages for the Runtime gRPC Edge
 
 **Status**: Accepted  

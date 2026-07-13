@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-015
+title: "Require Explicit Host Overrides and Human Review for High-Risk Actions"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Require Explicit Host Overrides and Human Review for High-Risk Actions."
+agent_summary: "Read this ADR for the decision of record: Require Explicit Host Overrides and Human Review for High-Risk Actions. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-015: Require Explicit Host Overrides and Human Review for High-Risk Actions
 
 **Status**: Accepted  

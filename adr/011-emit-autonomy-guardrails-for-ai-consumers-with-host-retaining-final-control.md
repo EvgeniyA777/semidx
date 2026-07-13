@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-011
+title: "Emit Autonomy Guardrails for AI Consumers, with Host Retaining Final Control"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Emit Autonomy Guardrails for AI Consumers, with Host Retaining Final Control."
+agent_summary: "Read this ADR for the decision of record: Emit Autonomy Guardrails for AI Consumers, with Host Retaining Final Control. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-011: Emit Autonomy Guardrails for AI Consumers, with Host Retaining Final Control
 
 **Status**: Accepted  

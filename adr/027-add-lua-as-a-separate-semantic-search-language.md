@@ -1,3 +1,17 @@
+---
+file_type: adr
+decision_id: ADR-027
+title: "Add Lua as a Separate Semantic Search Language"
+status: accepted
+date: 2026-03-18
+tags:
+  - architecture
+summary: "Add Lua as a Separate Semantic Search Language."
+agent_summary: "Read this ADR for the decision of record: Add Lua as a Separate Semantic Search Language. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-027: Add Lua as a Separate Semantic Search Language
 
 ## Status

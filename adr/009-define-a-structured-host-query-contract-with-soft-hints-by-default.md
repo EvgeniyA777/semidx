@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-009
+title: "Define a Structured Host Query Contract with Soft Hints by Default"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Define a Structured Host Query Contract with Soft Hints by Default."
+agent_summary: "Read this ADR for the decision of record: Define a Structured Host Query Contract with Soft Hints by Default. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-009: Define a Structured Host Query Contract with Soft Hints by Default
 
 **Status**: Accepted  

@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-019
+title: "Define Service Auth, Tenancy, and Rate-Limit Boundary for Runtime HTTP/gRPC Edges"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Define Service Auth, Tenancy, and Rate-Limit Boundary for Runtime HTTP/gRPC Edges."
+agent_summary: "Read this ADR for the decision of record: Define Service Auth, Tenancy, and Rate-Limit Boundary for Runtime HTTP/gRPC Edges. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-019: Define Service Auth, Tenancy, and Rate-Limit Boundary for Runtime HTTP/gRPC Edges
 
 **Status**: Accepted  

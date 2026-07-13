@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-021
+title: "Design Host-Integrated Authz Policy Contract for Runtime HTTP/gRPC Edges"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Design Host-Integrated Authz Policy Contract for Runtime HTTP/gRPC Edges."
+agent_summary: "Read this ADR for the decision of record: Design Host-Integrated Authz Policy Contract for Runtime HTTP/gRPC Edges. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-021: Design Host-Integrated Authz Policy Contract for Runtime HTTP/gRPC Edges
 
 **Status**: Accepted  

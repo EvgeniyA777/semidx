@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-022
+title: "Define Standard Onboarding Flow for New Language Adapters"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Define Standard Onboarding Flow for New Language Adapters."
+agent_summary: "Read this ADR for the decision of record: Define Standard Onboarding Flow for New Language Adapters. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-022: Define Standard Onboarding Flow for New Language Adapters
 
 **Status**: Accepted  

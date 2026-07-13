@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-006
+title: "Fetch Raw Code Late and Only for Ranked Spans"
+status: accepted
+date: 2026-03-07
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Fetch Raw Code Late and Only for Ranked Spans."
+agent_summary: "Read this ADR for the decision of record: Fetch Raw Code Late and Only for Ranked Spans. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-006: Fetch Raw Code Late and Only for Ranked Spans
 
 **Status**: Accepted  

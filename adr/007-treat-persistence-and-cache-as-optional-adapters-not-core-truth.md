@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-007
+title: "Treat Persistence and Cache as Optional Adapters, Not Core Truth"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Treat Persistence and Cache as Optional Adapters, Not Core Truth."
+agent_summary: "Read this ADR for the decision of record: Treat Persistence and Cache as Optional Adapters, Not Core Truth. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-007: Treat Persistence and Cache as Optional Adapters, Not Core Truth
 
 **Status**: Accepted  

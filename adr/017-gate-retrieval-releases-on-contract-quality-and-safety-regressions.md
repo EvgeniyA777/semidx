@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-017
+title: "Gate Retrieval Releases on Contract, Quality, and Safety Regressions"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Gate Retrieval Releases on Contract, Quality, and Safety Regressions."
+agent_summary: "Read this ADR for the decision of record: Gate Retrieval Releases on Contract, Quality, and Safety Regressions. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-017: Gate Retrieval Releases on Contract, Quality, and Safety Regressions
 
 **Status**: Accepted  

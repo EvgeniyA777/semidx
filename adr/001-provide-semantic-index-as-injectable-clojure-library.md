@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-001
+title: "Provide Semantic Index as an Injectable Clojure Library"
+status: accepted
+date: 2026-03-07
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Provide Semantic Index as an Injectable Clojure Library."
+agent_summary: "Read this ADR for the decision of record: Provide Semantic Index as an Injectable Clojure Library. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-001: Provide Semantic Index as an Injectable Clojure Library
 
 **Status**: Accepted  

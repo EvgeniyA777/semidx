@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-003
+title: "Represent the Index as a Normalized Semantic Graph"
+status: accepted
+date: 2026-03-07
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Represent the Index as a Normalized Semantic Graph."
+agent_summary: "Read this ADR for the decision of record: Represent the Index as a Normalized Semantic Graph. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-003: Represent the Index as a Normalized Semantic Graph
 
 **Status**: Accepted  

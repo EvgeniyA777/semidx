@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-005
+title: "Rank Context Using Structural Signals First and Semantic Signals Second"
+status: accepted
+date: 2026-03-07
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Rank Context Using Structural Signals First and Semantic Signals Second."
+agent_summary: "Read this ADR for the decision of record: Rank Context Using Structural Signals First and Semantic Signals Second. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-005: Rank Context Using Structural Signals First and Semantic Signals Second
 
 **Status**: Accepted  

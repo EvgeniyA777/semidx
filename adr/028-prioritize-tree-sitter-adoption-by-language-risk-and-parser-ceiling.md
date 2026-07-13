@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-028
+title: "Prioritize Tree-Sitter Adoption by Language Risk and Parser Ceiling"
+status: proposed
+date: 2026-03-18
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Prioritize Tree-Sitter Adoption by Language Risk and Parser Ceiling."
+agent_summary: "Read this ADR for the decision of record: Prioritize Tree-Sitter Adoption by Language Risk and Parser Ceiling. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-028: Prioritize Tree-Sitter Adoption by Language Risk and Parser Ceiling
 
 **Status**: Proposed  

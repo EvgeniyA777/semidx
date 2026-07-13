@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-018
+title: "Design Production API Boundary with a Minimal HTTP Edge over the Library Runtime"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Design Production API Boundary with a Minimal HTTP Edge over the Library Runtime."
+agent_summary: "Read this ADR for the decision of record: Design Production API Boundary with a Minimal HTTP Edge over the Library Runtime. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-018: Design Production API Boundary with a Minimal HTTP Edge over the Library Runtime
 
 **Status**: Accepted  

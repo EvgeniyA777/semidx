@@ -1,3 +1,17 @@
+---
+file_type: adr
+decision_id: ADR-025
+title: "Top-level `intent` string shorthand for `resolve_context`"
+status: accepted
+date: 2026-03-17
+tags:
+  - architecture
+summary: "Top-level `intent` string shorthand for `resolve_context`."
+agent_summary: "Read this ADR for the decision of record: Top-level `intent` string shorthand for `resolve_context`. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-025: Top-level `intent` string shorthand for `resolve_context`
 
 ## Status

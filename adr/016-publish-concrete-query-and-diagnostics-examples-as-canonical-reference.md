@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-016
+title: "Publish Concrete Query and Diagnostics Examples as Canonical Reference"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Publish Concrete Query and Diagnostics Examples as Canonical Reference."
+agent_summary: "Read this ADR for the decision of record: Publish Concrete Query and Diagnostics Examples as Canonical Reference. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-016: Publish Concrete Query and Diagnostics Examples as Canonical Reference
 
 **Status**: Accepted  

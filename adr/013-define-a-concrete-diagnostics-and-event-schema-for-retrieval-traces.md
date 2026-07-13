@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-013
+title: "Define a Concrete Diagnostics and Event Schema for Retrieval Traces"
+status: accepted
+date: 2026-03-08
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Define a Concrete Diagnostics and Event Schema for Retrieval Traces."
+agent_summary: "Read this ADR for the decision of record: Define a Concrete Diagnostics and Event Schema for Retrieval Traces. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-013: Define a Concrete Diagnostics and Event Schema for Retrieval Traces
 
 **Status**: Accepted  

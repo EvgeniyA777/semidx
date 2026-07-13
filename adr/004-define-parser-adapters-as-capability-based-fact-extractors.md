@@ -1,3 +1,19 @@
+---
+file_type: adr
+decision_id: ADR-004
+title: "Define Parser Adapters as Capability-Based Fact Extractors"
+status: accepted
+date: 2026-03-07
+deciders:
+  - project owner
+tags:
+  - architecture
+summary: "Define Parser Adapters as Capability-Based Fact Extractors."
+agent_summary: "Read this ADR for the decision of record: Define Parser Adapters as Capability-Based Fact Extractors. Treat the Decision and Status sections as normative."
+supersedes: []
+superseded_by: null
+links: []
+---
 # ADR-004: Define Parser Adapters as Capability-Based Fact Extractors
 
 **Status**: Accepted  
