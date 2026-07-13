@@ -1291,7 +1291,7 @@
         (is (= "storage_latest" (get-in reused [:index_lifecycle :provenance :source]))))
       (testing "stale latest snapshot triggers rebuild with provenance"
         (is (not= (:snapshot_id index-a) (:snapshot_id rebuilt)))
-        (is (= "snapshot_stale" (get-in rebuilt [:index_lifecycle :rebuild_reason])))
+        (is (= "max_age_stale" (get-in rebuilt [:index_lifecycle :rebuild_reason])))
         (is (= (:snapshot_id index-a)
                (get-in rebuilt [:index_lifecycle :provenance :parent_snapshot_id]))))
       (testing "pinned snapshot reuses exact snapshot even when stale"

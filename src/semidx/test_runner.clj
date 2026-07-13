@@ -11,7 +11,10 @@
             [semidx.storage-test]
             [semidx.typescript-onboarding-test]
             [semidx.runtime-test]
-            [semidx.usage-metrics-test]))
+            [semidx.usage-metrics-test]
+            [semidx.freshness-baseline-test]
+            [semidx.workspace-state-test]
+            [semidx.freshness-test]))
 
 (defn -main [& _]
   (let [result (t/run-tests 'semidx.mcp-server-test
@@ -25,6 +28,9 @@
                             'semidx.lua-onboarding-test
                             'semidx.storage-test
                             'semidx.typescript-onboarding-test
-                            'semidx.usage-metrics-test)
+                            'semidx.usage-metrics-test
+                            'semidx.freshness-baseline-test
+                            'semidx.workspace-state-test
+                            'semidx.freshness-test)
         failures (+ (:fail result) (:error result))]
     (System/exit (if (zero? failures) 0 1))))

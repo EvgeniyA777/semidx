@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: 541213ab1399f211a84dcd5f5d0d9301a0384df3
+- fingerprint: f0e5a5e091592cdd47c6a74623c5bb810cdcf3f0
 
 ## Tree
 ```text
@@ -17,6 +17,8 @@ semidx
   └ semidx
     ├ compression_test.clj
     ├ evaluation_test.clj
+    ├ freshness_baseline_test.clj
+    ├ freshness_test.clj
     ├ lua_onboarding_test.clj
     ├ mcp_http_server_test.clj
     ├ mcp_server_test.clj
@@ -28,7 +30,8 @@ semidx
     ├ runtime_test.clj
     ├ storage_test.clj
     ├ typescript_onboarding_test.clj
-    └ usage_metrics_test.clj
+    ├ usage_metrics_test.clj
+    └ workspace_state_test.clj
 ```
 
 ## Entry Points
@@ -56,13 +59,13 @@ semidx
 ### test
 - semidx.compression-test
 - semidx.evaluation-test
+- semidx.freshness-baseline-test
+- semidx.freshness-test
 - semidx.lua-onboarding-test
 - semidx.mcp-http-server-test
 - semidx.mcp-server-test
 - semidx.policy-governance-test
-- semidx.project-context-test
-- semidx.repo-identity-test
-- ... +6 more
+- ... +9 more
 ### other
 - semidx.contracts.cli
 - semidx.contracts.schemas
@@ -72,7 +75,7 @@ semidx
 - semidx.mcp.session-registry
 - semidx.runtime.adapters
 - semidx.runtime.authz
-- ... +34 more
+- ... +37 more
 
 ## Domain Model
 - IndexStorage [protocol]
@@ -104,7 +107,7 @@ semidx
 - semidx.core -> semidx.runtime.semantic-quality
 - semidx.core -> semidx.runtime.snapshot-diff
 - semidx.core -> semidx.runtime.storage
-- ... +231 more
+- ... +256 more
 
 ## Namespaces
 ### semidx.contracts.cli

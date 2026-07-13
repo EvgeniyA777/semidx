@@ -270,11 +270,15 @@
     canonical))
 
 (defn index-summary [entry cache-hit?]
-  (let [index (:index entry)]
+  (let [index (:index entry)
+        lifecycle (:index_lifecycle index)
+        action (or (:lifecycle_action lifecycle) (if cache-hit? "reuse" "full_rebuild"))
+        reason (or (:lifecycle_reason lifecycle) (if cache-hit? "cached_entry" "initial_build"))
+        diagnostics (or (:lifecycle_diagnostics lifecycle) [])]
     {:index_id (:index_id entry)
      :snapshot_id (:snapshot_id index)
      :indexed_at (:indexed_at index)
-     :index_lifecycle (:index_lifecycle index)
+     :index_lifecycle lifecycle
      :root_path (:root_path entry)
      :file_count (count (:files index))
      :unit_count (count (:units index))
@@ -286,7 +290,10 @@
      :recommended_next_step "repo_map"
      :recommended_flow canonical-mcp-flow
      :usage_hint mcp-first-usage-hint
-     :cache_hit cache-hit?}))
+     :cache_hit (= action "reuse")
+     :lifecycle_action action
+     :lifecycle_reason reason
+     :lifecycle_diagnostics diagnostics}))
 
 (defn touch-index! [state index-id]
   (let [ts (now-ms)]
@@ -368,38 +375,40 @@
         parser-opts (normalize-parser-opts (:parser_opts args))
         language-policy (normalize-language-policy (:language_policy args))
         force-rebuild (boolean (ensure-boolean-or-nil (:force_rebuild args) "force_rebuild"))
-        cache-key-value (cache-key root-path paths parser-opts language-policy)]
-    (if-let [entry (when-not force-rebuild
-                     (find-cached-entry state cache-key-value))]
-      (with-usage-event
-        (index-summary entry true)
-        {:root_path_hash (usage/hash-root-path root-path)
-         :file_count (count (get-in entry [:index :files]))
-         :unit_count (count (get-in entry [:index :units]))
-         :cache_hit true
-         :payload {:force_rebuild force-rebuild
-                   :paths_count (count paths)
-                   :snapshot_id (get-in entry [:index :snapshot_id])}})
-      (let [index (sci/create-index {:root_path root-path
-                                     :paths paths
-                                     :parser_opts parser-opts
-                                     :storage (:storage_adapter @state)
-                                     :language_policy language-policy
-                                     :policy_registry (:policy_registry @state)
-                                     :usage_metrics (:usage_metrics @state)
-                                     :usage_context (tool-usage-context state)
-                                     :selection_cache (:selection_cache @state)
-                                     :suppress_usage_metrics true})
-            entry (store-index! state cache-key-value root-path paths parser-opts language-policy index)]
-        (with-usage-event
-          (index-summary entry false)
-          {:root_path_hash (usage/hash-root-path root-path)
-           :file_count (count (get-in entry [:index :files]))
-           :unit_count (count (get-in entry [:index :units]))
-           :cache_hit false
-           :payload {:force_rebuild force-rebuild
-                     :paths_count (count paths)
-                     :snapshot_id (get-in entry [:index :snapshot_id])}})))))
+        cache-key-value (cache-key root-path paths parser-opts language-policy)
+        storage (or (:storage_adapter @state)
+                    (let [s (storage/in-memory-storage)]
+                      (swap! state assoc :storage_adapter s)
+                      s))
+        index (sci/create-index {:root_path root-path
+                                 :paths paths
+                                 :parser_opts parser-opts
+                                 :storage storage
+                                 :language_policy language-policy
+                                 :policy_registry (:policy_registry @state)
+                                 :usage_metrics (:usage_metrics @state)
+                                 :usage_context (tool-usage-context state)
+                                 :selection_cache (:selection_cache @state)
+                                 :force_rebuild force-rebuild
+                                 :load_latest true
+                                 :suppress_usage_metrics true})
+        lifecycle-action (get-in index [:index_lifecycle :lifecycle_action])
+        cache-hit? (= "reuse" lifecycle-action)
+        existing-id (get-in @state [:cache-key->index-id cache-key-value])
+        entry (if (and cache-hit? existing-id (get-in @state [:indexes-by-id existing-id]))
+                (do
+                  (swap! state assoc-in [:indexes-by-id existing-id :index] index)
+                  (get-in @state [:indexes-by-id existing-id]))
+                (store-index! state cache-key-value root-path paths parser-opts language-policy index))]
+    (with-usage-event
+      (index-summary entry cache-hit?)
+      {:root_path_hash (usage/hash-root-path root-path)
+       :file_count (count (get-in entry [:index :files]))
+       :unit_count (count (get-in entry [:index :units]))
+       :cache_hit cache-hit?
+       :payload {:force_rebuild force-rebuild
+                 :paths_count (count paths)
+                 :snapshot_id (get-in entry [:index :snapshot_id])}})))
 
 (defn project-context-for-entry [entry]
   {:detected_languages (get-in entry [:index :detected_languages])

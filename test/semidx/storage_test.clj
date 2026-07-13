@@ -108,3 +108,15 @@
       (testing "shadow lookup helpers remain independently available"
         (is (= (:snapshot_id index-b)
                (:snapshot_id (sci/load-latest-by-repo storage-adapter repo-key)))))))
+
+(deftest in-memory-storage-workspace-state-round-trip-test
+  (let [root (sample-root!)
+        storage-adapter (storage/in-memory-storage)
+        index (sci/create-index {:root_path root :storage storage-adapter})
+        _ (storage/save-index! storage-adapter index)
+        loaded (storage/load-latest-index storage-adapter root)]
+    (testing "workspace state round-trip via InMemoryStorage"
+      (is (some? (:workspace_state loaded)))
+      (is (= (get-in index [:workspace_state :workspace_fingerprint])
+             (get-in loaded [:workspace_state :workspace_fingerprint]))))))
+

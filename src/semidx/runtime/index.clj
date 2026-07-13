@@ -444,7 +444,7 @@
          callers-index (build-callers-index units (:files files-data))
          callees-index (build-callees-index callers-index)]
      (attach-lifecycle
-     {:root_path root-path
+      {:root_path root-path
        :snapshot_id (uuid)
        :indexed_at (now-iso)
        :repo_identity repo-identity*
@@ -473,7 +473,8 @@
        :activation_state (:activation_state activation-metadata)
        :supported_languages (:supported_languages activation-metadata)
        :selection_hint (:selection_hint activation-metadata)
-       :manual_language_selection (:manual_language_selection activation-metadata)}
+       :manual_language_selection (:manual_language_selection activation-metadata)
+       :workspace_state (:workspace_state lifecycle-opts)}
       lifecycle-opts))))
 
 (defn- shadow-reuse-mode? [mode]
@@ -573,88 +574,41 @@
          vec)))
 
 (defn create-index
-  [{:keys [root_path paths parser_opts storage load_latest pinned_snapshot_id
-           repo_identity_reuse_mode
-           max_snapshot_age_seconds rebuild_reason language_policy]
-    :or {root_path "."
-         parser_opts {:clojure_engine :clj-kondo
-                      :tree_sitter_enabled false}
-         load_latest false}}]
-  (when (and (seq pinned_snapshot_id) (nil? storage))
-    (throw (ex-info "pinned_snapshot_id requires a storage adapter"
-                    {:type :invalid_request
-                     :message "pinned_snapshot_id requires a storage adapter"})))
-  (when (and (seq pinned_snapshot_id) (seq paths))
-    (throw (ex-info "pinned_snapshot_id cannot be combined with paths subset indexing"
-                    {:type :invalid_request
-                     :message "pinned_snapshot_id cannot be combined with paths subset indexing"})))
-  (let [discovery (activation/discover-languages root_path)
-        activation-state (activation/resolve-activation discovery language_policy)
-        activation-metadata (activation/activation-metadata discovery activation-state)
-        no-supported? (and (empty? (:detected_languages activation-state))
-                           (empty? (:active_languages activation-state)))]
-    (when no-supported?
-      (throw (ex-info "no supported languages were detected for this project"
-                      {:type :no_supported_languages_found
-                       :message "no supported languages were detected for this project"
-                       :details (activation/no-supported-languages-details discovery activation-state)})))
-    (let [{:keys [loaded shadow_reuse]} (maybe-load-index storage root_path {:load_latest load_latest
-                                                                             :pinned_snapshot_id pinned_snapshot_id
-                                                                             :repo_identity_reuse_mode repo_identity_reuse_mode})]
-      (if loaded
-        (let [loaded-activation (merge activation-metadata
-                                       (select-keys loaded
-                                                  [:detected_languages
-                                                   :active_languages
-                                                   :language_fingerprint
-                                                   :activation_state
-                                                   :supported_languages
-                                                   :selection_hint
-                                                   :manual_language_selection]))
-              loaded* (attach-lifecycle loaded {:provenance_source (if (seq pinned_snapshot_id)
-                                                                     "storage_pinned"
-                                                                     "storage_latest")
-                                                :requested_snapshot_id pinned_snapshot_id
-                                                :reused_snapshot true
-                                                :snapshot_pinned (boolean (seq pinned_snapshot_id))
-                                                :max_snapshot_age_seconds max_snapshot_age_seconds
-                                                :activation_metadata loaded-activation
-                                                :shadow_reuse shadow_reuse})
-              stale-loaded? (get-in loaded* [:index_lifecycle :stale])]
-          (if (and stale-loaded? (not (seq pinned_snapshot_id)))
-            (let [discovered (if (seq paths)
-                               (filtered-paths (normalize-paths paths) (:active_languages activation-state))
-                               (activation/active-source-paths discovery activation-state))
-                  files-data (parse-files root_path discovered parser_opts)
-                  rebuilt (build-index-state root_path
-                                             files-data
-                                             {:provenance_source "fresh_build"
-                                              :parent_snapshot_id (:snapshot_id loaded*)
-                                              :requested_snapshot_id pinned_snapshot_id
-                                              :max_snapshot_age_seconds max_snapshot_age_seconds
-                                              :activation_metadata activation-metadata
-                                              :shadow_reuse shadow_reuse
-                                              :rebuild_reason "snapshot_stale"})]
-              (maybe-save-index! storage rebuilt))
-            loaded*))
-        (let [discovered (if (seq paths)
-                           (filtered-paths (normalize-paths paths) (:active_languages activation-state))
-                           (activation/active-source-paths discovery activation-state))
-              files-data (parse-files root_path discovered parser_opts)
-              index (build-index-state root_path
-                                       files-data
-                                       {:provenance_source "fresh_build"
-                                        :requested_snapshot_id pinned_snapshot_id
-                                        :max_snapshot_age_seconds max_snapshot_age_seconds
-                                        :activation_metadata activation-metadata
-                                        :shadow_reuse shadow_reuse
-                                        :rebuild_reason (or rebuild_reason
-                                                            (cond
-                                                              (:manual_language_selection activation-state) "manual_language_selection"
-                                                              (seq paths) "paths_subset_requested"
-                                                              load_latest "storage_latest_missing"
-                                                              :else "initial_build"))})]
-          (maybe-save-index! storage index))))))
+  [opts]
+  (if (:raw_build? opts)
+    (let [root_path (or (:root_path opts) (:root-path opts) ".")
+          parser_opts (or (:parser_opts opts) (:parser-opts opts)
+                          {:clojure_engine :clj-kondo
+                           :tree_sitter_enabled false})
+          storage (or (:storage opts) (:storage_adapter opts))
+          pinned_snapshot_id (:pinned_snapshot_id opts)
+          max_snapshot_age_seconds (:max_snapshot_age_seconds opts)
+          rebuild_reason (:rebuild_reason opts)
+          language_policy (:language_policy opts)
+          discovery (activation/discover-languages root_path)
+          activation-state (activation/resolve-activation discovery language_policy)
+          activation-metadata (activation/activation-metadata discovery activation-state)
+          no-supported? (and (empty? (:detected_languages activation-state))
+                             (empty? (:active_languages activation-state)))]
+      (when no-supported?
+        (throw (ex-info "no supported languages were detected for this project"
+                        {:type :no_supported_languages_found
+                         :message "no supported languages were detected for this project"
+                         :details (activation/no-supported-languages-details discovery activation-state)})))
+      (let [discovered (if (seq (:paths opts))
+                         (filtered-paths (normalize-paths (:paths opts)) (:active_languages activation-state))
+                         (activation/active-source-paths discovery activation-state))
+            files-data (parse-files root_path discovered parser_opts)
+            index (build-index-state root_path
+                                     files-data
+                                     {:provenance_source "fresh_build"
+                                      :requested_snapshot_id pinned_snapshot_id
+                                      :max_snapshot_age_seconds max_snapshot_age_seconds
+                                      :activation_metadata activation-metadata
+                                      :rebuild_reason (or rebuild_reason "initial_build")
+                                      :workspace_state (:workspace_state opts)})]
+        (maybe-save-index! storage index)))
+    ((requiring-resolve 'semidx.runtime.index-lifecycle/coordinate-index-lifecycle) opts)))
 
 (defn- remove-paths-from-index [index paths]
   (let [path-set (set paths)
@@ -669,29 +623,37 @@
      :diagnostics remaining-diagnostics}))
 
 (defn update-index
-  [index {:keys [changed_paths parser_opts storage]
-          :or {changed_paths []
-               parser_opts {:clojure_engine :clj-kondo
-                            :tree_sitter_enabled false}}}]
-  (if (empty? changed_paths)
-    (create-index {:root_path (:root_path index)
-                   :parser_opts parser_opts
-                   :storage storage
-                   :rebuild_reason "full_rebuild"})
-    (let [paths (normalize-paths changed_paths)
-          base (remove-paths-from-index index paths)
-          parsed (parse-files (:root_path index) paths parser_opts)
-          merged-files (merge (:files base) (:files parsed))
-          merged-units (vec (concat (:units base) (:units parsed)))
-          merged-diags (vec (concat (:diagnostics base) (:diagnostics parsed)))
-          updated (build-index-state (:root_path index)
-                                     {:files merged-files
-                                      :units merged-units
-                                      :diagnostics merged-diags}
-                                     {:provenance_source "incremental_update"
-                                      :parent_snapshot_id (:snapshot_id index)
-                                      :rebuild_reason "changed_paths_update"})]
-      (maybe-save-index! storage updated))))
+  [index opts]
+  (let [added-paths (normalize-paths (or (:added_paths opts) (:added-paths opts) []))
+        changed-paths (normalize-paths (or (:changed_paths opts) (:changed-paths opts) []))
+        deleted-paths (normalize-paths (or (:deleted_paths opts) (:deleted-paths opts) []))
+        parser-opts (or (:parser_opts opts) (:parser-opts opts)
+                        {:clojure_engine :clj-kondo
+                         :tree_sitter_enabled false})
+        storage (or (:storage opts) (:storage_adapter opts))
+        workspace-state (:workspace_state opts)]
+    (if (and (empty? added-paths) (empty? changed-paths) (empty? deleted-paths))
+      (create-index {:root_path (:root_path index)
+                     :parser_opts parser-opts
+                     :storage storage
+                     :rebuild_reason "full_rebuild"
+                     :workspace_state workspace-state})
+      (let [paths-to-remove (vec (concat changed-paths deleted-paths))
+            base (remove-paths-from-index index paths-to-remove)
+            paths-to-parse (vec (concat added-paths changed-paths))
+            parsed (parse-files (:root_path index) paths-to-parse parser-opts)
+            merged-files (merge (:files base) (:files parsed))
+            merged-units (vec (concat (:units base) (:units parsed)))
+            merged-diags (vec (concat (:diagnostics base) (:diagnostics parsed)))
+            updated (build-index-state (:root_path index)
+                                       {:files merged-files
+                                        :units merged-units
+                                        :diagnostics merged-diags}
+                                       {:provenance_source "incremental_update"
+                                        :parent_snapshot_id (:snapshot_id index)
+                                        :rebuild_reason "changed_paths_update"
+                                        :workspace_state workspace-state})]
+        (maybe-save-index! storage updated)))))
 
 (defn unit-by-id [index unit-id]
   (get (:units index) unit-id))
