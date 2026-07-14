@@ -4,7 +4,9 @@
             [clojure.string :as str]
             [semidx.core :as sci]
             [semidx.runtime.errors :as errors]
+            [semidx.runtime.capabilities :as capabilities]
             [semidx.runtime.language-activation :as activation]
+            [semidx.runtime.language-registry :as registry]
             [semidx.runtime.query-anchors :as query-anchors]
             [semidx.runtime.retrieval-policy :as rp]
             [semidx.runtime.storage :as storage]
@@ -930,7 +932,11 @@
                   :properties {"root_path" {:type "string"}
                                "paths" {:type "array" :items {:type "string"}}
                                "parser_opts" {:type "object"}
-                               "language_policy" {:type "object"}
+                               "language_policy" {:type "object"
+                                                  :properties {"allow_languages" {:type "array" :items {:type "string" :enum registry/supported-language-order}}
+                                                               "disable_languages" {:type "array" :items {:type "string" :enum registry/supported-language-order}}
+                                                               "prewarm_languages" {:type "array" :items {:type "string" :enum registry/supported-language-order}}}
+                                                  :additionalProperties false}
                                "force_rebuild" {:type "boolean"}}
                   :required ["root_path"]
                   :additionalProperties false}}
@@ -1135,7 +1141,8 @@
         (do
           (swap! state assoc :client-info (get-in message [:params :clientInfo]))
           (jsonrpc-success id {:protocolVersion (negotiate-protocol-version message)
-                               :capabilities {:tools {}}
+                               :capabilities {:tools {}
+                                              :semidx_capabilities (capabilities/capabilities-payload server-name server-version)}
                                :serverInfo {:name server-name
                                             :version server-version}}))
 
