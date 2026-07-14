@@ -113,6 +113,10 @@
       "type": "string",
       "enum": ["planned", "drafted", "patched", "discarded"]
     },
+    "languagePolicyOption": {
+      "type": "string",
+      "enum": ["clojure", "java", "elixir", "python", "typescript", "javascript", "lua", "html", "css"]
+    },
     "retrievalIssueCode": {
       "type": "string",
       "enum": [

@@ -125,12 +125,15 @@
    [:name bounded-string]
    [:version bounded-string]])
 
+(def language-policy-option
+  [:enum "clojure" "java" "elixir" "python" "typescript" "javascript" "lua" "html" "css"])
+
 (def capabilities
   [:map {:closed true}
    [:capability_version bounded-string]
    [:server server-info]
    [:languages [:vector {:min 1} language-capability]]
-   [:language_policy_options string-array]])
+   [:language_policy_options [:vector language-policy-option]]])
 
 (def capability-summary
   [:map {:closed true}

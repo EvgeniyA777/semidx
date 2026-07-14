@@ -74,7 +74,9 @@
       "minItems": 1
     },
     "language_policy_options": {
-      "$ref": "common.schema.json#/$defs/stringArray"
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/languagePolicyOption" },
+      "uniqueItems": true
     }
   }
 }
