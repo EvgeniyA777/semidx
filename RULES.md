@@ -92,11 +92,13 @@
 
 ## Clojure Editing Rules
 
-- For `.clj`, `.cljc`, `.cljs`, and `.edn` structural edits, prefer form-aware Clojure editing tools when available.
+- For `.clj`, `.cljc`, `.cljs`, and `.edn` structural edits, you MUST use `clojure-mcp` tools (e.g., `clojure_edit`, `clojure_edit_replace_sexp`) if the server is connected. 
+- **CRITICAL**: Do NOT use raw text tools like `replace_file_content` or `multi_replace_file_content` for Clojure code unless structural tools explicitly fail or are unavailable.
+- Use `clojure_eval` via `clojure-mcp` to test changes interactively in the REPL before resorting to running the full `clojure -M:test` suite.
 - Avoid large raw `apply_patch` rewrites of deeply nested forms when a narrower edit will work.
 - Keep Clojure patches scoped to one top-level form where possible.
 - After any manual `apply_patch` that changes Clojure forms, run an immediate syntax or compile probe before continuing with more edits.
-- If Clojure reports `Unmatched delimiter`, `EOF while reading`, or `defn` spec errors after an edit, inspect the just-edited form tail first and repair delimiters before making additional changes.
+- If Clojure reports `Unmatched delimiter`, `EOF while reading`, or `defn` spec errors after an edit, inspect the just-edited form tail first and repair delimiters (or use `paren_repair`) before making additional changes.
 
 ## Contracts And Runtime Invariants
 
