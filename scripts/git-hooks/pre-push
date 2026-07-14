@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+clojure -M:ccc refresh --root "$repo_root" --changed >/dev/null
+if ! git diff --quiet -- docs/code-context.md; then
+  echo "code context summary changed; stage docs/code-context.md and retry push" >&2
+  exit 1
+fi
+
+status=0
+input_seen=0
+
+while read local_ref local_sha remote_ref remote_sha
+do
+  input_seen=1
+  if ! ./scripts/check-memory-freshness.sh --pre-push "$local_sha" "$remote_sha"; then
+    status=1
+  fi
+done
+
+if [ "$input_seen" -eq 0 ]; then
+  if ! ./scripts/check-memory-freshness.sh --range HEAD; then
+    status=1
+  fi
+fi
+
+exit "$status"

@@ -43,6 +43,14 @@
 - `./scripts/agent-bootstrap.sh` is the canonical bootstrap entrypoint. It runs `clojure -M:ccc init --root . --skip-hook` only when CCC artifacts are missing.
 - Do not refresh CCC artifacts on every task. Refresh them only when the task explicitly needs regenerated compression outputs or when the user asks for it.
 
+## Project Memory Freshness
+
+- `MEMORY.md` is the lightweight operational memory for current implementation reality, key non-ADR decisions, active assumptions, constraints, known gaps, and near-term priorities.
+- Update `MEMORY.md` when runtime behavior materially changes, new invariants are introduced, priorities or known gaps change, or integration assumptions change.
+- The versioned pre-push hook runs `scripts/check-memory-freshness.sh` and blocks pushes that change high-signal project files without a `MEMORY.md` update.
+- If a high-signal change is intentionally memory-neutral, bypass the hook only after checking the update rule: `SCI_SKIP_MEMORY_FRESHNESS=1 git push`.
+- Install versioned hooks with `./scripts/install-git-hooks.sh`; the tracked hook source lives under `scripts/git-hooks/`.
+
 ## MCP-First Workflow
 
 - If the `semidx` MCP server is available, do not begin codebase exploration with directory listing, wildcard search, grep, broad file reads, or shell crawling.
@@ -128,6 +136,7 @@
 - Never run dependent git commands in parallel.
 - `git commit` and `git push` must always run sequentially.
 - Use parallel tool execution only for independent reads or checks, never for state-changing commands that depend on each other.
+- Use versioned git hook sources under `scripts/git-hooks/`; install them into `.git/hooks` with `./scripts/install-git-hooks.sh`.
 - If uncommitted files remain in the repo from previous agent runs, explicitly surface them and offer to commit and push them separately.
 - Commit or push only when the user requests or approves it.
 - Do not auto-commit after every file edit. When committing, group related changes into coherent commits.
