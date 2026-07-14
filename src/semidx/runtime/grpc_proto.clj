@@ -21,7 +21,8 @@
    :health-response
    {:proto-name "HealthResponse"
     :fields [{:key :status :proto-name "status" :number 1 :type :string}
-             {:key :service :proto-name "service" :number 2 :type :string}]}
+             {:key :service :proto-name "service" :number 2 :type :string}
+             {:key :capabilities_json :proto-name "capabilities_json" :number 3 :type :string}]}
 
    :create-index-request
    {:proto-name "CreateIndexRequest"
@@ -225,14 +226,16 @@
 (defn health-request []
   (build-message :health-request {}))
 
-(defn health-response [{:keys [status service]}]
+(defn health-response [{:keys [status service capabilities_json]}]
   (build-message :health-response
-                 {:status status
-                  :service service}))
+                 (cond-> {:status status
+                          :service service}
+                   capabilities_json (assoc :capabilities_json capabilities_json))))
 
 (defn health-response->map [message]
   {:status (string-field :health-response message :status)
-   :service (string-field :health-response message :service)})
+   :service (string-field :health-response message :service)
+   :capabilities_json (string-field :health-response message :capabilities_json)})
 
 (defn create-index-request [{:keys [root_path paths parser_opts language_policy]}]
   (build-message :create-index-request

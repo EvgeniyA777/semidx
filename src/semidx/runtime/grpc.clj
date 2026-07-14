@@ -2,7 +2,9 @@
   (:gen-class)
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
+            [clojure.data.json :as json]
             [semidx.runtime.authz :as authz]
+            [semidx.runtime.capabilities :as capabilities]
             [semidx.runtime.errors :as errors]
             [semidx.runtime.grpc-proto :as grpc-proto]
             [semidx.runtime.project-context :as project-context]
@@ -220,7 +222,8 @@
 
 (defn- handle-health [_]
   {:status "ok"
-   :service "semidx-runtime-grpc"})
+   :service "semidx-runtime-grpc"
+   :capabilities_json (json/write-str (capabilities/capabilities-payload "semidx-runtime-grpc" "1.0") :escape-slash false)})
 
 (declare build-project-index project-context-summary)
 

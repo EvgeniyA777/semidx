@@ -5,6 +5,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [semidx.runtime.authz :as authz]
+            [semidx.runtime.capabilities :as capabilities]
             [semidx.runtime.errors :as errors]
             [semidx.runtime.project-context :as project-context]
             [semidx.runtime.retrieval-policy :as rp]
@@ -223,7 +224,9 @@
 
 (defn- handle-health [^HttpExchange exchange]
   (if (= "GET" (request-method exchange))
-    (write-json! exchange 200 {:status "ok" :service "semidx-runtime-http"})
+    (write-json! exchange 200 {:status "ok" 
+                               :service "semidx-runtime-http"
+                               :capabilities (capabilities/capabilities-payload "semidx-runtime-http" "1.0")})
     (write-json! exchange 405 {:error "method_not_allowed"
                                :error_code "method_not_allowed"
                                :error_category "client"
