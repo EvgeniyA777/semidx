@@ -2,7 +2,8 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [semidx.runtime.index :as idx]))
+            [semidx.runtime.index :as idx]
+            [semidx.runtime.language-registry :as registry]))
 
 (def ^:private default-policy
   {:policy_id "heuristic_v1"
@@ -61,13 +62,6 @@
    "medium" 1
    "high" 2})
 
-(def ^:private language-strength-profile
-  {"clojure" "high"
-   "elixir" "medium"
-   "java" "medium"
-   "python" "medium"
-   "typescript" "low"
-   "javascript" "low"})
 
 (defn default-retrieval-policy []
   default-policy)
@@ -322,7 +316,7 @@
       (get-in index [:files (:path unit) :language])))
 
 (defn- language-strength [language]
-  (get language-strength-profile (str/lower-case (str language)) "low"))
+  (registry/strength-for-language language))
 
 (defn- selected-language-strengths [index units]
   (let [by-language (->> units

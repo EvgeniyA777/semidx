@@ -73,6 +73,7 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 
 - JSON Schema is the external contract source of truth.
 - `malli` is a runtime mirror, not a competing source of truth.
+- `runtime/language_registry.clj` is the single source of truth for language semantic strength.
 - Outputs must remain bounded and contract-valid (`context_packet`, diagnostics, guardrails, events).
 - If limits are exhausted, stop immediately and wait for explicit user instruction.
 - Before any service-backed tests (PostgreSQL or other servers): detect running instance -> shutdown if running -> start fresh with required config -> only then run tests.
