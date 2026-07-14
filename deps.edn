@@ -27,6 +27,11 @@
   {:main-opts ["-m" "semidx.runtime.evaluation"]}
   :bench
   {:main-opts ["-m" "semidx.runtime.benchmarks"]}
+  :nrepl
+  {:extra-deps {nrepl/nrepl {:mvn/version "1.6.0"}}
+   :main-opts ["-m" "nrepl.cmdline"
+               "--bind" "127.0.0.1"
+               "--port" "0"]}
   :test
   {:extra-paths ["test"]
    :extra-deps {org.clojure/tools.namespace {:mvn/version "1.5.0"}}

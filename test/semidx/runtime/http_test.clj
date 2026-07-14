@@ -70,7 +70,15 @@
             health (wait-health! client base-url)]
         (testing "health endpoint"
           (is (= 200 (:status health)))
-          (is (= "ok" (get-in health [:json :status]))))
+          (is (= "ok" (get-in health [:json :status])))
+          (is (map? (get-in health [:json :capabilities]))))
+
+        (testing "capabilities endpoint"
+          (let [cap-resp (http-request client "GET" (str base-url "/capabilities") nil)]
+            (is (= 200 (:status cap-resp)))
+            (is (= "1.0" (get-in cap-resp [:json :capability_version])))
+            (is (= "semidx-runtime-http" (get-in cap-resp [:json :server :name])))
+            (is (seq (get-in cap-resp [:json :languages])))))
 
         (testing "index create endpoint"
           (let [resp (post-json client

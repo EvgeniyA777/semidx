@@ -100,6 +100,14 @@
 - After any manual `apply_patch` that changes Clojure forms, run an immediate syntax or compile probe before continuing with more edits.
 - If Clojure reports `Unmatched delimiter`, `EOF while reading`, or `defn` spec errors after an edit, inspect the just-edited form tail first and repair delimiters (or use `paren_repair`) before making additional changes.
 
+## Clojure MCP nREPL Bootstrap
+
+- When `clojure-mcp` is connected and `clojure_eval` reports that no nREPL port is available, start the project-local nREPL with `clojure -M:nrepl` from the repository root.
+- `:nrepl` is the canonical repo-local alias for agent REPL support. Do not rely on user-global aliases such as `:dev` or combined commands such as `clojure -M:dev:nrepl`.
+- The alias binds nREPL to `127.0.0.1` and asks nREPL to choose an available port. It writes `.nrepl-port`, which is ignored by git and discoverable by `clojure-mcp`.
+- After starting the process, verify it with `clojure-mcp` `list_nrepl_ports`, then pass the discovered port explicitly to `clojure_eval` when evaluating code.
+- Keep the nREPL process running for the current agent session unless the user asks to stop it, the task requires a clean restart, or verification shows it is stale.
+
 ## Contracts And Runtime Invariants
 
 - JSON Schema files under `contracts/schemas/` are the external contract source of truth.
@@ -122,6 +130,7 @@
   - `clojure -M:ccc check --root .`
 - For language-lane work, use `./scripts/validate-language-onboarding.sh <language>` and include `--skip-gates` only when a fast structural check is sufficient.
 - For benchmarks, use `./scripts/run-benchmarks.sh`.
+- For clojure-mcp REPL smoke, use `clojure -M:nrepl`, then `list_nrepl_ports`, then a small `clojure_eval` such as `(+ 1 2)` on the discovered port.
 - For MCP runtime smoke, use `clojure -M:mcp` or `clojure -M:mcp-http --host 127.0.0.1 --port 8791` as appropriate.
 - For HTTP/gRPC runtime edges, use `clojure -M:runtime-http` or `clojure -M:runtime-grpc` as appropriate.
 - If a verification command cannot be run, report that clearly.

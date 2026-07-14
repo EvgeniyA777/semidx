@@ -8,7 +8,8 @@
             [semidx.runtime.semantic-quality :as semantic-quality]
             [semidx.runtime.snapshot-diff :as snapshot-diff]
             [semidx.runtime.storage :as storage]
-            [semidx.runtime.usage-metrics :as usage]))
+            [semidx.runtime.usage-metrics :as usage]
+            [semidx.runtime.capabilities :as capabilities]))
 
 (defn- now-ms []
   (System/currentTimeMillis))
@@ -741,3 +742,8 @@
   "Query persisted callees for a unit id."
   [storage-adapter root-path unit-id opts]
   (storage/query-callees storage-adapter root-path unit-id opts))
+
+(defn capabilities
+  "Return the versioned capability self-description contract for the library."
+  []
+  (capabilities/capabilities-payload "semidx-core" "1.0"))

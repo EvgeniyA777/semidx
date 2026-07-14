@@ -291,7 +291,7 @@
               tool-names (->> tools
                               (map :name)
                               set)]
-          (is (= #{"create_index" "repo_map" "resolve_context" "expand_context" "fetch_context_detail" "literal_file_slice" "snapshot_diff" "impact_analysis" "skeletons" "health"}
+          (is (= #{"capabilities" "create_index" "repo_map" "resolve_context" "expand_context" "fetch_context_detail" "literal_file_slice" "snapshot_diff" "impact_analysis" "skeletons" "health"}
                  tool-names))
           (is (str/includes? (some->> tools
                                       (filter #(= "create_index" (:name %)))
@@ -322,7 +322,17 @@
           (is (string? (:session_id health-data)))
           (is (integer? (:uptime_ms health-data)))
           (is (contains? health-data :index_count))
+          (is (contains? health-data :capabilities_summary))
+          (is (= "1.0" (get-in health-data [:capabilities_summary :capability_version])))
           (is (not (contains? health-data :allowed_roots)))))
+
+      (testing "capabilities returns full self-description"
+        (let [cap-response (call-tool! handle 102 "capabilities" {})
+              cap-data (get-in cap-response [:result :structuredContent])]
+          (is (= "1.0" (:capability_version cap-data)))
+          (is (= "semidx-mcp" (get-in cap-data [:server :name])))
+          (is (seq (:languages cap-data)))
+          (is (seq (:language_policy_options cap-data)))))
 
       (let [create-response (call-tool! handle 3 "create_index" {:root_path tmp-root})
             create-data (get-in create-response [:result :structuredContent])
@@ -704,7 +714,7 @@
             tool-names (->> (get-in tools-response [:result :tools])
                             (map :name)
                             set)]
-        (is (= #{"create_index" "repo_map" "resolve_context" "expand_context" "fetch_context_detail" "literal_file_slice" "snapshot_diff" "impact_analysis" "skeletons" "health"}
+        (is (= #{"capabilities" "create_index" "repo_map" "resolve_context" "expand_context" "fetch_context_detail" "literal_file_slice" "snapshot_diff" "impact_analysis" "skeletons" "health"}
                tool-names)))
       (finally
         (destroy-process! handle)))))

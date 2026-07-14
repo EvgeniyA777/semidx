@@ -1022,8 +1022,15 @@
     :description "Check if the SCI MCP server is alive and ready. Returns immediately with server status and uptime. Use to verify MCP availability before starting a workflow."
     :inputSchema {:type "object"
                   :properties {}
+                  :additionalProperties false}}
+   {:name "capabilities"
+    :description "Return the full versioned capability self-description contract for this server."
+    :inputSchema {:type "object"
+                  :properties {}
                   :additionalProperties false}}])
 
+(defn tool-capabilities [state _args]
+  (capabilities/capabilities-payload server-name server-version))
 (defn tool-health [state _args]
   (let [state* @state
         index-count (count (:indexes-by-id state*))
@@ -1033,7 +1040,9 @@
      :server_version server-version
      :session_id session-id
      :uptime_ms (- (now-ms) (or (:started_at state*) (now-ms)))
-     :index_count index-count}))
+     :index_count index-count
+     :capabilities_summary {:capability_version capabilities/current-capability-version
+                            :lanes_count (count registry/language-lanes)}}))
 
 (def tool-handlers
   {"create_index" tool-create-index
@@ -1045,7 +1054,8 @@
    "snapshot_diff" tool-snapshot-diff
    "impact_analysis" tool-impact-analysis
    "skeletons" tool-skeletons
-   "health" tool-health})
+   "health" tool-health
+   "capabilities" tool-capabilities})
 
 (defn format-json [payload]
   (json/write-str payload :escape-slash false))

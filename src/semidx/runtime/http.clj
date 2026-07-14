@@ -232,6 +232,14 @@
                                :error_category "client"
                                :allowed ["GET"]})))
 
+(defn- handle-capabilities [^HttpExchange exchange]
+  (if (= "GET" (request-method exchange))
+    (write-json! exchange 200 (capabilities/capabilities-payload "semidx-runtime-http" "1.0"))
+    (write-json! exchange 405 {:error "method_not_allowed"
+                               :error_code "method_not_allowed"
+                               :error_category "client"
+                               :allowed ["GET"]})))
+
 (defn- handle-create-index [auth-config ^HttpExchange exchange]
   (if-not (post-request? exchange)
     (write-json! exchange 405 {:error "method_not_allowed"
@@ -481,6 +489,7 @@
                      :storage storage-adapter
                      :language_policy language_policy}]
     (.createContext server "/health" (with-handler handle-health))
+    (.createContext server "/capabilities" (with-handler handle-capabilities))
     (.createContext server "/v1/index/create" (with-handler (partial handle-create-index auth-config)))
     (.createContext server "/v1/retrieval/resolve-context" (with-handler (partial handle-resolve-context auth-config)))
     (.createContext server "/v1/retrieval/expand-context" (with-handler (partial handle-expand-context auth-config)))
