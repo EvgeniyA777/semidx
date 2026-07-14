@@ -2,9 +2,9 @@
 title: "Capability Self-Description Plan"
 doc_type: "implementation_plan"
 lifecycle: "active"
-status: "planned"
+status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-07-13"
+updated: "2026-07-14"
 ---
 
 # Implementation Plan: Capability Self-Description
@@ -89,7 +89,7 @@ churns the registry, so the single-source-of-truth consolidation happens first.
 Each stage: **map (semidx MCP first) → implement → verify (narrowest gate first)
 → commit (explicit paths) → review (`/code-review` + stage-gated external
 reviewer loop) → fixes → docs update → push (sequential)**. Record each stage in
-the companion progress log `reports/011_capability_self_description_progress_log.md`.
+the companion progress log `reports/010_capability_self_description_progress_log.md`.
 ADR numbers are chosen at execution time by scanning `adr/` for the next free
 number (033+).
 

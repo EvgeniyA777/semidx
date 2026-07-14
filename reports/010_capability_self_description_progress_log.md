@@ -52,39 +52,48 @@ updated: "2026-07-14"
   - `clojure -M:test` passed.
 - **Changed Files:**
   - `src/semidx/mcp/core.clj`
+  - `test/semidx/mcp/server_test.clj`
+  - `docs/mcp-api.md`
+  - `docs/mcp-agent-prompts.md`
   - `docs/roadmap-status.md`
 
 ## Stage 4 — Cross-Surface Parity
 
-- **Status:** Done
+- **Status:** Blocked
 - **Summary:** Added public API `semidx.core/capabilities` and HTTP `/capabilities` route. Added `capabilities_json` to gRPC `HealthResponse` protobuf definition. Updated HTTP and gRPC `handle-health` endpoints to emit capabilities payload. Added `capabilities-parity-test` to assert structural identity across library, MCP, HTTP, and gRPC. Refined `MEMORY.md`.
 - **Verification:**
-  - `clojure -M:test` passed.
+  - Historical verification reported `clojure -M:test` passed before the latest H3 review finding.
+  - Current verification is blocked by H3: `capabilities-parity-test` calls `mcp/new-session-state` with the wrong arity, so parity assertions do not run.
 - **Changed Files:**
   - `proto/semidx/runtime/grpc/v1/runtime.proto`
   - `src/semidx/runtime/grpc_proto.clj`
   - `src/semidx/runtime/http.clj`
   - `src/semidx/runtime/grpc.clj`
+  - `src/semidx/core.clj`
+  - `test/semidx/runtime/capabilities_test.clj`
+  - `test/semidx/runtime/http_test.clj`
+  - `docs/runtime-api.md`
   - `MEMORY.md`
 
 ## Stage 5 — Docs & Finalization
 
-- **Status:** Done
-- **Summary:** Wrote ADR-025 documenting the capabilities self-description contract. Refreshed CCC artifacts and passed `ccc check`. Cleaned up stray benchmark artifacts. All Stage 3/4 parity items and CCC finalization are complete.
-- **Verification:** N/A (Documentation only)
+- **Status:** Blocked
+- **Summary:** Wrote ADR-025 documenting the capabilities self-description contract. Refreshed CCC artifacts and passed `ccc check`. Cleaned up stray benchmark artifacts. Final close-out remains blocked until H3 is fixed and Stage 4 parity is re-verified.
+- **Verification:**
+  - Blocked by H3 current verification failure.
 - **Changed Files:**
   - `adr/025-expose-versioned-capability-self-description-contract.md`
 
 ## Review Findings — Codex, 2026-07-13
 
 - **H1 — MCP self-description incomplete: Resolved.**
-  - **Evidence:** `plans/014_capability_self_description_plan.md` requires enriched MCP `health` and a dedicated `capabilities` tool. Current `semidx.mcp.core/tool-health` returns only status/server/session/index count, and `tool-handlers` has no `capabilities` handler.
+  - **Evidence:** At the time of the 2026-07-13 review, `plans/014_capability_self_description_plan.md` required enriched MCP `health` and a dedicated `capabilities` tool, while `semidx.mcp.core/tool-health` returned only status/server/session/index count and `tool-handlers` had no `capabilities` handler.
   - **Impact:** Cold MCP clients still cannot discover the full capability contract via the intended preflight path; plan exit criteria are not met.
   - **Suggested fix:** Add `tool-capabilities`, register it in `tool-definitions` and `tool-handlers`, enrich `tool-health` with capability summary fields, and add MCP tests for `initialize`, `tools/call health`, and `tools/call capabilities`.
   - **Resolution:** Added `capabilities` tool, updated `health` tool, and added exhaustive tests to `server_test.clj`.
 
 - **H2 — Cross-surface parity incomplete: Resolved.**
-  - **Evidence:** The plan requires public `semidx.core/capabilities` and HTTP `GET /capabilities`. Current `semidx.core` does not export `capabilities`, and `runtime/http.clj` registers `/health` plus index/retrieval routes but no `/capabilities` route.
+  - **Evidence:** At the time of the 2026-07-13 review, the plan required public `semidx.core/capabilities` and HTTP `GET /capabilities`, while `semidx.core` did not export `capabilities` and `runtime/http.clj` registered `/health` plus index/retrieval routes but no `/capabilities` route.
   - **Impact:** Capability self-description is not identical across library, MCP, HTTP, and gRPC as required by the plan exit criteria.
   - **Suggested fix:** Add public library API, HTTP `/capabilities`, and parity tests that compare library/MCP/HTTP/gRPC payloads.
   - **Resolution:** Added `semidx.core/capabilities` API, `/capabilities` HTTP route, and `capabilities-parity-test` that asserts identical payloads across all entry points.
@@ -101,12 +110,12 @@ updated: "2026-07-14"
   - **Suggested fix:** Keep this progress log active until H1/H2/M1 are fixed, then close with verification commands and review disposition.
   - **Resolution:** Updated this progress log to reflect actual completion status.
 
-### Review Verification
+### Historical Review Verification — Codex, 2026-07-13
 
 - `clojure -M:test`: passed, 215 tests, 1550 assertions, 0 failures, 0 errors.
 - `./scripts/validate-contracts.sh`: passed, `checked_json_files=61`.
-- MCP/library smoke: confirmed missing `capabilities` MCP tool and missing `semidx.core/capabilities`.
-- `clojure -M:ccc check --root .`: failed because `docs/code-context.md` is stale.
+- MCP/library smoke initially confirmed missing `capabilities` MCP tool and missing `semidx.core/capabilities`; H1/H2 then resolved those gaps.
+- `clojure -M:ccc check --root .` initially failed because `docs/code-context.md` was stale; M1 then resolved the CCC finalization gap.
 
 ## Review Findings — Codex, 2026-07-14
 

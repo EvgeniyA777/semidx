@@ -18,6 +18,25 @@ This document describes the current MVP in-memory library API.
 
 ## Public Functions
 
+### `capabilities`
+
+Returns the versioned capability self-description contract without indexing a repository.
+
+```clojure
+(require '[semidx.core :as sci])
+
+(sci/capabilities)
+```
+
+The payload is shared with MCP, HTTP, and gRPC surfaces and includes:
+
+- `:capability_version`
+- `:server`
+- `:languages` with language id, extensions, provider, strength, and confidence ceiling
+- `:language_policy_options`
+
+Use this as library-side preflight when a caller needs to choose a `:language_policy` before calling `create-index`.
+
 ### `create-index`
 
 Creates a new in-memory index.
@@ -1198,8 +1217,11 @@ clojure -M:runtime-http --host 127.0.0.1 --port 8787
 Endpoints:
 
 - `GET /health`
+- `GET /capabilities`
 - `POST /v1/index/create` with JSON body: `root_path`, optional `paths`, optional `parser_opts`, optional `language_policy`
 - `POST /v1/retrieval/resolve-context` with JSON body: `root_path`, optional `paths`, optional `parser_opts`, required `query`, optional `retrieval_policy`, optional `language_policy`
+
+`GET /health` returns liveness plus the same capability payload under `capabilities`. `GET /capabilities` returns the full capability payload directly and is the preferred HTTP preflight endpoint when a client needs supported languages, extensions, strength/confidence ceilings, and `language_policy` options before `POST /v1/index/create`.
 
 HTTP create/retrieval responses now also include additive `project_context` metadata summarizing the current canonical per-root activation state. If activation is already in progress, HTTP returns `409 language_activation_in_progress` and a `Retry-After` header.
 
@@ -1245,6 +1267,8 @@ Unary methods:
 - `ResolveContext` (`ResolveContextRequest` -> `ResolveContextResponse`)
 
 Proto schema source: `proto/semidx/runtime/grpc/v1/runtime.proto`
+
+`HealthResponse` carries `capabilities_json`, a JSON-encoded copy of the same versioned capability payload returned by `semidx.core/capabilities`, MCP `capabilities`, and HTTP `GET /capabilities`. gRPC clients should call `Health` as capability preflight before selecting `language_policy_json` for indexing.
 
 Current gRPC transport uses dedicated runtime protobuf envelope messages while preserving HTTP/library semantics:
 

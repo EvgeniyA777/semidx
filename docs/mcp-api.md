@@ -46,14 +46,37 @@ The HTTP MCP transport is local-only by default because `mcp-http` binds to `127
 
 If you want an IDE or coding agent to use this server correctly on the first pass, do not rely on a generic “use the MCP if helpful” instruction. Use an explicit `MCP-first` prompt that says:
 
-1. call `create_index` first
-2. call `repo_map` immediately after indexing
-3. use `resolve_context -> expand_context -> fetch_context_detail` for code-understanding work
-4. treat `language_refresh_required` as “rerun create_index”
-5. treat `language_activation_in_progress` as “wait and retry the same request”
-6. only fall back to manual file inspection after the MCP failure has been surfaced explicitly
+1. call `health` or `capabilities` before indexing to discover supported languages, confidence ceilings, extensions, and `capability_version`
+2. choose `create_index.language_policy` values from the advertised supported-language set
+3. call `create_index`
+4. call `repo_map` immediately after indexing
+5. use `resolve_context -> expand_context -> fetch_context_detail` for code-understanding work
+6. treat `language_refresh_required` as “rerun create_index”
+7. treat `language_activation_in_progress` as “wait and retry the same request”
+8. only fall back to manual file inspection after the MCP failure has been surfaced explicitly
 
 Canonical English prompt snippets for Codex, Claude-style IDE agents, and generic MCP-capable IDE fields live in [docs/mcp-agent-prompts.md](mcp-agent-prompts.md).
+
+## Capability Preflight
+
+MCP clients can discover SemIdx capability metadata before any repository indexing:
+
+- `initialize` includes `semidx_capabilities` in server metadata.
+- `tools/call health` returns a lightweight capability summary alongside status/session data.
+- `tools/call capabilities` returns the full versioned capability contract.
+- `tools/list` constrains `create_index.language_policy` language values to the supported-language enum.
+
+The full payload is produced from the same runtime projection used by library, HTTP, and gRPC surfaces. It includes:
+
+- `capability_version`
+- server name/version
+- supported languages
+- file extensions
+- provider identity
+- language strength and confidence ceiling
+- allowed `language_policy` options
+
+Agents should use this payload to choose `language_policy.allow_languages`, `disable_languages`, and `prewarm_languages`, and to explain `no_supported_languages_found` without relying on model memory.
 
 ## Transport Shapes
 
@@ -121,11 +144,12 @@ Use semidx in MCP-first mode: do not start with Analyze, directory listing, wild
 
 Canonical MCP retrieval flow is:
 
-1. `create_index`
-2. `repo_map`
-3. `resolve_context`
-4. optional `expand_context`
-5. optional `fetch_context_detail`
+1. optional preflight: `health` or `capabilities`
+2. `create_index`
+3. `repo_map`
+4. `resolve_context`
+5. optional `expand_context`
+6. optional `fetch_context_detail`
 
 `resolve_context` returns a compact selection artifact. Rich retrieval detail is intentionally delayed to `fetch_context_detail`.
 The canonical contract remains a full structured retrieval query, but MCP also accepts one narrow shorthand ingress for first-contact IDE agents: `query.intent` may be a string or a partial `{purpose, details}` object, and the server fills safe defaults for the remaining retrieval sections.
@@ -134,6 +158,21 @@ Projection metadata is also additive on MCP responses:
 
 - `projection_profile` identifies the current payload shape
 - `recommended_projection_profile` appears only on progressive/refinement outputs
+
+### `capabilities`
+
+Return the full versioned capability self-description contract without indexing a repository.
+
+Inputs: none.
+
+Returns:
+
+- `capability_version`
+- `server`
+- `languages`
+- `language_policy_options`
+
+Use this as the preferred cold-client preflight when the client needs the complete supported-language and strength/ceiling table. The lightweight `health` tool is still useful for liveness checks and includes a capability summary.
 
 ### `create_index`
 
