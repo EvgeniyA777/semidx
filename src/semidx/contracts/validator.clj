@@ -31,6 +31,7 @@
   (let [p (rel-path path)]
     (cond
       (str/ends-with? p "contracts/examples/catalog.json") :example/catalog
+      (str/ends-with? p "contracts/examples/capabilities.json") :example/capabilities
       (str/includes? p "contracts/examples/queries/") :example/query
       (str/includes? p "contracts/examples/context-packets/") :example/context-packet
       (str/includes? p "contracts/examples/diagnostics/") :example/diagnostics-trace

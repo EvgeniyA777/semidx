@@ -1,0 +1,21 @@
+{
+  "capability_version": "1.0",
+  "server": {
+    "name": "semidx",
+    "version": "0.1.0"
+  },
+  "languages": [
+    {
+      "language": "clojure",
+      "extensions": [".clj", ".cljc", ".cljs"],
+      "provider": {
+        "provider_id": "clojure-native",
+        "provider_version": "1",
+        "classification": "source"
+      },
+      "strength": "high",
+      "confidence_ceiling": "high"
+    }
+  ],
+  "language_policy_options": ["clojure", "java", "elixir", "python", "typescript", "javascript", "lua", "html", "css"]
+}

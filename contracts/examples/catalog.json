@@ -2,6 +2,15 @@
   "schema_version": "1.0",
   "examples": [
     {
+      "example_id": "capabilities_001",
+      "contract_family": "capabilities",
+      "path": "capabilities.json",
+      "schema": "../schemas/capabilities.schema.json",
+      "adr_refs": ["ADR-025"],
+      "purpose": "Versioned capability self-description payload.",
+      "expected_interpretation": "Represents the capabilities of the server."
+    },
+    {
       "example_id": "query_symbol_target_001",
       "contract_family": "retrieval_query",
       "path": "queries/symbol-target.json",

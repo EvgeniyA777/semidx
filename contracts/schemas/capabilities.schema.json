@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semidx.example/contracts/schemas/capabilities.schema.json",
+  "title": "Semantic Code Indexing Capabilities",
+  "description": "Server capabilities and language semantic strengths.",
+  "type": "object",
+  "required": [
+    "capability_version",
+    "server",
+    "languages",
+    "language_policy_options"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "capability_version": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "server": {
+      "type": "object",
+      "required": ["name", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "common.schema.json#/$defs/boundedString"
+        },
+        "version": {
+          "$ref": "common.schema.json#/$defs/boundedString"
+        }
+      }
+    },
+    "languages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "language",
+          "extensions",
+          "provider",
+          "strength",
+          "confidence_ceiling"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "language": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "extensions": {
+            "$ref": "common.schema.json#/$defs/stringArray"
+          },
+          "provider": {
+            "type": "object",
+            "required": ["provider_id", "provider_version", "classification"],
+            "additionalProperties": false,
+            "properties": {
+              "provider_id": {
+                "$ref": "common.schema.json#/$defs/boundedString"
+              },
+              "provider_version": {
+                "$ref": "common.schema.json#/$defs/boundedString"
+              },
+              "classification": {
+                "$ref": "common.schema.json#/$defs/boundedString"
+              }
+            }
+          },
+          "strength": {
+            "$ref": "common.schema.json#/$defs/confidenceLevel"
+          },
+          "confidence_ceiling": {
+            "$ref": "common.schema.json#/$defs/confidenceLevel"
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "language_policy_options": {
+      "$ref": "common.schema.json#/$defs/stringArray"
+    }
+  }
+}

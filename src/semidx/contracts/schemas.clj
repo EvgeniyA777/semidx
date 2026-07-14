@@ -106,6 +106,32 @@
    [:policy_id bounded-string]
    [:version bounded-string]])
 
+(def provider
+  [:map {:closed true}
+   [:provider_id bounded-string]
+   [:provider_version bounded-string]
+   [:classification bounded-string]])
+
+(def language-capability
+  [:map {:closed true}
+   [:language bounded-string]
+   [:extensions string-array]
+   [:provider provider]
+   [:strength confidence-level]
+   [:confidence_ceiling confidence-level]])
+
+(def server-info
+  [:map {:closed true}
+   [:name bounded-string]
+   [:version bounded-string]])
+
+(def capabilities
+  [:map {:closed true}
+   [:capability_version bounded-string]
+   [:server server-info]
+   [:languages [:vector {:min 1} language-capability]]
+   [:language_policy_options string-array]])
+
 (def capability-summary
   [:map {:closed true}
    [:index_languages string-array]
@@ -493,6 +519,7 @@
 
 (def contracts
   {:example/catalog example-catalog
+   :example/capabilities capabilities
    :example/query retrieval-query
    :example/selection-result selection-result
    :example/expansion-result expansion-result
