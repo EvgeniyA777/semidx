@@ -4,6 +4,7 @@
             [semidx.runtime.adapters :as adapters]
             [semidx.runtime.language-activation :as activation]
             [semidx.runtime.projections :as projections]
+            [semidx.runtime.relations :as relations]
             [semidx.runtime.repo-identity :as repo-identity]
             [semidx.runtime.semantic-id :as semantic-id]
             [semidx.runtime.storage :as storage]))
@@ -442,7 +443,8 @@
          activation-metadata (:activation_metadata lifecycle-opts)
          repo-identity* (repo-identity/resolve-repo-identity root-path)
          callers-index (build-callers-index units (:files files-data))
-         callees-index (build-callees-index callers-index)]
+         callees-index (build-callees-index callers-index)
+         relation-indexes (relations/index-relations (:relations files-data))]
      (attach-lifecycle
       {:root_path root-path
        :snapshot_id (uuid)
@@ -465,6 +467,9 @@
        :module_index (index-by :module units)
        :callers_index callers-index
        :callees_index callees-index
+       :relations (:relations relation-indexes)
+       :relation_forward_index (:relation_forward_index relation-indexes)
+       :relation_reverse_index (:relation_reverse_index relation-indexes)
        :module_dependents (build-module-dependents (:files files-data))
        :test_target_index (build-test-target-index (:files files-data))
        :detected_languages (:detected_languages activation-metadata)
@@ -693,11 +698,11 @@
                       (take max_modules)
                       vec)]
      (projections/with-projection
-      {:snapshot_id (:snapshot_id index)
-       :indexed_at (:indexed_at index)
-       :index_lifecycle (:index_lifecycle index)
-       :files files
-       :modules modules
-       :summary (str "Indexed " (count (:files index)) " files and " (count (:units index)) " units.")}
-      :structural
-      :selection))))
+       {:snapshot_id (:snapshot_id index)
+        :indexed_at (:indexed_at index)
+        :index_lifecycle (:index_lifecycle index)
+        :files files
+        :modules modules
+        :summary (str "Indexed " (count (:files index)) " files and " (count (:units index)) " units.")}
+       :structural
+       :selection))))

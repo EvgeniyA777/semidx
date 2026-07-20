@@ -274,3 +274,33 @@ Tracks execution of `plans/013_open_gaps_closure_program.md`.
   - `git diff --check` passed.
 - Skipped / limitations: runtime tests and gates are deferred to the implementation sub-step because this commit records the Stage 3 architecture scope only.
 - Known blockers: none.
+
+## Stage 3.2 - Relation Substrate And Empty Snapshot Indexes
+
+- Status: completed.
+- Scope: Add the typed-relation substrate from `ADR-037` without producing dataflow facts or changing retrieval behavior.
+- Summary:
+  - Added `semidx.runtime.relations` for relation normalization, deterministic `relation_id` generation, schema versioning, validation, and forward/reverse relation index construction.
+  - `semidx.runtime.index/build-index-state` now attaches `:relations`, `:relation_forward_index`, and `:relation_reverse_index` to every snapshot.
+  - Existing `:callers_index` / `:callees_index` behavior remains unchanged; no producers, retrieval projections, public graph API, or `calls`/`imports` migration are included in this sub-step.
+- Changed files:
+  - `src/semidx/runtime/relations.clj`
+  - `src/semidx/runtime/index.clj`
+  - `test/semidx/runtime/relations_test.clj`
+  - `MEMORY.md`
+  - `docs/roadmap-status.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - semidx MCP mapping completed for `semantic-ir`, index graph, storage, retrieval, and runtime test seams.
+  - clojure-mcp REPL smoke passed for `semidx.runtime.relations/normalize-relation` and `valid-relation?`.
+  - Compile probe passed for `semidx.runtime.relations`, `semidx.runtime.index`, and `semidx.runtime.storage`.
+  - `clojure -M:test -n semidx.runtime.relations-test` passed (`3 tests / 16 assertions`).
+  - `clojure -M:test -n semidx.integration.runtime-test` passed (`104 tests / 472 assertions`).
+  - `clojure -M:test` passed (`240 tests / 1654 assertions`).
+  - `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
+  - `./scripts/run-semantic-quality-report.sh` exited `0` with the expected advisory gate state: `expected_change_match_rate=0.8333333333333334`, `identity_stability_rate=1.0`, `move_rename_recovery_rate=1.0`, `implementation_vs_meaning_accuracy=0.6666666666666666`, `unmatched_rate=0.0`.
+  - `./scripts/run-mvp-gates.sh` passed (`240 tests / 1654 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
+  - `clojure -M:ccc check --root .` passed after refreshing `docs/code-context.md`.
+  - `git diff --check` passed.
+- Skipped / limitations: no dataflow producers or retrieval projections were implemented in this sub-step by design.
+- Known blockers: none.
