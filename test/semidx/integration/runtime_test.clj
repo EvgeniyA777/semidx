@@ -11,6 +11,7 @@
             [semidx.runtime.languages.java :as java-language]
             [semidx.runtime.languages.lua :as lua-language]
             [semidx.runtime.languages.python :as py-language]
+            [semidx.runtime.languages.shared :as shared-language]
             [semidx.runtime.languages.typescript :as ts-language]
             [semidx.runtime.retrieval-policy :as rp]
             [semidx.runtime.storage :as storage]))
@@ -1970,6 +1971,24 @@
     (is (some #(= "my.app.protocols/format-summary" (:symbol %)) protocol-units))
     (is format-order-id)
     (is (some #(= "my.app.protocols/render-order" (:symbol %)) callers))))
+
+(deftest tree-sitter-cli-resolution-prefers-explicit-and-managed-toolchain-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-tree-sitter-cli-resolution" (make-array java.nio.file.attribute.FileAttribute 0)))
+        explicit-rel "tools/tree-sitter"
+        managed-rel ".tree-sitter-grammars/bin/tree-sitter"
+        explicit-file (io/file tmp-root explicit-rel)
+        missing-file (io/file tmp-root "missing/tree-sitter")
+        managed-file (io/file tmp-root managed-rel)]
+    (write-file! tmp-root explicit-rel "#!/usr/bin/env sh\necho tree-sitter 0.22.0\n")
+    (write-file! tmp-root managed-rel "#!/usr/bin/env sh\necho tree-sitter 0.22.0\n")
+    (.setExecutable explicit-file true)
+    (.setExecutable managed-file true)
+    (is (= (.getPath explicit-file)
+           (shared-language/tree-sitter-cli-path {:tree_sitter_cli_path (.getPath explicit-file)})))
+    (is (true? (shared-language/tree-sitter-available? {:tree_sitter_cli_path (.getPath explicit-file)})))
+    (is (false? (shared-language/tree-sitter-available? {:tree_sitter_cli_path (.getPath missing-file)})))
+    (is (= (.getPath managed-file)
+           (shared-language/tree-sitter-cli-path {:tree_sitter_grammars_dir (str (io/file tmp-root ".tree-sitter-grammars"))})))))
 
 (deftest tree-sitter-parser-path-test
   (let [clj-grammar (System/getenv "SEMIDX_TREE_SITTER_CLOJURE_GRAMMAR_PATH")

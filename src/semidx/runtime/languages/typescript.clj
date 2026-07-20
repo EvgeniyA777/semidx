@@ -101,17 +101,17 @@
 (defn- ts-default-export-line? [line]
   (boolean (re-find #"^\s*export\s+default\s+" (str line))))
 
-(defn- tree-sitter-available? []
-  (shared/tree-sitter-available?))
+(defn- tree-sitter-available? [parser-opts]
+  (shared/tree-sitter-available? parser-opts))
 
 (defn- parser-grammar-path [parser-opts]
   (shared/parser-grammar-path parser-opts :typescript))
 
-(defn- tree-sitter-cst [abs-path grammar-path]
-  (shared/tree-sitter-cst abs-path grammar-path :typescript))
+(defn- tree-sitter-cst [abs-path grammar-path parser-opts]
+  (shared/tree-sitter-cst abs-path grammar-path :typescript parser-opts))
 
-(defn- add-tree-sitter-diag [parsed enabled?]
-  (shared/add-tree-sitter-diag parsed enabled?))
+(defn- add-tree-sitter-diag [parsed enabled? parser-opts]
+  (shared/add-tree-sitter-diag parsed enabled? parser-opts))
 
 (defn- ts-test-path? [path]
   (language-registry/ecmascript-test-path? path))
@@ -539,7 +539,7 @@
         {:keys [defs local-class-names local-object-names]} (regex-defs path src-lines)
         regex-re-exports (re-export-defs path src-lines)]
     (cond
-      (not (tree-sitter-available?))
+      (not (tree-sitter-available? parser-opts))
       {:ok? false
        :reason {:code "tree_sitter_unavailable"
                 :summary "tree-sitter CLI is unavailable for typescript tree-sitter parser."}}
@@ -550,7 +550,7 @@
                 :summary "No tree-sitter TypeScript grammar path configured."}}
 
       :else
-      (let [{:keys [ok? lines err]} (tree-sitter-cst abs grammar-path)
+      (let [{:keys [ok? lines err]} (tree-sitter-cst abs grammar-path parser-opts)
             ts-lines lines]
         (if-not ok?
           {:ok? false
@@ -594,4 +594,4 @@
                      (-> (parse-typescript-regex path lines)
                          (update :diagnostics conj reason))))
                  (parse-typescript-regex path lines))]
-    (add-tree-sitter-diag parsed tree_sitter_enabled)))
+    (add-tree-sitter-diag parsed tree_sitter_enabled parser-opts)))

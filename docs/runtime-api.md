@@ -81,17 +81,26 @@ Tree-sitter extraction path (optional):
                 :java_engine :tree-sitter
                 :typescript_engine :tree-sitter
                 :tree_sitter_enabled true
+                :tree_sitter_cli_path ".tree-sitter-grammars/bin/tree-sitter"
                 :tree_sitter_grammars {:clojure ".tree-sitter-grammars/tree-sitter-clojure"
                                        :elixir "/path/to/tree-sitter-elixir"
                                        :java ".tree-sitter-grammars/tree-sitter-java"
                                        :typescript ".tree-sitter-grammars/tree-sitter-typescript/typescript"}}})
 ```
 
-Bootstrap grammar checkouts under `.tree-sitter-grammars/`:
+Regex parsers remain the default and guaranteed path. Tree-sitter is optional:
+when enabled, the runtime resolves the CLI from `:tree_sitter_cli_path`,
+`SEMIDX_TREE_SITTER_CLI_PATH`, `.tree-sitter-grammars/bin/tree-sitter`, then
+ambient `PATH` as a developer fallback.
+
+Bootstrap grammar checkouts and the managed CLI link under `.tree-sitter-grammars/`:
 
 ```bash
 ./scripts/setup-tree-sitter-grammars.sh
 ```
+
+Use `--write-env-file <path>` to emit `SEMIDX_TREE_SITTER_CLI_PATH` plus the
+pinned grammar paths for shell-based smoke runs.
 
 Returned index maps and `repo-map` outputs now carry `:index_lifecycle`, which includes:
 

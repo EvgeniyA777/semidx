@@ -26,17 +26,17 @@
 (defn- safe-line [lines n]
   (shared/safe-line lines n))
 
-(defn- tree-sitter-available? []
-  (shared/tree-sitter-available?))
+(defn- tree-sitter-available? [parser-opts]
+  (shared/tree-sitter-available? parser-opts))
 
 (defn- parser-grammar-path [parser-opts lang]
   (shared/parser-grammar-path parser-opts lang))
 
-(defn- tree-sitter-cst [abs-path grammar-path]
-  (shared/tree-sitter-cst abs-path grammar-path))
+(defn- tree-sitter-cst [abs-path grammar-path parser-opts]
+  (shared/tree-sitter-cst abs-path grammar-path nil parser-opts))
 
-(defn- add-tree-sitter-diag [parsed enabled? language]
-  (shared/add-tree-sitter-diag parsed enabled? language))
+(defn- add-tree-sitter-diag [parsed enabled? language parser-opts]
+  (shared/add-tree-sitter-diag parsed enabled? language parser-opts))
 
 (defn- short-hash [s]
   (let [md (java.security.MessageDigest/getInstance "SHA-1")
@@ -362,7 +362,7 @@
                      vec)
         class-spots (java-class-spots pkg imports src-lines)]
     (cond
-      (not (tree-sitter-available?))
+      (not (tree-sitter-available? parser-opts))
       {:ok? false
        :reason {:code "tree_sitter_unavailable"
                 :summary "tree-sitter CLI is unavailable for java tree-sitter parser."}}
@@ -373,7 +373,7 @@
                 :summary "No tree-sitter Java grammar path configured."}}
 
       :else
-      (let [{:keys [ok? lines err]} (tree-sitter-cst abs grammar-path)
+      (let [{:keys [ok? lines err]} (tree-sitter-cst abs grammar-path parser-opts)
             ts-lines lines]
         (if-not ok?
           {:ok? false
@@ -448,8 +448,8 @@
                         :summary "tree-sitter did not extract Java units."}})))))))
 
 (defn parse-file [root-path path lines {:keys [java_engine tree_sitter_enabled]
-                                             :or {java_engine :regex}
-                                             :as parser-opts}]
+                                        :or {java_engine :regex}
+                                        :as parser-opts}]
   (let [engine (if (true? tree_sitter_enabled) :tree-sitter java_engine)
         parsed (if (= engine :tree-sitter)
                  (let [{:keys [ok? result reason]} (parse-java-tree-sitter root-path path lines parser-opts)]
@@ -458,4 +458,4 @@
                      (-> (parse-java-regex path lines)
                          (update :diagnostics conj reason))))
                  (parse-java-regex path lines))]
-    (add-tree-sitter-diag parsed tree_sitter_enabled "java")))
+    (add-tree-sitter-diag parsed tree_sitter_enabled "java" parser-opts)))

@@ -5,23 +5,23 @@
             [semidx.runtime.languages.elixir.tree-sitter :as tree-sitter]
             [semidx.runtime.languages.shared :as shared]))
 
-(defn- tree-sitter-available? []
-  (shared/tree-sitter-available?))
+(defn- tree-sitter-available? [parser-opts]
+  (shared/tree-sitter-available? parser-opts))
 
 (defn- parser-grammar-path [parser-opts]
   (shared/parser-grammar-path parser-opts :elixir))
 
-(defn- tree-sitter-cst [abs-path grammar-path]
-  (shared/tree-sitter-cst abs-path grammar-path :elixir))
+(defn- tree-sitter-cst [abs-path grammar-path parser-opts]
+  (shared/tree-sitter-cst abs-path grammar-path :elixir parser-opts))
 
-(defn- add-tree-sitter-diag [parsed enabled?]
-  (shared/add-tree-sitter-diag parsed enabled?))
+(defn- add-tree-sitter-diag [parsed enabled? parser-opts]
+  (shared/add-tree-sitter-diag parsed enabled? parser-opts))
 
 (defn- parse-tree-sitter [root-path path src-lines parser-opts]
   (let [grammar-path (parser-grammar-path parser-opts)
         abs (-> (io/file root-path path) .getCanonicalPath)]
     (cond
-      (not (tree-sitter-available?))
+      (not (tree-sitter-available? parser-opts))
       {:ok? false
        :reason {:code "tree_sitter_unavailable"
                 :summary "tree-sitter CLI is unavailable for elixir tree-sitter parser."}}
@@ -32,7 +32,7 @@
                 :summary "No tree-sitter Elixir grammar path configured."}}
 
       :else
-      (let [{:keys [ok? err lines]} (tree-sitter-cst abs grammar-path)]
+      (let [{:keys [ok? err lines]} (tree-sitter-cst abs grammar-path parser-opts)]
         (if-not ok?
           {:ok? false
            :reason {:code "tree_sitter_parse_failed"
@@ -50,4 +50,4 @@
                      (-> (regex/parse-file path lines)
                          (update :diagnostics conj reason))))
                  (regex/parse-file path lines))]
-    (add-tree-sitter-diag parsed (or tree_sitter_enabled (= engine :tree-sitter)))))
+    (add-tree-sitter-diag parsed (or tree_sitter_enabled (= engine :tree-sitter)) parser-opts)))

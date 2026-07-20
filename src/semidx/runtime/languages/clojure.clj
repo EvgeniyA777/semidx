@@ -33,17 +33,17 @@
 (defn- tail-token [token]
   (shared/tail-token token))
 
-(defn- tree-sitter-available? []
-  (shared/tree-sitter-available?))
+(defn- tree-sitter-available? [parser-opts]
+  (shared/tree-sitter-available? parser-opts))
 
 (defn- parser-grammar-path [parser-opts lang]
   (shared/parser-grammar-path parser-opts lang))
 
-(defn- tree-sitter-cst [abs-path grammar-path]
-  (shared/tree-sitter-cst abs-path grammar-path))
+(defn- tree-sitter-cst [abs-path grammar-path parser-opts]
+  (shared/tree-sitter-cst abs-path grammar-path nil parser-opts))
 
-(defn- add-tree-sitter-diag [parsed enabled? language]
-  (shared/add-tree-sitter-diag parsed enabled? language))
+(defn- add-tree-sitter-diag [parsed enabled? language parser-opts]
+  (shared/add-tree-sitter-diag parsed enabled? language parser-opts))
 
 (defn- short-hash [s]
   (subs (format "%08x" (bit-and 0xffffffff (hash (str s)))) 0 8))
@@ -1099,7 +1099,7 @@
         ns-name (some (fn [line] (some-> (re-find #"^\s*\(ns\s+([^\s\)]+).*" line) second)) src-lines)
         test-target-modules (clj-test-target-modules ns-name imports path)]
     (cond
-      (not (tree-sitter-available?))
+      (not (tree-sitter-available? parser-opts))
       {:ok? false
        :reason {:code "tree_sitter_unavailable"
                 :summary "tree-sitter CLI is unavailable for clojure tree-sitter parser."}}
@@ -1110,7 +1110,7 @@
                 :summary "No tree-sitter Clojure grammar path configured."}}
 
       :else
-      (let [{:keys [ok? lines err]} (tree-sitter-cst abs grammar-path)
+      (let [{:keys [ok? lines err]} (tree-sitter-cst abs grammar-path parser-opts)
             ts-lines lines]
         (if-not ok?
           {:ok? false
@@ -1193,4 +1193,4 @@
                          (update :diagnostics conj reason))))
                  :clj-kondo (parse-clojure-kondo root-path path lines)
                  (parse-clojure-kondo root-path path lines))]
-    (add-tree-sitter-diag parsed tree_sitter_enabled "clojure")))
+    (add-tree-sitter-diag parsed tree_sitter_enabled "clojure" parser-opts)))

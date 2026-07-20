@@ -12,7 +12,7 @@
 (def ^:private tree-sitter-diagnostic-languages
   #{"clojure" "elixir" "java" "typescript" "javascript"})
 
-(defonce ^:private tree-sitter-availability (atom nil))
+(defonce ^:private tree-sitter-availability (atom {}))
 (defonce ^:private tree-sitter-config-cache (atom {}))
 
 (defn slurp-lines [file]
@@ -35,15 +35,46 @@
 (defn tail-token [token]
   (some-> token str (str/split #"[\./#]") last))
 
-(defn tree-sitter-available? []
-  (if (some? @tree-sitter-availability)
-    @tree-sitter-availability
-    (let [{:keys [exit]} (try
-                           (sh/sh "tree-sitter" "--version")
-                           (catch Exception _ {:exit 127}))
-          available? (zero? (int exit))]
-      (reset! tree-sitter-availability available?)
-      available?)))
+(defn- present-path [value]
+  (let [s (some-> value str str/trim)]
+    (when-not (str/blank? s) s)))
+
+(defn- executable-file? [path]
+  (let [f (io/file path)]
+    (and (.exists f) (.isFile f) (.canExecute f))))
+
+(defn- managed-tree-sitter-cli-path [parser-opts]
+  (let [grammar-dir (or (present-path (:tree_sitter_grammars_dir parser-opts))
+                        (present-path (:tree-sitter-grammars-dir parser-opts))
+                        (present-path (System/getenv "SEMIDX_TREE_SITTER_GRAMMARS_DIR"))
+                        (present-path (str (io/file ".tree-sitter-grammars"))))
+        managed (some-> grammar-dir io/file (io/file "bin/tree-sitter") .getPath)]
+    (when (and managed (executable-file? managed))
+      managed)))
+
+(defn tree-sitter-cli-path
+  ([]
+   (tree-sitter-cli-path {}))
+  ([parser-opts]
+   (or (present-path (:tree_sitter_cli_path parser-opts))
+       (present-path (:tree-sitter-cli-path parser-opts))
+       (present-path (System/getenv "SEMIDX_TREE_SITTER_CLI_PATH"))
+       (managed-tree-sitter-cli-path parser-opts)
+       "tree-sitter")))
+
+(defn tree-sitter-available?
+  ([]
+   (tree-sitter-available? {}))
+  ([parser-opts]
+   (let [cli-path (tree-sitter-cli-path parser-opts)]
+     (if (contains? @tree-sitter-availability cli-path)
+       (get @tree-sitter-availability cli-path)
+       (let [{:keys [exit]} (try
+                              (sh/sh cli-path "--version")
+                              (catch Exception _ {:exit 127}))
+             available? (zero? (int exit))]
+         (swap! tree-sitter-availability assoc cli-path available?)
+         available?)))))
 
 (defn parser-grammar-path [parser-opts lang]
   (or (get-in parser-opts [:tree_sitter_grammars lang])
@@ -96,13 +127,16 @@
 
 (defn tree-sitter-cst
   ([abs-path grammar-path]
-   (tree-sitter-cst abs-path grammar-path nil))
+   (tree-sitter-cst abs-path grammar-path nil {}))
   ([abs-path grammar-path config-name]
-   (let [config-path (tree-sitter-config-path grammar-path config-name)
+   (tree-sitter-cst abs-path grammar-path config-name {}))
+  ([abs-path grammar-path config-name parser-opts]
+   (let [cli-path (tree-sitter-cli-path parser-opts)
+         config-path (tree-sitter-config-path grammar-path config-name)
          tmpdir (System/getProperty "java.io.tmpdir")
          {:keys [exit out err]}
          (try
-           (sh/sh "tree-sitter" "parse" "--cst" "--config-path" config-path "--grammar-path" grammar-path abs-path
+           (sh/sh cli-path "parse" "--cst" "--config-path" config-path "--grammar-path" grammar-path abs-path
                   :env (cond-> {"XDG_CACHE_HOME" (or (System/getenv "XDG_CACHE_HOME")
                                                      tmpdir)
                                 "TMPDIR" tmpdir}
@@ -119,14 +153,18 @@
 
 (defn add-tree-sitter-diag
   ([parsed enabled?]
-   (if enabled?
-     (if (tree-sitter-available?)
-       (update parsed :diagnostics conj {:code "tree_sitter_probe"
-                                         :summary "tree-sitter CLI detected."})
-       (update parsed :diagnostics conj {:code "tree_sitter_unavailable"
-                                         :summary "tree-sitter requested but CLI is unavailable; using adapter parser."}))
-     parsed))
-  ([parsed enabled? language]
+   (add-tree-sitter-diag parsed enabled? {}))
+  ([parsed enabled? language-or-parser-opts]
+   (if (map? language-or-parser-opts)
+     (if enabled?
+       (if (tree-sitter-available? language-or-parser-opts)
+         (update parsed :diagnostics conj {:code "tree_sitter_probe"
+                                           :summary "tree-sitter CLI detected."})
+         (update parsed :diagnostics conj {:code "tree_sitter_unavailable"
+                                           :summary "tree-sitter requested but CLI is unavailable; using adapter parser."}))
+       parsed)
+     (add-tree-sitter-diag parsed enabled? language-or-parser-opts {})))
+  ([parsed enabled? language parser-opts]
    (if (and enabled? (tree-sitter-diagnostic-languages (str language)))
-     (add-tree-sitter-diag parsed true)
+     (add-tree-sitter-diag parsed true parser-opts)
      parsed)))

@@ -216,3 +216,38 @@ Tracks execution of `plans/013_open_gaps_closure_program.md`.
   - `clojure -M:ccc check --root .` passed.
 - Skipped / limitations: runtime tests and gates are deferred to the implementation sub-step because this commit records the strategy and plan repair only.
 - Known blockers: none.
+
+## Stage 2.2 - Repo-Managed Tree-Sitter Toolchain Resolution
+
+- Status: completed.
+- Scope: Implement `ADR-036` in runtime helpers and bootstrap tooling without changing the default parser path.
+- Summary:
+  - Regex parsing remains the guaranteed default.
+  - Tree-sitter acceleration now resolves the CLI through explicit parser options, environment configuration, the repo-managed `.tree-sitter-grammars/bin/tree-sitter` link, then ambient `PATH` as a developer fallback.
+  - Language lanes pass parser opts through tree-sitter availability probes and CST calls, so explicit missing CLI paths degrade through the existing unavailable-acceleration diagnostics instead of silently using an unrelated global executable.
+  - The grammar bootstrap script now verifies/provisions a managed CLI link and can emit `SEMIDX_TREE_SITTER_CLI_PATH` alongside pinned grammar env vars.
+- Changed files:
+  - `src/semidx/runtime/languages/shared.clj`
+  - `src/semidx/runtime/languages/clojure.clj`
+  - `src/semidx/runtime/languages/elixir.clj`
+  - `src/semidx/runtime/languages/java.clj`
+  - `src/semidx/runtime/languages/typescript.clj`
+  - `test/semidx/integration/runtime_test.clj`
+  - `scripts/setup-tree-sitter-grammars.sh`
+  - `docs/runtime-api.md`
+  - `MEMORY.md`
+  - `docs/roadmap-status.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - `bash -n scripts/setup-tree-sitter-grammars.sh` passed.
+  - Compile probe passed for `semidx.runtime.languages.shared`, `semidx.runtime.languages.clojure`, `semidx.runtime.languages.java`, `semidx.runtime.languages.typescript`, and `semidx.runtime.languages.elixir`.
+  - `clojure -M:test -n semidx.integration.runtime-test` passed (`104 tests / 472 assertions`).
+  - `clojure -M:test -n semidx.integration.typescript-onboarding-test` passed (`3 tests / 11 assertions`).
+  - `clojure -M:test` passed (`231 tests / 1618 assertions`).
+  - `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
+  - `./scripts/run-semantic-quality-report.sh` exited `0` with the expected advisory gate state: `expected_change_match_rate=0.8333333333333334`, `identity_stability_rate=1.0`, `move_rename_recovery_rate=1.0`, `implementation_vs_meaning_accuracy=0.6666666666666666`, `unmatched_rate=0.0`.
+  - `./scripts/run-mvp-gates.sh` passed (`237 tests / 1638 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
+  - `clojure -M:ccc check --root .` passed after refreshing `docs/code-context.md`.
+  - `git diff --check` passed.
+- Skipped / limitations: the bootstrap script syntax was verified locally, but the networked grammar clone/fetch path was not rerun during this sub-step.
+- Known blockers: none.
