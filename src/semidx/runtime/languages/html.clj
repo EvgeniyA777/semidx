@@ -1,14 +1,14 @@
 (ns semidx.runtime.languages.html
   (:require [clojure.java.io :as io]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [semidx.runtime.languages.shared :as shared]))
 
 (def ^:private tag-re #"<\s*([A-Za-z][A-Za-z0-9:_-]*)([^<>]*?)(?:/?)>")
 (def ^:private attr-re #"([A-Za-z_:][A-Za-z0-9_:.-]*)(?:\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+)))?")
 (def ^:private reference-attrs #{"href" "src" "action" "poster" "data-src"})
 
 (defn- trim-signature [line]
-  (let [t (str/trim (or line ""))]
-    (subs t 0 (min 180 (count t)))))
+  (shared/trim-signature line))
 
 (defn- strip-ext [path]
   (-> (str path)

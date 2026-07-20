@@ -1,8 +1,8 @@
 (ns semidx.runtime.languages.typescript
   (:require [clojure.java.io :as io]
-            [clojure.java.shell :as sh]
             [clojure.string :as str]
-            [semidx.runtime.language-registry :as language-registry]))
+            [semidx.runtime.language-registry :as language-registry]
+            [semidx.runtime.languages.shared :as shared]))
 
 (def ^:private ts-import-clause-re #"^\s*import\s+(.+?)\s+from\s+['\"]([^'\"]+)['\"]")
 (def ^:private ts-import-bare-re #"^\s*import\s+['\"]([^'\"]+)['\"]")
@@ -19,20 +19,14 @@
   #{"if" "for" "while" "switch" "catch" "return" "throw" "new" "super" "this"
     "function" "class" "import" "export" "typeof" "instanceof" "await" "delete"
     "do" "try" "finally" "of" "in"})
-(def ^:private ts-line-re #"^\s*(\d+):(\d+)\s*-\s*(\d+):(\d+)(\s+)(.+?)\s*$")
-(def ^:private ansi-escape-re #"\u001B\[[0-9;]*m")
-(defonce ^:private tree-sitter-config-cache (atom {}))
-
 (defn- trim-signature [line]
-  (let [t (str/trim (or line ""))]
-    (subs t 0 (min 180 (count t)))))
+  (shared/trim-signature line))
 
 (defn- unit-end-lines [starts total-lines]
-  (let [pairs (partition 2 1 (concat starts [(inc total-lines)]))]
-    (mapv (fn [[s n]] (max s (dec n))) pairs)))
+  (shared/unit-end-lines starts total-lines))
 
 (defn- tail-token [token]
-  (some-> token str (str/split #"[\./#]") last))
+  (shared/tail-token token))
 
 (defn- safe-line [lines n]
   (when (<= 1 n (count lines))
@@ -45,7 +39,7 @@
     (-> (if extension
           (subs path* 0 (- (count path*) (count extension)))
           path*)
-      (str/replace #"/index$" ""))))
+        (str/replace #"/index$" ""))))
 
 (defn- ts-module-name [path]
   (-> path
@@ -107,82 +101,17 @@
 (defn- ts-default-export-line? [line]
   (boolean (re-find #"^\s*export\s+default\s+" (str line))))
 
-(defonce ^:private tree-sitter-availability (atom nil))
-
 (defn- tree-sitter-available? []
-  (if (some? @tree-sitter-availability)
-    @tree-sitter-availability
-    (let [{:keys [exit]} (try
-                           (sh/sh "tree-sitter" "--version")
-                           (catch Exception _ {:exit 127}))
-          available? (zero? (int exit))]
-      (reset! tree-sitter-availability available?)
-      available?)))
+  (shared/tree-sitter-available?))
 
 (defn- parser-grammar-path [parser-opts]
-  (or (get-in parser-opts [:tree_sitter_grammars :typescript])
-      (get-in parser-opts [:tree_sitter_grammars "typescript"])
-      (get parser-opts :tree_sitter_typescript_grammar)
-      (System/getenv "SEMIDX_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH")))
-
-(defn- parse-ts-line [line]
-  (let [clean-line (str/replace (str line) ansi-escape-re "")]
-    (when-let [[_ sr sc er ec spacing text] (re-find ts-line-re clean-line)]
-    (let [plain (str/trim (first (str/split text #"`")))
-          source (if (str/includes? plain ":")
-                   (second (str/split plain #":\s*" 2))
-                   plain)
-          node-type (last (str/split (str/trim source) #"\s+"))
-          value (some-> (re-find #"`([^`]*)`" text) second)]
-      {:indent (count spacing)
-       :start-row (parse-long sr)
-       :start-col (parse-long sc)
-       :end-row (parse-long er)
-       :end-col (parse-long ec)
-       :text text
-       :node-type node-type
-       :value value}))))
-
-(defn- tree-sitter-config-path [grammar-path]
-  (let [parser-dir (some-> grammar-path io/file .getCanonicalFile .getParent)
-        escaped-dir (-> (str parser-dir)
-                        (str/replace "\\" "\\\\")
-                        (str/replace "\"" "\\\""))]
-    (or (get @tree-sitter-config-cache parser-dir)
-        (let [config-file (io/file (System/getProperty "java.io.tmpdir")
-                                   (format "sci-tree-sitter-typescript-%s.json" (Math/abs (hash (str parser-dir)))))]
-          (spit config-file (format "{\"parser-directories\":[\"%s\"]}" escaped-dir))
-          (swap! tree-sitter-config-cache assoc parser-dir (.getPath config-file))
-          (.getPath config-file)))))
+  (shared/parser-grammar-path parser-opts :typescript))
 
 (defn- tree-sitter-cst [abs-path grammar-path]
-  (let [config-path (tree-sitter-config-path grammar-path)
-        tmpdir (System/getProperty "java.io.tmpdir")
-        {:keys [exit out err]}
-        (try
-          (sh/sh "tree-sitter" "parse" "--cst" "--config-path" config-path "--grammar-path" grammar-path abs-path
-                 :env (cond-> {"XDG_CACHE_HOME" (or (System/getenv "XDG_CACHE_HOME")
-                                                   tmpdir)
-                               "TMPDIR" tmpdir}
-                        (System/getenv "HOME") (assoc "HOME" (System/getenv "HOME"))))
-          (catch Exception e
-            {:exit 127 :out "" :err (.getMessage e)}))]
-    (if (zero? (int exit))
-      {:ok? true
-       :lines (->> (str/split-lines out) (keep parse-ts-line) vec)
-       :err nil}
-      {:ok? false
-       :lines []
-       :err (or err "tree-sitter parse failed")})))
+  (shared/tree-sitter-cst abs-path grammar-path :typescript))
 
 (defn- add-tree-sitter-diag [parsed enabled?]
-  (if enabled?
-    (if (tree-sitter-available?)
-      (update parsed :diagnostics conj {:code "tree_sitter_probe"
-                                        :summary "tree-sitter CLI detected."})
-      (update parsed :diagnostics conj {:code "tree_sitter_unavailable"
-                                        :summary "tree-sitter requested but CLI is unavailable; using adapter parser."}))
-    parsed))
+  (shared/add-tree-sitter-diag parsed enabled?))
 
 (defn- ts-test-path? [path]
   (language-registry/ecmascript-test-path? path))
@@ -387,7 +316,7 @@
                                                                          :local-call-names local-call-names
                                                                          :local-class-names local-class-names
                                                                          :local-object-names local-object-names})
-                                              (:synthetic-calls d))))
+                                                 (:synthetic-calls d))))
                    :parser_mode "full"})))
          vec)))
 

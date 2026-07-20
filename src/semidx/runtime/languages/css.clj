@@ -1,5 +1,6 @@
 (ns semidx.runtime.languages.css
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [semidx.runtime.languages.shared :as shared]))
 
 (def ^:private import-re #"@import\s+(?:url\(\s*)?[\"']?([^\"'\)\s;]+)")
 (def ^:private url-re #"url\(\s*[\"']?([^\"'\)]+)")
@@ -9,8 +10,7 @@
 (def ^:private tag-selector-re #"(?i)^\s*([a-z][a-z0-9-]*)")
 
 (defn- trim-signature [line]
-  (let [t (str/trim (or line ""))]
-    (subs t 0 (min 180 (count t)))))
+  (shared/trim-signature line))
 
 (defn- strip-ext [path]
   (str/replace (str path) #"\.css$" ""))

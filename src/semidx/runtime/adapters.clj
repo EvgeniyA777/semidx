@@ -7,6 +7,7 @@
             [semidx.runtime.languages.css :as css-language]
             [semidx.runtime.languages.html :as html-language]
             [semidx.runtime.languages.javascript :as js-language]
+            [semidx.runtime.languages.shared :as shared-language]
             [semidx.runtime.languages.typescript :as ts-language]
             [semidx.runtime.language-registry :as language-registry]
             [semidx.runtime.semantic-ir :as semantic-ir]))
@@ -81,14 +82,6 @@
     "function" "class" "import" "export" "typeof" "instanceof" "await" "delete"
     "do" "try" "finally" "of" "in"})
 
-(def ^:private ts-line-re
-  #"^\s*(\d+):(\d+)\s*-\s*(\d+):(\d+)(\s+)(.+?)\s*$")
-
-(def ^:private ansi-escape-re
-  #"\u001B\[[0-9;]*m")
-
-(defonce ^:private tree-sitter-config-cache (atom {}))
-
 (defn language-by-path [path]
   (language-registry/language-by-path path))
 
@@ -96,18 +89,16 @@
   (language-registry/source-path? path))
 
 (defn- slurp-lines [file]
-  (-> file slurp str/split-lines vec))
+  (shared-language/slurp-lines file))
 
 (defn- trim-signature [line]
-  (let [t (str/trim (or line ""))]
-    (subs t 0 (min 180 (count t)))))
+  (shared-language/trim-signature line))
 
 (defn- unit-end-lines [starts total-lines]
-  (let [pairs (partition 2 1 (concat starts [(inc total-lines)]))]
-    (mapv (fn [[s n]] (max s (dec n))) pairs)))
+  (shared-language/unit-end-lines starts total-lines))
 
 (defn- tail-token [token]
-  (some-> token str (str/split #"[\./#]") last))
+  (shared-language/tail-token token))
 
 (defn- clj-scan-line [{:keys [depth in-string] :as _state} line]
   (loop [chars (seq (str line))
@@ -228,88 +219,17 @@
 (defn- ts-default-export-line? [line]
   (boolean (re-find #"^\s*export\s+default\s+" (str line))))
 
-(defonce ^:private tree-sitter-availability (atom nil))
-
 (defn- tree-sitter-available? []
-  (if (some? @tree-sitter-availability)
-    @tree-sitter-availability
-    (let [{:keys [exit]} (try
-                           (sh/sh "tree-sitter" "--version")
-                           (catch Exception _ {:exit 127}))
-          available? (zero? (int exit))]
-      (reset! tree-sitter-availability available?)
-      available?)))
+  (shared-language/tree-sitter-available?))
 
 (defn- parser-grammar-path [parser-opts lang]
-  (or (get-in parser-opts [:tree_sitter_grammars lang])
-      (get-in parser-opts [:tree_sitter_grammars (keyword lang)])
-      (get parser-opts (keyword (str "tree_sitter_" (name lang) "_grammar")))
-      (System/getenv (case lang
-                       :clojure "SEMIDX_TREE_SITTER_CLOJURE_GRAMMAR_PATH"
-                       :elixir "SEMIDX_TREE_SITTER_ELIXIR_GRAMMAR_PATH"
-                       :java "SEMIDX_TREE_SITTER_JAVA_GRAMMAR_PATH"
-                       :typescript "SEMIDX_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH"
-                       :javascript "SEMIDX_TREE_SITTER_JAVASCRIPT_GRAMMAR_PATH"
-                       nil))))
-
-(defn- parse-ts-line [line]
-  (let [clean-line (str/replace (str line) ansi-escape-re "")]
-    (when-let [[_ sr sc er ec spacing text] (re-find ts-line-re clean-line)]
-    (let [plain (str/trim (first (str/split text #"`")))
-          source (if (str/includes? plain ":")
-                   (second (str/split plain #":\s*" 2))
-                   plain)
-          node-type (last (str/split (str/trim source) #"\s+"))
-          value (some-> (re-find #"`([^`]*)`" text) second)]
-      {:indent (count spacing)
-       :start-row (parse-long sr)
-       :start-col (parse-long sc)
-       :end-row (parse-long er)
-       :end-col (parse-long ec)
-       :text text
-       :node-type node-type
-       :value value}))))
-
-(defn- tree-sitter-config-path [grammar-path]
-  (let [parser-dir (some-> grammar-path io/file .getCanonicalFile .getParent)
-        escaped-dir (-> (str parser-dir)
-                        (str/replace "\\" "\\\\")
-                        (str/replace "\"" "\\\""))]
-    (or (get @tree-sitter-config-cache parser-dir)
-        (let [config-file (io/file (System/getProperty "java.io.tmpdir")
-                                   (format "sci-tree-sitter-%s.json" (Math/abs (hash (str parser-dir)))))]
-          (spit config-file (format "{\"parser-directories\":[\"%s\"]}" escaped-dir))
-          (swap! tree-sitter-config-cache assoc parser-dir (.getPath config-file))
-          (.getPath config-file)))))
+  (shared-language/parser-grammar-path parser-opts lang))
 
 (defn- tree-sitter-cst [abs-path grammar-path]
-  (let [config-path (tree-sitter-config-path grammar-path)
-        tmpdir (System/getProperty "java.io.tmpdir")
-        {:keys [exit out err]}
-        (try
-          (sh/sh "tree-sitter" "parse" "--cst" "--config-path" config-path "--grammar-path" grammar-path abs-path
-                 :env (cond-> {"XDG_CACHE_HOME" (or (System/getenv "XDG_CACHE_HOME")
-                                                   tmpdir)
-                               "TMPDIR" tmpdir}
-                        (System/getenv "HOME") (assoc "HOME" (System/getenv "HOME"))))
-          (catch Exception e
-            {:exit 127 :out "" :err (.getMessage e)}))]
-    (if (zero? (int exit))
-      {:ok? true
-       :lines (->> (str/split-lines out) (keep parse-ts-line) vec)
-       :err nil}
-      {:ok? false
-       :lines []
-       :err (or err "tree-sitter parse failed")})))
+  (shared-language/tree-sitter-cst abs-path grammar-path))
 
 (defn- add-tree-sitter-diag [parsed enabled? language]
-  (if (and enabled? (#{"clojure" "elixir" "java" "typescript" "javascript"} language))
-    (if (tree-sitter-available?)
-      (update parsed :diagnostics conj {:code "tree_sitter_probe"
-                                        :summary "tree-sitter CLI detected."})
-      (update parsed :diagnostics conj {:code "tree_sitter_unavailable"
-                                        :summary "tree-sitter requested but CLI is unavailable; using adapter parser."}))
-    parsed))
+  (shared-language/add-tree-sitter-diag parsed enabled? language))
 
 (defn- clj-kind [kw path]
   (cond
@@ -948,8 +868,8 @@
                     branch-tokens (when (contains? clj-generated-conditional-ops op)
                                     (conditional-branch-generated-tokens op args walk helper-generated-calls**))
                     child-generated-context? (or generated-context?
-                                                (contains? clj-generated-builder-ops op)
-                                                (contains? clj-generated-apply-ops op))
+                                                 (contains? clj-generated-builder-ops op)
+                                                 (contains? clj-generated-apply-ops op))
                     children (cond
                                (contains? clj-generated-conditional-ops op) []
                                (= "letfn" op) (rest args)
@@ -979,8 +899,8 @@
    (generated-builder-call-tokens form {}))
   ([form helper-generated-calls]
    (->> (generated-builder-call-tokens* form helper-generated-calls false)
-       distinct
-       vec)))
+        distinct
+        vec)))
 
 (defn- helper-generated-call-tokens [form-text alias-map helper-generated-calls]
   (let [form (clj-read-form form-text)]
@@ -1110,10 +1030,10 @@
                           (when (zero? (nth line-start-depths idx 1))
                             (when-let [[_ kw raw-sym] (re-find clj-def-re line)]
                               {:start-line (inc idx)
-                                            :kind (clj-kind kw path)
-                                            :operator kw
-                                            :raw-symbol raw-sym
-                                            :signature (trim-signature line)})))))
+                               :kind (clj-kind kw path)
+                               :operator kw
+                               :raw-symbol raw-sym
+                               :signature (trim-signature line)})))))
         starts (mapv :start-line defs)
         ends (if (seq starts)
                (mapv #(clj-form-end-line lines %) starts)
@@ -1235,8 +1155,8 @@
                                              :imports imports
                                              :calls (vec (distinct (concat (clj-kondo-unit-calls var-usages start end)
                                                                            (clj-dispatch-call-tokens form-text ns-name (clj-require-alias-map lines) (set (map #(when (= "defmulti" (:operator %))
-                                                                                                                                                            (clj-qualified-symbol ns-name (:raw-symbol %)))
-                                                                                                                                                         primary-records))))))
+                                                                                                                                                                  (clj-qualified-symbol ns-name (:raw-symbol %)))
+                                                                                                                                                               primary-records))))))
                                              :parser-mode "full"
                                              :alias-map (clj-require-alias-map lines)
                                              :helper-generated-calls helper-generated-calls}
@@ -1250,9 +1170,9 @@
         units (vec (concat primary-units supplemental-units))
         findings
         (->> (:findings parsed)
-            (filter #(and (same-file? abs (:filename %))
-                          (#{:error :warning} (:level %))))
-            (mapv (fn [f]
+             (filter #(and (same-file? abs (:filename %))
+                           (#{:error :warning} (:level %))))
+             (mapv (fn [f]
                      {:code (str "kondo_" (name (:type f)))
                       :summary (:message f)})))]
     (cond
@@ -2035,8 +1955,8 @@
                  (let [token* (str token)
                        tail (tail-token token*)
                        local-class-owner? (some->> (re-matches #"([A-Za-z_][A-Za-z0-9_]*)\.(.+)" token*)
-                                                  second
-                                                  (contains? body-local-class-names))]
+                                                   second
+                                                   (contains? body-local-class-names))]
                    (or (contains? body-local-call-names token*)
                        (contains? body-local-call-names tail)
                        local-class-owner?))))
@@ -2062,7 +1982,7 @@
         defs (loop [idx 0
                     class-stack []
                     fn-stack []
-                 out []]
+                    out []]
                (if (>= idx line-count)
                  out
                  (let [line (nth lines idx)
@@ -2137,13 +2057,13 @@
                              :docstring_excerpt nil
                              :imports imports
                              :calls (extract-py-calls body {:module module
-                                                           :class-name (:class-name d)
-                                                           :module-aliases module-aliases
-                                                           :symbol-aliases symbol-aliases
-                                                           :local-call-names local-call-names
-                                                           :local-class-names local-class-names
-                                                           :body-local-call-names (:local-call-names body-scope)
-                                                           :body-local-class-names (:local-class-names body-scope)})
+                                                            :class-name (:class-name d)
+                                                            :module-aliases module-aliases
+                                                            :symbol-aliases symbol-aliases
+                                                            :local-call-names local-call-names
+                                                            :local-class-names local-class-names
+                                                            :body-local-call-names (:local-call-names body-scope)
+                                                            :body-local-class-names (:local-class-names body-scope)})
                              :parser_mode "full"})))
                    vec)]
     {:language "python"
@@ -2440,8 +2360,7 @@
                                                               :current-owner-module (:module d)
                                                               :local-call-names local-call-names
                                                               :body-local-call-names body-local-call-names})
-                              :parser_mode "full"}))))
-        ]
+                              :parser_mode "full"}))))]
     {:language "lua"
      :module module
      :imports imports
@@ -2747,7 +2666,7 @@
                                                                                    :local-call-names local-call-names
                                                                                    :local-class-names local-class-names
                                                                                    :local-object-names local-object-names})
-                                                        (:synthetic-calls d))))
+                                                           (:synthetic-calls d))))
                              :parser_mode "full"})))
                    vec)]
     {:language "typescript"
@@ -3008,7 +2927,7 @@
    (let [abs (io/file root-path file-path)
          language (language-by-path file-path)]
      (try
-         (let [lines (slurp-lines abs)]
+       (let [lines (slurp-lines abs)]
          (->> (case language
                 "clojure" (parse-clojure-file root-path file-path lines parser-opts)
                 "java" (parse-java-file root-path file-path lines parser-opts)

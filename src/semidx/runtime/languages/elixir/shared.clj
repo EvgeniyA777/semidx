@@ -1,5 +1,6 @@
 (ns semidx.runtime.languages.elixir.shared
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [semidx.runtime.languages.shared :as shared]))
 
 (def ex-module-re #"^\s*defmodule\s+([A-Za-z0-9_\.]+)\s+do")
 (def ex-import-only-re #"^\s*import\s+([A-Za-z0-9_\.]+)")
@@ -19,11 +20,10 @@
   ["Test"])
 
 (defn trim-signature [line]
-  (let [t (str/trim (or line ""))]
-    (subs t 0 (min 180 (count t)))))
+  (shared/trim-signature line))
 
 (defn tail-token [token]
-  (some-> token str (str/split #"[\./#]") last))
+  (shared/tail-token token))
 
 (defn ex-test-symbol [module test-name]
   (let [slug (-> test-name
