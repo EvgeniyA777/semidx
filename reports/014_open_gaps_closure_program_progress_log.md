@@ -104,3 +104,25 @@ Tracks execution of `plans/013_open_gaps_closure_program.md`.
   - `./scripts/run-mvp-gates.sh` passed (`225 tests / 1590 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
 - Skipped / limitations: none.
 - Known blockers: none.
+
+## Stage 1.4 - Python Lane Extraction
+
+- Status: completed.
+- Scope: Move the Python parser lane out of `semidx.runtime.adapters` into `semidx.runtime.languages.python`, including Python module normalization, import and relative-import expansion, class/method ownership, self/class call expansion, local symbol collision handling, nested-scope suppression, and test-target module linkage.
+- Architecture plan:
+  - Goal: make `semidx.runtime.languages.python` the real Python lane owner instead of a wrapper around adapter internals.
+  - Boundary: `adapters/parse-file` remains the cross-language dispatcher; Python-specific regexes, import state, call extraction, parser policy, and semantic ownership logic live in the Python lane namespace.
+  - Cleanup: removed the legacy public `adapters/parse-python-file` facade and dispatches directly to `py-language/parse-file`.
+- Changed files:
+  - `src/semidx/runtime/adapters.clj`
+  - `src/semidx/runtime/languages/python.clj`
+  - `MEMORY.md`
+- Verification:
+  - Compile probe passed for `semidx.runtime.languages.python` and `semidx.runtime.adapters`.
+  - `clojure -M:test -n semidx.integration.runtime-test` passed (`103 tests / 468 assertions`).
+  - `clojure -M:test` passed (`225 tests / 1590 assertions`).
+  - `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
+  - `./scripts/run-semantic-quality-report.sh` exited `0` with the expected advisory gate state: `expected_change_match_rate=0.8333333333333334`, `identity_stability_rate=1.0`, `move_rename_recovery_rate=1.0`, `implementation_vs_meaning_accuracy=0.6666666666666666`, `unmatched_rate=0.0`.
+  - `./scripts/run-mvp-gates.sh` passed (`225 tests / 1590 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
+- Skipped / limitations: none.
+- Known blockers: none.
