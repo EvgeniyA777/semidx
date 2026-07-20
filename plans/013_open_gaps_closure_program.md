@@ -177,14 +177,13 @@ resolver narrowing; per-lane semantic-cores do import/owner-aware single-hop
 disambiguation; `related_tests` already does one helper-namespace hop.
 
 **Sub-steps:**
-1. Follow the relation-first fork accepted in ADR-034, then define the v1
-   dataflow scope in a new scoping ADR numbered with the next available ADR at
-   execution time: which flows (e.g. local variable → call-target propagation,
-   return-value threading, parameter-to-call binding) and which lanes ship first
-   (Clojure high-confidence lane as reference, then at least one non-Clojure
-   lane).
-2. Extend `semantic_ir.clj` with the interprocedural edge/flow representation.
-3. Implement resolver narrowing that consumes the new IR, keeping ambiguous
+1. Follow the relation-first fork accepted in ADR-034 and the Stage 3 v1 scope
+   accepted in ADR-037: `dataflow/local-binding-call-result`,
+   `dataflow/returns-call-result`, and `dataflow/passes-argument` relations,
+   with Clojure first and Python second.
+2. Add the typed-relation schema/index boundary and attach relation indexes to
+   snapshots; do not add new ad-hoc flow keys to `semantic_ir.clj`.
+3. Implement resolver narrowing that consumes relation-index projections, keeping ambiguous
    flows conservative (no over-linking) — mirror the existing "conservative
    branch" discipline in the Clojure/Java cores.
 4. Recalibrate confidence ceilings only if evidence supports it; otherwise keep
@@ -196,7 +195,7 @@ replay/benchmark ambiguity fixtures under `fixtures/`;
 must show no regression and a measurable gain on the new interprocedural cases.
 Consider protected replay-case promotion for the hardest new cases.
 
-**Docs:** ADR-034 plus the new Stage 3 scoping ADR; `MEMORY.md` Current State +
+**Docs:** ADR-034 plus ADR-037; `MEMORY.md` Current State +
 Known Gaps (compiler-grade line); `docs/roadmap-status.md`; refresh CCC.
 
 **Risk:** highest semantic risk. Mitigation: land per-lane behind conservative

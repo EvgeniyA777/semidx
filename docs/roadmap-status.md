@@ -72,9 +72,9 @@ The `plans/013` Stage 1 adapter split is now delivered for the current scope:
 
 The `plans/013` Stage 2 tree-sitter dependency cleanup is now delivered under `ADR-036`: regex parsing remains the guaranteed default, tree-sitter stays optional, runtime CLI resolution prefers explicit parser options, environment configuration, and the repo-managed `.tree-sitter-grammars/bin/tree-sitter` link, and ambient `PATH` is only a developer fallback.
 
-The next semantic focus is Stage 3:
+The next semantic focus is Stage 3 under `ADR-034` and `ADR-037`:
 
-- interprocedural/dataflow-sensitive semantic resolution under the relation-first constraint captured by `ADR-034`
+- interprocedural/dataflow-sensitive semantic resolution using the relation-first v1 slice captured by `ADR-037`
 - continued benchmark/replay-driven validation as deeper semantic layers land
 - Elixir tree-sitter readiness is now tracked by [notes/2026-03-26-1800-13931a71-c700-4f43-84d0-701ff08273b8.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1800-13931a71-c700-4f43-84d0-701ff08273b8.md) and benchmark delta evidence by [notes/2026-03-26-1839-abc6454d-f08a-44ae-abe2-dba1557049d6.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1839-abc6454d-f08a-44ae-abe2-dba1557049d6.md)
 - Python parser-strategy frontier is now tracked in [notes/2026-03-26-1839-7815c5cd-3357-4776-a628-71dc7f695ee8.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1839-7815c5cd-3357-4776-a628-71dc7f695ee8.md)

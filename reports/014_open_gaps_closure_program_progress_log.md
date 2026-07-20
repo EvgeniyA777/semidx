@@ -251,3 +251,26 @@ Tracks execution of `plans/013_open_gaps_closure_program.md`.
   - `git diff --check` passed.
 - Skipped / limitations: the bootstrap script syntax was verified locally, but the networked grammar clone/fetch path was not rerun during this sub-step.
 - Known blockers: none.
+
+## Stage 3.1 - Interprocedural Dataflow V1 Scoping ADR
+
+- Status: completed.
+- Scope: Define the Stage 3 v1 dataflow scope required by `ADR-034` before implementation begins.
+- Decision record: `ADR-037 Scope Interprocedural Dataflow V1`.
+- Summary:
+  - Stage 3 starts by adding a typed-relation schema/index boundary rather than adding ad-hoc dataflow keys to `semantic-ir`.
+  - V1 relation types are `dataflow/local-binding-call-result`, `dataflow/returns-call-result`, and `dataflow/passes-argument`.
+  - Lane order is Clojure first, Python second; TypeScript, Java, and Elixir producers are deferred until the first slice is measured.
+  - Retrieval and impact may consume relations only through bounded relation-index projections; no public `query_relations` API, context-packet relation array, caller/callee replacement, or `calls`/`imports` dual-write lands in Stage 3.
+- Changed files:
+  - `adr/037-scope-interprocedural-dataflow-v1.md`
+  - `plans/013_open_gaps_closure_program.md`
+  - `MEMORY.md`
+  - `docs/roadmap-status.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - semidx MCP mapping completed for existing Semantic IR, index graph, retrieval, storage, and evaluation seams.
+  - Documentation cross-reference checks passed for Stage 3 / ADR links.
+  - `git diff --check` passed.
+- Skipped / limitations: runtime tests and gates are deferred to the implementation sub-step because this commit records the Stage 3 architecture scope only.
+- Known blockers: none.
