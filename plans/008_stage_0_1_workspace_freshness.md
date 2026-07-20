@@ -1,15 +1,15 @@
 ---
 title: "Stage 0+1 Workspace Freshness Plan"
 doc_type: "implementation_plan"
-lifecycle: "active"
-status: "draft"
-agent_action: "reference_for_context"
-updated: "2026-07-13"
+lifecycle: "completed"
+status: "delivered"
+agent_action: "historical_reference_only"
+updated: "2026-07-19"
 ---
 
 # Implementation Plan: Stage 0+1 — Contract Baselines and Workspace Freshness
 
-Status: Active
+Status: Delivered (historical)
 Architecture reference:
   plans/007_semidx_extension_architecture_resolution_plan.md
 
