@@ -11,7 +11,6 @@
   },
   "constraints": {
     "token_budget": 1800,
-    "snapshot_id": "repo-snapshot-20260308-001",
     "language_allowlist": ["clojure"],
     "allowed_path_prefixes": ["src/", "test/"],
     "max_raw_code_level": "enclosing_unit",
