@@ -297,14 +297,40 @@
      :lifecycle_reason reason
      :lifecycle_diagnostics diagnostics}))
 
+(defn- entry-root-consistent? [entry]
+  (= (:root_path entry)
+     (get-in entry [:index :root_path])))
+
+(defn- remove-index-entry! [state index-id]
+  (swap! state
+         (fn [current]
+           (-> current
+               (update :indexes-by-id dissoc index-id)
+               (update :cache-key->index-id
+                       (fn [cache-index]
+                         (reduce-kv (fn [acc k v]
+                                      (if (= index-id v)
+                                        (dissoc acc k)
+                                        acc))
+                                    cache-index
+                                    cache-index)))))))
+
 (defn touch-index! [state index-id]
-  (let [ts (now-ms)]
-    (swap! state update-in [:indexes-by-id index-id]
-           (fn [entry]
-             (when entry
-               (assoc entry :last_accessed_at ts))))
-    (or (get-in @state [:indexes-by-id index-id])
-        (index-not-found index-id))))
+  (let [ts (now-ms)
+        entry (get-in @state [:indexes-by-id index-id])]
+    (cond
+      (nil? entry)
+      (index-not-found index-id)
+
+      (not (entry-root-consistent? entry))
+      (do
+        (remove-index-entry! state index-id)
+        (index-not-found index-id))
+
+      :else
+      (do
+        (swap! state assoc-in [:indexes-by-id index-id :last_accessed_at] ts)
+        (get-in @state [:indexes-by-id index-id])))))
 
 (defn remove-evicted-cache-keys [cache-index evicted-ids]
   (reduce-kv (fn [acc k v]
@@ -382,25 +408,39 @@
                     (let [s (storage/in-memory-storage)]
                       (swap! state assoc :storage_adapter s)
                       s))
-        index (sci/create-index {:root_path root-path
-                                 :paths paths
-                                 :parser_opts parser-opts
-                                 :storage storage
-                                 :language_policy language-policy
-                                 :policy_registry (:policy_registry @state)
-                                 :usage_metrics (:usage_metrics @state)
-                                 :usage_context (tool-usage-context state)
-                                 :selection_cache (:selection_cache @state)
-                                 :force_rebuild force-rebuild
-                                 :load_latest true
-                                 :suppress_usage_metrics true})
+        create-opts {:root_path root-path
+                     :paths paths
+                     :parser_opts parser-opts
+                     :storage storage
+                     :language_policy language-policy
+                     :policy_registry (:policy_registry @state)
+                     :usage_metrics (:usage_metrics @state)
+                     :usage_context (tool-usage-context state)
+                     :selection_cache (:selection_cache @state)
+                     :force_rebuild force-rebuild
+                     :load_latest true
+                     :suppress_usage_metrics true}
+        loaded-index (sci/create-index create-opts)
+        index (if (= root-path (:root_path loaded-index))
+                loaded-index
+                (sci/create-index (assoc create-opts :force_rebuild true)))
         lifecycle-action (get-in index [:index_lifecycle :lifecycle_action])
-        cache-hit? (= "reuse" lifecycle-action)
+        cache-hit? (and (= "reuse" lifecycle-action)
+                        (= root-path (:root_path loaded-index)))
         existing-id (get-in @state [:cache-key->index-id cache-key-value])
-        entry (if (and cache-hit? existing-id (get-in @state [:indexes-by-id existing-id]))
+        existing-entry (get-in @state [:indexes-by-id existing-id])
+        stale-existing? (and existing-entry
+                             (or (not= root-path (:root_path existing-entry))
+                                 (not (entry-root-consistent? existing-entry))))
+        _ (when stale-existing?
+            (remove-index-entry! state existing-id))
+        reusable-existing-id (when-not stale-existing? existing-id)
+        entry (if (and cache-hit?
+                       reusable-existing-id
+                       (get-in @state [:indexes-by-id reusable-existing-id]))
                 (do
-                  (swap! state assoc-in [:indexes-by-id existing-id :index] index)
-                  (get-in @state [:indexes-by-id existing-id]))
+                  (swap! state assoc-in [:indexes-by-id reusable-existing-id :index] index)
+                  (get-in @state [:indexes-by-id reusable-existing-id]))
                 (store-index! state cache-key-value root-path paths parser-opts language-policy index))]
     (with-usage-event
       (index-summary entry cache-hit?)
@@ -605,14 +645,14 @@
   ([message query]
    (enrich-invalid-query message query nil))
   ([message query cause-data]
-  (ex-info message
-           {:type :invalid_query
-            :message message
-            :details {:missing_sections (missing-query-sections query)
-                      :invalid_field_paths (invalid-field-paths query)
-                      :validation_errors (:errors cause-data)
-                      :minimal_query_skeleton (minimal-retrieval-query-skeleton)
-                      :recommended_next_step "retry_resolve_context_with_structured_query"}})))
+   (ex-info message
+            {:type :invalid_query
+             :message message
+             :details {:missing_sections (missing-query-sections query)
+                       :invalid_field_paths (invalid-field-paths query)
+                       :validation_errors (:errors cause-data)
+                       :minimal_query_skeleton (minimal-retrieval-query-skeleton)
+                       :recommended_next_step "retry_resolve_context_with_structured_query"}})))
 
 (defn tool-repo-map [state args]
   (when-not (map? args)
@@ -977,7 +1017,7 @@
                                "snapshot_id" {:type "string"}
                                "unit_ids" {:type "array" :items {:type "string"}}
                                "detail_level" {:type "string"
-                                                :enum ["none" "target_span" "enclosing_unit" "local_neighborhood" "whole_file"]}}
+                                               :enum ["none" "target_span" "enclosing_unit" "local_neighborhood" "whole_file"]}}
                   :required ["index_id" "selection_id" "snapshot_id"]
                   :additionalProperties false}}
    {:name "literal_file_slice"

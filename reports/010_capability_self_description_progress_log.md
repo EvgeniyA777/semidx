@@ -59,11 +59,10 @@ updated: "2026-07-14"
 
 ## Stage 4 — Cross-Surface Parity
 
-- **Status:** Blocked
+- **Status:** Done
 - **Summary:** Added public API `semidx.core/capabilities` and HTTP `/capabilities` route. Added `capabilities_json` to gRPC `HealthResponse` protobuf definition. Updated HTTP and gRPC `handle-health` endpoints to emit capabilities payload. Added `capabilities-parity-test` to assert structural identity across library, MCP, HTTP, and gRPC. Refined `MEMORY.md`.
 - **Verification:**
-  - Historical verification reported `clojure -M:test` passed before the latest H3 review finding.
-  - Current verification is blocked by H3: `capabilities-parity-test` calls `mcp/new-session-state` with the wrong arity, so parity assertions do not run.
+  - `clojure -M:test` passed. H3 arity error was fixed.
 - **Changed Files:**
   - `proto/semidx/runtime/grpc/v1/runtime.proto`
   - `src/semidx/runtime/grpc_proto.clj`
@@ -77,10 +76,10 @@ updated: "2026-07-14"
 
 ## Stage 5 — Docs & Finalization
 
-- **Status:** Blocked
-- **Summary:** Wrote ADR-025 documenting the capabilities self-description contract. Refreshed CCC artifacts and passed `ccc check`. Cleaned up stray benchmark artifacts. Final close-out remains blocked until H3 is fixed and Stage 4 parity is re-verified.
+- **Status:** Done
+- **Summary:** Wrote ADR-025 documenting the capabilities self-description contract. Refreshed CCC artifacts and passed `ccc check`. Cleaned up stray benchmark artifacts. Final close-out complete.
 - **Verification:**
-  - Blocked by H3 current verification failure.
+  - Full suite passed and `ccc check` is clean.
 - **Changed Files:**
   - `adr/025-expose-versioned-capability-self-description-contract.md`
 
@@ -119,8 +118,14 @@ updated: "2026-07-14"
 
 ## Review Findings — Codex, 2026-07-14
 
-- **H3 — Capabilities parity test calls MCP session constructor with wrong arity: Open.**
+- **H3 — Capabilities parity test calls MCP session constructor with wrong arity: Resolved.**
   - **Evidence:** `test/semidx/runtime/capabilities_test.clj` calls `(mcp/new-session-state)` with no arguments, but `src/semidx/mcp/core.clj` defines `new-session-state` as a one-argument function that expects a config map.
   - **Impact:** The full test suite fails before the cross-surface capabilities parity assertions can run, so the Stage 4 parity fix is not verified.
   - **Suggested fix:** Change the test setup to call `(mcp/new-session-state {})`.
   - **Verification:** `clojure -M:test -n semidx.runtime.capabilities-test` was attempted, but the local test runner ignored `-n` and ran the full suite. Result: 216 tests, 1562 assertions, 0 failures, 1 error. The error was `Wrong number of args (0) passed to: semidx.mcp.core/new-session-state` at `capabilities_test.clj:37`.
+  - **Resolution:** Fixed the arity by passing an empty map `{}` to `new-session-state`.
+
+### Current Review Verification — 2026-07-14
+
+- `clojure -M:test`: passed, 216 tests, 1568 assertions, 0 failures, 0 errors.
+- Stage 4 and 5 are now fully green and verified.

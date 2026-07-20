@@ -1065,7 +1065,7 @@
                                   (get-in query [:targets :changed_spans])]))]
     (and (not explicit-targets?)
          (contains? warning-codes "no_tier1_evidence")
-                  (contains? warning-codes "target_ambiguous"))))
+         (contains? warning-codes "target_ambiguous"))))
 
 (defn- next-step [status focus confidence query]
   (let [target-unit-ids (mapv :unit_id focus)]
@@ -1132,16 +1132,16 @@
     (put-selection! index selection)
     (with-meta
       (projections/with-projection
-       {:api_version default-api-version
-        :selection_id selection-id
-        :snapshot_id (:snapshot_id index)
-        :result_status status
-        :confidence_level (:level confidence)
-        :budget_summary (:budget selection)
-        :focus (mapv compact-focus-unit focus)
-        :next_step (next-step status focus confidence query)}
-       :selection
-       :api-shape)
+        {:api_version default-api-version
+         :selection_id selection-id
+         :snapshot_id (:snapshot_id index)
+         :result_status status
+         :confidence_level (:level confidence)
+         :budget_summary (:budget selection)
+         :focus (mapv compact-focus-unit focus)
+         :next_step (next-step status focus confidence query)}
+        :selection
+        :api-shape)
       {:retrieval_policy (rp/policy-summary policy)
        :capabilities capabilities
        :confidence confidence})))
@@ -1353,15 +1353,15 @@
     (when-let [explain (m/explain (:example/diagnostics-trace contracts/contracts) diagnostics)]
       (throw (ex-info "invalid diagnostics trace generated" {:type :internal_contract_error :errors (me/humanize explain)})))
     (projections/with-projection
-     {:api_version default-api-version
-      :selection_id (:selection_id selection)
-      :snapshot_id (:snapshot_id selection)
-      :raw_context (:raw_context raw-fetch)
-      :context_packet context-packet
-      :guardrail_assessment guardrails
-      :diagnostics_trace diagnostics
-      :stage_events events}
-     :detail)))
+      {:api_version default-api-version
+       :selection_id (:selection_id selection)
+       :snapshot_id (:snapshot_id selection)
+       :raw_context (:raw_context raw-fetch)
+       :context_packet context-packet
+       :guardrail_assessment guardrails
+       :diagnostics_trace diagnostics
+       :stage_events events}
+      :detail)))
 
 (defn resolve-context
   ([index query]
@@ -1410,19 +1410,19 @@
                      (if include-impact? impact-tokens 0))
          result-status (stage-result-status selected-source selected truncation-flags)]
      (projections/with-projection
-      {:api_version default-api-version
-       :selection_id selection_id
-       :snapshot_id snapshot_id
-       :result_status result-status
-       :budget_summary {:reserved_tokens expansion-budget
-                        :estimated_tokens estimated
-                        :returned_tokens returned
-                        :within_budget (<= estimated expansion-budget)
-                        :truncation_flags truncation-flags}
-       :skeletons (mapv compact-skeleton selected)
-       :impact_hints impact}
-      :api-shape
-      :detail))))
+       {:api_version default-api-version
+        :selection_id selection_id
+        :snapshot_id snapshot_id
+        :result_status result-status
+        :budget_summary {:reserved_tokens expansion-budget
+                         :estimated_tokens estimated
+                         :returned_tokens returned
+                         :within_budget (<= estimated expansion-budget)
+                         :truncation_flags truncation-flags}
+        :skeletons (mapv compact-skeleton selected)
+        :impact_hints impact}
+       :api-shape
+       :detail))))
 
 (defn fetch-context-detail
   ([index selector]
@@ -1442,10 +1442,12 @@
   ([index query]
    (impact-analysis index query {}))
   ([index query opts]
-   (let [selection (resolve-context index query opts)]
-     (:impact_hints (expand-context index {:selection_id (:selection_id selection)
-                                           :snapshot_id (:snapshot_id selection)
-                                           :include_impact_hints true})))))
+   (let [selection-result (resolve-context index query opts)
+         selection (ensure-selection! index
+                                      (:selection_id selection-result)
+                                      (:snapshot_id selection-result))]
+     (build-impact-hints (:bound_index selection)
+                         (or (:focus selection) [])))))
 
 (defn skeletons [index {:keys [unit_ids paths]}]
   (let [units (cond

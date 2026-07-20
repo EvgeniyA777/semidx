@@ -3,6 +3,7 @@
             [clojure.test :refer [deftest is testing]]
             [semidx.core :as sci]
             [semidx.mcp.core :as mcp-core]
+            [semidx.runtime.storage :as storage]
             [semidx.runtime.usage-metrics :as usage]))
 
 (defn- write-file! [root rel-path content]
@@ -120,6 +121,88 @@
                        :usage_metrics sink
                        :suppress_usage_metrics true})
     (is (empty? (usage/emitted-events sink)))))
+
+(deftest impact-analysis-returns-hints-when-expand-budget-omits-them-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-impact-budget" (make-array java.nio.file.attribute.FileAttribute 0)))
+        long-neighbors (apply str
+                              (for [n (range 20)]
+                                (format "(defn very-long-related-neighbor-%02d-for-impact-analysis-budget-pressure [order]\n  order)\n\n" n)))
+        _ (write-file! tmp-root "src/my/app/order.clj"
+                       (str "(ns my.app.order)\n\n"
+                            "(defn process-order [order]\n  (validate-order order))\n\n"
+                            "(defn validate-order [order]\n  order)\n\n"
+                            long-neighbors))
+        index (sci/create-index {:root_path tmp-root})
+        query {:api_version "1.0"
+               :schema_version "1.0"
+               :intent {:purpose "change_impact"
+                        :details "Change process-order."}
+               :targets {:symbols ["my.app.order/process-order"]
+                         :paths ["src/my/app/order.clj"]}
+               :constraints {:token_budget 1200
+                             :max_raw_code_level "enclosing_unit"
+                             :freshness "current_snapshot"}
+               :hints {:focus_on_tests true
+                       :prefer_definitions_over_callers true}
+               :options {:include_tests true
+                         :include_impact_hints true
+                         :allow_raw_code_escalation false}
+               :trace {:trace_id "88888888-8888-4888-8888-888888888888"
+                       :request_id "impact-budget-regression"}}
+        selection (sci/resolve-context index query)
+        expansion (sci/expand-context index {:selection_id (:selection_id selection)
+                                             :snapshot_id (:snapshot_id selection)
+                                             :include_impact_hints true})
+        impact (sci/impact-analysis index query)]
+    (is (some #{"impact_hints_omitted"}
+              (get-in expansion [:budget_summary :truncation_flags])))
+    (is (nil? (:impact_hints expansion)))
+    (is (map? impact))
+    (is (= #{:callers :dependents :related_tests :risky_neighbors}
+           (set (keys impact))))
+    (is (every? vector? (vals impact)))))
+
+(deftest mcp-create-index-replaces-stale-workspace-cache-entry-test
+  (let [root-a (str (java.nio.file.Files/createTempDirectory "sci-mcp-stale-a" (make-array java.nio.file.attribute.FileAttribute 0)))
+        root-b (str (java.nio.file.Files/createTempDirectory "sci-mcp-stale-b" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-sample-repo! root-a)
+        _ (create-sample-repo! root-b)
+        root-a-canonical (.getCanonicalPath (io/file root-a))
+        root-b-canonical (.getCanonicalPath (io/file root-b))
+        storage-adapter (storage/in-memory-storage)
+        _stored-b (sci/create-index {:root_path root-b-canonical
+                                     :storage storage-adapter})
+        stale-index (sci/create-index {:root_path root-a-canonical})
+        parser-opts (#'mcp-core/normalize-parser-opts nil)
+        cache-key-value (#'mcp-core/cache-key root-b-canonical nil parser-opts nil)
+        stale-entry {:index_id "stale-index"
+                     :cache_key cache-key-value
+                     :root_path root-a-canonical
+                     :paths nil
+                     :parser_opts parser-opts
+                     :language_policy nil
+                     :index stale-index
+                     :created_at 1
+                     :last_accessed_at 1}
+        state (atom {:max-indexes 4
+                     :session_id "mcp-stale-cache-test"
+                     :storage_adapter storage-adapter
+                     :selection_cache (atom {})
+                     :indexes-by-id {"stale-index" stale-entry}
+                     :cache-key->index-id {cache-key-value "stale-index"}
+                     :client-info {:name "codex-test-client"}})
+        create-response (#'mcp-core/handle-tools-call state {:name "create_index"
+                                                             :arguments {:root_path root-b-canonical}})
+        create-data (:structuredContent create-response)
+        fresh-id (:index_id create-data)
+        fresh-entry (get-in @state [:indexes-by-id fresh-id])]
+    (is (string? fresh-id))
+    (is (not= "stale-index" fresh-id))
+    (is (= root-b-canonical (:root_path create-data)))
+    (is (= root-b-canonical (:root_path fresh-entry)))
+    (is (= root-b-canonical (get-in fresh-entry [:index :root_path])))
+    (is (nil? (get-in @state [:indexes-by-id "stale-index"])))
+    (is (= fresh-id (get-in @state [:cache-key->index-id cache-key-value])))))
 
 (deftest mcp-tool-usage-metrics-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-usage-metrics-mcp" (make-array java.nio.file.attribute.FileAttribute 0)))
