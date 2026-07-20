@@ -75,7 +75,9 @@ The `plans/013` Stage 2 tree-sitter dependency cleanup is now delivered under `A
 The next semantic focus is Stage 3 under `ADR-034` and `ADR-037`:
 
 - the typed-relation substrate now exists on snapshots without changing current retrieval behavior
+- the Clojure lane now emits and resolves the v1 `dataflow/*` relation facts on that substrate
 - interprocedural/dataflow-sensitive semantic resolution using the relation-first v1 slice captured by `ADR-037`
+- the next Stage 3 implementation step is the Python producer on the same relation contract, followed by bounded retrieval/impact projections
 - continued benchmark/replay-driven validation as deeper semantic layers land
 - Elixir tree-sitter readiness is now tracked by [notes/2026-03-26-1800-13931a71-c700-4f43-84d0-701ff08273b8.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1800-13931a71-c700-4f43-84d0-701ff08273b8.md) and benchmark delta evidence by [notes/2026-03-26-1839-abc6454d-f08a-44ae-abe2-dba1557049d6.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1839-abc6454d-f08a-44ae-abe2-dba1557049d6.md)
 - Python parser-strategy frontier is now tracked in [notes/2026-03-26-1839-7815c5cd-3357-4776-a628-71dc7f695ee8.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1839-7815c5cd-3357-4776-a628-71dc7f695ee8.md)

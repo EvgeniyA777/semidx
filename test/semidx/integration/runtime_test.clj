@@ -1972,6 +1972,34 @@
     (is format-order-id)
     (is (some #(= "my.app.protocols/render-order" (:symbol %)) callers))))
 
+(deftest clojure-dataflow-relations-resolve-target-units-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-clojure-dataflow-relations" (make-array java.nio.file.attribute.FileAttribute 0)))
+        rel-path "src/my/app/flow.clj"]
+    (write-file! tmp-root rel-path "(ns my.app.flow)\n\n(defn make-client [config]\n  config)\n\n(defn normalize [order]\n  order)\n\n(defn save! [order client]\n  order)\n\n(defn wrapper [order config]\n  (let [client (make-client config)]\n    (save! order client)\n    (normalize order)))\n")
+    (let [index (sci/create-index {:root_path tmp-root
+                                   :parser_opts {:clojure_engine :regex}})
+          wrapper-id (str rel-path "::my.app.flow/wrapper")
+          make-client-id (str rel-path "::my.app.flow/make-client")
+          normalize-id (str rel-path "::my.app.flow/normalize")
+          save-id (str rel-path "::my.app.flow/save!")
+          relations (->> (:relations index) vals (filter #(= wrapper-id (:source_unit_id %))) vec)
+          by-type (group-by :relation_type relations)]
+      (is (= #{"dataflow/local-binding-call-result"
+               "dataflow/returns-call-result"
+               "dataflow/passes-argument"}
+             (set (keys by-type))))
+      (is (some #(and (= "resolved" (:resolution_status %))
+                      (= [make-client-id] (:target_unit_ids %)))
+                (get by-type "dataflow/local-binding-call-result")))
+      (is (some #(and (= "resolved" (:resolution_status %))
+                      (= [normalize-id] (:target_unit_ids %)))
+                (get by-type "dataflow/returns-call-result")))
+      (is (some #(and (= "resolved" (:resolution_status %))
+                      (= [save-id] (:target_unit_ids %))
+                      (= "order" (:local_name %)))
+                (get by-type "dataflow/passes-argument")))
+      (is (contains? (get (:relation_forward_index index) wrapper-id) (:relation_id (first relations)))))))
+
 (deftest tree-sitter-cli-resolution-prefers-explicit-and-managed-toolchain-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-tree-sitter-cli-resolution" (make-array java.nio.file.attribute.FileAttribute 0)))
         explicit-rel "tools/tree-sitter"

@@ -34,6 +34,19 @@
     (is (= "resolved" (:resolution_status normalized)))
     (is (relations/valid-relation? normalized))))
 
+(deftest relation-id-preserves-dataflow-argument-payload-test
+  (let [base {:source_unit_id "unit:wrapper"
+              :target_key "save!"
+              :target_unit_ids ["unit:save"]
+              :relation_type "dataflow/passes-argument"
+              :resolution_status "resolved"
+              :evidence_quality "medium"
+              :evidence_location {:start_line 10}
+              :provenance {:producer "test"}}
+        first-arg (relations/normalize-relation (assoc base :local_name "order" :arg_index 0))
+        second-arg (relations/normalize-relation (assoc base :local_name "client" :arg_index 1))]
+    (is (not= (:relation_id first-arg) (:relation_id second-arg)))))
+
 (deftest index-relations-builds-forward-and-reverse-indexes-test
   (let [resolved (relations/normalize-relation
                   {:source_unit_id "unit:wrapper"

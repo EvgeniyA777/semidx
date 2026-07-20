@@ -51,7 +51,7 @@
 (defn- parse-files [root-path paths parser-opts]
   (letfn [(distinct-vec [xs]
             (->> xs (remove nil?) distinct vec))
-          (enrich-elixir-use-imports [{:keys [files units diagnostics]}]
+          (enrich-elixir-use-imports [{:keys [files units diagnostics relations]}]
             (let [module->use-imports (->> (vals files)
                                            (filter #(= "elixir" (:language %)))
                                            (keep (fn [{:keys [module use_expansion_imports]}]
@@ -78,7 +78,8 @@
                                units)]
               {:files files*
                :units units*
-               :diagnostics diagnostics}))]
+               :diagnostics diagnostics
+               :relations relations}))]
     (->> paths
          (reduce
           (fn [acc path]
@@ -96,9 +97,10 @@
               (-> acc
                   (update :files assoc path file-rec)
                   (update :units into (:units parsed))
+                  (update :relations into (:relations parsed))
                   (update :diagnostics into
                           (map (fn [d] (assoc d :path path)) (:diagnostics parsed))))))
-          {:files {} :units [] :diagnostics []})
+          {:files {} :units [] :diagnostics [] :relations []})
          enrich-elixir-use-imports)))
 
 (defn- snapshot-file-lines [root-path path]
@@ -332,6 +334,25 @@
                         vec)]
     (narrow-targets caller target-ids token units-by-id files-by-path)))
 
+(defn- relation-resolution-status [target-ids]
+  (case (count target-ids)
+    0 "unresolved"
+    1 "resolved"
+    "ambiguous"))
+
+(defn- resolve-relation-targets [relations units-by-id files-by-path]
+  (let [token-index (build-call-token-index (vals units-by-id))]
+    (mapv (fn [{:keys [source_unit_id target_key target_unit_ids] :as relation}]
+            (let [source (get units-by-id source_unit_id)
+                  target-ids (if (seq target_unit_ids)
+                               (vec target_unit_ids)
+                               (when (and source (seq target_key))
+                                 (resolve-target-ids source target_key token-index units-by-id files-by-path)))]
+              (assoc relation
+                     :target_unit_ids (vec (or target-ids []))
+                     :resolution_status (relation-resolution-status (or target-ids [])))))
+          relations)))
+
 (defn- macro-unit? [u]
   (= "defmacro" (:form_operator u)))
 
@@ -444,7 +465,8 @@
          repo-identity* (repo-identity/resolve-repo-identity root-path)
          callers-index (build-callers-index units (:files files-data))
          callees-index (build-callees-index callers-index)
-         relation-indexes (relations/index-relations (:relations files-data))]
+         resolved-relations (resolve-relation-targets (:relations files-data) units-by-id (:files files-data))
+         relation-indexes (relations/index-relations resolved-relations)]
      (attach-lifecycle
       {:root_path root-path
        :snapshot_id (uuid)

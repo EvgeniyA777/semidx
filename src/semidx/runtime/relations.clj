@@ -42,6 +42,8 @@
                 :evidence_quality
                 :provenance
                 :evidence_location
+                :local_name
+                :arg_index
                 :relation_schema_version]))
 
 (defn relation-id [relation]

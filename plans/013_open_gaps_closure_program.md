@@ -4,7 +4,7 @@ doc_type: "implementation_plan"
 lifecycle: "active"
 status: "planned"
 agent_action: "reference_for_context"
-updated: "2026-07-13"
+updated: "2026-07-20"
 ---
 
 # Implementation Plan: Open Semantic and Ops Gaps Closure Program
@@ -183,10 +183,14 @@ disambiguation; `related_tests` already does one helper-namespace hop.
    with Clojure first and Python second.
 2. Add the typed-relation schema/index boundary and attach relation indexes to
    snapshots; do not add new ad-hoc flow keys to `semantic_ir.clj`.
-3. Implement resolver narrowing that consumes relation-index projections, keeping ambiguous
-   flows conservative (no over-linking) — mirror the existing "conservative
-   branch" discipline in the Clojure/Java cores.
-4. Recalibrate confidence ceilings only if evidence supports it; otherwise keep
+3. Emit Clojure `dataflow/*` facts from the Clojure lane into the typed relation
+   substrate and resolve `target_key` values to `target_unit_ids` during index
+   construction; do not change existing caller/callee retrieval behavior.
+4. Emit Python `dataflow/*` facts on the same relation contract.
+5. Add bounded retrieval/impact projections that consume relation indexes,
+   keeping ambiguous flows conservative (no over-linking) and avoiding a public
+   graph-query API in Stage 3.
+6. Recalibrate confidence ceilings only if evidence supports it; otherwise keep
    ceilings unchanged and document the non-bump (as done previously).
 
 **Verification:** new mirrored `*-test` namespaces per lane; new

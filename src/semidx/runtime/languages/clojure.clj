@@ -819,8 +819,154 @@
 (defn- clj-dispatch-fragment [dispatch-value]
   (some-> dispatch-value pr-str (str/replace #"\s+" " ") str/trim))
 
+(defn- clj-call-target-key [node alias-map]
+  (when (seq? node)
+    (let [op (first node)]
+      (when (and (symbol? op)
+                 (not (contains? clj-call-stop (str op))))
+        (last (expand-clj-call-token (str op) alias-map))))))
+
+(defn- defn-body-forms [form]
+  (let [args (rest form)
+        after-name (rest args)
+        after-doc (cond-> after-name
+                    (string? (first after-name)) rest
+                    (map? (first after-name)) rest)]
+    (cond
+      (vector? (first after-doc))
+      [{:params (first after-doc)
+        :body (vec (rest after-doc))}]
+
+      :else
+      (->> after-doc
+           (keep (fn [arity-form]
+                   (when (and (seq? arity-form)
+                              (vector? (first arity-form)))
+                     {:params (first arity-form)
+                      :body (vec (rest arity-form))})))
+           vec))))
+
+(defn- defmethod-body-forms [form]
+  (let [after-dispatch (drop 3 form)
+        after-doc (cond-> after-dispatch
+                    (string? (first after-dispatch)) rest
+                    (map? (first after-dispatch)) rest)]
+    (when (vector? (first after-doc))
+      [{:params (first after-doc)
+        :body (vec (rest after-doc))}])))
+
+(defn- relation-provenance [parser-mode]
+  {:producer "semidx.runtime.languages.clojure"
+   :parser_mode parser-mode})
+
+(defn- clj-dataflow-relation
+  [{:keys [unit-id relation-type target-key parser-mode evidence-location] :as opts}]
+  (cond-> {:source_unit_id unit-id
+           :target_key target-key
+           :relation_type relation-type
+           :resolution_status "unresolved"
+           :evidence_quality "medium"
+           :provenance (relation-provenance parser-mode)}
+    (:local_name opts) (assoc :local_name (:local_name opts))
+    (:arg_index opts) (assoc :arg_index (:arg_index opts))
+    (seq evidence-location) (assoc :evidence_location evidence-location)))
+
+(defn- clj-dataflow-relations-from-body [unit-id parser-mode alias-map params body-forms start-line]
+  (let [param-names (set (clj-binding-symbols params))]
+    (letfn [(return-target-key [node]
+              (when (seq? node)
+                (let [op (some-> (first node) str)
+                      args (rest node)]
+                  (case op
+                    ("let" "loop") (return-target-key (last args))
+                    "do" (return-target-key (last args))
+                    (clj-call-target-key node alias-map)))))
+            (walk [node locals]
+              (let [locals* (set locals)]
+                (cond
+                  (seq? node)
+                  (let [op (some-> (first node) str)
+                        args (rest node)
+                        target-key (clj-call-target-key node alias-map)
+                        call-relations (when target-key
+                                         (->> args
+                                              (map-indexed vector)
+                                              (keep (fn [[idx arg]]
+                                                      (when (and (symbol? arg)
+                                                                 (or (contains? param-names (str arg))
+                                                                     (contains? locals* (str arg))))
+                                                        (clj-dataflow-relation
+                                                         {:unit-id unit-id
+                                                          :relation-type "dataflow/passes-argument"
+                                                          :target-key target-key
+                                                          :parser-mode parser-mode
+                                                          :arg_index idx
+                                                          :local_name (str arg)
+                                                          :evidence-location {:start_line start-line}}))))))]
+                    (case op
+                      ("quote" "var")
+                      []
+
+                      ("let" "loop" "binding")
+                      (let [binding-vec (first args)
+                            pairs (partition 2 binding-vec)
+                            binding-relations (->> pairs
+                                                   (keep (fn [[binding expr]]
+                                                           (when-let [target-key (clj-call-target-key expr alias-map)]
+                                                             (clj-dataflow-relation
+                                                              {:unit-id unit-id
+                                                               :relation-type "dataflow/local-binding-call-result"
+                                                               :target-key target-key
+                                                               :parser-mode parser-mode
+                                                               :local_name (some-> binding clj-binding-symbols first str)
+                                                               :evidence-location {:start_line start-line}})))))
+                            binding-calls (mapcat (fn [[_ expr]] (walk expr locals*)) pairs)
+                            locals** (into locals* (mapcat (comp clj-binding-symbols first) pairs))]
+                        (concat binding-relations binding-calls (mapcat #(walk % locals**) (rest args))))
+
+                      "fn"
+                      []
+
+                      (concat call-relations (mapcat #(walk % locals*) args))))
+
+                  (vector? node)
+                  (mapcat #(walk % locals*) node)
+
+                  (map? node)
+                  (mapcat #(walk % locals*) (concat (keys node) (vals node)))
+
+                  (set? node)
+                  (mapcat #(walk % locals*) node)
+
+                  :else [])))]
+      (let [return-form (last body-forms)
+            return-relation (when-let [target-key (return-target-key return-form)]
+                              [(clj-dataflow-relation
+                                {:unit-id unit-id
+                                 :relation-type "dataflow/returns-call-result"
+                                 :target-key target-key
+                                 :parser-mode parser-mode
+                                 :evidence-location {:start_line start-line}})])]
+        (->> (concat return-relation
+                     (mapcat #(walk % param-names) body-forms))
+             (remove #(= (:target_key %) (:source_unit_id %)))
+             distinct
+             vec)))))
+
+(defn- clj-dataflow-relations
+  [{:keys [operator parser-mode alias-map start-line] :as ctx} unit-id form]
+  (let [bodies (case operator
+                 ("defn" "defn-" "defmacro" "deftest") (defn-body-forms form)
+                 "defmethod" (defmethod-body-forms form)
+                 [])]
+    (->> bodies
+         (mapcat (fn [{:keys [params body]}]
+                   (clj-dataflow-relations-from-body unit-id parser-mode alias-map params body start-line)))
+         distinct
+         vec)))
+
 (defn- clj-unit-from-form
-  [{:keys [path ns-name raw-symbol operator kind start-line end-line signature imports calls parser-mode alias-map helper-generated-calls]}
+  [{:keys [path ns-name raw-symbol operator kind start-line end-line signature imports calls parser-mode alias-map helper-generated-calls] :as ctx}
    form-text]
   (let [form (clj-read-form form-text)
         operator* (or operator (clj-form-operator form))
@@ -835,7 +981,13 @@
                   (str path "::" symbol))
         summary (str kind* " " symbol
                      (when dispatch-value
-                       (str " dispatch " dispatch-value)))]
+                       (str " dispatch " dispatch-value)))
+        relations (clj-dataflow-relations (assoc ctx
+                                                 :operator operator*
+                                                 :kind kind*
+                                                 :parser-mode parser-mode)
+                                          unit-id
+                                          form)]
     (cond-> {:unit_id unit-id
              :kind kind*
              :symbol symbol
@@ -854,6 +1006,8 @@
       (assoc :call_tokens [(clj-dispatch-call-token symbol dispatch-value)])
       (seq generated-calls)
       (assoc :generated_calls generated-calls)
+      (seq relations)
+      (assoc :relations relations)
       dispatch-value
       (assoc :dispatch_value dispatch-value
              :multimethod_symbol symbol))))
@@ -863,6 +1017,13 @@
   (if (= "defprotocol" (:operator ctx))
     (clj-protocol-method-units ctx form-text)
     [(clj-unit-from-form ctx form-text)]))
+
+(defn- detach-unit-relations [units]
+  {:units (mapv #(dissoc % :relations) units)
+   :relations (->> units
+                   (mapcat :relations)
+                   distinct
+                   vec)})
 
 (defn- usage-in-line-range? [usage start-line end-line]
   (let [row (long (or (:row usage) (:name-row usage) 0))]
@@ -920,29 +1081,31 @@
                                      :body body
                                      :form-text form-text}))))
         helper-generated-calls (top-level-helper-generated-calls form-records ns-name alias-map)
-        units (->> form-records
-                   (mapcat (fn [{:keys [def end-line body form-text]}]
-                             (clj-units-from-form {:path path
-                                                   :ns-name ns-name
-                                                   :raw-symbol (:raw-symbol def)
-                                                   :operator (:operator def)
-                                                   :kind (:kind def)
-                                                   :start-line (:start-line def)
-                                                   :end-line end-line
-                                                   :signature (:signature def)
-                                                   :imports imports
-                                                   :calls (vec (distinct (concat (extract-clj-calls body alias-map)
-                                                                                 (clj-dispatch-call-tokens form-text ns-name alias-map dispatch-symbols))))
-                                                   :parser-mode "fallback"
-                                                   :alias-map alias-map
-                                                   :helper-generated-calls helper-generated-calls}
-                                                  form-text)))
-                   vec)]
+        raw-units (->> form-records
+                       (mapcat (fn [{:keys [def end-line body form-text]}]
+                                 (clj-units-from-form {:path path
+                                                       :ns-name ns-name
+                                                       :raw-symbol (:raw-symbol def)
+                                                       :operator (:operator def)
+                                                       :kind (:kind def)
+                                                       :start-line (:start-line def)
+                                                       :end-line end-line
+                                                       :signature (:signature def)
+                                                       :imports imports
+                                                       :calls (vec (distinct (concat (extract-clj-calls body alias-map)
+                                                                                     (clj-dispatch-call-tokens form-text ns-name alias-map dispatch-symbols))))
+                                                       :parser-mode "fallback"
+                                                       :alias-map alias-map
+                                                       :helper-generated-calls helper-generated-calls}
+                                                      form-text)))
+                       vec)
+        {:keys [units relations]} (detach-unit-relations raw-units)]
     {:language "clojure"
      :module ns-name
      :imports imports
      :test_target_modules test-target-modules
      :units units
+     :relations relations
      :diagnostics [{:code "parser_fallback" :summary "Clojure analyzed via regex fallback."}]
      :parser_mode "fallback"}))
 
@@ -983,6 +1146,7 @@
         ns-usages (->> (:namespace-usages analysis) (filter #(same-file? abs (:filename %))) vec)
         var-usages (->> (:var-usages analysis) (filter #(same-file? abs (:filename %))) vec)
         imports (->> ns-usages (keep :to) (map str) distinct vec)
+        alias-map (clj-require-alias-map lines)
         test-target-modules (clj-test-target-modules (some-> var-defs first :ns str) imports path)
         primary-records
         (->> var-defs
@@ -1008,8 +1172,8 @@
                                                                           :form-text form-text})
                                                                        primary-records)
                                                                  (some-> primary-records first :ns-name)
-                                                                 (clj-require-alias-map lines))
-        primary-units
+                                                                 alias-map)
+        primary-raw-units
         (->> primary-records
              (mapcat (fn [{:keys [ns-name raw-symbol kind start end form-text signature operator]}]
                        (clj-units-from-form {:path path
@@ -1022,20 +1186,28 @@
                                              :signature signature
                                              :imports imports
                                              :calls (vec (distinct (concat (clj-kondo-unit-calls var-usages start end)
-                                                                           (clj-dispatch-call-tokens form-text ns-name (clj-require-alias-map lines) (set (map #(when (= "defmulti" (:operator %))
-                                                                                                                                                                  (clj-qualified-symbol ns-name (:raw-symbol %)))
-                                                                                                                                                               primary-records))))))
+                                                                           (clj-dispatch-call-tokens form-text ns-name alias-map (set (map #(when (= "defmulti" (:operator %))
+                                                                                                                                              (clj-qualified-symbol ns-name (:raw-symbol %)))
+                                                                                                                                           primary-records))))))
                                              :parser-mode "full"
-                                             :alias-map (clj-require-alias-map lines)
+                                             :alias-map alias-map
                                              :helper-generated-calls helper-generated-calls}
                                             form-text)))
              vec)
-        existing-unit-ids (set (map :unit_id primary-units))
+        {:keys [units primary-relations] :or {primary-relations []}}
+        (let [{:keys [units relations]} (detach-unit-relations primary-raw-units)]
+          {:units units :primary-relations relations})
+        existing-unit-ids (set (map :unit_id units))
         supplemental-units (->> (:units fallback)
                                 (remove #(contains? existing-unit-ids (:unit_id %)))
                                 (map #(assoc % :parser_mode "full"))
                                 vec)
-        units (vec (concat primary-units supplemental-units))
+        supplemental-relations (->> (:relations fallback)
+                                    (remove #(contains? existing-unit-ids (:source_unit_id %)))
+                                    (map #(assoc-in % [:provenance :parser_mode] "full"))
+                                    vec)
+        units (vec (concat units supplemental-units))
+        relations (vec (distinct (concat primary-relations supplemental-relations)))
         findings
         (->> (:findings parsed)
              (filter #(and (same-file? abs (:filename %))
@@ -1050,6 +1222,7 @@
        :imports imports
        :test_target_modules test-target-modules
        :units units
+       :relations relations
        :diagnostics findings
        :parser_mode "full"}
 
@@ -1147,23 +1320,24 @@
                                               (when (= "defmulti" operator)
                                                 (clj-qualified-symbol ns-name raw-symbol))))
                                       set)
-                units (->> form-records
-                           (mapcat (fn [{:keys [start-line end-line operator raw-symbol calls form-text]}]
-                                     (clj-units-from-form {:path path
-                                                           :ns-name ns-name
-                                                           :raw-symbol raw-symbol
-                                                           :operator operator
-                                                           :start-line start-line
-                                                           :end-line end-line
-                                                           :signature (safe-line src-lines start-line)
-                                                           :imports imports
-                                                           :calls (vec (distinct (concat calls
-                                                                                         (clj-dispatch-call-tokens form-text ns-name alias-map dispatch-symbols))))
-                                                           :parser-mode "full"
-                                                           :alias-map alias-map
-                                                           :helper-generated-calls helper-generated-calls}
-                                                          form-text)))
-                           vec)]
+                raw-units (->> form-records
+                               (mapcat (fn [{:keys [start-line end-line operator raw-symbol calls form-text]}]
+                                         (clj-units-from-form {:path path
+                                                               :ns-name ns-name
+                                                               :raw-symbol raw-symbol
+                                                               :operator operator
+                                                               :start-line start-line
+                                                               :end-line end-line
+                                                               :signature (safe-line src-lines start-line)
+                                                               :imports imports
+                                                               :calls (vec (distinct (concat calls
+                                                                                             (clj-dispatch-call-tokens form-text ns-name alias-map dispatch-symbols))))
+                                                               :parser-mode "full"
+                                                               :alias-map alias-map
+                                                               :helper-generated-calls helper-generated-calls}
+                                                              form-text)))
+                               vec)
+                {:keys [units relations]} (detach-unit-relations raw-units)]
             (if (seq units)
               {:ok? true
                :result {:language "clojure"
@@ -1171,6 +1345,7 @@
                         :imports imports
                         :test_target_modules test-target-modules
                         :units units
+                        :relations relations
                         :diagnostics [{:code "tree_sitter_active"
                                        :summary "Clojure analyzed using tree-sitter CST extraction."}]
                         :parser_mode "full"}}
