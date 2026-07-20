@@ -421,12 +421,15 @@ Returns:
 - `:guardrail_assessment`
 - `:diagnostics_trace`
 - `:stage_events`
+- optional `:next_step` - present when the detail payload was truncated or degraded to fit the reserved budget; carries `:recommended_action "raise_token_budget"` and `:suggested_token_budget`
 - `:projection_profile` => `"detail"`
 
 Both `:context_packet` and `:diagnostics_trace` include:
 
 - `:retrieval_policy` - `{ :policy_id ... :version ... }`
 - `:capabilities` - selected-language and parser-coverage summary, including per-language strength and a derived `:confidence_ceiling`
+
+Raw fetch is budget-adaptive (`ADR-033`). When the reserved detail budget cannot fit the requested raw spans, the fetch level degrades down `whole_file -> local_neighborhood -> enclosing_unit -> target_span`, and an oversized chunk is sliced from the span start instead of being dropped, so a positive raw-fetch budget never yields an empty `:raw_context` for a readable unit. In that case the context-packet budget carries `:suggested_token_budget` plus truncation flags `raw_snippets_truncated` / `raw_fetch_level_degraded`, and the caller should retry once with the suggested budget. The zero-detail-budget path (tiny requested budgets) still returns a `skipped` raw fetch with an empty `:raw_context`.
 
 While the selection artifact is retained, repeated `fetch-context-detail` calls with the same selector are idempotent.
 

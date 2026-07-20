@@ -356,6 +356,7 @@ Returns:
 - `guardrail_assessment`
 - `diagnostics_trace`
 - `stage_events`
+- optional `next_step` - present when the detail payload was truncated or degraded to fit the reserved budget; carries `recommended_action "raise_token_budget"` and `suggested_token_budget`
 - `project_context`
 - `compact_continuation`
 - `recommended_next_step`
@@ -367,6 +368,8 @@ The returned `context_packet` and `diagnostics_trace` include:
 
 - `retrieval_policy` - versioned ranking policy summary used for this retrieval
 - `capabilities` - parser/language coverage summary for the selected authority/support evidence set, including per-language strength and a derived `confidence_ceiling`
+
+Raw fetch is budget-adaptive (`ADR-033`): under a tight `token_budget` the fetch level degrades down `whole_file -> local_neighborhood -> enclosing_unit -> target_span` and an oversized chunk is sliced from the span start instead of being dropped, so a positive raw-fetch budget never yields an empty `raw_context` for a readable unit. When truncation or degradation happens, `context_packet.budget` carries `suggested_token_budget` and the truncation flags `raw_snippets_truncated` / `raw_fetch_level_degraded`; re-run `resolve_context` with `constraints.token_budget` set to the suggested value and fetch detail again instead of falling back to manual file reads.
 
 ### `literal_file_slice`
 

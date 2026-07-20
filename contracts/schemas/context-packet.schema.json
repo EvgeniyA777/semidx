@@ -166,6 +166,10 @@
           "type": "integer",
           "minimum": 0
         },
+        "suggested_token_budget": {
+          "type": "integer",
+          "minimum": 1
+        },
         "stage_result_status": {
           "type": "string",
           "enum": ["completed", "truncated", "budget_exhausted"]

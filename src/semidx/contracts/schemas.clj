@@ -210,7 +210,7 @@
      [:prefer_definitions_over_callers {:optional true} boolean?]
      [:prefer_breadth_over_depth {:optional true} boolean?]]]
    [:options
-   [:map {:closed true}
+    [:map {:closed true}
      [:include_tests {:optional true} boolean?]
      [:include_impact_hints {:optional true} boolean?]
      [:allow_raw_code_escalation {:optional true} boolean?]]]
@@ -326,6 +326,7 @@
      [:reserved_tokens {:optional true} nat-int?]
      [:estimated_tokens nat-int?]
      [:returned_tokens {:optional true} nat-int?]
+     [:suggested_token_budget {:optional true} pos-int?]
      [:stage_result_status {:optional true} bounded-string]
      [:truncation_flags string-array]]]
    [:confidence confidence]])

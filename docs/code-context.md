@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: d4e31f4b0d57de49bdfa467a60eba726c787e0b5
+- fingerprint: 94cebf68ca17aa47674d085e94e42713b2fa9bdd
 
 ## Tree
 ```text
@@ -52,7 +52,7 @@ semidx
 - semidx.integration.lua-onboarding-test
 - semidx.integration.policy-governance-test
 - semidx.integration.runtime-test
-- ... +16 more
+- ... +17 more
 ### other
 - semidx.contracts.cli
 - semidx.contracts.schemas
@@ -94,7 +94,7 @@ semidx
 - semidx.core -> semidx.runtime.usage-metrics
 - semidx.integration.css-onboarding-test -> clojure.java.io
 - semidx.integration.css-onboarding-test -> clojure.test
-- ... +314 more
+- ... +316 more
 
 ## Namespaces
 ### semidx.contracts.cli

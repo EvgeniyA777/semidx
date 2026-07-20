@@ -801,92 +801,210 @@
 (defn- snippet-bytes [s]
   (count (.getBytes (str s) java.nio.charset.StandardCharsets/UTF_8)))
 
+(def ^:private raw-fetch-max-units 6)
+
+(def ^:private raw-level-degradation-ladder
+  ["whole_file" "local_neighborhood" "enclosing_unit" "target_span"])
+
+(defn- raw-fetch-chunk
+  "Read the raw chunk for one unit at the given level. Returns a map with
+   :fetch_status :ok and the chunk content, or a non-ok status for diagnostics."
+  [selection unit level]
+  (let [lines (selection-file-lines selection (:path unit))]
+    (if-not (seq lines)
+      {:fetch_status :file_missing :unit unit}
+      (if-let [span (bounded-span unit level (count lines))]
+        (let [content (->> (subvec lines (dec (:start span)) (:end span))
+                           (str/join "\n"))]
+          {:fetch_status :ok
+           :unit unit
+           :span span
+           :content content
+           :bytes (snippet-bytes content)})
+        {:fetch_status :level_invalid :unit unit}))))
+
+(defn- raw-chunks-at-level [selection chosen level]
+  (mapv #(raw-fetch-chunk selection % level) chosen))
+
+(defn- raw-chunks-bytes [chunks]
+  (reduce + 0 (keep :bytes chunks)))
+
+(defn- fit-raw-level
+  "Walk the level ladder downward from the requested level until the total
+   chunk payload fits max-bytes, or the narrowest level is reached."
+  [selection chosen level max-bytes]
+  (let [start-idx (.indexOf ^java.util.List raw-level-degradation-ladder level)]
+    (if (neg? start-idx)
+      {:level level :chunks (raw-chunks-at-level selection chosen level)}
+      (loop [idx start-idx]
+        (let [lvl (nth raw-level-degradation-ladder idx)
+              chunks (raw-chunks-at-level selection chosen lvl)]
+          (if (or (<= (raw-chunks-bytes chunks) max-bytes)
+                  (>= idx (dec (count raw-level-degradation-ladder))))
+            {:level lvl :chunks chunks}
+            (recur (inc idx))))))))
+
+(defn- truncate-line-to-bytes [line max-bytes]
+  (loop [n (min (count line) (max 0 max-bytes))]
+    (let [candidate (subs line 0 n)]
+      (if (or (zero? n) (<= (snippet-bytes candidate) max-bytes))
+        candidate
+        (recur (long (Math/floor (* 0.8 n))))))))
+
+(defn- partial-chunk-snippet
+  "Slice whole lines off the front of a chunk so it fits remaining-bytes.
+   Returns nil when not even one line fits, unless force? is set, in which
+   case a single byte-truncated line is returned so the caller never has to
+   emit an empty raw_context for a positive budget."
+  [{:keys [unit span content]} remaining-bytes force?]
+  (let [lines (str/split-lines content)
+        fitted (loop [ls lines kept [] used 0]
+                 (if (empty? ls)
+                   kept
+                   (let [line (first ls)
+                         line-bytes (+ (snippet-bytes line) (if (seq kept) 1 0))]
+                     (if (<= (+ used line-bytes) remaining-bytes)
+                       (recur (rest ls) (conj kept line) (+ used line-bytes))
+                       kept))))]
+    (cond
+      (seq fitted)
+      {:unit_id (:unit_id unit)
+       :path (:path unit)
+       :start_line (:start span)
+       :end_line (+ (:start span) (count fitted) -1)
+       :content (str/join "\n" fitted)}
+
+      force?
+      (let [line (truncate-line-to-bytes (or (first lines) "") remaining-bytes)]
+        (when (seq line)
+          {:unit_id (:unit_id unit)
+           :path (:path unit)
+           :start_line (:start span)
+           :end_line (:start span)
+           :content line}))
+
+      :else nil)))
+
 (defn- perform-raw-fetch [_index selection selected query requested-token-budget]
   (let [level (raw-escalation-level query)]
     (if (= level "none")
       {:status "skipped"
        :level "none"
+       :requested_level "none"
        :requests 0
        :snippets 0
        :raw_context []
        :bytes 0
+       :required_tokens 0
+       :truncated? false
        :warnings []
        :degradations []}
-      (if (<= (long (or requested-token-budget 0)) 0)
-        {:status "skipped"
-         :level level
-         :requests 0
-         :snippets 0
-         :raw_context []
-         :bytes 0
-         :warnings [(coded "raw_fetch_budget_exhausted" "No budget remained for late raw-code fetch.")]
-         :degradations []}
-        (let [max-units 6
-              max-bytes (* 4 (max 200 requested-token-budget))
-              chosen (take max-units selected)]
-          (loop [units chosen
-                 requests 0
-                 snippets 0
-                 raw-context []
-                 bytes 0
-                 warnings []
-                 degradations []
-                 truncated? false]
-            (if (empty? units)
-              (let [status (if (or (seq degradations) truncated?) "degraded" "completed")
-                    status* (if (zero? snippets) "degraded" status)
-                    warnings* (cond-> warnings
-                                truncated? (conj (coded "raw_fetch_budget_limited" "Raw fetch was truncated by budget limits.")))
-                    degradations* (cond-> degradations
-                                    (zero? snippets) (conj (coded "raw_fetch_empty" "Raw-code escalation produced no snippets.")))]
-                {:status status*
-                 :level level
-                 :requests requests
-                 :snippets snippets
-                 :raw_context raw-context
-                 :bytes bytes
-                 :warnings (vec (take 10 warnings*))
-                 :degradations (vec (take 10 degradations*))})
-              (let [u (first units)
-                    lines (selection-file-lines selection (:path u))]
-                (if-not (seq lines)
-                  (recur (rest units)
-                         (inc requests)
-                         snippets
-                         raw-context
-                         bytes
-                         warnings
-                         (conj degradations (coded "raw_fetch_file_missing" (str "Unable to read " (:path u) " for raw fetch.")))
-                         truncated?)
-                  (let [span (bounded-span u level (count lines))]
-                    (if-not span
-                      (recur (rest units)
-                             (inc requests)
-                             snippets
-                             raw-context
-                             bytes
-                             warnings
-                             (conj degradations (coded "raw_fetch_level_invalid" "Unknown raw-code fetch level requested."))
-                             truncated?)
-                      (let [chunk (->> (subvec lines (dec (:start span)) (:end span))
-                                       (str/join "\n"))
-                            chunk-bytes (snippet-bytes chunk)
-                            next-bytes (+ bytes chunk-bytes)]
-                        (if (> next-bytes max-bytes)
-                          (recur [] requests snippets raw-context bytes warnings degradations true)
-                          (recur (rest units)
-                                 (inc requests)
-                                 (inc snippets)
-                                 (conj raw-context
-                                       {:unit_id (:unit_id u)
-                                        :path (:path u)
-                                        :start_line (:start span)
-                                        :end_line (:end span)
-                                        :content chunk})
-                                 next-bytes
-                                 warnings
-                                 degradations
-                                 truncated?))))))))))))))
+      (let [chosen (vec (take raw-fetch-max-units selected))
+            required-bytes (raw-chunks-bytes (raw-chunks-at-level selection chosen level))
+            required-tokens (int (Math/ceil (/ (double required-bytes) 4.0)))]
+        (if (<= (long (or requested-token-budget 0)) 0)
+          {:status "skipped"
+           :level level
+           :requested_level level
+           :requests 0
+           :snippets 0
+           :raw_context []
+           :bytes 0
+           :required_tokens required-tokens
+           :truncated? false
+           :warnings [(coded "raw_fetch_budget_exhausted" "No budget remained for late raw-code fetch.")]
+           :degradations []}
+          (let [max-bytes (* 4 (max 200 requested-token-budget))
+                {effective-level :level chunks :chunks} (fit-raw-level selection chosen level max-bytes)
+                level-degraded? (not= effective-level level)]
+            (loop [chunks* chunks
+                   requests 0
+                   snippets 0
+                   raw-context []
+                   bytes 0
+                   warnings []
+                   degradations []
+                   truncated? false]
+              (if (empty? chunks*)
+                (let [degradations* (cond-> degradations
+                                      level-degraded?
+                                      (conj (coded "raw_fetch_level_degraded"
+                                                   (str "Raw fetch level degraded from " level
+                                                        " to " effective-level
+                                                        " to fit the raw-fetch budget.")))
+                                      (zero? snippets)
+                                      (conj (coded "raw_fetch_empty" "Raw-code escalation produced no snippets.")))
+                      status (if (or (seq degradations*) truncated?) "degraded" "completed")
+                      warnings* (cond-> warnings
+                                  truncated? (conj (coded "raw_fetch_budget_limited" "Raw fetch was truncated by budget limits.")))]
+                  {:status status
+                   :level effective-level
+                   :requested_level level
+                   :requests requests
+                   :snippets snippets
+                   :raw_context raw-context
+                   :bytes bytes
+                   :required_tokens required-tokens
+                   :truncated? truncated?
+                   :warnings (vec (take 10 warnings*))
+                   :degradations (vec (take 10 degradations*))})
+                (let [{:keys [fetch_status unit span content] chunk-bytes :bytes :as chunk} (first chunks*)]
+                  (case fetch_status
+                    :file_missing
+                    (recur (rest chunks*)
+                           (inc requests)
+                           snippets
+                           raw-context
+                           bytes
+                           warnings
+                           (conj degradations (coded "raw_fetch_file_missing" (str "Unable to read " (:path unit) " for raw fetch.")))
+                           truncated?)
+
+                    :level_invalid
+                    (recur (rest chunks*)
+                           (inc requests)
+                           snippets
+                           raw-context
+                           bytes
+                           warnings
+                           (conj degradations (coded "raw_fetch_level_invalid" "Unknown raw-code fetch level requested."))
+                           truncated?)
+
+                    :ok
+                    (let [next-bytes (+ bytes chunk-bytes)]
+                      (if (<= next-bytes max-bytes)
+                        (recur (rest chunks*)
+                               (inc requests)
+                               (inc snippets)
+                               (conj raw-context
+                                     {:unit_id (:unit_id unit)
+                                      :path (:path unit)
+                                      :start_line (:start span)
+                                      :end_line (:end span)
+                                      :content content})
+                               next-bytes
+                               warnings
+                               degradations
+                               truncated?)
+                        (let [remaining (max 0 (- max-bytes bytes))
+                              snippet (partial-chunk-snippet chunk remaining (zero? snippets))]
+                          (if snippet
+                            (recur []
+                                   (inc requests)
+                                   (inc snippets)
+                                   (conj raw-context snippet)
+                                   (+ bytes (snippet-bytes (:content snippet)))
+                                   warnings
+                                   degradations
+                                   true)
+                            (recur []
+                                   requests
+                                   snippets
+                                   raw-context
+                                   bytes
+                                   warnings
+                                   degradations
+                                   true)))))))))))))))
 
 (def ^:private default-api-version "1.0")
 (def ^:private default-selection-cache-max-entries 128)
@@ -1174,6 +1292,23 @@
        :capabilities capabilities
        :confidence confidence})))
 
+(defn- suggested-token-budget
+  "Estimate a top-level token_budget large enough for the detail stage to
+   return structure, impact hints, and full raw snippets without truncation.
+   Inverts the stage split from stage-budgets (10%/20%/70% with 80/160 token
+   floors) and the 35% detail structure share, then adds a 10% margin for
+   estimation error. Raw need is measured over the currently kept units, so
+   the suggestion is a close lower-bound estimate rather than a guarantee."
+  [structure-tokens structure-truncated? impact-tokens raw-tokens]
+  (let [structure-floor (if structure-truncated?
+                          (int (Math/ceil (/ (double structure-tokens) 0.35)))
+                          0)
+        detail-needed (max structure-floor
+                           (+ structure-tokens impact-tokens raw-tokens))
+        requested-needed (max (+ detail-needed 240)
+                              (int (Math/ceil (/ (double detail-needed) 0.7))))]
+    (int (Math/ceil (* 1.1 (double requested-needed))))))
+
 (defn- build-detail-response [index selection selector]
   (let [query (:query selection)
         policy (:policy selection)
@@ -1211,14 +1346,29 @@
         impact (if include-impact? impact-full (empty-impact-hints))
         raw-budget* (max 0 (- raw-budget (if include-impact? impact-tokens 0)))
         structure-estimated (estimate-tokens selected-source)
-        truncation (cond-> []
-                     (:truncated? selected-fit) (conj "selected_units_truncated")
-                     (and (seq selected) (not include-impact?)) (conj "impact_hints_omitted")
-                     (zero? detail-budget) (conj "detail_budget_exhausted"))
         capabilities (rp/capability-summary index (capability-units selected))
         base-confidence (build-confidence selected query* policy)
         raw-fetch (perform-raw-fetch index selection selected query* raw-budget*)
         raw-fetch-tokens (estimate-raw-context-tokens (:raw_context raw-fetch))
+        required-raw-tokens (long (or (:required_tokens raw-fetch) 0))
+        raw-level-degraded? (not= (:requested_level raw-fetch) (:level raw-fetch))
+        raw-truncated? (true? (:truncated? raw-fetch))
+        raw-shortfall? (or raw-truncated?
+                           raw-level-degraded?
+                           (and (= "skipped" (:status raw-fetch)) (pos? required-raw-tokens)))
+        truncation (cond-> []
+                     (:truncated? selected-fit) (conj "selected_units_truncated")
+                     (and (seq selected) (not include-impact?)) (conj "impact_hints_omitted")
+                     (zero? detail-budget) (conj "detail_budget_exhausted")
+                     raw-truncated? (conj "raw_snippets_truncated")
+                     raw-level-degraded? (conj "raw_fetch_level_degraded"))
+        suggested-budget (when (or raw-shortfall? (:truncated? selected-fit))
+                           (suggested-token-budget structure-estimated
+                                                   (boolean (:truncated? selected-fit))
+                                                   impact-tokens
+                                                   required-raw-tokens))
+        suggested-budget* (when (and suggested-budget (> suggested-budget requested))
+                            suggested-budget)
         budget (cond-> {:requested_tokens requested
                         :reserved_tokens detail-budget
                         :estimated_tokens (+ structure-estimated
@@ -1232,6 +1382,7 @@
                                                  (= "skipped" (:status raw-fetch))
                                                  (pos? (count (:warnings raw-fetch))))
                                             (into (map :code (:warnings raw-fetch))))}
+                 suggested-budget* (assoc :suggested_token_budget suggested-budget*)
                  true (assoc :stage_result_status
                              (stage-result-status selected-source selected truncation)))
         fallback-selected? (some #(= "parser_fallback" (:code %)) (:warnings base-confidence))
@@ -1286,6 +1437,7 @@
                        (= "low" (:level confidence)) (conj (coded "confidence_low" "Context packet confidence is low."))
                        (= "degraded" (:status raw-fetch)) (conj (coded "raw_fetch_degraded" "Raw-code fetch was executed in degraded mode."))
                        (:truncated? selected-fit) (conj (coded "detail_budget_limited" "Detail packet selected units were truncated to fit the reserved stage budget."))
+                       raw-truncated? (conj (coded "raw_snippets_truncated" "Raw snippets were truncated to fit the reserved raw-fetch budget."))
                        (and (seq selected) (not include-impact?)) (conj (coded "impact_hints_omitted" "Impact hints were omitted to keep detail payload within the reserved stage budget.")))
         stage-packet (build-stage "context_packet_assembly"
                                   packet-status
@@ -1308,6 +1460,7 @@
                                  {:raw_fetch_requests (:requests raw-fetch)
                                   :raw_fetch_snippets (:snippets raw-fetch)
                                   :raw_fetch_bytes (:bytes raw-fetch)
+                                  :raw_fetch_required_tokens required-raw-tokens
                                   :reserved_tokens raw-budget*
                                   :returned_tokens raw-fetch-tokens}
                                  (:warnings raw-fetch)
@@ -1365,30 +1518,38 @@
                                    :fetch_summary {:raw_fetch_requests (:requests raw-fetch)
                                                    :raw_fetch_snippets (:snippets raw-fetch)
                                                    :raw_fetch_bytes (:bytes raw-fetch)}
-                                   :budget_summary {:requested_tokens requested
-                                                    :reserved_tokens detail-budget
-                                                    :structure_budget_tokens structure-budget
-                                                    :raw_fetch_budget_tokens raw-budget*
-                                                    :estimated_tokens (:estimated_tokens budget)
-                                                    :returned_tokens (:returned_tokens budget)
-                                                    :raw_fetch_returned_tokens raw-fetch-tokens}}}
-        events (build-stage-events trace-id request-id (get-in query [:intent :purpose] "unknown") stages {:requested_tokens requested
-                                                                                                           :reserved_tokens detail-budget
-                                                                                                           :estimated_tokens (:estimated_tokens budget)
-                                                                                                           :returned_tokens (:returned_tokens budget)})]
+                                   :budget_summary (cond-> {:requested_tokens requested
+                                                            :reserved_tokens detail-budget
+                                                            :structure_budget_tokens structure-budget
+                                                            :raw_fetch_budget_tokens raw-budget*
+                                                            :raw_fetch_required_tokens required-raw-tokens
+                                                            :estimated_tokens (:estimated_tokens budget)
+                                                            :returned_tokens (:returned_tokens budget)
+                                                            :raw_fetch_returned_tokens raw-fetch-tokens}
+                                                     suggested-budget* (assoc :suggested_token_budget suggested-budget*))}}
+        events (build-stage-events trace-id request-id (get-in query [:intent :purpose] "unknown") stages (cond-> {:requested_tokens requested
+                                                                                                                   :reserved_tokens detail-budget
+                                                                                                                   :estimated_tokens (:estimated_tokens budget)
+                                                                                                                   :returned_tokens (:returned_tokens budget)}
+                                                                                                            suggested-budget* (assoc :suggested_token_budget suggested-budget*)))]
     (when-let [explain (m/explain (:example/context-packet contracts/contracts) context-packet)]
       (throw (ex-info "invalid context packet generated" {:type :internal_contract_error :errors (me/humanize explain)})))
     (when-let [explain (m/explain (:example/diagnostics-trace contracts/contracts) diagnostics)]
       (throw (ex-info "invalid diagnostics trace generated" {:type :internal_contract_error :errors (me/humanize explain)})))
     (projections/with-projection
-      {:api_version default-api-version
-       :selection_id (:selection_id selection)
-       :snapshot_id (:snapshot_id selection)
-       :raw_context (:raw_context raw-fetch)
-       :context_packet context-packet
-       :guardrail_assessment guardrails
-       :diagnostics_trace diagnostics
-       :stage_events events}
+      (cond-> {:api_version default-api-version
+               :selection_id (:selection_id selection)
+               :snapshot_id (:snapshot_id selection)
+               :raw_context (:raw_context raw-fetch)
+               :context_packet context-packet
+               :guardrail_assessment guardrails
+               :diagnostics_trace diagnostics
+               :stage_events events}
+        suggested-budget*
+        (assoc :next_step {:recommended_action "raise_token_budget"
+                           :available_actions ["fetch_context_detail"]
+                           :reason "Detail payload was truncated or degraded to fit the reserved budget; retry with the suggested token_budget."
+                           :suggested_token_budget suggested-budget*}))
       :detail)))
 
 (defn resolve-context
