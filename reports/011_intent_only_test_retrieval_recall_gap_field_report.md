@@ -1,10 +1,10 @@
 ---
 title: "Field Report: intent-only queries don't surface test units without explicit targets"
 doc_type: "bug_report"
-lifecycle: "active"
-status: "open"
-agent_action: "reference_for_context"
-updated: "2026-07-14"
+lifecycle: "completed"
+status: "fixed"
+agent_action: "historical_reference_only"
+updated: "2026-07-20"
 ---
 
 # Field Report: intent-only `resolve_context` under-recalls test units
@@ -126,3 +126,17 @@ the MCP-first goal.
 
 High — both calls above were run back-to-back on the same snapshot in one
 session; the divergence is reproducible by re-issuing them.
+
+## Resolution
+
+Fixed on 2026-07-20. Intent-only lexical retrieval now includes file paths in
+lexical matching, classifies `src/test/...` paths as test paths before generic
+`src/` source paths, supplements lexical seeds with matched test units when
+`include_tests` is true, and applies a bounded `focus_on_tests` boost only to
+already-matched test units.
+
+Verification:
+
+- `clojure -M:test -n semidx.integration.runtime-test`: passed, 103 tests, 468 assertions.
+- `clojure -M:test`: passed, 225 tests, 1590 assertions.
+- `clojure -M:ccc check --root .`: passed after refreshing CCC artifacts.

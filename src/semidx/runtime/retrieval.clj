@@ -127,15 +127,15 @@
           (str/ends-with? p "_pb2.py"))
       "generated"
 
-      (or (str/starts-with? p "src/")
-          (str/starts-with? p "lib/")
-          (str/starts-with? p "app/"))
-      "source"
-
       (or (str/starts-with? p "test/")
           (str/includes? p "/test/")
           (str/includes? p "/tests/"))
       "test"
+
+      (or (str/starts-with? p "src/")
+          (str/starts-with? p "lib/")
+          (str/starts-with? p "app/"))
+      "source"
 
       :else
       "other")))
@@ -156,7 +156,7 @@
                   (path-class (:path u)))))
 
 (defn- lexical-match-score [u tokens]
-  (let [hay (str/lower-case (str (:signature u) " " (:summary u) " " (:symbol u)))
+  (let [hay (str/lower-case (str (:signature u) " " (:summary u) " " (:symbol u) " " (:path u)))
         lexical-overlap (count (filter #(str/includes? hay %) tokens))
         dispatch-bonus (if (dispatch-match? u tokens) 2 0)]
     (+ lexical-overlap dispatch-bonus)))
@@ -252,24 +252,34 @@
        by-dispatch (conj [:tier2 "dispatch_value_match" "Tier2: multimethod dispatch value matches the query intent."]))
      (suspected-symbol-match-reasons u query))))
 
-(defn- lexical-seed-units [units tokens]
+(defn- lexical-seed-units [units tokens query]
   (let [matches (->> units
                      (keep (fn [u]
                              (let [score (lexical-match-score u tokens)]
                                (when (pos? score)
                                  (assoc u ::lexical-score score)))))
                      vec)
+        sort-key (fn [u]
+                   [(- (::lexical-score u))
+                    (get path-class-rank (path-class (:path u)) 99)
+                    (:path u)
+                    (:start_line u)])
+        sorted-matches (sort-by sort-key matches)
         eligible-matches (vec (filter lexical-path-eligible? matches))
         candidates (if (seq eligible-matches)
                      eligible-matches
-                     matches)]
-    (->> candidates
-         (sort-by (fn [u]
-                    [(- (::lexical-score u))
-                     (get path-class-rank (path-class (:path u)) 99)
-                     (:path u)
-                     (:start_line u)]))
-         (take 6)
+                     matches)
+        primary-seeds (take 6 (sort-by sort-key candidates))
+        test-seeds (when (include-tests? query)
+                     (->> sorted-matches
+                          (filter #(= "test" (path-class (:path %))))
+                          (take 4)))]
+    (->> (concat primary-seeds test-seeds)
+         (reduce (fn [acc u]
+                   (if (some #(= (:unit_id %) (:unit_id u)) acc)
+                     acc
+                     (conj acc u)))
+                 [])
          (mapv #(dissoc % ::lexical-score)))))
 
 (defn- related-test-unit-ids [index module]
@@ -318,18 +328,22 @@
 (defn- apply-global-boosts [units query policy score-map]
   (let [hints (:hints query)
         preferred-paths (set (:preferred_paths hints))
-        preferred-modules (:preferred_modules hints)]
+        preferred-modules (:preferred_modules hints)
+        focus-on-tests? (true? (:focus_on_tests hints))]
     (reduce
      (fn [acc u]
        (let [uid (:unit_id u)
              already-scored? (contains? score-map uid)
+             test-path? (= "test" (path-class (:path u)))
              by-pref-path (contains? preferred-paths (:path u))
              by-pref-module (some #(module-prefix-match? u %) preferred-modules)
+             by-focused-test (and already-scored? focus-on-tests? test-path?)
              by-source-path-prior (and already-scored? (source-like-path? (:path u)))
              by-parser-fallback (= "fallback" (:parser_mode u))]
          (cond-> acc
            by-pref-path (add-scored-reason uid :tier3 (rp/weight policy "hint_preferred_path") "hint_preferred_path" "Tier3: preferred path hint boosted unit.")
            by-pref-module (add-scored-reason uid :tier3 (rp/weight policy "hint_preferred_module") "hint_preferred_module" "Tier3: preferred module hint boosted unit.")
+           by-focused-test (add-scored-reason uid :tier3 (rp/weight policy "hint_focus_on_tests") "hint_focus_on_tests" "Tier3: focus_on_tests hint boosted an already-matched test unit.")
            by-source-path-prior (add-scored-reason uid :tier3 (rp/weight policy "source_path_prior") "source_path_prior" "Tier3: source-like path prior boosted an already-matched unit.")
            by-parser-fallback (add-scored-reason uid :tier3 (rp/weight policy "parser_fallback") "parser_fallback" "Fallback parser contributes limited-confidence evidence."))))
      score-map
@@ -403,7 +417,7 @@
                                  seed-pairs)
         lexical-seeds (if (seq structural-seed-ids)
                         []
-                        (lexical-seed-units units tokens))
+                        (lexical-seed-units units tokens query))
         lexical-seed-ids (mapv :unit_id lexical-seeds)
         lexical-score-map (reduce (fn [acc u]
                                     (add-scored-reason acc

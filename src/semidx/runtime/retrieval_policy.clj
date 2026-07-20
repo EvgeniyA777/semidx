@@ -21,6 +21,7 @@
              :graph_related_test_neighbor 28
              :hint_preferred_path 15
              :hint_preferred_module 10
+             :hint_focus_on_tests 42
              :hint_suspected_symbol_exact 42
              :hint_suspected_symbol_segment 18
              :source_path_prior 6
@@ -61,7 +62,6 @@
   {"low" 0
    "medium" 1
    "high" 2})
-
 
 (defn default-retrieval-policy []
   default-policy)

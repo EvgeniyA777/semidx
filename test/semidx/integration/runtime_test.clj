@@ -299,9 +299,9 @@
         index (sci/create-index {:root_path tmp-root
                                  :policy_registry registry})
         result (sci/resolve-context-detail index
-                                    sample-query
-                                    {:retrieval_policy {:policy_id "heuristic_v1_shadow_strict"
-                                                        :version "2026-03-12"}})]
+                                           sample-query
+                                           {:retrieval_policy {:policy_id "heuristic_v1_shadow_strict"
+                                                               :version "2026-03-12"}})]
     (is (not= "top_authority" (get-in result [:context_packet :relevant_units 0 :rank_band])))
     (is (= "heuristic_v1_shadow_strict"
            (get-in result [:diagnostics_trace :retrieval_policy :policy_id])))))
@@ -444,10 +444,10 @@
         overloaded-units (sci/query-units storage tmp-root {:module "MyApp.LocalOverloadedFormatter" :limit 20})
         formatter-units (sci/query-units storage tmp-root {:module "MyApp.Formatter" :limit 20})
         local-normalize-2-id (some->> overloaded-units
-                                       (filter #(and (= "MyApp.LocalOverloadedFormatter/normalize" (:symbol %))
-                                                     (= 2 (:method_arity %))))
-                                       first
-                                       :unit_id)
+                                      (filter #(and (= "MyApp.LocalOverloadedFormatter/normalize" (:symbol %))
+                                                    (= 2 (:method_arity %))))
+                                      first
+                                      :unit_id)
         formatter-normalize-1-id (some->> formatter-units
                                           (filter #(= "MyApp.Formatter/normalize" (:symbol %)))
                                           first
@@ -1121,8 +1121,8 @@
                                    (into {}
                                          (map (fn [[unit-id unit]]
                                                 [unit-id (dissoc unit :semantic_id
-                                                                      :semantic_id_version
-                                                                      :semantic_fingerprint)])
+                                                                 :semantic_id_version
+                                                                 :semantic_fingerprint)])
                                               units)))))
         _ (storage/init-storage! storage-adapter)
         _ (storage/save-index! storage-adapter legacy-index)
@@ -2257,6 +2257,14 @@
   (write-file! root ".tree-sitter-grammars/tree-sitter-java/bindings/python/tree_sitter_java/__init__.py"
                "def process_order(value):\n    return value\n\n\ndef validate_order(value):\n    return value\n"))
 
+(defn- create-intent-only-test-recall-repo! [root]
+  (write-file! root "src/main/java/com/example/jobtracker/controller/GoogleSheetsController.java"
+               "package com.example.jobtracker.controller;\n\npublic class GoogleSheetsController {\n  public boolean credentialsFilePresent(String path) {\n    return hasText(path);\n  }\n\n  public String redact(String value) {\n    return hasText(value) ? \"***\" : \"\";\n  }\n\n  private boolean hasText(String value) {\n    return value != null && !value.isBlank();\n  }\n}\n")
+  (write-file! root "src/test/java/com/example/jobtracker/service/GoogleApiSheetsClientTest.java"
+               "package com.example.jobtracker.service;\n\nclass GoogleApiSheetsClientTest {\n  GoogleApiSheetsClient newClient() {\n    MockHttpTransport transport = new MockHttpTransport();\n    return new GoogleApiSheetsClient(transport);\n  }\n\n  GoogleApiSheetsClient errorClient() {\n    MockHttpTransport transport = new MockHttpTransport();\n    return new GoogleApiSheetsClient(transport);\n  }\n}\n\nclass GoogleApiSheetsClient {\n  GoogleApiSheetsClient(MockHttpTransport transport) {}\n}\n\nclass MockHttpTransport {}\n")
+  (write-file! root "src/test/java/com/example/jobtracker/controller/GoogleSheetsControllerTest.java"
+               "package com.example.jobtracker.controller;\n\nclass GoogleSheetsControllerTest {\n  MockMvc mockMvc;\n\n  void listsConfigurationKeys() {\n    mockMvc.perform(\"/google-sheets\");\n  }\n}\n\nclass MockMvc {\n  void perform(String path) {}\n}\n"))
+
 (deftest broad-query-prefers-source-over-vendored-lexical-noise-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-vendored-noise" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)
@@ -2308,3 +2316,30 @@
     (is (some #(= "my.app.order/process-order" (:symbol %)) focus))
     (is (not-any? #(str/starts-with? (:path %) ".tree-sitter-grammars/") focus))
     (is (= "src/my/app/order.clj" (:path (first focus))))))
+
+(deftest intent-only-include-tests-surfaces-lexical-test-units-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-intent-test-recall" (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-intent-only-test-recall-repo! tmp-root)
+        index (sci/create-index {:root_path tmp-root})
+        intent-text "How existing tests mock the Google Sheets HTTP SDK layer without live network (GoogleApiSheetsClientTest), and how GoogleSheetsController MockMvc tests are structured"
+        query {:api_version "1.0"
+               :schema_version "1.0"
+               :intent {:purpose "test_targeting"
+                        :details intent-text}
+               :targets {:diff_summary intent-text}
+               :constraints {:token_budget 3200
+                             :max_raw_code_level "enclosing_unit"
+                             :freshness "current_snapshot"}
+               :hints {:focus_on_tests true}
+               :options {:include_tests true
+                         :include_impact_hints false
+                         :allow_raw_code_escalation false}
+               :trace {:trace_id "99999999-9999-4999-8999-999999999999"
+                       :request_id "runtime-intent-test-recall-001"}}
+        result (sci/resolve-context index query)
+        focus (:focus result)]
+    (is (seq focus))
+    (is (some #(str/includes? (:path %) "/test/") focus))
+    (is (some #(or (str/includes? (:symbol %) "GoogleSheetsControllerTest")
+                   (str/includes? (:symbol %) "MockMvc"))
+              focus))))
