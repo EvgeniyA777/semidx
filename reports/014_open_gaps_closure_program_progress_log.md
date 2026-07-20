@@ -193,3 +193,26 @@ Tracks execution of `plans/013_open_gaps_closure_program.md`.
 - Next stage: Stage 2 - remove the hard runtime dependency on an externally installed tree-sitter CLI.
 - Skipped / limitations: external reviewer loop was not run inside this documentation-only closure commit; implementation sub-stage verification is recorded above.
 - Known blockers: none.
+
+## Stage 2.1 - Tree-Sitter Toolchain Strategy ADR
+
+- Status: completed.
+- Scope: Decide and record the Stage 2 strategy for removing the hard runtime dependency on an externally installed `tree-sitter` CLI, and repair stale ADR placeholder references in `plans/013`.
+- Decision record: `ADR-036 Use A Repo-Managed Tree-Sitter Toolchain`.
+- Summary:
+  - Regex parsing remains the guaranteed default.
+  - Tree-sitter remains an optional accelerated parser path.
+  - Runtime acceleration must resolve through explicit parser options, environment configuration, and a repository-managed toolchain provisioned by the grammar bootstrap path, with ambient `PATH` only as a developer fallback.
+  - `plans/013` now references real accepted ADRs for Stage 1 (`ADR-035`) and Stage 2 (`ADR-036`), points Stage 3 at the accepted relation-first fork (`ADR-034`) plus a future scoping ADR, and avoids reusing occupied ADR numbers for later stages.
+- Changed files:
+  - `adr/036-use-a-repo-managed-tree-sitter-toolchain.md`
+  - `plans/013_open_gaps_closure_program.md`
+  - `MEMORY.md`
+  - `docs/roadmap-status.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - semidx MCP mapping completed for shared tree-sitter helpers and Clojure/Java/TypeScript lane callers.
+  - `git diff --check` passed.
+  - `clojure -M:ccc check --root .` passed.
+- Skipped / limitations: runtime tests and gates are deferred to the implementation sub-step because this commit records the strategy and plan repair only.
+- Known blockers: none.

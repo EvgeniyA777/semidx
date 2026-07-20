@@ -130,7 +130,7 @@ from `plans/012` guards behavior), then `./scripts/run-mvp-gates.sh`,
 `./scripts/validate-language-onboarding.sh` for each moved lane — outputs must be
 byte-identical to pre-split baselines (capture baselines before Stage 1).
 
-**Docs:** ADR-033 "Split language-lane extraction out of the adapter facade";
+**Docs:** ADR-035 "Split language-lane extraction out of the adapter facade";
 update `MEMORY.md` (facade now thin), `docs/roadmap-status.md` (drop
 "split `runtime/adapters.clj`" from Current Focus); refresh CCC.
 
@@ -150,11 +150,10 @@ lane layer shell out to the external CLI; `.tree-sitter-grammars/` holds
 bootstrapped grammars.
 
 **Sub-steps:**
-1. Decide and record the strategy in ADR-034: bundle grammars + invoke via an
-   embeddable binding, or vendor a self-contained CLI, or formalize graceful
-   regex-fallback as the guaranteed default with tree-sitter as an explicit
-   opt-in. Prefer the option that removes the *hard* external dependency while
-   keeping regex fallback as the safety net.
+1. Use ADR-036 as the accepted strategy: keep regex parsers as the guaranteed
+   default, keep tree-sitter as optional acceleration, and resolve acceleration
+   through explicit parser options, environment configuration, and a
+   repository-managed toolchain rather than a required external CLI.
 2. Implement the chosen path in `languages/shared.clj` tree-sitter helpers.
 3. Ensure clean degradation + a diagnostic when the accelerated path is
    unavailable (no silent fallback — surface it).
@@ -163,7 +162,7 @@ bootstrapped grammars.
 unavailable; parser-mode parity (regex vs tree-sitter) must hold for TS/Java/Clj.
 `./scripts/run-semantic-quality-report.sh` for extraction parity.
 
-**Docs:** ADR-034; `MEMORY.md` Known Gaps (tree-sitter dependency line);
+**Docs:** ADR-036; `MEMORY.md` Known Gaps (tree-sitter dependency line);
 `docs/roadmap-status.md`; update the grammar-bootstrap section of surface docs.
 
 ---
@@ -178,10 +177,12 @@ resolver narrowing; per-lane semantic-cores do import/owner-aware single-hop
 disambiguation; `related_tests` already does one helper-namespace hop.
 
 **Sub-steps:**
-1. Define the v1 dataflow scope in ADR-035: which flows (e.g. local variable →
-   call-target propagation, return-value threading, parameter-to-call binding)
-   and which lanes ship first (Clojure high-confidence lane as reference, then
-   at least one non-Clojure lane).
+1. Follow the relation-first fork accepted in ADR-034, then define the v1
+   dataflow scope in a new scoping ADR numbered with the next available ADR at
+   execution time: which flows (e.g. local variable → call-target propagation,
+   return-value threading, parameter-to-call binding) and which lanes ship first
+   (Clojure high-confidence lane as reference, then at least one non-Clojure
+   lane).
 2. Extend `semantic_ir.clj` with the interprocedural edge/flow representation.
 3. Implement resolver narrowing that consumes the new IR, keeping ambiguous
    flows conservative (no over-linking) — mirror the existing "conservative
@@ -195,8 +196,8 @@ replay/benchmark ambiguity fixtures under `fixtures/`;
 must show no regression and a measurable gain on the new interprocedural cases.
 Consider protected replay-case promotion for the hardest new cases.
 
-**Docs:** ADR-035; `MEMORY.md` Current State + Known Gaps (compiler-grade line);
-`docs/roadmap-status.md`; refresh CCC.
+**Docs:** ADR-034 plus the new Stage 3 scoping ADR; `MEMORY.md` Current State +
+Known Gaps (compiler-grade line); `docs/roadmap-status.md`; refresh CCC.
 
 **Risk:** highest semantic risk. Mitigation: land per-lane behind conservative
 defaults; benchmark/replay parity is the gate; split into multiple commits/PRs
@@ -214,8 +215,9 @@ graph query capability (multi-hop traversal with contract-valid bounded output).
 unit queries over `semantic_index_call_edges` (in-memory + PostgreSQL).
 
 **Sub-steps:**
-1. Specify the query surface + bounds in ADR-036 (traversal depth cap, result
-   caps, contract shape). Keep outputs bounded and contract-valid.
+1. Specify the query surface + bounds in a new ADR numbered with the next
+   available ADR at execution time (traversal depth cap, result caps, contract
+   shape). Keep outputs bounded and contract-valid.
 2. Add JSON Schema under `contracts/schemas/` + `malli` mirror in
    `src/semidx/contracts/` for the new query request/response.
 3. Implement bounded multi-hop traversal in `storage.clj` for both in-memory and
@@ -227,8 +229,8 @@ unit queries over `semantic_index_call_edges` (in-memory + PostgreSQL).
 (in-memory vs PostgreSQL, `SCI_TEST_POSTGRES_URL`) — detect/stop/fresh-start the
 PostgreSQL instance before running; `clojure -M:test`.
 
-**Docs:** ADR-036; `contracts/` updates; `docs/runtime-api.md` + `docs/mcp-api.md`
-if surfaced there; `MEMORY.md` Known Gaps (graph-query line);
+**Docs:** the new Stage 4 ADR; `contracts/` updates; `docs/runtime-api.md` +
+`docs/mcp-api.md` if surfaced there; `MEMORY.md` Known Gaps (graph-query line);
 `docs/roadmap-status.md`.
 
 ---
@@ -243,7 +245,8 @@ at runtime; `grpc.clj` is the edge; parity tests are `semidx.runtime-grpc-test`.
 
 **Sub-steps:**
 1. Add a protobuf codegen path (build alias in `deps.edn`) producing stubs from
-   the pinned `.proto`; record the toolchain decision in ADR-037.
+   the pinned `.proto`; record the toolchain decision in a new ADR numbered
+   with the next available ADR at execution time.
 2. Wire `grpc_proto.clj` / `grpc.clj` to the generated stubs while preserving the
    dedicated runtime envelope messages and error-trailer taxonomy
    (`x-sci-error-code` / `x-sci-error-category`).
@@ -252,7 +255,7 @@ at runtime; `grpc.clj` is the edge; parity tests are `semidx.runtime-grpc-test`.
 **Verification:** `semidx.runtime-grpc-test` parity; `clojure -M:runtime-grpc`
 smoke; error-taxonomy trailers unchanged.
 
-**Docs:** ADR-037; `MEMORY.md` Known Gaps (gRPC stubs line);
+**Docs:** the new Stage 5 ADR; `MEMORY.md` Known Gaps (gRPC stubs line);
 `docs/roadmap-status.md`; `docs/runtime-api.md` gRPC section.
 
 ---
@@ -269,9 +272,10 @@ intentionally absent; governance lifecycle (`draft/shadow/active/retired`) is
 offline via `clojure -M:eval`.
 
 **Sub-steps:**
-1. ADR-038: scope the control-plane (read/introspect registry + guarded
-   promote/retire hooks) and its authz boundary; do not bypass promotion gates,
-   protected-case checks, or approval tiers.
+1. In a new ADR numbered with the next available ADR at execution time, scope
+   the control-plane (read/introspect registry + guarded promote/retire hooks)
+   and its authz boundary; do not bypass promotion gates, protected-case
+   checks, or approval tiers.
 2. Contract-first: JSON Schema + `malli` mirror for control-plane requests.
 3. Implement on HTTP (and mirror on gRPC/MCP as applicable), reusing existing
    governance-tier enforcement and error taxonomy.
@@ -280,8 +284,9 @@ offline via `clojure -M:eval`.
 governance-gate regression tests (promotion still refuses blocked/regressing
 candidates).
 
-**Docs:** ADR-038; `contracts/`; `MEMORY.md` Known Gaps (control-plane line);
-`docs/roadmap-status.md`; `docs/runtime-api.md` + `docs/mcp-api.md`.
+**Docs:** the new Stage 6 ADR; `contracts/`; `MEMORY.md` Known Gaps
+(control-plane line); `docs/roadmap-status.md`; `docs/runtime-api.md` +
+`docs/mcp-api.md`.
 
 ---
 
@@ -294,8 +299,9 @@ depth, without displacing ingress/proxy responsibility.
 edges (`http.clj`, `grpc.clj`) have tenant/correlation context but no limiter.
 
 **Sub-steps:**
-1. ADR-039: scope an optional, config-gated limiter (per-tenant / per-actor),
-   default off, emitting the unified error taxonomy on rejection.
+1. In a new ADR numbered with the next available ADR at execution time, scope
+   an optional, config-gated limiter (per-tenant / per-actor), default off,
+   emitting the unified error taxonomy on rejection.
 2. Implement as edge middleware on HTTP and gRPC, fed by existing
    tenant/correlation context; surface limiter decisions in usage metrics.
 3. Keep it opt-in so the default in-memory/local path is unchanged.
@@ -303,7 +309,7 @@ edges (`http.clj`, `grpc.clj`) have tenant/correlation context but no limiter.
 **Verification:** edge conformance tests with limiter on/off; usage-metrics
 rollup includes limiter rejections; error taxonomy on 429-equivalent responses.
 
-**Docs:** ADR-039; `MEMORY.md` Known Gaps (rate-limiting line);
+**Docs:** the new Stage 7 ADR; `MEMORY.md` Known Gaps (rate-limiting line);
 `docs/roadmap-status.md`; `docs/runtime-api.md`.
 
 ---

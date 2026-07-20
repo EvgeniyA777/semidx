@@ -70,7 +70,7 @@ The `plans/013` Stage 1 adapter split is now delivered for the current scope:
 - shared line/signature/token and tree-sitter helper mechanics live in `semidx.runtime.languages.shared`
 - the remaining legacy TypeScript adapter block and adapter-private compatibility wrappers have been removed rather than carried forward
 
-The next near-term focus is `plans/013` Stage 2: remove the hard runtime dependency on an externally installed tree-sitter CLI while preserving pinned grammar reproducibility and explicit graceful degradation.
+The next near-term focus is `plans/013` Stage 2 implementation under `ADR-036`: remove the hard runtime dependency on an externally installed tree-sitter CLI by adding repo-managed tree-sitter toolchain resolution, while preserving pinned grammar reproducibility, regex defaults, and explicit graceful degradation.
 
 After Stage 2, the next semantic focus remains:
 
