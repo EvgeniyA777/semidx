@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: f3f01fc7fcef71e60c821d72b0733d4e4ab3db6b
+- fingerprint: 6157175ee98fb2331867bdb2dcc814a40b536392
 
 ## Tree
 ```text
@@ -196,17 +196,17 @@ semidx
 - close-sse! [function]
 ### semidx.runtime.adapters
 - path: src/semidx/runtime/adapters.clj
-- requires: clojure.edn, clojure.java.io, clojure.java.shell, clojure.set, clojure.string, semidx.runtime.language-registry, semidx.runtime.languages.clojure, semidx.runtime.languages.css, semidx.runtime.languages.html, semidx.runtime.languages.javascript, semidx.runtime.languages.shared, semidx.runtime.languages.typescript, semidx.runtime.semantic-ir
-- aliases: clj-language -> semidx.runtime.languages.clojure, css-language -> semidx.runtime.languages.css, edn -> clojure.edn, html-language -> semidx.runtime.languages.html, io -> clojure.java.io, js-language -> semidx.runtime.languages.javascript, language-registry -> semidx.runtime.language-registry, semantic-ir -> semidx.runtime.semantic-ir, set -> clojure.set, sh -> clojure.java.shell, shared-language -> semidx.runtime.languages.shared, str -> clojure.string, ts-language -> semidx.runtime.languages.typescript
+- requires: clojure.java.io, clojure.string, semidx.runtime.language-registry, semidx.runtime.languages.clojure, semidx.runtime.languages.css, semidx.runtime.languages.html, semidx.runtime.languages.java, semidx.runtime.languages.javascript, semidx.runtime.languages.shared, semidx.runtime.languages.typescript, semidx.runtime.semantic-ir
+- aliases: clj-language -> semidx.runtime.languages.clojure, css-language -> semidx.runtime.languages.css, html-language -> semidx.runtime.languages.html, io -> clojure.java.io, java-language -> semidx.runtime.languages.java, js-language -> semidx.runtime.languages.javascript, language-registry -> semidx.runtime.language-registry, semantic-ir -> semidx.runtime.semantic-ir, shared-language -> semidx.runtime.languages.shared, str -> clojure.string, ts-language -> semidx.runtime.languages.typescript
 - symbols:
-- java-package-re [section]
-- java-import-re [section]
-- java-class-re [section]
-- java-method-re [section]
-- java-constructor-re [section]
 - py-import-re [section]
 - py-from-import-re [section]
 - py-class-re [section]
+- py-def-re [section]
+- py-call-re [section]
+- lua-require-re [section]
+- lua-assigned-require-re [section]
+- lua-local-function-re [section]
 ### semidx.runtime.authz
 - path: src/semidx/runtime/authz.clj
 - requires: clojure.edn, clojure.java.io, clojure.string

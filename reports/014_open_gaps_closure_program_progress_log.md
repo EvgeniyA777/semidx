@@ -81,3 +81,26 @@ Tracks execution of `plans/013_open_gaps_closure_program.md`.
   - `./scripts/run-mvp-gates.sh` passed (`225 tests / 1590 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
 - Skipped / limitations: none.
 - Known blockers: none.
+
+## Stage 1.3 - Java Lane Extraction
+
+- Status: completed.
+- Scope: Move the Java parser lane out of `semidx.runtime.adapters` into `semidx.runtime.languages.java`, including Java regex parsing, optional tree-sitter extraction, overload/constructor unit identity, superclass metadata, static-import ownership, method references, and call arity indexing.
+- Architecture plan:
+  - Goal: make `semidx.runtime.languages.java` the real Java lane owner instead of a wrapper around adapter internals.
+  - Boundary: `adapters/parse-file` remains the cross-language dispatcher; Java-specific regexes, call extraction, parser policy, and tree-sitter interpretation live in the Java lane namespace.
+  - Cleanup: removed the legacy public `adapters/parse-java-file` facade and dispatches directly to `java-language/parse-file`.
+  - Dependency cleanup: removed Java-only `edn`, `sh`, and `set` namespace requirements from `semidx.runtime.adapters` after the move.
+- Changed files:
+  - `src/semidx/runtime/adapters.clj`
+  - `src/semidx/runtime/languages/java.clj`
+  - `MEMORY.md`
+- Verification:
+  - Compile probe passed for `semidx.runtime.languages.java` and `semidx.runtime.adapters`.
+  - `clojure -M:test -n semidx.integration.runtime-test` passed (`103 tests / 468 assertions`).
+  - `clojure -M:test` passed (`225 tests / 1590 assertions`).
+  - `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
+  - `./scripts/run-semantic-quality-report.sh` exited `0` with the expected advisory gate state: `expected_change_match_rate=0.8333333333333334`, `identity_stability_rate=1.0`, `move_rename_recovery_rate=1.0`, `implementation_vs_meaning_accuracy=0.6666666666666666`, `unmatched_rate=0.0`.
+  - `./scripts/run-mvp-gates.sh` passed (`225 tests / 1590 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
+- Skipped / limitations: none.
+- Known blockers: none.
