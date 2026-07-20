@@ -11,6 +11,10 @@ This file stores lightweight operational memory for the project:
 
 Use this as a fast session bootstrap before deep-diving into ADRs and code.
 
+For Codex continuation handoff, read
+[`reports/017_codex_continuation_handoff.md`](reports/017_codex_continuation_handoff.md)
+after this memory file.
+
 ## Current State
 
 - Contract layer is established (`contracts/schemas`, `contracts/examples`, `fixtures/retrieval`).
