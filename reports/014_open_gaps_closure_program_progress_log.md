@@ -147,5 +147,29 @@ Tracks execution of `plans/013_open_gaps_closure_program.md`.
   - `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
   - `./scripts/run-semantic-quality-report.sh` exited `0` with the expected advisory gate state: `expected_change_match_rate=0.8333333333333334`, `identity_stability_rate=1.0`, `move_rename_recovery_rate=1.0`, `implementation_vs_meaning_accuracy=0.6666666666666666`, `unmatched_rate=0.0`.
   - `./scripts/run-mvp-gates.sh` passed (`230 tests / 1614 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
+  - `clojure -M:ccc check --root .` passed after refreshing CCC artifacts.
+- Skipped / limitations: none.
+- Known blockers: none.
+
+## Stage 1.6 - TypeScript Legacy Adapter Cleanup
+
+- Status: completed.
+- Scope: Remove the remaining legacy TypeScript parser block from `semidx.runtime.adapters` after the TypeScript lane already owned the implementation, and route TypeScript/JavaScript dispatch directly to their language namespaces.
+- Architecture plan:
+  - Goal: keep adapters as a cross-language dispatcher only, without carrying duplicate TypeScript regex/tree-sitter parsing or compatibility fallbacks.
+  - Boundary: `semidx.runtime.languages.typescript` owns TypeScript regex parsing, optional tree-sitter parsing, import/call expansion, object-literal/class-field/default-export/re-export extraction, and parser diagnostics; `semidx.runtime.languages.javascript` owns JavaScript parse dispatch and language tagging.
+  - Cleanup: removed adapter-level TypeScript regexes, tree-sitter helpers, `parse-typescript-legacy`, `parse-typescript`, and the private `parse-javascript` wrapper.
+- Changed files:
+  - `src/semidx/runtime/adapters.clj`
+  - `MEMORY.md`
+- Verification:
+  - Compile probe passed for `semidx.runtime.adapters`, `semidx.runtime.languages.typescript`, and `semidx.runtime.languages.javascript`.
+  - `clojure -M:test -n semidx.integration.typescript-onboarding-test` passed (`3 tests / 11 assertions`).
+  - `clojure -M:test -n semidx.integration.javascript-onboarding-test` passed (`4 tests / 34 assertions`).
+  - `clojure -M:test -n semidx.integration.runtime-test` passed (`103 tests / 468 assertions`).
+  - `clojure -M:test` passed (`230 tests / 1614 assertions`).
+  - `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
+  - `./scripts/run-semantic-quality-report.sh` exited `0` with the expected advisory gate state: `expected_change_match_rate=0.8333333333333334`, `identity_stability_rate=1.0`, `move_rename_recovery_rate=1.0`, `implementation_vs_meaning_accuracy=0.6666666666666666`, `unmatched_rate=0.0`.
+  - `./scripts/run-mvp-gates.sh` passed (`230 tests / 1614 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
 - Skipped / limitations: none.
 - Known blockers: none.
