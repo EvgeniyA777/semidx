@@ -113,10 +113,10 @@ Use this as a fast session bootstrap before deep-diving into ADRs and code.
 
 ## Next Execution Priorities
 
-1. Put the next serious engineering pass into genuinely deeper compiler-grade semantic-core work rather than more roadmap closure.
-2. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
-3. On the next Antigravity touchpoint, explicitly test staged continuation after `resolve_context`: require `expand_context` and `fetch_context_detail`, verify the client reuses `selection_id` / `snapshot_id`, and check whether evidence quality improves without falling back to manual browsing.
-4. Treat further runtime/ops work as incremental polish unless a concrete production gap appears.
+1. Execute `plans/013` Stage 2 next: remove the hard runtime dependency on an externally installed tree-sitter CLI while preserving pinned grammar reproducibility and explicit graceful degradation.
+2. After Stage 2, continue into the relation-first interprocedural/dataflow semantic tranche governed by `ADR-034`.
+3. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
+4. On the next Antigravity touchpoint, explicitly test staged continuation after `resolve_context`: require `expand_context` and `fetch_context_detail`, verify the client reuses `selection_id` / `snapshot_id`, and check whether evidence quality improves without falling back to manual browsing.
 
 ## Update Rule
 

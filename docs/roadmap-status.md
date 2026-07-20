@@ -63,10 +63,18 @@ The semantic snapshot productization tail is now also delivered for the current 
 - semantic-quality reporting is available as an advisory CI artifact lane via `.github/workflows/mvp-runtime.yml`
 - runtime and MCP docs now cover `literal-file-slice`, `snapshot-diff`, `semantic-quality-report`, and the projection taxonomy
 
-The next near-term focus is now beyond this delivered stabilization slice:
+The `plans/013` Stage 1 adapter split is now delivered for the current scope:
 
-- deeper shared-helper extraction out of the remaining adapter hotspot
-- interprocedural/dataflow-sensitive semantic resolution
+- `semidx.runtime.adapters` is a thin public parser facade over the language registry and per-language lane namespaces
+- Clojure, Java, Python, Lua, TypeScript, and JavaScript parser ownership now lives under `semidx.runtime.languages.*`
+- shared line/signature/token and tree-sitter helper mechanics live in `semidx.runtime.languages.shared`
+- the remaining legacy TypeScript adapter block and adapter-private compatibility wrappers have been removed rather than carried forward
+
+The next near-term focus is `plans/013` Stage 2: remove the hard runtime dependency on an externally installed tree-sitter CLI while preserving pinned grammar reproducibility and explicit graceful degradation.
+
+After Stage 2, the next semantic focus remains:
+
+- interprocedural/dataflow-sensitive semantic resolution under the relation-first constraint captured by `ADR-034`
 - continued benchmark/replay-driven validation as deeper semantic layers land
 - Elixir tree-sitter readiness is now tracked by [notes/2026-03-26-1800-13931a71-c700-4f43-84d0-701ff08273b8.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1800-13931a71-c700-4f43-84d0-701ff08273b8.md) and benchmark delta evidence by [notes/2026-03-26-1839-abc6454d-f08a-44ae-abe2-dba1557049d6.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1839-abc6454d-f08a-44ae-abe2-dba1557049d6.md)
 - Python parser-strategy frontier is now tracked in [notes/2026-03-26-1839-7815c5cd-3357-4776-a628-71dc7f695ee8.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1839-7815c5cd-3357-4776-a628-71dc7f695ee8.md)

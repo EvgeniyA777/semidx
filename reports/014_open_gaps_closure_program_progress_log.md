@@ -173,3 +173,23 @@ Tracks execution of `plans/013_open_gaps_closure_program.md`.
   - `./scripts/run-mvp-gates.sh` passed (`230 tests / 1614 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
 - Skipped / limitations: none.
 - Known blockers: none.
+
+## Stage 1 Closure - Adapter Facade Boundary
+
+- Status: completed.
+- Summary: Stage 1 is closed. `semidx.runtime.adapters` is now a thin public dispatch facade over per-language lane namespaces plus shared language helpers, and the remaining adapter-private TypeScript compatibility block has been removed instead of carried forward.
+- Decision record: `ADR-035 Split Language Lanes Out Of The Adapter Facade`.
+- Completed stage commits:
+  - `bc9117f refactor: extract shared language helpers`.
+  - `7d3f4ae refactor: move clojure lane out of adapters`.
+  - `06201dd refactor: move java lane out of adapters`.
+  - `12c2605 refactor: move python lane out of adapters`.
+  - `0b4d630 refactor: move lua lane out of adapters`.
+  - `29188ef refactor: remove typescript legacy adapter block`.
+- Verification baseline at closure:
+  - Compile probes passed for touched parser namespaces during each sub-stage.
+  - Focused language/runtime suites passed during each sub-stage.
+  - Latest full gate set passed: `clojure -M:test` (`230 tests / 1614 assertions`), `./scripts/run-benchmarks.sh` (`21/21` fixtures), `./scripts/run-semantic-quality-report.sh` (`advisory_failure` with unchanged baseline metrics), `./scripts/run-mvp-gates.sh` (`mvp_gates=ok`), and `clojure -M:ccc check --root .`.
+- Next stage: Stage 2 - remove the hard runtime dependency on an externally installed tree-sitter CLI.
+- Skipped / limitations: external reviewer loop was not run inside this documentation-only closure commit; implementation sub-stage verification is recorded above.
+- Known blockers: none.
