@@ -126,3 +126,26 @@ Tracks execution of `plans/013_open_gaps_closure_program.md`.
   - `./scripts/run-mvp-gates.sh` passed (`225 tests / 1590 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
 - Skipped / limitations: none.
 - Known blockers: none.
+
+## Stage 1.5 - Lua Lane Extraction
+
+- Status: completed.
+- Scope: Move the Lua parser lane out of `semidx.runtime.adapters` into `semidx.runtime.languages.lua`, including Lua module normalization, `require` import tracking, table/function/method ownership, returned-module owner detection, local call suppression, and test-target module linkage.
+- Architecture plan:
+  - Goal: make `semidx.runtime.languages.lua` the real Lua lane owner instead of a wrapper around adapter internals.
+  - Boundary: `adapters/parse-file` remains the cross-language dispatcher; Lua-specific regexes, import state, call extraction, parser policy, and module ownership logic live in the Lua lane namespace.
+  - Cleanup: removed the legacy public `adapters/parse-lua-file` facade and dispatches directly to `lua-language/parse-file`.
+- Changed files:
+  - `src/semidx/runtime/adapters.clj`
+  - `src/semidx/runtime/languages/lua.clj`
+  - `MEMORY.md`
+- Verification:
+  - Compile probe passed for `semidx.runtime.languages.lua` and `semidx.runtime.adapters`.
+  - `clojure -M:test -n semidx.integration.lua-onboarding-test` passed (`2 tests / 7 assertions`).
+  - `clojure -M:test -n semidx.integration.runtime-test` passed (`103 tests / 468 assertions`).
+  - `clojure -M:test` passed (`230 tests / 1614 assertions`).
+  - `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
+  - `./scripts/run-semantic-quality-report.sh` exited `0` with the expected advisory gate state: `expected_change_match_rate=0.8333333333333334`, `identity_stability_rate=1.0`, `move_rename_recovery_rate=1.0`, `implementation_vs_meaning_accuracy=0.6666666666666666`, `unmatched_rate=0.0`.
+  - `./scripts/run-mvp-gates.sh` passed (`230 tests / 1614 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
+- Skipped / limitations: none.
+- Known blockers: none.
