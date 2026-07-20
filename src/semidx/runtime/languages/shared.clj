@@ -22,6 +22,12 @@
   (let [t (str/trim (or line ""))]
     (subs t 0 (min 180 (count t)))))
 
+(defn safe-line [lines n]
+  (let [idx (dec (max 1 n))]
+    (if (< idx (count lines))
+      (trim-signature (nth lines idx))
+      "")))
+
 (defn unit-end-lines [starts total-lines]
   (let [pairs (partition 2 1 (concat starts [(inc total-lines)]))]
     (mapv (fn [[s n]] (max s (dec n))) pairs)))

@@ -2196,8 +2196,8 @@
 (deftest parse-file-fallback-finalizes-parse-exceptions-test
   (let [root-path (-> (io/file ".") .getCanonicalPath)
         rel-path "src/semidx/runtime/evaluation.clj"
-        parsed (with-redefs [adapters/parse-clojure-file (fn [& _]
-                                                           (throw (ex-info "boom" {})))]
+        parsed (with-redefs [clj-language/parse-file (fn [& _]
+                                                       (throw (ex-info "boom" {})))]
                  (adapters/parse-file root-path rel-path {}))]
     (is (map? parsed))
     (is (= "clojure" (:language parsed)))
