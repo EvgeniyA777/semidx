@@ -327,9 +327,15 @@
 
 (defn- apply-global-boosts [units query policy score-map]
   (let [hints (:hints query)
+        targets (:targets query)
         preferred-paths (set (:preferred_paths hints))
         preferred-modules (:preferred_modules hints)
-        focus-on-tests? (true? (:focus_on_tests hints))]
+        focus-on-tests? (true? (:focus_on_tests hints))
+        intent-only? (not (some seq [(:symbols targets)
+                                     (:paths targets)
+                                     (:modules targets)
+                                     (:tests targets)
+                                     (:changed_spans targets)]))]
     (reduce
      (fn [acc u]
        (let [uid (:unit_id u)
@@ -337,13 +343,13 @@
              test-path? (= "test" (path-class (:path u)))
              by-pref-path (contains? preferred-paths (:path u))
              by-pref-module (some #(module-prefix-match? u %) preferred-modules)
-             by-focused-test (and already-scored? focus-on-tests? test-path?)
+             by-focused-test (and already-scored? intent-only? focus-on-tests? test-path?)
              by-source-path-prior (and already-scored? (source-like-path? (:path u)))
              by-parser-fallback (= "fallback" (:parser_mode u))]
          (cond-> acc
            by-pref-path (add-scored-reason uid :tier3 (rp/weight policy "hint_preferred_path") "hint_preferred_path" "Tier3: preferred path hint boosted unit.")
            by-pref-module (add-scored-reason uid :tier3 (rp/weight policy "hint_preferred_module") "hint_preferred_module" "Tier3: preferred module hint boosted unit.")
-           by-focused-test (add-scored-reason uid :tier3 (rp/weight policy "hint_focus_on_tests") "hint_focus_on_tests" "Tier3: focus_on_tests hint boosted an already-matched test unit.")
+           by-focused-test (add-scored-reason uid :tier3 (rp/weight policy "hint_focus_on_tests") "hint_focus_on_tests" "Tier3: focus_on_tests hint boosted an already-matched test unit for an intent-only query.")
            by-source-path-prior (add-scored-reason uid :tier3 (rp/weight policy "source_path_prior") "source_path_prior" "Tier3: source-like path prior boosted an already-matched unit.")
            by-parser-fallback (add-scored-reason uid :tier3 (rp/weight policy "parser_fallback") "parser_fallback" "Fallback parser contributes limited-confidence evidence."))))
      score-map
