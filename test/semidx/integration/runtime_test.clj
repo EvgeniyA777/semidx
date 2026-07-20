@@ -2000,6 +2000,38 @@
                 (get by-type "dataflow/passes-argument")))
       (is (contains? (get (:relation_forward_index index) wrapper-id) (:relation_id (first relations)))))))
 
+(deftest python-dataflow-relations-resolve-target-units-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-python-dataflow-relations" (make-array java.nio.file.attribute.FileAttribute 0)))
+        rel-path "app/flow.py"]
+    (write-file! tmp-root rel-path "def make_client(config):\n    return config\n\ndef normalize(order):\n    return order\n\ndef save(order, client):\n    return order\n\ndef wrapper(order, config):\n    client = make_client(config)\n    save(order, client)\n    return normalize(order)\n")
+    (let [index (sci/create-index {:root_path tmp-root})
+          wrapper-id (str rel-path "::app.flow/wrapper")
+          make-client-id (str rel-path "::app.flow/make_client")
+          normalize-id (str rel-path "::app.flow/normalize")
+          save-id (str rel-path "::app.flow/save")
+          relations (->> (:relations index) vals (filter #(= wrapper-id (:source_unit_id %))) vec)
+          by-type (group-by :relation_type relations)]
+      (is (= #{"dataflow/local-binding-call-result"
+               "dataflow/returns-call-result"
+               "dataflow/passes-argument"}
+             (set (keys by-type))))
+      (is (some #(and (= "resolved" (:resolution_status %))
+                      (= [make-client-id] (:target_unit_ids %))
+                      (= "client" (:local_name %)))
+                (get by-type "dataflow/local-binding-call-result")))
+      (is (some #(and (= "resolved" (:resolution_status %))
+                      (= [normalize-id] (:target_unit_ids %)))
+                (get by-type "dataflow/returns-call-result")))
+      (is (some #(and (= "resolved" (:resolution_status %))
+                      (= [save-id] (:target_unit_ids %))
+                      (= "order" (:local_name %)))
+                (get by-type "dataflow/passes-argument")))
+      (is (some #(and (= "resolved" (:resolution_status %))
+                      (= [save-id] (:target_unit_ids %))
+                      (= "client" (:local_name %)))
+                (get by-type "dataflow/passes-argument")))
+      (is (contains? (get (:relation_forward_index index) wrapper-id) (:relation_id (first relations)))))))
+
 (deftest tree-sitter-cli-resolution-prefers-explicit-and-managed-toolchain-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-tree-sitter-cli-resolution" (make-array java.nio.file.attribute.FileAttribute 0)))
         explicit-rel "tools/tree-sitter"

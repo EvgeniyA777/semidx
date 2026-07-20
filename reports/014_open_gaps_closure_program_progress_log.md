@@ -338,3 +338,34 @@ Tracks execution of `plans/013_open_gaps_closure_program.md`.
   - `git diff --check` passed.
 - Skipped / limitations: Python producer and relation-backed retrieval/impact projections are deferred to later Stage 3 sub-steps by design.
 - Known blockers: none.
+
+## Stage 3.4 - Python Dataflow Relation Producer
+
+- Status: completed.
+- Scope: Emit the accepted `ADR-037` v1 dataflow relation facts from the Python lane on the same relation contract as the Clojure producer.
+- Summary:
+  - Python parsing now detaches per-unit producer facts into top-level parsed-file `:relations` without adding ad-hoc flow keys to `semantic_ir.clj`.
+  - The Python producer emits `dataflow/local-binding-call-result`, `dataflow/returns-call-result`, and `dataflow/passes-argument` facts for direct assignment, return-call, and argument-passing shapes.
+  - Relation target keys reuse the Python lane's existing alias/import/self/class-name expansion helpers so `semidx.runtime.index/build-index-state` can resolve them through the shared relation resolver.
+  - Nested local defs/classes remain conservative through the existing Python body-local suppression sets.
+  - Existing `:callers_index` / `:callees_index` behavior remains unchanged; no retrieval projection, public graph API, or `calls`/`imports` migration is included in this sub-step.
+- Changed files:
+  - `src/semidx/runtime/languages/python.clj`
+  - `test/semidx/integration/runtime_test.clj`
+  - `MEMORY.md`
+  - `docs/roadmap-status.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - semidx MCP mapping completed for the Python lane, index relation resolver, relation substrate, and runtime test seams before implementation.
+  - clojure-mcp REPL reload passed for `semidx.runtime.languages.python`, `semidx.runtime.index`, and `semidx.runtime.relations`.
+  - clojure-mcp REPL smoke confirmed Python parsed-file `:relations` for a wrapper function with local binding, return-call, and argument-pass facts.
+  - `clojure -M:test -n semidx.runtime.relations-test` passed (`4 tests / 17 assertions`).
+  - `clojure -M:test -n semidx.integration.runtime-test` passed (`106 tests / 483 assertions`).
+  - `clojure -M:test` passed (`243 tests / 1666 assertions`).
+  - `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
+  - `./scripts/run-semantic-quality-report.sh` exited `0` with the expected advisory gate state: `expected_change_match_rate=0.8333333333333334`, `identity_stability_rate=1.0`, `move_rename_recovery_rate=1.0`, `implementation_vs_meaning_accuracy=0.6666666666666666`, `unmatched_rate=0.0`.
+  - `./scripts/run-mvp-gates.sh` passed (`243 tests / 1666 assertions`, `21/21` retrieval benchmarks, all query smokes, `mvp_gates=ok`).
+  - `clojure -M:ccc check --root .` passed after refreshing `docs/code-context.md`.
+  - `git diff --check` passed.
+- Skipped / limitations: relation-backed retrieval/impact projections are deferred to the next Stage 3 sub-step by design.
+- Known blockers: none.

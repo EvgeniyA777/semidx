@@ -244,6 +244,142 @@
          vec)
     []))
 
+(defn- py-param-names [signature]
+  (if-let [[_ args] (re-find #"\((.*)\)" (str signature))]
+    (->> (str/split args #",")
+         (map str/trim)
+         (map #(str/replace % #"=.*$" ""))
+         (map #(str/replace % #":.*$" ""))
+         (map #(str/replace % #"^[\*\s]+" ""))
+         (remove #(or (str/blank? %)
+                      (= % "self")
+                      (= % "cls")))
+         set)
+    #{}))
+
+(defn- py-call-expressions [line]
+  (->> (re-seq #"\b([A-Za-z_][A-Za-z0-9_\.]*)\s*\(([^()]*)\)" (str line))
+       (map (fn [[_ token args]] {:token token :args args}))
+       vec))
+
+(defn- py-call-arg-names [args]
+  (->> (str/split (str args) #",")
+       (map str/trim)
+       (keep #(second (re-matches #"([A-Za-z_][A-Za-z0-9_]*)" %)))
+       vec))
+
+(defn- py-dataflow-target-key
+  [token {:keys [module class-name module-aliases symbol-aliases local-call-names local-class-names body-local-call-names body-local-class-names]}]
+  (let [token* (str token)
+        tail (tail-token token*)
+        local-body-class? (some->> (re-matches #"([A-Za-z_][A-Za-z0-9_]*)\.(.+)" token*)
+                                   second
+                                   (contains? body-local-class-names))]
+    (when-not (or (contains? py-call-stop token*)
+                  (contains? body-local-call-names token*)
+                  (contains? body-local-call-names tail)
+                  local-body-class?)
+      (let [module-alias-token (py-expand-module-alias token* module-aliases)
+            imported-symbols (py-expand-symbol-import token* symbol-aliases local-call-names)
+            self-symbols (if (and class-name module)
+                           (py-expand-self-token token* module class-name)
+                           [])
+            class-symbols (if module
+                            (py-expand-local-class-token token* module local-class-names)
+                            [])]
+        (first (remove str/blank?
+                       (concat [module-alias-token]
+                               self-symbols
+                               class-symbols
+                               imported-symbols
+                               [token*])))))))
+
+(defn- py-relation-provenance []
+  {:producer "semidx.runtime.languages.python"
+   :parser_mode "full"})
+
+(defn- py-dataflow-relation
+  [{:keys [unit-id relation-type target-key evidence-location] :as opts}]
+  (cond-> {:source_unit_id unit-id
+           :target_key target-key
+           :relation_type relation-type
+           :resolution_status "unresolved"
+           :evidence_quality "medium"
+           :provenance (py-relation-provenance)}
+    (:local_name opts) (assoc :local_name (:local_name opts))
+    (:arg_index opts) (assoc :arg_index (:arg_index opts))
+    (seq evidence-location) (assoc :evidence_location evidence-location)))
+
+(defn- py-local-binding-call-relation [unit-id relation-ctx line line-number]
+  (when-let [[_ local-name token _args] (re-find #"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*\(([^()]*)\)" (str line))]
+    (when-let [target-key (py-dataflow-target-key token relation-ctx)]
+      (py-dataflow-relation {:unit-id unit-id
+                             :relation-type "dataflow/local-binding-call-result"
+                             :target-key target-key
+                             :local_name local-name
+                             :evidence-location {:start_line line-number}}))))
+
+(defn- py-return-call-relation [unit-id relation-ctx return-lines]
+  (when-let [[line-number line] (last return-lines)]
+    (when-let [[_ token _args] (re-find #"^\s*return\s+([A-Za-z_][A-Za-z0-9_\.]*)\s*\(([^()]*)\)" (str line))]
+      (when-let [target-key (py-dataflow-target-key token relation-ctx)]
+        (py-dataflow-relation {:unit-id unit-id
+                               :relation-type "dataflow/returns-call-result"
+                               :target-key target-key
+                               :evidence-location {:start_line line-number}})))))
+
+(defn- py-passes-argument-relations [unit-id relation-ctx tracked-names line line-number]
+  (if (or (re-find py-def-re (str line))
+          (re-find py-class-re (str line)))
+    []
+    (->> (py-call-expressions line)
+         (mapcat (fn [{:keys [token args]}]
+                   (when-let [target-key (py-dataflow-target-key token relation-ctx)]
+                     (->> (py-call-arg-names args)
+                          (map-indexed vector)
+                          (keep (fn [[idx arg]]
+                                  (when (contains? tracked-names arg)
+                                    (py-dataflow-relation {:unit-id unit-id
+                                                           :relation-type "dataflow/passes-argument"
+                                                           :target-key target-key
+                                                           :arg_index idx
+                                                           :local_name arg
+                                                           :evidence-location {:start_line line-number}}))))))))
+         vec)))
+
+(defn- py-dataflow-relations
+  [unit-id unit body-lines body-scope {:keys [module module-aliases symbol-aliases local-call-names local-class-names]}]
+  (if (= "class" (:kind unit))
+    []
+    (let [relation-ctx {:module module
+                        :class-name (:class-name unit)
+                        :module-aliases module-aliases
+                        :symbol-aliases symbol-aliases
+                        :local-call-names local-call-names
+                        :local-class-names local-class-names
+                        :body-local-call-names (:local-call-names body-scope)
+                        :body-local-class-names (:local-class-names body-scope)}
+          start-line (:start-line unit)
+          numbered-lines (map-indexed (fn [idx line] [(+ start-line idx) line]) body-lines)
+          param-names (py-param-names (:signature unit))
+          binding-relations (keep (fn [[line-number line]]
+                                    (py-local-binding-call-relation unit-id relation-ctx line line-number))
+                                  numbered-lines)
+          binding-names (set (keep :local_name binding-relations))
+          tracked-names (into param-names binding-names)
+          return-lines (filter (fn [[_ line]]
+                                 (re-find #"^\s*return\s+" (str line)))
+                               numbered-lines)
+          return-relation (py-return-call-relation unit-id relation-ctx return-lines)
+          argument-relations (mapcat (fn [[line-number line]]
+                                       (py-passes-argument-relations unit-id relation-ctx tracked-names line line-number))
+                                     numbered-lines)]
+      (->> (concat binding-relations
+                   (when return-relation [return-relation])
+                   argument-relations)
+           distinct
+           vec))))
+
 (defn parse-file [_root-path path lines _parser-opts]
   (let [line-count (count lines)
         module (py-module-name path)
@@ -308,39 +444,53 @@
                                (keep (fn [{:keys [raw-symbol]}]
                                        (some-> raw-symbol str (str/split #"\.") last)))
                                set)
+        relation-base {:module module
+                       :module-aliases module-aliases
+                       :symbol-aliases symbol-aliases
+                       :local-call-names local-call-names
+                       :local-class-names local-class-names}
         starts (mapv :start-line defs)
         ends (unit-end-lines starts line-count)
-        units (->> (map vector defs ends)
-                   (map (fn [[d end-line]]
-                          (let [start-line (:start-line d)
-                                body-lines (subvec lines (dec start-line) end-line)
-                                body (str/join "\n" body-lines)
-                                body-scope (py-local-body-scope body-lines (py-indent (nth lines (dec start-line))))]
-                            {:unit_id (str path "::" (:raw-symbol d))
-                             :kind (:kind d)
-                             :symbol (:raw-symbol d)
-                             :path path
-                             :module module
-                             :start_line start-line
-                             :end_line end-line
-                             :signature (:signature d)
-                             :summary (str (:kind d) " " (:raw-symbol d))
-                             :docstring_excerpt nil
-                             :imports imports
-                             :calls (extract-py-calls body {:module module
-                                                            :class-name (:class-name d)
-                                                            :module-aliases module-aliases
-                                                            :symbol-aliases symbol-aliases
-                                                            :local-call-names local-call-names
-                                                            :local-class-names local-class-names
-                                                            :body-local-call-names (:local-call-names body-scope)
-                                                            :body-local-class-names (:local-class-names body-scope)})
-                             :parser_mode "full"})))
-                   vec)]
+        raw-units (->> (map vector defs ends)
+                       (map (fn [[d end-line]]
+                              (let [start-line (:start-line d)
+                                    body-lines (subvec lines (dec start-line) end-line)
+                                    body (str/join "\n" body-lines)
+                                    body-scope (py-local-body-scope body-lines (py-indent (nth lines (dec start-line))))
+                                    unit-id (str path "::" (:raw-symbol d))
+                                    relations (py-dataflow-relations unit-id d body-lines body-scope relation-base)]
+                                (cond-> {:unit_id unit-id
+                                         :kind (:kind d)
+                                         :symbol (:raw-symbol d)
+                                         :path path
+                                         :module module
+                                         :start_line start-line
+                                         :end_line end-line
+                                         :signature (:signature d)
+                                         :summary (str (:kind d) " " (:raw-symbol d))
+                                         :docstring_excerpt nil
+                                         :imports imports
+                                         :calls (extract-py-calls body {:module module
+                                                                        :class-name (:class-name d)
+                                                                        :module-aliases module-aliases
+                                                                        :symbol-aliases symbol-aliases
+                                                                        :local-call-names local-call-names
+                                                                        :local-class-names local-class-names
+                                                                        :body-local-call-names (:local-call-names body-scope)
+                                                                        :body-local-class-names (:local-class-names body-scope)})
+                                         :parser_mode "full"}
+                                  (seq relations) (assoc :relations relations)))))
+                       vec)
+        units (mapv #(dissoc % :relations) raw-units)
+        relations (->> raw-units
+                       (mapcat :relations)
+                       distinct
+                       vec)]
     {:language "python"
      :module module
      :imports imports
      :test_target_modules test-target-modules
      :units units
+     :relations relations
      :diagnostics []
      :parser_mode "full"}))
