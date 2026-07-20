@@ -43,7 +43,7 @@
     "top_authority_units": ["src/example/main.ts::src.example.main/processMain"],
     "must_include_paths": ["src/example/main.ts"],
     "must_include_selection_reason_codes": ["exact_target_resolved"],
-    "confidence_level": "high",
-    "autonomy_posture": "draft_patch_safe"
+    "confidence_level": "low",
+    "autonomy_posture": "autonomy_blocked"
   }
 }

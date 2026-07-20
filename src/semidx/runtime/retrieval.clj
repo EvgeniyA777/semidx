@@ -742,9 +742,17 @@
                :redaction_level "default_safe"}))
        vec))
 
+(def ^:private public-unit-kinds
+  #{"namespace" "module" "class" "type" "function" "method" "protocol" "interface" "section" "block" "test"})
+
+(defn- public-unit-kind [kind]
+  (if (contains? public-unit-kinds kind)
+    kind
+    "block"))
+
 (defn- compact-unit [u]
   {:unit_id (:unit_id u)
-   :kind (:kind u)
+   :kind (public-unit-kind (:kind u))
    :symbol (:symbol u)
    :path (:path u)
    :span {:path (:path u) :start_line (:start_line u) :end_line (:end_line u)}

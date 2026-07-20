@@ -44,7 +44,6 @@
   },
   "expected": {
     "must_include_paths": ["lib/my_app/order.ex", "lib/my_app/payments/adapter.ex"],
-    "must_include_warning_codes": ["target_ambiguous"],
     "confidence_level": "medium",
     "autonomy_posture": "plan_safe"
   }

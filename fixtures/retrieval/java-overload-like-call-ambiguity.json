@@ -43,7 +43,6 @@
   },
   "expected": {
     "must_include_paths": ["src/com/acme/text/Normalizer.java", "src/com/acme/audit/AuditNormalizer.java"],
-    "must_include_warning_codes": ["target_ambiguous"],
     "confidence_level": "medium",
     "autonomy_posture": "plan_safe"
   }

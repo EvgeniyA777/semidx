@@ -66,6 +66,18 @@
     (write-file! root "test/example/main_test.ts"
                  "import { processMain } from \"../../src/example/main\";\n\nexport function testProcessMain(): string {\n  return processMain(\"A-1\");\n}\n")
 
+    (write-file! root "src/example/main.js"
+                 "export function processMain(orderId) {\n  return (orderId || \"\").trim().toLowerCase();\n}\n")
+    (write-file! root "test/example/main.test.js"
+                 "import { processMain } from \"../../src/example/main.js\";\n\nexport function testProcessMain() {\n  return processMain(\"A-1\");\n}\n")
+
+    (write-file! root "public/index.html"
+                 "<!doctype html>\n<html>\n  <head>\n    <link rel=\"stylesheet\" href=\"/styles.css\">\n  </head>\n  <body>\n    <main>\n      <a class=\"cta-button\" href=\"/signup\">Start now</a>\n    </main>\n  </body>\n</html>\n")
+    (write-file! root "public/styles.css"
+                 ":root {\n  --brand-color: #3366ff;\n}\n\n.cta-button {\n  color: white;\n  background: var(--brand-color);\n}\n")
+    (write-file! root "public/theme.css"
+                 ":root {\n  --brand-color: #2244cc;\n}\n")
+
     (write-file! root "lib/my_app/payments/adapter.ex"
                  "defmodule MyApp.Payments.Adapter do\n  def charge(order) do\n    {:ok, order}\n  end\nend\n")
     (write-file! root "lib/my_app/order.ex"

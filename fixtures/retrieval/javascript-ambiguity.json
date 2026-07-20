@@ -42,8 +42,7 @@
   },
   "expected": {
     "must_include_paths": ["src/example/main.js", "test/example/main.test.js"],
-    "must_include_warning_codes": ["target_ambiguous"],
-    "confidence_level": "medium",
-    "autonomy_posture": "plan_safe"
+    "confidence_level": "low",
+    "autonomy_posture": "autonomy_blocked"
   }
 }

@@ -42,15 +42,15 @@
     }
   },
   "expected": {
-    "top_authority_units": ["lib/my_app/order.ex::MyApp.Order/to_status"],
+    "top_authority_units": ["lib/my_app/order.ex::MyApp.Order/to_status$arity1"],
     "must_include_paths": ["lib/my_app/order.ex"],
     "rank_band_expectations": [
       {
-        "unit_id": "lib/my_app/order.ex::MyApp.Order/to_status",
+        "unit_id": "lib/my_app/order.ex::MyApp.Order/to_status$arity1",
         "rank_band": "top_authority"
       }
     ],
-    "confidence_level": "high",
-    "autonomy_posture": "draft_patch_safe"
+    "confidence_level": "medium",
+    "autonomy_posture": "plan_safe"
   }
 }

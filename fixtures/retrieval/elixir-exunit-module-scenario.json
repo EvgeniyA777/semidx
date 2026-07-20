@@ -45,7 +45,7 @@
     "rank_band_expectations": [
       {
         "unit_id": "test/my_app/order_test.exs::MyApp.OrderTest/test-process-order-uses-billing-adapter",
-        "rank_band": "exploratory"
+        "rank_band": "useful_support"
       }
     ],
     "confidence_level": "medium",

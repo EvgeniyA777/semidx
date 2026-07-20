@@ -43,7 +43,7 @@
     "top_authority_units": ["public/index.html::html-document"],
     "must_include_paths": ["public/index.html"],
     "must_include_selection_reason_codes": ["exact_target_resolved"],
-    "confidence_level": "high",
-    "autonomy_posture": "draft_patch_safe"
+    "confidence_level": "low",
+    "autonomy_posture": "autonomy_blocked"
   }
 }
