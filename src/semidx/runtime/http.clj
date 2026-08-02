@@ -184,7 +184,7 @@
                                              correlation)
                        :selection_cache (:selection_cache auth-config)
                        :suppress_usage_metrics suppress-usage?
-                       :policy_registry (:policy_registry auth-config)
+                       :policy_registry (when-let [a (:policy_registry_atom auth-config)] @a)
                        :language_policy effective-language-policy})))
 
 (defn- refresh-project-entry! [auth-config root-path paths parser-opts tenant-id correlation language-policy]
@@ -320,7 +320,7 @@
                       result (sci/resolve-context index
                                                   query
                                                   {:retrieval_policy retrieval-policy
-                                                   :policy_registry (:policy_registry auth-config)})]
+                                                   :policy_registry (when-let [a (:policy_registry_atom auth-config)] @a)})]
                   (write-json! exchange 200
                                (assoc result :project_context (project-context-summary entry))
                                (merge api-version-header
@@ -526,7 +526,80 @@
                            (merge api-version-header
                                   (response-correlation-header-map exchange))))))))))
 
-(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry usage_metrics selection_cache
+(defn- handle-policy-registry [auth-config ^HttpExchange exchange]
+  (if-not (= "GET" (request-method exchange))
+    (write-json! exchange 405 {:error "method_not_allowed"
+                               :error_code "method_not_allowed"
+                               :error_category "client"
+                               :allowed ["GET"]})
+    (do
+      (remember-correlation! exchange (request-correlation exchange))
+      (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
+        (when (enforce-authz! exchange auth-config {:operation :policy_read
+                                                    :tenant_id tenant_id})
+          (if-let [registry-atom (:policy_registry_atom auth-config)]
+            (write-json! exchange 200 (rp/normalize-registry @registry-atom) (response-correlation-header-map exchange))
+            (write-json! exchange 404 {:error "not_found"
+                                       :message "no policy registry configured"} (response-correlation-header-map exchange))))))))
+
+(defn- handle-policy-promote [auth-config ^HttpExchange exchange]
+  (if-not (post-request? exchange)
+    (write-json! exchange 405 {:error "method_not_allowed"
+                               :error_code "method_not_allowed"
+                               :error_category "client"
+                               :allowed ["POST"]})
+    (do
+      (remember-correlation! exchange (request-correlation exchange))
+      (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
+        (let [payload (read-json-body exchange)
+              policy-id (:policy_id payload)
+              version (:version payload)]
+          (when (enforce-authz! exchange auth-config {:operation :policy_promote :tenant_id tenant_id})
+            (let [registry @(:policy_registry_atom auth-config)
+                  entry (rp/resolve-registry-entry registry policy-id version)]
+              (cond
+                (not entry) (write-json! exchange 404 {:error "not_found"})
+                (not (get-in entry [:shadow_review :eligible_for_promotion]))
+                (write-json! exchange 409 {:error "conflict" :message "policy not eligible for promotion"})
+                (and (rp/manual-approval-required? entry) (not (:manual_approval payload)))
+                (write-json! exchange 409 {:error "conflict" :message "manual approval required"})
+                (rp/blocked? entry)
+                (write-json! exchange 409 {:error "conflict" :message "policy promotion is blocked"})
+                :else
+                (let [baseline (rp/active-registry-entry registry)
+                      retired (if (and baseline (not (and (= (:policy_id baseline) policy-id) (= (:version baseline) version))))
+                                (rp/set-entry-state registry (:policy_id baseline) (:version baseline) "retired")
+                                registry)
+                      promoted (rp/set-entry-state retired policy-id version "active")]
+                  (reset! (:policy_registry_atom auth-config) promoted)
+                  (when-let [f (:policy_registry_file auth-config)]
+                    (rp/write-registry! f promoted))
+                  (write-json! exchange 200 {:promoted true} (response-correlation-header-map exchange)))))))))))
+
+(defn- handle-policy-retire [auth-config ^HttpExchange exchange]
+  (if-not (post-request? exchange)
+    (write-json! exchange 405 {:error "method_not_allowed"
+                               :error_code "method_not_allowed"
+                               :error_category "client"
+                               :allowed ["POST"]})
+    (do
+      (remember-correlation! exchange (request-correlation exchange))
+      (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
+        (let [payload (read-json-body exchange)
+              policy-id (:policy_id payload)
+              version (:version payload)]
+          (when (enforce-authz! exchange auth-config {:operation :policy_retire :tenant_id tenant_id})
+            (let [registry @(:policy_registry_atom auth-config)
+                  entry (rp/resolve-registry-entry registry policy-id version)]
+              (if-not entry
+                (write-json! exchange 404 {:error "not_found"})
+                (let [retired (rp/set-entry-state registry policy-id version "retired")]
+                  (reset! (:policy_registry_atom auth-config) retired)
+                  (when-let [f (:policy_registry_file auth-config)]
+                    (rp/write-registry! f retired))
+                  (write-json! exchange 200 {:retired true} (response-correlation-header-map exchange)))))))))))
+
+(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry policy_registry_file usage_metrics selection_cache
                             project_registry language_policy storage]}]
   (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)
         selection-cache (or selection_cache (atom {:max_entries 128}))
@@ -535,7 +608,8 @@
         auth-config {:api_key api_key
                      :require_tenant require_tenant
                      :authz_check authz_check
-                     :policy_registry policy_registry
+                     :policy_registry_atom (atom (or policy_registry (rp/empty-registry)))
+                     :policy_registry_file policy_registry_file
                      :usage_metrics usage_metrics
                      :selection_cache selection-cache
                      :project_registry project-registry
@@ -550,6 +624,9 @@
     (.createContext server "/v1/retrieval/literal-file-slice" (with-handler (partial handle-literal-file-slice auth-config)))
     (.createContext server "/v1/retrieval/snapshot-diff" (with-handler (partial handle-snapshot-diff auth-config)))
     (.createContext server "/v1/retrieval/traverse-relations" (with-handler (partial handle-traverse-relations auth-config)))
+    (.createContext server "/v1/policies/registry" (with-handler (partial handle-policy-registry auth-config)))
+    (.createContext server "/v1/policies/promote" (with-handler (partial handle-policy-promote auth-config)))
+    (.createContext server "/v1/policies/retire" (with-handler (partial handle-policy-retire auth-config)))
     (.setExecutor server nil)
     (.start server)
     server))
@@ -576,6 +653,7 @@
                                :require_tenant require-tenant*
                                :authz_check authz-check*
                                :policy_registry policy-registry*
+                               :policy_registry_file policy-registry-file*
                                :language_policy language-policy*
                                :usage_metrics usage-metrics*})]
     (println (str "runtime_http_server_started host=" host " port=" port))

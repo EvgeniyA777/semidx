@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semidx.example/contracts/schemas/policy-lifecycle-request.schema.json",
+  "title": "Policy Lifecycle Request",
+  "description": "Request to promote or retire a retrieval policy in the online control plane.",
+  "type": "object",
+  "required": ["schema_version", "policy_id", "version", "trace"],
+  "additionalProperties": false,
+  "properties": {
+    "api_version": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schemaVersion"
+    },
+    "policy_id": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/boundedString"
+    },
+    "trace": {
+      "$ref": "common.schema.json#/$defs/traceRef"
+    }
+  },
+  "examples": [
+    {
+      "api_version": "1.0",
+      "schema_version": "1.0",
+      "policy_id": "heuristic_v1",
+      "version": "2026-03-10",
+      "trace": {
+        "trace_id": "11111111-1111-4111-8111-111111111111",
+        "request_id": "req-policy-lifecycle-001",
+        "actor_id": "operator"
+      }
+    }
+  ]
+}

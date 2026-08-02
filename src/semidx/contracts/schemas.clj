@@ -592,6 +592,14 @@
      [:max_paths boolean?]]]
    [:selection_id {:optional true} bounded-string]])
 
+(def policy-lifecycle-request
+  [:map {:closed true}
+   [:api_version {:optional true} bounded-string]
+   [:schema_version schema-version]
+   [:policy_id bounded-string]
+   [:version bounded-string]
+   [:trace trace-ref]])
+
 (def contracts
   {:example/catalog example-catalog
    :example/capabilities capabilities
@@ -609,5 +617,6 @@
    :example/human-review-record human-review-record
    :example/relation-traversal-query relation-traversal-query
    :example/relation-traversal-result relation-traversal-result
+   :example/policy-lifecycle-request policy-lifecycle-request
    :fixture/corpus fixture-corpus
    :fixture/retrieval retrieval-fixture})
