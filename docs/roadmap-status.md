@@ -72,17 +72,25 @@ The `plans/013` Stage 1 adapter split is now delivered for the current scope:
 
 The `plans/013` Stage 2 tree-sitter dependency cleanup is now delivered under `ADR-036`: regex parsing remains the guaranteed default, tree-sitter stays optional, runtime CLI resolution prefers explicit parser options, environment configuration, and the repo-managed `.tree-sitter-grammars/bin/tree-sitter` link, and ambient `PATH` is only a developer fallback.
 
-The next semantic focus is Stage 3 under `ADR-034`, `ADR-037`, and `ADR-038`:
+Stage 3 of `plans/013` is code-complete under ADR-034, ADR-037, ADR-038, and
+ADR-039:
 
-- the typed-relation substrate now exists on snapshots without changing current retrieval behavior
-- the Clojure lane now emits and resolves the v1 `dataflow/*` relation facts on that substrate
-- the Python lane now emits and resolves the same v1 `dataflow/*` relation facts on that substrate
-- interprocedural/dataflow-sensitive semantic resolution using the canonical relation-first graph captured by `ADR-037` and `ADR-038`
-- relation identity is now separated from mutable resolution/evidence and invalid facts produce explicit diagnostics under `ADR-039`: `relation_id` derives only from relation type, source endpoint, semantic target key, and flow payload, while `relation-errors` validates facts against an explicit internal schema and `index-relations` surfaces invalid facts as snapshot `:relation_diagnostics`
-- the storage-independent bounded traversal kernel now exists as `semidx.runtime.relations/traverse-relations`: a pure, cycle-safe, deterministic breadth-first walk with `:downstream`/`:upstream` direction, a relation-type allow-list, conservative `:resolved_only` default, and `max_depth`/`max_nodes`/`max_paths` budgets (depth 4 / 200 nodes / 50 paths)
-- `build-impact-hints` now consumes that kernel to attach an optional, reason-coded `:relation_support` field to `impact_hints`: bounded `:resolved_only` downstream dataflow dependencies and upstream dataflow dependents under a conservative sub-ceiling (depth 2 / 24 nodes / 12 paths), omitted entirely when there is no resolved relation-backed unit so the legacy caller/callee/dependent/test outputs stay byte-identical, with no public graph-query API and unchanged confidence ceilings
-- the remaining Stage 3 lever is confidence-ceiling recalibration only if future evidence supports it (currently a documented non-bump); the next tranche is the Stage 4 public graph surface, reusing the same traversal contract
-- continued benchmark/replay-driven validation as deeper semantic layers land
-- Elixir tree-sitter readiness is now tracked by [notes/2026-03-26-1800-13931a71-c700-4f43-84d0-701ff08273b8.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1800-13931a71-c700-4f43-84d0-701ff08273b8.md) and benchmark delta evidence by [notes/2026-03-26-1839-abc6454d-f08a-44ae-abe2-dba1557049d6.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1839-abc6454d-f08a-44ae-abe2-dba1557049d6.md)
-- Python parser-strategy frontier is now tracked in [notes/2026-03-26-1839-7815c5cd-3357-4776-a628-71dc7f695ee8.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1839-7815c5cd-3357-4776-a628-71dc7f695ee8.md)
-- Interprocedural/dataflow v1 frontier is now tracked in [notes/2026-03-26-1839-152b99e3-3b4b-4feb-93a9-957f43950934.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1839-152b99e3-3b4b-4feb-93a9-957f43950934.md)
+- Clojure and Python emit and resolve the v1 `dataflow/*` relation facts on the
+  canonical typed-relation graph;
+- relation identity is separated from mutable resolution/evidence and invalid
+  facts produce explicit snapshot diagnostics;
+- `semidx.runtime.relations/traverse-relations` provides the pure, deterministic,
+  cycle-safe bounded traversal kernel;
+- `build-impact-hints` consumes the kernel through conservative, reason-coded
+  `relation_support`, with no confidence-ceiling increase.
+
+The current semantic focus is Stage 4 under ADR-040: expose the same bounded
+relation traversal through library + MCP, add the forward-only PostgreSQL
+`semantic_index_relations` projection, and prove execution parity without moving
+traversal policy into storage. HTTP/gRPC exposure is deferred and must reuse the
+same contract.
+
+After Stage 4, the product sequence is provider catalog/discovery, then one
+Protobuf/OpenAPI contract-linking vertical slice, then a SCIP evidence-provider
+spike over the same canonical relation graph. Parser-deepening research remains
+future-plan input rather than part of the active Stage 4 queue.

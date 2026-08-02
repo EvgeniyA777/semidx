@@ -533,6 +533,64 @@
    ;; expected is intentionally open so behavior bands can evolve
    [:expected :map]])
 
+(def relation-traversal-node
+  [:map {:closed true}
+   [:unit_id bounded-string]
+   [:depth nat-int?]])
+
+(def relation-traversal-edge
+  [:map {:closed true}
+   [:relation_id bounded-string]
+   [:from bounded-string]
+   [:to bounded-string]
+   [:relation_type bounded-string]
+   [:resolution_status [:enum "resolved" "ambiguous" "unresolved"]]
+   [:depth pos-int?]])
+
+(def relation-traversal-query
+  "Public bounded relation-traversal request (ADR-040). Reuses the Stage 3
+  traversal kernel semantics; it is not a general-purpose graph-query language."
+  [:map {:closed true}
+   [:api_version {:optional true} bounded-string]
+   [:schema_version schema-version]
+   [:start_nodes [:vector {:min 1 :max 200} bounded-string]]
+   [:direction [:enum "downstream" "upstream"]]
+   [:relation_types {:optional true} [:vector {:min 1 :max 12} bounded-string]]
+   [:resolved_only {:optional true} boolean?]
+   [:budgets {:optional true}
+    [:map {:closed true}
+     [:max_depth {:optional true} nat-int?]
+     [:max_nodes {:optional true} pos-int?]
+     [:max_paths {:optional true} nat-int?]]]
+   [:snapshot_id {:optional true} bounded-string]
+   [:trace trace-ref]])
+
+(def relation-traversal-result
+  "Compact, snapshot-bound relation-traversal result (ADR-040). Ordering is
+  deterministic and mirrors the Stage 3 traversal kernel output."
+  [:map {:closed true}
+   [:api_version {:optional true} bounded-string]
+   [:schema_version schema-version]
+   [:snapshot_id bounded-string]
+   [:direction [:enum "downstream" "upstream"]]
+   [:start_nodes [:vector {:max 200} bounded-string]]
+   [:relation_types [:vector {:max 12} bounded-string]]
+   [:budgets
+    [:map {:closed true}
+     [:max_depth nat-int?]
+     [:max_nodes pos-int?]
+     [:max_paths nat-int?]
+     [:resolved_only boolean?]]]
+   [:nodes [:vector {:max 200} relation-traversal-node]]
+   [:edges [:vector {:max 1000} relation-traversal-edge]]
+   [:paths [:vector {:max 50} [:vector {:max 4} bounded-string]]]
+   [:truncated
+    [:map {:closed true}
+     [:max_depth boolean?]
+     [:max_nodes boolean?]
+     [:max_paths boolean?]]]
+   [:selection_id {:optional true} bounded-string]])
+
 (def contracts
   {:example/catalog example-catalog
    :example/capabilities capabilities
@@ -548,5 +606,7 @@
    :example/guardrail-assessment guardrail-assessment
    :example/override-record override-record
    :example/human-review-record human-review-record
+   :example/relation-traversal-query relation-traversal-query
+   :example/relation-traversal-result relation-traversal-result
    :fixture/corpus fixture-corpus
    :fixture/retrieval retrieval-fixture})

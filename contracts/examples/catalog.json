@@ -234,6 +234,24 @@
       "adr_refs": ["ADR-015", "ADR-016"],
       "purpose": "Human review approval attached to a high-risk override.",
       "expected_interpretation": "Shows the canonical record required before executing a risky action."
+    },
+    {
+      "example_id": "relation_traversal_query_downstream_001",
+      "contract_family": "relation_traversal_query",
+      "path": "relation-queries/downstream.json",
+      "schema": "../schemas/relation-traversal-query.schema.json",
+      "adr_refs": ["ADR-040"],
+      "purpose": "Bounded downstream traversal request over typed semantic relations.",
+      "expected_interpretation": "Requests a conservative snapshot-bound walk using the canonical traversal kernel and explicit budgets."
+    },
+    {
+      "example_id": "relation_traversal_result_downstream_001",
+      "contract_family": "relation_traversal_result",
+      "path": "relation-results/downstream.json",
+      "schema": "../schemas/relation-traversal-result.schema.json",
+      "adr_refs": ["ADR-040"],
+      "purpose": "Compact deterministic result for a bounded downstream relation traversal.",
+      "expected_interpretation": "Returns discovered nodes, edges, paths, applied budgets, truncation state, and a staged-retrieval selection handle."
     }
   ]
 }

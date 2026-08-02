@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-01"
+updated: "2026-08-02"
 ---
 
 # Open Gaps Closure Program Progress Log
@@ -674,4 +674,40 @@ as part of this planning review.
 - Skipped / limitations: confidence-ceiling recalibration is intentionally a
   documented non-bump; PostgreSQL relation projection and the public graph-query
   surface are Stage 4 scope.
+- Known blockers: none.
+
+## Stage 4.1 - Relation Traversal Decision And Contract
+
+- Status: completed.
+- Scope: Record the bounded public relation-traversal decision and establish the
+  external JSON plus runtime malli request/response contract before persistence
+  and public handler implementation.
+- Decision record: `ADR-040 Expose Bounded Relation Traversal As A Public Query
+  Surface`.
+- Current decision:
+  - Reuse the Stage 3 traversal kernel and bounds; do not add a second graph walk.
+  - Expose library + MCP in Stage 4; report HTTP/gRPC as `not_exposed` and defer
+    those transport handlers.
+  - Keep traversal semantics in the pure kernel through a batched frontier
+    provider; PostgreSQL only optimizes neighbor retrieval.
+  - Make the PostgreSQL relation projection forward-only; do not perform an
+    implicit historical backfill in `init-storage!`.
+- Worktree files in progress:
+  - `adr/040-expose-bounded-relation-traversal-as-a-public-query-surface.md`
+  - `contracts/schemas/relation-traversal-query.schema.json`
+  - `contracts/schemas/relation-traversal-result.schema.json`
+  - `contracts/examples/relation-queries/`
+  - `contracts/examples/relation-results/`
+  - `src/semidx/contracts/schemas.clj`
+  - `src/semidx/contracts/validator.clj`
+  - `contracts/examples/catalog.json`
+- Commit: the Stage 4.1 contract and documentation lifecycle commit containing
+  this entry.
+- Verification:
+  - Compile probe for `semidx.contracts.validator` passed.
+  - `./scripts/validate-contracts.sh` passed
+    (`checked_json_files=65`, `contracts_validation=ok`).
+  - Documentation frontmatter, lifecycle/action combinations, ADR-ID uniqueness,
+    local Markdown links, and `git diff --check` passed during the companion
+    documentation lifecycle cleanup.
 - Known blockers: none.

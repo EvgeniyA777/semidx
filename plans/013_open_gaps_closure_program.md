@@ -4,7 +4,7 @@ doc_type: "implementation_plan"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-01"
+updated: "2026-08-02"
 ---
 
 # Implementation Plan: Open Semantic and Ops Gaps Closure Program
@@ -72,7 +72,7 @@ Each stage MUST run this loop and record it in the progress log:
    only explicit paths (`git add <file> ...`, never `git add .`/`-A`). Branch off
    first if on `main`. Commit only after verification is green.
 5. **Review** — run the stage-gated external reviewer loop captured in
-   `notes/2026-07-13_stage-gated-external-reviewer-loop.md` and/or
+   `notes/2026-07-13-stage-gated-external-reviewer-loop.md` and/or
    `/code-review` on the stage diff. Record every finding.
 6. **Fixes** — address accepted findings; re-verify; record fix summary +
    changed files/commit hash + verification results in the progress log. Mark
@@ -249,23 +249,27 @@ per lane if the diff grows.
 query surface and add a PostgreSQL physical projection without moving graph
 policy into storage.
 
-**Current shape:** `storage.clj` (453 lines) exposes single-hop caller/callee/
-unit queries over `semantic_index_call_edges` (in-memory + PostgreSQL).
+**Current shape:** `storage.clj` exposes single-hop caller/callee/unit queries
+over `semantic_index_call_edges` (in-memory + PostgreSQL). ADR-040 now fixes the
+Stage 4 public and execution contract; its implementation is in progress.
 
 **Sub-steps:**
-1. Specify the public query surface in a new ADR numbered with the next
-   available ADR at execution time. Reuse the Stage 3 traversal semantics and
-   bounds instead of defining a second graph walk.
+1. Use accepted ADR-040 as the public query decision: expose bounded relation
+   traversal through library + MCP first, report HTTP/gRPC as `not_exposed`, and
+   reuse the Stage 3 traversal semantics and bounds instead of defining a second
+   graph walk. **Delivered in Stage 4.1.**
 2. Add JSON Schema under `contracts/schemas/` + `malli` mirror in
-   `src/semidx/contracts/` for the new query request/response.
+   `src/semidx/contracts/` for the new query request/response. **Delivered in
+   Stage 4.1.**
 3. Add a `semantic_index_relations` PostgreSQL projection scoped by repository
    and snapshot, with source, target, relation-type, and evidence indexes plus
    an explicit migration/backfill policy.
 4. Implement a PostgreSQL execution adapter for the canonical traversal
    contract and prove parity with the pure in-memory kernel. Storage may
    optimize execution but must not own traversal semantics.
-5. Expose it on the public surfaces only where it fits the staged-retrieval
-   contract; keep MCP/library/HTTP/gRPC aligned.
+5. Expose `traverse_relations` through library + MCP and keep capability metadata
+   explicit: library/MCP `supported`, HTTP/gRPC `not_exposed`. HTTP/gRPC parity
+   is a follow-up and must reuse the same contract and traversal kernel.
 
 **Verification:** `./scripts/validate-contracts.sh`; storage parity tests
 (in-memory vs PostgreSQL, `SCI_TEST_POSTGRES_URL`) — detect/stop/fresh-start the
