@@ -104,6 +104,13 @@ delivered across all four runtime surfaces under ADR-040:
   (library/MCP/HTTP/gRPC) are aligned and the ADR-040 phased-exposure follow-up
   is complete.
 
+Stage 5.1 is delivered under ADR-042: the repo-managed protobuf toolchain
+decision is accepted and `runtime.proto` is now the complete authoritative
+contract for all 16 envelope messages and eight unary RPCs. Generated Java
+sources, idempotent javac preparation, runtime parity/cutover, and removal of the
+temporary descriptor-built oracle remain the active Stage 5 implementation
+slices.
+
 After Stage 4, the product sequence is provider catalog/discovery, then one
 Protobuf/OpenAPI contract-linking vertical slice, then a SCIP evidence-provider
 spike over the same canonical relation graph. Parser-deepening research remains

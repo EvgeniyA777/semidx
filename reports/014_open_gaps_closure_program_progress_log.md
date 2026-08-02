@@ -947,3 +947,48 @@ as part of this planning review.
   reconciling the `.proto` (service block + missing messages, generated stubs) is
   Stage 5 (gRPC generated stubs) territory, not this stage.
 - Known blockers: none.
+
+## Stage 5.1 - Protobuf Toolchain Decision And Complete Contract
+
+- Status: completed.
+- Scope: Accept the generated-stub build architecture and make the pinned
+  `.proto` a complete representation of the existing descriptor-built gRPC
+  surface before introducing code generation or changing runtime behavior.
+- Summary:
+  - ADR-042 accepts a repo-managed, SHA-256-pinned, build-only `protoc` 3.25.1 /
+    `protoc-gen-grpc-java` 1.63.0 toolchain, committed generated Java sources,
+    and idempotent javac preparation that does not invoke protoc during an
+    ordinary `clojure -M:test` run.
+  - `runtime.proto` now declares the Java generation options, the previously
+    missing `LiteralFileSlice` and `SnapshotDiff` request/response messages, and
+    `RuntimeService` with all eight unary RPCs.
+  - The 16 message definitions, field numbers, scalar/repeated types, and eight
+    RPC names match the temporary descriptor-built oracle.
+  - The service package intentionally changes full method paths from
+    `/semidx.RuntimeService/<Method>` to
+    `/semidx.runtime.grpc.v1.RuntimeService/<Method>`; ADR and proto comments now
+    state that compatibility consequence explicitly.
+  - Only `osx-aarch_64` is validated initially. The grpc-java artifact under
+    that classifier is an upstream x86_64 Mach-O copy and requires Rosetta 2 for
+    Apple Silicon codegen; this is build-only and does not affect ordinary
+    runtime/test execution after generated sources are committed.
+- Changed files:
+  - `adr/042-generate-grpc-stubs-from-a-repo-managed-protobuf-toolchain.md`
+  - `proto/semidx/runtime/grpc/v1/runtime.proto`
+  - `MEMORY.md`
+  - `docs/roadmap-status.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - Maven Central acquisition probe passed for both pinned executables on
+    `Darwin arm64`; downloaded bytes matched the ADR-042 SHA-256 pins.
+  - `protoc --version` returned `libprotoc 25.1`.
+  - Pinned protoc compiled the completed contract to a descriptor set and
+    generated 33 protobuf Java files plus
+    `RuntimeServiceGrpc.java`; the descriptor contains all eight RPCs with the
+    expected versioned request/response type names.
+  - The grpc-java plugin completed a real protoc plugin invocation successfully
+    through Rosetta 2.
+- Skipped / limitations: build aliases, committed generated sources, javac
+  preparation, runtime cutover, and descriptor-oracle removal belong to the
+  remaining Stage 5 delivery slices.
+- Known blockers: none.

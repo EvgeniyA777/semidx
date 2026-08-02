@@ -92,7 +92,11 @@ after this memory file.
 ## Known Gaps
 
 - No full compiler-grade interprocedural semantic resolution across all supported languages yet.
-- gRPC message classes are still descriptor-built at runtime; generated Java/Kotlin stubs are not wired yet.
+- Stage 5.1 is complete under ADR-042: `runtime.proto` now carries all 16 envelope
+  messages and all eight unary RPCs, and the repo-managed generated-Java
+  toolchain contract is accepted. Runtime message classes are still
+  descriptor-built until the remaining Stage 5 build, parity, and cutover
+  slices wire the generated stubs.
 - No dynamic external policy backend integration yet (current authz adapter is local file/callback based).
 - HTTP/gRPC/MCP surfaces now support server-configured registries and selector-based `resolve_context` policy lookup, but broader online policy-management/control-plane APIs are still intentionally absent.
 - Rate limiting is delegated to ingress/proxy/host layer and not implemented in runtime edges.
@@ -167,8 +171,10 @@ after this memory file.
    same contract (4.4). The only optional residual is an explicit reprojection
    command for snapshots saved before the projection existed. Next frontier: the
    post-Stage-4 product sequence (provider catalog/discovery) and the independent
-   operational Stages 5-7 (gRPC generated stubs, online policy control-plane,
-   runtime-edge rate limiting).
+   operational Stages 5-7. Stage 5.1 (ADR-042 plus the complete authoritative
+   `.proto`) is delivered; the next Stage 5 slice is tool acquisition,
+   deterministic generation, and idempotent javac preparation. Stages 6-7 are
+   the online policy control-plane and runtime-edge rate limiting.
 4. After the public graph surface, sequence provider catalog/discovery work before the Protobuf/OpenAPI contract-linking vertical slice and the SCIP evidence-provider spike.
 5. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
 6. On the next Antigravity touchpoint, explicitly test staged continuation after `resolve_context`: require `expand_context` and `fetch_context_detail`, verify the client reuses `selection_id` / `snapshot_id`, and check whether evidence quality improves without falling back to manual browsing.
