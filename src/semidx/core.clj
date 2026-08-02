@@ -554,6 +554,48 @@
                     :payload (error-payload e)})))
          (throw (errors/normalize-exception e)))))))
 
+(defn relation-traversal
+  "Bounded public traversal over typed semantic relations for a loaded index,
+  wrapped with usage metrics like impact-analysis. Returns the relation-traversal
+  contract result plus a selection_id for staged expand/detail. See ADR-040."
+  ([index request]
+   (relation-traversal index request {}))
+  ([index request opts]
+   (let [sink (resolve-usage-metrics index opts)
+         usage-context (resolve-usage-context index opts)
+         start-ms (now-ms)]
+     (try
+       (let [result (retrieval/relation-traversal index request opts)]
+         (when (should-record-usage? sink opts)
+           (usage/safe-record-event!
+            sink
+            (merge usage-context
+                   (request-trace-fields request)
+                   {:operation "traverse_relations"
+                    :status "success"
+                    :latency_ms (- (now-ms) start-ms)
+                    :root_path_hash (usage/hash-root-path (:root_path index))
+                    :payload (cond-> {:direction (:direction result)
+                                      :node_count (count (:nodes result))
+                                      :edge_count (count (:edges result))
+                                      :path_count (count (:paths result))
+                                      :snapshot_id (:snapshot_id result)}
+                               (:selection_id result)
+                               (assoc :selection_id (:selection_id result)))})))
+         result)
+       (catch Exception e
+         (when (should-record-usage? sink opts)
+           (usage/safe-record-event!
+            sink
+            (merge usage-context
+                   (request-trace-fields request)
+                   {:operation "traverse_relations"
+                    :status "error"
+                    :latency_ms (- (now-ms) start-ms)
+                    :root_path_hash (usage/hash-root-path (:root_path index))
+                    :payload (error-payload e)})))
+         (throw (errors/normalize-exception e)))))))
+
 (defn skeletons
   "Return skeletons for selected units/paths.
 

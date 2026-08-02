@@ -33,6 +33,7 @@
    "expand_context"
    "fetch_context_detail"
    "impact_analysis"
+   "traverse_relations"
    "skeletons"
    "cache_eviction"])
 (def usage-status [:enum "success" "error"])

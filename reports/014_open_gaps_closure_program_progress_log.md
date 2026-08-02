@@ -760,3 +760,64 @@ as part of this planning review.
 - Skipped / limitations: no PostgreSQL provider yet (Stage 4.3); no public
   library/MCP handler yet (rest of Stage 4.2).
 - Known blockers: none.
+
+## Stage 4.2b - Public Relation Traversal Surface (library + MCP)
+
+- Status: completed.
+- Scope: Expose the bounded relation traversal on the library and MCP surfaces
+  (ADR-040 phased exposure: library + MCP supported; HTTP/gRPC not_exposed),
+  returning the compact contract result plus a staged-retrieval selection_id.
+- Summary:
+  - `semidx.runtime.retrieval/relation-traversal` runs the pure kernel on a
+    loaded snapshot index, validates direction/start_nodes, maps the contract
+    request (`:direction`, `:start_nodes`, `:relation_types`, `:resolved_only`,
+    `:budgets`) to the kernel, and returns the compact contract result
+    (`schema_version`, `snapshot_id`, `direction`, `start_nodes`,
+    `relation_types`, `budgets`, `nodes`, `edges`, `paths`, `truncated`).
+  - `store-traversal-selection!` builds and stores a selection artifact over the
+    discovered units (reusing `stage-budgets`, `fit-focus`, `build-confidence`,
+    `capability-summary`, `snapshot-bound-index`, `snapshot-file-lines`,
+    `put-selection!`), so the returned `selection_id` is reusable by the existing
+    `expand-context` / `fetch-context-detail` flow rather than a parallel
+    code-delivery mechanism.
+  - `semidx.core/relation-traversal` wraps it with usage metrics (operation
+    `traverse_relations`), mirroring `impact-analysis`.
+  - MCP tool `traverse_relations` is registered in `tool-definitions` /
+    `tool-handlers` (`semidx.mcp.core/tool-traverse-relations`) and returns the
+    compact result plus `index_id` and `selection_id`.
+  - `usage-operation` gained `traverse_relations` in both the JSON common schema
+    and the malli mirror.
+- Changed files:
+  - `src/semidx/runtime/retrieval.clj`
+  - `src/semidx/core.clj`
+  - `src/semidx/mcp/core.clj`
+  - `src/semidx/contracts/schemas.clj`
+  - `contracts/schemas/common.schema.json`
+  - `test/semidx/integration/runtime_test.clj`
+  - `test/semidx/mcp/server_test.clj`
+  - `MEMORY.md`
+  - `docs/mcp-api.md`
+  - `docs/code-context.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - semidx MCP mapped the selection store (`build-selection-result`,
+    `put-selection!`, `ensure-selection!`), the MCP tool registration/dispatch,
+    and the core/retrieval public API before editing.
+  - REPL end-to-end: `sci/relation-traversal` returns a contract-valid result
+    (validated against `contracts/relation-traversal-{query,result}` malli), the
+    selection_id is reusable by `expand-context` (skeletons) and
+    `fetch-context-detail` (raw_context), and the snapshot-mismatch guard fires.
+  - REPL MCP end-to-end via `handle-tools-call`: create_index ->
+    traverse_relations -> expand_context succeeds; result serializes to JSON.
+  - `clojure -M:test` passed (`258 tests / 1735 assertions`), including a new
+    `relation-traversal-public-surface-test` (integration) and a
+    `traverse_relations` case plus updated tool-name sets in the MCP server
+    conformance test.
+  - `./scripts/validate-contracts.sh` passed (`checked_json_files=65`,
+    `contracts_validation=ok`).
+  - `./scripts/run-mvp-gates.sh` passed; `./scripts/run-benchmarks.sh` `21/21`.
+- Skipped / limitations: HTTP/gRPC exposure is intentionally deferred
+  (`not_exposed` per ADR-040). No new capability-contract surface-matrix field
+  was added; exposure is reflected by tool presence in `tools/list` + the library
+  API and documented in ADR-040. PostgreSQL projection/provider is Stage 4.3.
+- Known blockers: none.

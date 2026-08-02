@@ -2083,6 +2083,44 @@
         (is (some #(= "relation_traversal_truncated" (:code %))
                   (get-in hints [:relation_support :reasons])))))))
 
+(deftest relation-traversal-public-surface-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-relation-traversal-surface" (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (write-flow-fixture! tmp-root)
+    (let [index (sci/create-index {:root_path tmp-root :parser_opts {:clojure_engine :regex}})
+          wrapper-id "src/my/app/flow.clj::my.app.flow/wrapper"
+          make-client-id "src/my/app/flow.clj::my.app.flow/make-client"
+          down (sci/relation-traversal index {:direction "downstream" :start_nodes [wrapper-id]})
+          up (sci/relation-traversal index {:direction "upstream" :start_nodes [make-client-id]})]
+      (testing "the result matches the relation-traversal contract"
+        (is (nil? (m/explain contracts/relation-traversal-result down)))
+        (is (= "downstream" (:direction down)))
+        (is (= (:snapshot_id index) (:snapshot_id down))))
+      (testing "downstream traversal surfaces resolved dataflow dependencies"
+        (is (contains? (set (map :unit_id (:nodes down)))
+                       "src/my/app/flow.clj::my.app.flow/make-client"))
+        (is (contains? (set (map :unit_id (:nodes down)))
+                       "src/my/app/flow.clj::my.app.flow/save!"))
+        (is (contains? (set (map :unit_id (:nodes down)))
+                       "src/my/app/flow.clj::my.app.flow/normalize"))
+        (is (seq (:edges down))))
+      (testing "upstream traversal walks target -> source"
+        (is (contains? (set (map :unit_id (:nodes up))) wrapper-id)))
+      (testing "a selection_id is produced and reusable by staged expand/detail"
+        (let [sid (:selection_id down)]
+          (is (string? sid))
+          (let [exp (sci/expand-context index {:selection_id sid :snapshot_id (:snapshot_id down)})
+                det (sci/fetch-context-detail index {:selection_id sid
+                                                     :snapshot_id (:snapshot_id down)
+                                                     :detail_level "target_span"})]
+            (is (seq (:skeletons exp)))
+            (is (seq (:raw_context det))))))
+      (testing "an unknown direction is rejected"
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (sci/relation-traversal index {:direction "sideways" :start_nodes [wrapper-id]}))))
+      (testing "empty start_nodes are rejected"
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (sci/relation-traversal index {:direction "downstream" :start_nodes []})))))))
+
 (deftest python-dataflow-relations-resolve-target-units-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-python-dataflow-relations" (make-array java.nio.file.attribute.FileAttribute 0)))
         rel-path "app/flow.py"]

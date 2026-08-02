@@ -109,7 +109,7 @@ Both HTTP transports reuse the same tool/session core as stdio, so `initialize`,
 
 If `SCI_USAGE_METRICS_JDBC_URL` is configured, the server records:
 
-- tool usage events by operation (`create_index`, `repo_map`, `resolve_context`, `expand_context`, `fetch_context_detail`, `impact_analysis`, `skeletons`)
+- tool usage events by operation (`create_index`, `repo_map`, `resolve_context`, `expand_context`, `fetch_context_detail`, `impact_analysis`, `traverse_relations`, `skeletons`)
 - cache-hit/cache-miss behavior for `create_index`
 - cache eviction events
 - normalized correlation fields such as `session_id`, `task_id`, `trace_id`, `request_id`, and `actor_id` where available
@@ -440,6 +440,27 @@ Returns:
 
 - `index_id`
 - `impact_hints`
+
+### `traverse_relations`
+
+Run a bounded traversal over typed semantic relations (dataflow) from one or more start unit ids, reusing the Stage 3 traversal kernel (ADR-040). It is a bounded relation walk, not a general-purpose graph-query language. Exposed on library and MCP; HTTP/gRPC are not exposed in this stage.
+
+Inputs:
+
+- `index_id`
+- `start_nodes` (array of unit ids)
+- `direction` => `"downstream"` (source -> target / flows-to) or `"upstream"` (target -> source / flows-from)
+- `relation_types` (optional allow-list; empty means all)
+- `resolved_only` (optional boolean, default `true`; ambiguous/unresolved edges are skipped)
+- `budgets` (optional `max_depth` / `max_nodes` / `max_paths`, clamped to the kernel ceiling)
+
+Returns:
+
+- `index_id`
+- `snapshot_id`, `direction`, `start_nodes`, `relation_types`
+- `budgets` (the applied bounds, including `resolved_only`)
+- `nodes` (`unit_id` + `depth`), `edges`, `paths`, `truncated`
+- `selection_id` — pass it (with `snapshot_id`) to `expand_context` / `fetch_context_detail` to deliver the discovered units' code through the staged-retrieval flow
 
 ### `skeletons`
 

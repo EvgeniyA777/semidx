@@ -1706,6 +1706,107 @@
      (build-impact-hints (:bound_index selection)
                          (or (:focus selection) [])))))
 
+(def ^:private relation-traversal-directions
+  {"downstream" :downstream
+   "upstream" :upstream})
+
+(def ^:private default-relation-traversal-budget 1800)
+
+(defn- store-traversal-selection!
+  "Build and store a selection artifact over the traversal's discovered units so
+  the existing staged-retrieval flow (`expand-context` / `fetch-context-detail`)
+  can deliver their code, and return its selection_id. Returns nil when no
+  discovered unit resolves to a real unit in the index."
+  [index unit-ids requested-budget]
+  (let [selected (->> unit-ids
+                      (keep #(idx/unit-by-id index %))
+                      (map #(assoc % :rank_band "useful_support" :score 0.0
+                                   :tier_scores {} :selection_reasons []))
+                      vec)]
+    (when (seq selected)
+      (let [reserved (stage-budgets requested-budget)
+            policy (rp/resolve-policy nil nil)
+            query {:constraints {:token_budget requested-budget}}
+            capabilities (rp/capability-summary index (capability-units selected))
+            confidence (-> (build-confidence selected query policy)
+                           (apply-capability-ceiling capabilities policy))
+            {:keys [focus estimated_tokens]} (fit-focus selected (:selection_tokens reserved))
+            selection-id (str (java.util.UUID/randomUUID))
+            selection {:api_version default-api-version
+                       :selection_id selection-id
+                       :snapshot_id (:snapshot_id index)
+                       :query query
+                       :policy policy
+                       :created_at_ms (now-ms)
+                       :bound_index (snapshot-bound-index index)
+                       :file_snapshots (snapshot-file-lines
+                                        index (->> selected (map :path) distinct vec))
+                       :selected selected
+                       :focus focus
+                       :confidence confidence
+                       :capabilities capabilities
+                       :budget {:requested_tokens requested-budget
+                                :estimated_tokens estimated_tokens
+                                :within_budget (<= estimated_tokens (:selection_tokens reserved))
+                                :remaining_tokens (max 0 (- requested-budget estimated_tokens))
+                                :reserved_budget reserved}
+                       :result_status "completed"}]
+        (put-selection! index selection)
+        selection-id))))
+
+(defn relation-traversal
+  "Bounded public traversal over typed semantic relations for a loaded snapshot
+  `index`. `request` is the relation-traversal contract shape
+  (`:start_nodes`, `:direction`, optional `:relation_types`, `:resolved_only`,
+  `:budgets`, `:snapshot_id`, `:trace`). Runs the pure Stage 3 kernel and returns
+  the compact contract result plus a `:selection_id` (a stored selection over the
+  discovered units) so `expand-context` / `fetch-context-detail` deliver code
+  through the existing staged-retrieval flow. See ADR-040."
+  ([index request] (relation-traversal index request {}))
+  ([index request _opts]
+   (let [direction-kw (get relation-traversal-directions (some-> (:direction request) name))
+         start-nodes (->> (:start_nodes request)
+                          (keep (fn [s] (let [t (some-> s str clojure.string/trim)]
+                                          (when-not (clojure.string/blank? t) t))))
+                          distinct
+                          vec)]
+     (when-not direction-kw
+       (throw (ex-info "Unknown traversal direction"
+                       {:type :invalid_traversal_request
+                        :error_code :invalid_traversal_request
+                        :message "direction must be \"downstream\" or \"upstream\""
+                        :details {:direction (:direction request)}})))
+     (when (empty? start-nodes)
+       (throw (ex-info "start_nodes must be non-empty"
+                       {:type :invalid_traversal_request
+                        :error_code :invalid_traversal_request
+                        :message "start_nodes must contain at least one non-blank unit id"
+                        :details {:start_nodes (:start_nodes request)}})))
+     (let [budgets (:budgets request)
+           kernel-req (cond-> {:direction direction-kw
+                               :start_nodes start-nodes
+                               :relation_types (:relation_types request)}
+                        (contains? request :resolved_only)
+                        (assoc :resolved_only (:resolved_only request))
+                        (number? (:max_depth budgets)) (assoc :max_depth (:max_depth budgets))
+                        (number? (:max_nodes budgets)) (assoc :max_nodes (:max_nodes budgets))
+                        (number? (:max_paths budgets)) (assoc :max_paths (:max_paths budgets)))
+           result (relations/traverse-relations index kernel-req)
+           discovered (mapv :unit_id (:nodes result))
+           selection-id (store-traversal-selection! index discovered
+                                                    default-relation-traversal-budget)]
+       (cond-> {:schema_version "1.0"
+                :snapshot_id (:snapshot_id index)
+                :direction (name (:direction result))
+                :start_nodes (:start_nodes result)
+                :relation_types (:relation_types result)
+                :budgets (:budgets result)
+                :nodes (:nodes result)
+                :edges (:edges result)
+                :paths (:paths result)
+                :truncated (:truncated result)}
+         selection-id (assoc :selection_id selection-id))))))
+
 (defn skeletons [index {:keys [unit_ids paths]}]
   (let [units (cond
                 (seq unit_ids) (idx/units-by-ids index unit_ids)
