@@ -11,7 +11,8 @@ updated: "2026-08-01"
 
 Baseline snapshot of what is genuinely open in this repository, produced by a
 full read of all plan and idea documents cross-checked against the actual code,
-progress logs, and live MCP responses (2026-07-19). Use this document as the
+progress logs, and live MCP responses on 2026-07-19, then refreshed for the
+relation-first architecture review on 2026-08-01. Use this document as the
 starting point for the next planning pass; update or supersede it when the
 program state changes materially.
 
@@ -26,15 +27,12 @@ fixtures, live `create_index` / `resolve_context` payloads).
 
 Seven-stage program; current state:
 
-- **Stage 1 (split `runtime/adapters.clj` into lane modules): in progress.**
-  Shared helpers, Clojure, Java, Python, and Lua lanes are extracted
-  (commits `bc9117f`, `7d3f4ae`, `06201dd`, `12c2605`, `0b4d630`). Remaining:
-  the JavaScript lane and collapsing `adapters.clj` into a thin dispatch
-  facade over `language_registry` + lane modules.
+- **Stage 1 is delivered.** Shared helpers and all planned language lanes are
+  extracted, and `adapters.clj` is the thin dispatch facade (closure commit
+  `2ec7c7c`).
 - **Stage 2 is delivered; Stage 3 is partially delivered.**
-  2. Remove the tree-sitter external-CLI runtime dependency (ADR-034 decision
-     has been implemented as the repo-managed optional-toolchain strategy in
-     ADR-036).
+  2. Remove the tree-sitter external-CLI runtime dependency (implemented as the
+     repo-managed optional-toolchain strategy in ADR-036).
   3. Interprocedural / dataflow-sensitive resolution v1 has its relation
      substrate plus Clojure/Python producers; bounded retrieval and impact
      projections remain the next semantic step.
@@ -135,16 +133,17 @@ separate parity-gated migration.
 
 1. ~~Hygiene commit: flip stale frontmatter on delivered plans~~ — **done**
    (`74e3d4e`).
-2. Finish 013 Stage 1: JavaScript lane extraction + collapse `adapters.clj`
-   into a thin facade; run the full parity gates from the plan.
-3. Complete bounded retrieval/impact projections over the existing relation
-   indexes, preserving conservative handling of ambiguity.
+2. Stabilize relation identity/evidence and validation before relation-backed
+   consumers are introduced.
+3. Complete the storage-independent bounded traversal kernel, then wire
+   retrieval/impact projections over it while preserving conservative handling
+   of ambiguity.
 4. First new plan from the idea backlog: `ideas/012` state invariant context —
    it fits the existing staged-retrieval contract and does not wait for the
    provider catalog.
-5. Content update to `docs/roadmap-status.md` Current Focus (still describes
-   plans 002-004 as the frontier; should point at the 013 program and this
-   assessment).
+5. After the bounded public graph surface, schedule the provider catalog and
+   Protobuf/OpenAPI product vertical slice before a SCIP evidence-provider
+   spike.
 
 ## 6. Related Recent Work (context)
 

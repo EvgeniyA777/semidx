@@ -806,16 +806,16 @@ Exit criteria:
 - binary and oversized files are excluded with explicit reasons;
 - language activation remains compatible for code providers.
 
-### Stage 4. Typed Relations In Shadow Mode
+### Stage 4. Legacy Graph Migration Into Canonical Typed Relations
 
 Goal:
 
-- add general relations without changing existing graph behavior.
+- migrate legacy call/import graph projections without changing observable
+  graph behavior; the typed-relation substrate for new facts already exists.
 
 Deliverables:
 
-- relation schema;
-- forward and reverse relation indexes;
+- existing relation schema and forward/reverse indexes as the migration target;
 - call/import dual-write;
 - relation-derived caller/callee shadow projections;
 - compatibility comparison reports.
@@ -839,7 +839,7 @@ Required path:
 Discovery
 → Provider Selection
 → Markdown FileIndexer
-→ Semantic IR Units And Relations
+→ Provider-Normalized Units And Typed Relations
 → Retrieval And Capability Projection
 ```
 

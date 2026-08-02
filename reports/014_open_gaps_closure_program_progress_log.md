@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-07-20"
+updated: "2026-08-01"
 ---
 
 # Open Gaps Closure Program Progress Log
@@ -369,3 +369,87 @@ Tracks execution of `plans/013_open_gaps_closure_program.md`.
   - `git diff --check` passed.
 - Skipped / limitations: relation-backed retrieval/impact projections are deferred to the next Stage 3 sub-step by design.
 - Known blockers: none.
+
+## Stage 3 Architecture Re-review - 2026-08-01
+
+- Status: completed.
+- Scope: Reconcile the accepted relation-first direction from ADR-034,
+  ADR-037, and ADR-038 with the current relation substrate, retrieval/storage
+  boundaries, and the agreed provider/product sequence.
+- Verification performed:
+  - semidx MCP `create_index -> repo_map -> resolve_context -> expand_context -> fetch_context_detail` completed against the current repository.
+  - Exact snapshot-bound slices confirmed that relation indexes exist while
+    `build-impact-hints` still consumes legacy caller/module/test indexes.
+  - `git diff --check` passed after documentation corrections.
+  - Full runtime tests were not rerun because this review changed planning and
+    progress documentation only.
+
+### Findings And Disposition
+
+1. **High - semantic relation identity includes mutable evidence and resolution.**
+   - Evidence: `relation-id-input` includes `target_unit_ids`,
+     `resolution_status`, `evidence_quality`, `provenance`, and
+     `evidence_location`.
+   - Impact: unresolved-to-resolved transitions and additional SCIP/compiler
+     evidence create replacement or duplicate semantic edges instead of
+     enriching one fact.
+   - Disposition: accepted; implementation required before relation-backed
+     consumers. Record the durable identity/evidence split in the next ADR.
+
+2. **High - Stage 3 and Stage 4 both implied ownership of traversal semantics.**
+   - Evidence: Stage 3 required bounded retrieval projections while Stage 4
+     placed bounded traversal directly in storage.
+   - Impact: duplicate in-memory and storage-specific graph semantics could
+     diverge.
+   - Disposition: accepted; planning fixed. Stage 3 now owns the pure bounded
+     traversal kernel and internal consumers; Stage 4 productizes that contract
+     and adds persistent execution parity.
+
+3. **High - the agreed Protobuf/OpenAPI vertical slice was absent from the
+   executable sequence.**
+   - Impact: ADR-038 named future providers but no active stage delivered the
+     cross-language contract trace.
+   - Disposition: accepted; planning fixed by adding the post-Stage-4 product
+     sequence. A dedicated implementation plan is still required before work.
+
+4. **Medium - relation validation is permissive and silently drops invalid
+   facts.**
+   - Evidence: `valid-relation?` checks only basic presence and
+     `normalize-relations` filters invalid facts without diagnostics.
+   - Disposition: accepted; schema hardening and structured diagnostics are a
+     Stage 3 prerequisite.
+
+5. **Medium - v1 unit-centric endpoints are insufficient for contract and
+   document providers.**
+   - Disposition: accepted and deferred to the provider tranche; additive
+     endpoint/entity references must land before Protobuf/OpenAPI/SCIP emitters.
+
+6. **Medium - PostgreSQL Stage 4 lacked an explicit typed-relation physical
+   projection.**
+   - Evidence: current storage has snapshot, unit, and legacy call-edge tables,
+     but no `semantic_index_relations` table.
+   - Disposition: accepted; planning fixed to require snapshot/repository scope,
+     relation/evidence indexes, migration policy, and parity with the pure
+     traversal kernel.
+
+7. **Medium - active planning metadata and references were stale.**
+   - Evidence: the program remained `planned`, referenced a nonexistent
+     `reports/010_open_gaps_closure_program_progress_log.md`, and the
+     architecture assessment still described Stage 1 as incomplete.
+   - Disposition: fixed in planning documentation on 2026-08-01; implementation
+     status remains Stage 3 in progress.
+
+### Follow-up Sequence
+
+1. Write the relation identity/evidence ADR and implement schema hardening.
+2. Implement and verify the pure bounded traversal kernel.
+3. Wire reason-coded relation support into retrieval and impact analysis.
+4. Complete Stage 4 persistence/public contract work.
+5. Create the provider/contract-linking implementation plan.
+
+### Out-of-scope Observation
+
+The review also found stale `repo_identity` metadata when a source snapshot is
+reused after documentation-only commits. The independent reproduction is in
+`notes/2026-08-01-reused-index-stale-repo-identity.md`; no runtime fix was made
+as part of this planning review.

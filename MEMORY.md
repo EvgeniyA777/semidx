@@ -120,10 +120,12 @@ after this memory file.
 
 ## Next Execution Priorities
 
-1. Continue `plans/013` Stage 3 with bounded retrieval/impact projections over the existing relation indexes.
-2. Keep ambiguous relation-backed flows conservative and avoid a public graph-query API in Stage 3.
-3. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
-4. On the next Antigravity touchpoint, explicitly test staged continuation after `resolve_context`: require `expand_context` and `fetch_context_detail`, verify the client reuses `selection_id` / `snapshot_id`, and check whether evidence quality improves without falling back to manual browsing.
+1. Stabilize semantic relation identity independently from mutable resolution and evidence, then harden relation validation with explicit diagnostics instead of silent invalid-fact filtering.
+2. Continue `plans/013` Stage 3 with a storage-independent bounded traversal kernel and relation-backed retrieval/impact projections over it.
+3. Keep ambiguous relation-backed flows conservative and avoid a public graph-query API in Stage 3.
+4. After the public graph surface, sequence provider catalog/discovery work before the Protobuf/OpenAPI contract-linking vertical slice and the SCIP evidence-provider spike.
+5. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
+6. On the next Antigravity touchpoint, explicitly test staged continuation after `resolve_context`: require `expand_context` and `fetch_context_detail`, verify the client reuses `selection_id` / `snapshot_id`, and check whether evidence quality improves without falling back to manual browsing.
 
 ## Update Rule
 

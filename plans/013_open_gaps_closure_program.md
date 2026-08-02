@@ -2,7 +2,7 @@
 title: "Open Semantic and Ops Gaps Closure Program"
 doc_type: "implementation_plan"
 lifecycle: "active"
-status: "planned"
+status: "in_progress"
 agent_action: "reference_for_context"
 updated: "2026-08-01"
 ---
@@ -24,21 +24,19 @@ Stage 1 begins. If they are still dirty, checkpoint them in a dedicated
 
 ## Companion Progress Log
 
-Before or during Stage 1, create `reports/010_open_gaps_closure_program_progress_log.md`
-with standard documentation frontmatter and update it as each stage completes
+The companion log is `reports/014_open_gaps_closure_program_progress_log.md`.
+Update it as each stage completes
 (stage status, changed files / commit hash, verification commands + results,
 review findings and their disposition, blockers, skipped checks).
 
 ## Ordering Rationale (dependency-first, not gap-number order)
 
-1. **Stage 1 — Split `runtime/adapters.clj`** (gap 2). Structural prerequisite.
-   `adapters.clj` is 3029 lines with ~492 per-language references; the language
-   modules for Clojure/Java/Python/Lua are still 5-6 line stubs while TypeScript
-   is already fully extracted. A clean lane/shared-helper base must exist before
-   deeper semantics land, and `plans/012` already prepared the mirrored test
-   suite for exactly this refactor.
-2. **Stage 2 — Remove tree-sitter external-CLI runtime dependency** (gap 6).
-   Parsing lands cleanly in the freshly extracted lane modules.
+1. **Stage 1 — Split `runtime/adapters.clj`** (gap 2) — delivered. The language
+   lanes and shared helpers now own extraction; `adapters.clj` is the thin
+   dispatch facade required by the deeper semantic stages.
+2. **Stage 2 — Remove tree-sitter external-CLI runtime dependency** (gap 6) —
+   delivered under ADR-036 with regex as the guaranteed default and the
+   repository-managed toolchain as optional acceleration.
 3. **Stage 3 — Interprocedural / dataflow-sensitive resolution v1** (gap 1). The
    major semantic tranche, built on the clean adapter base from Stage 1.
 4. **Stage 4 — Semantic graph query surface** (gap 7). Builds on the stabilized
@@ -185,14 +183,34 @@ canonical graph for all new graph semantics.
    snapshot-preserved typed relation indexes.
 2. Treat ADR-038 as the canonical graph decision: do not add new graph fields
    to `semantic_ir.clj`, and do not create provider-specific graph stores.
-3. Add bounded retrieval/impact projections that consume relation indexes,
+3. Before adding consumers, stabilize relation identity independently from
+   mutable resolution and evidence. A semantic relation ID must derive from
+   relation type, source endpoint, semantic target key, and flow payload;
+   resolution status, resolved target IDs, evidence quality, provenance, and
+   evidence location must not create a second semantic edge. Record this
+   durable identity/evidence split in the next ADR before changing v1 IDs.
+4. Replace permissive validation and silent invalid-fact filtering with an
+   explicit internal schema plus structured diagnostics. Resolved relations
+   require resolved targets; ambiguous/unresolved relations remain
+   conservative; relation types and evidence shapes are validated.
+5. Add a pure, storage-independent bounded traversal kernel under
+   `runtime.relations`. Its request must specify start nodes, direction,
+   relation-type allow-list, resolved-only behavior, cycle handling,
+   deterministic ordering, and `max_depth` / `max_nodes` / `max_paths` budgets.
+   Initial target bounds are depth at most 4, 200 nodes, and 50 paths, subject
+   to benchmark-backed tightening before public exposure.
+6. Add bounded retrieval/impact projections that consume the traversal kernel,
    keeping ambiguous flows conservative (no over-linking) and avoiding a public
-   graph-query API in Stage 3.
-4. Recalibrate confidence ceilings only if evidence supports it; otherwise keep
+   graph-query API in Stage 3. Start with reason-coded, low-weight support and
+   preserve existing caller/callee outputs.
+7. Recalibrate confidence ceilings only if evidence supports it; otherwise keep
    ceilings unchanged and document the non-bump (as done previously).
 
-**Verification:** new mirrored `*-test` namespaces per lane; new
-replay/benchmark ambiguity fixtures under `fixtures/`;
+**Verification:** relation identity remains stable as evidence is added and an
+unresolved target becomes resolved; invalid relations emit deterministic
+diagnostics; traversal tests cover cycles, direction, relation filtering,
+budgets, deterministic ordering, and ambiguous targets. Add mirrored `*-test`
+namespaces per lane plus replay/benchmark ambiguity fixtures under `fixtures/`;
 `./scripts/run-benchmarks.sh` and `./scripts/run-semantic-quality-report.sh`
 must show no regression and a measurable gain on the new interprocedural cases.
 Consider protected replay-case promotion for the hardest new cases.
@@ -208,22 +226,26 @@ per lane if the diff grows.
 
 ## Stage 4 — Semantic graph query surface (gap 7)
 
-**Goal:** Move persistence graph access beyond the current retrieval-oriented
-`query-callers`/`query-callees`/`query-units` toward a small, bounded semantic
-graph query capability (multi-hop traversal with contract-valid bounded output).
+**Goal:** Productize the Stage 3 traversal semantics as a bounded public graph
+query surface and add a PostgreSQL physical projection without moving graph
+policy into storage.
 
 **Current shape:** `storage.clj` (453 lines) exposes single-hop caller/callee/
 unit queries over `semantic_index_call_edges` (in-memory + PostgreSQL).
 
 **Sub-steps:**
-1. Specify the query surface + bounds in a new ADR numbered with the next
-   available ADR at execution time (traversal depth cap, result caps, contract
-   shape). Keep outputs bounded and contract-valid.
+1. Specify the public query surface in a new ADR numbered with the next
+   available ADR at execution time. Reuse the Stage 3 traversal semantics and
+   bounds instead of defining a second graph walk.
 2. Add JSON Schema under `contracts/schemas/` + `malli` mirror in
    `src/semidx/contracts/` for the new query request/response.
-3. Implement bounded multi-hop traversal in `storage.clj` for both in-memory and
-   PostgreSQL backends (parity required).
-4. Expose it on the public surfaces only where it fits the staged-retrieval
+3. Add a `semantic_index_relations` PostgreSQL projection scoped by repository
+   and snapshot, with source, target, relation-type, and evidence indexes plus
+   an explicit migration/backfill policy.
+4. Implement a PostgreSQL execution adapter for the canonical traversal
+   contract and prove parity with the pure in-memory kernel. Storage may
+   optimize execution but must not own traversal semantics.
+5. Expose it on the public surfaces only where it fits the staged-retrieval
    contract; keep MCP/library/HTTP/gRPC aligned.
 
 **Verification:** `./scripts/validate-contracts.sh`; storage parity tests
@@ -233,6 +255,24 @@ PostgreSQL instance before running; `clojure -M:test`.
 **Docs:** the new Stage 4 ADR; `contracts/` updates; `docs/runtime-api.md` +
 `docs/mcp-api.md` if surfaced there; `MEMORY.md` Known Gaps (graph-query line);
 `docs/roadmap-status.md`.
+
+### Product sequence after Stage 4
+
+The first product-facing graph slice follows the graph foundation rather than
+the unrelated runtime-operations stages below:
+
+1. Deliver `plans/007` Stage 2-3 provider catalog, arbitration, and discovery
+   separation.
+2. Add additive endpoint/entity references for contract operations, generated
+   artifacts, code units, and document sections before external providers emit
+   relations.
+3. Ship one Protobuf/OpenAPI vertical slice that links a contract operation to
+   a client call site, implementation, generated artifact, and documentation.
+4. Evaluate SCIP as an evidence provider over the same relation contract; it
+   must enrich existing semantic relations rather than create a parallel graph.
+
+This product sequence is independent of the ordering of operational Stages 5-7
+and should receive its own implementation plan before provider work begins.
 
 ---
 
@@ -320,7 +360,7 @@ rollup includes limiter rejections; error taxonomy on 429-equivalent responses.
 - All seven Known-Gaps lines in `MEMORY.md` are resolved or explicitly
   reclassified, and `docs/roadmap-status.md` Current Focus reflects the new
   frontier.
-- `reports/010_open_gaps_closure_program_progress_log.md` records every stage's
+- `reports/014_open_gaps_closure_program_progress_log.md` records every stage's
   status, commits, verification, and review disposition.
 - ADRs 033-039 (as applicable) capture the durable decisions.
 - `clojure -M:test`, `./scripts/run-mvp-gates.sh`, `./scripts/run-benchmarks.sh`,

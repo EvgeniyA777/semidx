@@ -78,7 +78,8 @@ The next semantic focus is Stage 3 under `ADR-034`, `ADR-037`, and `ADR-038`:
 - the Clojure lane now emits and resolves the v1 `dataflow/*` relation facts on that substrate
 - the Python lane now emits and resolves the same v1 `dataflow/*` relation facts on that substrate
 - interprocedural/dataflow-sensitive semantic resolution using the canonical relation-first graph captured by `ADR-037` and `ADR-038`
-- the next Stage 3 implementation step is bounded retrieval/impact projections over relation indexes
+- before relation-backed consumers, relation identity must be separated from mutable resolution/evidence and invalid facts must produce explicit diagnostics
+- the next Stage 3 implementation step is a storage-independent bounded traversal kernel followed by retrieval/impact projections over relation indexes
 - continued benchmark/replay-driven validation as deeper semantic layers land
 - Elixir tree-sitter readiness is now tracked by [notes/2026-03-26-1800-13931a71-c700-4f43-84d0-701ff08273b8.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1800-13931a71-c700-4f43-84d0-701ff08273b8.md) and benchmark delta evidence by [notes/2026-03-26-1839-abc6454d-f08a-44ae-abe2-dba1557049d6.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1839-abc6454d-f08a-44ae-abe2-dba1557049d6.md)
 - Python parser-strategy frontier is now tracked in [notes/2026-03-26-1839-7815c5cd-3357-4776-a628-71dc7f695ee8.md](/Users/ae/workspaces/SemanticCodeIndexing/notes/2026-03-26-1839-7815c5cd-3357-4776-a628-71dc7f695ee8.md)
