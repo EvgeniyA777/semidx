@@ -4,7 +4,7 @@ doc_type: "handoff"
 lifecycle: "active"
 status: "ready"
 agent_action: "reference_for_context"
-updated: "2026-07-20"
+updated: "2026-08-01"
 ---
 
 # Codex Continuation Handoff
@@ -53,8 +53,28 @@ and marks relations `resolved`, `ambiguous`, or `unresolved`.
 
 ## Next Stage
 
-Continue `plans/013` Stage 3 with bounded retrieval/impact projections over the
-existing relation indexes.
+Superseded ordering note: an earlier draft of this handoff sent the next agent
+straight to bounded retrieval/impact projections over the existing relation
+indexes. The `Stage 3 Architecture Re-review - 2026-08-01` in
+`reports/014_open_gaps_closure_program_progress_log.md` re-sequenced Stage 3.
+The traversal kernel and any relation-backed consumers are now blocked on a
+prerequisite identity/evidence split.
+
+Continue `plans/013` Stage 3 in this order (matching the re-review Follow-up
+Sequence and Stage 3 sub-steps 3-6):
+
+1. Separate semantic relation identity from mutable resolution and evidence.
+   The `relation_id` must derive only from relation type, source endpoint,
+   semantic target key, and flow payload. Resolution status, resolved target
+   IDs, evidence quality, provenance, and evidence location must not create a
+   second semantic edge. Record this durable identity/evidence split in the next
+   ADR (next free number is `ADR-039`) before changing v1 relation IDs.
+2. Replace permissive validation and silent invalid-fact filtering with an
+   explicit internal schema plus structured diagnostics.
+3. Only then add the pure, storage-independent bounded traversal kernel under
+   `runtime.relations` (depth <= 4, <= 200 nodes, <= 50 paths).
+4. Then add bounded, reason-coded retrieval/impact projections over the
+   traversal kernel.
 
 Constraints:
 
@@ -81,4 +101,6 @@ For commit `daf105e`:
 Read `reports/017_codex_continuation_handoff.md`, then continue
 `/Users/ae/workspaces/semidx` from the current `dev` branch. Follow `RULES.md`,
 use semidx MCP-first, and implement the next `plans/013` Stage 3 sub-step:
-bounded retrieval/impact projections over relation indexes.
+the relation identity/evidence split plus schema-hardening diagnostics
+(recorded in `ADR-039`), which is the prerequisite for the bounded traversal
+kernel and any relation-backed retrieval/impact projections.
