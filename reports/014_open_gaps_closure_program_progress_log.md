@@ -519,3 +519,66 @@ as part of this planning review.
     more readable.
 - Skipped / limitations: bounded traversal kernel and relation-backed retrieval/impact projections remain deferred to the next Stage 3 sub-step by design.
 - Known blockers: none.
+
+## Stage 3.6 - Bounded Relation Traversal Kernel
+
+- Status: completed.
+- Scope: Implement Stage 3 sub-step 5, the pure, storage-independent bounded
+  traversal kernel over the relation indexes. No consumer is wired to it and no
+  public graph-query API is exposed (deferred to later Stage 3 / Stage 4).
+- Summary:
+  - Added `semidx.runtime.relations/traverse-relations`, a breadth-first walk
+    over `:relations` / `:relation_forward_index` / `:relation_reverse_index`.
+  - Requests specify `:direction` (`:downstream` source->target /
+    `:upstream` target->source), `:start_nodes`, a `:relation_types` allow-list,
+    `:resolved_only` (default true, so ambiguous/unresolved edges are skipped),
+    and `:max_depth`/`:max_nodes`/`:max_paths` clamped to
+    `default-traversal-bounds` (depth 4 / 200 nodes / 50 paths). Requested
+    budgets may lower but not exceed the ceiling.
+  - Traversal is cycle-safe (each node discovered once at its shortest depth,
+    cross/back edges recorded without re-expansion) and deterministic (neighbors
+    sorted by `[relation_id to]`, FIFO queue, ordered accumulators), so output
+    does not depend on set iteration order.
+  - Returns `{:direction :start_nodes :relation_types :budgets :nodes :edges
+    :paths :truncated}`; `:truncated` flags `:max_depth`/`:max_nodes`/`:max_paths`
+    budget hits. An unknown direction throws `ex-info` with
+    `:error_code :invalid_traversal_request`.
+- Changed files:
+  - `src/semidx/runtime/relations.clj`
+  - `test/semidx/runtime/relations_test.clj`
+  - `plans/013_open_gaps_closure_program.md`
+  - `MEMORY.md`
+  - `docs/roadmap-status.md`
+  - `docs/code-context.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - clojure-mcp REPL smoke confirmed downstream/upstream direction, depth
+    ceiling clamping, relation-type filtering, `:resolved_only` conservatism
+    (ambiguous excluded by default, fanned out only when disabled), 2-node cycle
+    termination, node/path budget truncation flags, and run-to-run determinism.
+  - `clojure -M:test -n semidx.runtime.relations-test` passed (`13 tests / 46 assertions`).
+  - `clojure -M:test` passed (`252 tests / 1695 assertions`).
+  - `./scripts/run-mvp-gates.sh` passed (`mvp_gates=ok`, `21/21` retrieval benchmarks, all query smokes).
+- Review findings (`/code-review high` on the stage diff, `HEAD~1`):
+  - Low (fixed) - the budget clamp treated any non-positive requested value as
+    "unspecified" and substituted the ceiling default, so an explicit
+    `:max_depth`/`:max_nodes`/`:max_paths` of 0 was silently widened to the
+    maximum, contradicting the "may lower but not exceed" contract. Fixed to
+    honor non-negative budgets and clamp to `[0, ceil]` (`(max 0 (min req ceil))`),
+    with a regression test asserting `:max_depth 0` yields only the start node and
+    flags `:max_depth` truncation. Re-verified: `relations-test`
+    (`13 tests / 49 assertions`) and `clojure -M:test` (`252 tests`) green.
+  - Low (rejected) - `node-neighbors` is materialized for a node already at
+    `max_depth` solely to flag `:max_depth` truncation via `(seq neighbors)`.
+    Disposition: rejected; cost is bounded by `max_nodes`, and a dedicated
+    existence helper adds surface for negligible savings.
+- Design notes (accepted as-is): requested budgets are clamped into
+  `[0, default-traversal-bounds]` (lower allowed, ceiling enforced); `:paths`
+  records the breadth-first discovery path per node (bounded by `:max_paths`),
+  not an exhaustive enumeration of alternative simple paths.
+- Skipped / limitations: benchmarks/semantic-quality were not treated as gating
+  because the kernel is an unused pure function that does not touch extraction,
+  ranking, resolution, or confidence; `run-mvp-gates.sh` (which includes the
+  benchmark suite) still passed. Relation-backed retrieval/impact projections
+  remain the next Stage 3 sub-step.
+- Known blockers: none.

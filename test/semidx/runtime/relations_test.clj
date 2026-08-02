@@ -146,3 +146,107 @@
     (is (= 1 (count (:relation_diagnostics indexed))))
     (is (= :invalid-relation-type
            (-> indexed :relation_diagnostics first :errors first :code)))))
+
+(defn- traversal-rel [src tgt status typ]
+  {:source_unit_id src
+   :target_unit_ids (if (vector? tgt) tgt [tgt])
+   :relation_type typ
+   :resolution_status status
+   :evidence_quality "medium"})
+
+(defn- node-ids [result]
+  (mapv :unit_id (:nodes result)))
+
+(deftest traverse-relations-downstream-depth-and-direction-test
+  (let [idx (relations/index-relations
+             [(traversal-rel "A" "B" "resolved" "dataflow/returns-call-result")
+              (traversal-rel "B" "C" "resolved" "dataflow/returns-call-result")
+              (traversal-rel "C" "D" "resolved" "dataflow/returns-call-result")
+              (traversal-rel "D" "E" "resolved" "dataflow/returns-call-result")
+              (traversal-rel "E" "F" "resolved" "dataflow/returns-call-result")])
+        down (relations/traverse-relations idx {:direction :downstream :start_nodes ["A"]})
+        up (relations/traverse-relations idx {:direction :upstream :start_nodes ["C"]})]
+    (testing "downstream stops at the depth ceiling and flags the truncation"
+      (is (= ["A" "B" "C" "D" "E"] (node-ids down)))
+      (is (true? (get-in down [:truncated :max_depth])))
+      (is (= 4 (get-in down [:budgets :max_depth]))))
+    (testing "requested depth cannot exceed the ceiling"
+      (is (= 4 (get-in (relations/traverse-relations idx {:direction :downstream
+                                                          :start_nodes ["A"]
+                                                          :max_depth 99})
+                       [:budgets :max_depth]))))
+    (testing "an explicit zero budget is honored as a lower bound, not widened"
+      (let [zero (relations/traverse-relations idx {:direction :downstream
+                                                    :start_nodes ["A"]
+                                                    :max_depth 0})]
+        (is (= 0 (get-in zero [:budgets :max_depth])))
+        (is (= ["A"] (node-ids zero)))
+        (is (true? (get-in zero [:truncated :max_depth])))))
+    (testing "upstream walks target -> source"
+      (is (= ["C" "B" "A"] (node-ids up))))))
+
+(deftest traverse-relations-relation-type-filter-test
+  (let [idx (relations/index-relations
+             [(traversal-rel "A" "B" "resolved" "dataflow/returns-call-result")
+              (traversal-rel "A" "C" "resolved" "dataflow/passes-argument")])
+        filtered (relations/traverse-relations
+                  idx {:direction :downstream :start_nodes ["A"]
+                       :relation_types ["dataflow/returns-call-result"]})]
+    (is (= ["A" "B"] (node-ids filtered)))))
+
+(deftest traverse-relations-resolved-only-conservatism-test
+  (let [idx (relations/index-relations
+             [(traversal-rel "A" "B" "resolved" "dataflow/returns-call-result")
+              (assoc (traversal-rel "A" ["D1" "D2"] "ambiguous" "dataflow/returns-call-result")
+                     :target_key "amb")])
+        default (relations/traverse-relations idx {:direction :downstream :start_nodes ["A"]})
+        permissive (relations/traverse-relations idx {:direction :downstream
+                                                      :start_nodes ["A"]
+                                                      :resolved_only false})]
+    (testing "ambiguous edges are excluded by default"
+      (is (= #{"A" "B"} (set (node-ids default))))
+      (is (true? (get-in default [:budgets :resolved_only]))))
+    (testing "ambiguous edges fan out only when explicitly requested"
+      (is (= #{"A" "B" "D1" "D2"} (set (node-ids permissive)))))))
+
+(deftest traverse-relations-cycle-safe-test
+  (let [idx (relations/index-relations
+             [(traversal-rel "A" "B" "resolved" "dataflow/returns-call-result")
+              (traversal-rel "B" "A" "resolved" "dataflow/returns-call-result")])
+        res (relations/traverse-relations idx {:direction :downstream :start_nodes ["A"]})]
+    (testing "each node is discovered once and traversal terminates on a cycle"
+      (is (= #{"A" "B"} (set (node-ids res))))
+      (is (= 2 (count (:edges res)))))))
+
+(deftest traverse-relations-node-and-path-budgets-test
+  (let [chain (relations/index-relations
+               [(traversal-rel "A" "B" "resolved" "dataflow/returns-call-result")
+                (traversal-rel "B" "C" "resolved" "dataflow/returns-call-result")])
+        branch (relations/index-relations
+                [(traversal-rel "A" "B" "resolved" "dataflow/returns-call-result")
+                 (traversal-rel "A" "C" "resolved" "dataflow/passes-argument")])
+        node-capped (relations/traverse-relations chain {:direction :downstream
+                                                         :start_nodes ["A"]
+                                                         :max_nodes 2})
+        path-capped (relations/traverse-relations branch {:direction :downstream
+                                                          :start_nodes ["A"]
+                                                          :max_paths 1})]
+    (testing "node budget stops discovery and flags truncation"
+      (is (= ["A" "B"] (node-ids node-capped)))
+      (is (true? (get-in node-capped [:truncated :max_nodes]))))
+    (testing "path budget caps recorded paths and flags truncation"
+      (is (= 1 (count (:paths path-capped))))
+      (is (true? (get-in path-capped [:truncated :max_paths]))))))
+
+(deftest traverse-relations-deterministic-and-guarded-test
+  (let [idx (relations/index-relations
+             [(traversal-rel "A" "B" "resolved" "dataflow/returns-call-result")
+              (traversal-rel "A" "C" "resolved" "dataflow/passes-argument")])
+        req {:direction :downstream :start_nodes ["A"]}]
+    (testing "identical requests yield identical results"
+      (is (= (relations/traverse-relations idx req)
+             (relations/traverse-relations idx req))))
+    (testing "an unknown direction is rejected"
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (relations/traverse-relations idx {:direction :sideways
+                                                      :start_nodes ["A"]}))))))

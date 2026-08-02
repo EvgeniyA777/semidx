@@ -205,6 +205,10 @@ canonical graph for all new graph semantics.
    deterministic ordering, and `max_depth` / `max_nodes` / `max_paths` budgets.
    Initial target bounds are depth at most 4, 200 nodes, and 50 paths, subject
    to benchmark-backed tightening before public exposure.
+   **Delivered:** `relations/traverse-relations` is a breadth-first, cycle-safe,
+   deterministic kernel with `:downstream`/`:upstream` direction, a
+   `:relation_types` allow-list, `:resolved_only` (default true), and budgets
+   clamped to `default-traversal-bounds`; no consumer is wired to it yet.
 6. Add bounded retrieval/impact projections that consume the traversal kernel,
    keeping ambiguous flows conservative (no over-linking) and avoiding a public
    graph-query API in Stage 3. Start with reason-coded, low-weight support and
