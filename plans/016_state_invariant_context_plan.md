@@ -227,19 +227,28 @@ change and is a separate, later step in this plan.
 ## Implementation Sequence
 
 ### Stage 1 - Intent classifier + fixtures (thin, provable)
+Status: completed in commit `5f65c1a`.
+
 Pure `state-intent?` in `query_anchors.clj` + mirrored test. A fixture repo
 (Java entity + service + service-test-with-tail + fixture helper) that
 reproduces the observed case. Verify the classifier fires on lifecycle intent
 and stays quiet otherwise. `clojure -M:test`.
 
 ### Stage 2 - Assembler from existing facts
-Add the assembler helpers to `retrieval.clj`, reusing blast-radius machinery.
+Status: completed on 2026-08-02; see
+`reports/018_state_invariant_context_progress_log.md`.
+
+The assembler is isolated in `runtime/state_invariants.clj` and wired from
+`retrieval.clj`, reusing blast-radius results and indexes without adding policy
+to transports.
 Wire an additive `:state_invariants` section into the `impact-analysis` return,
 gated by the classifier. Guardrail always present when entity candidates exist.
 Verify against the Stage 1 fixture: entity file surfaced, test tail + fixture
 helper included, guardrail present. `clojure -M:test`.
 
 ### Stage 3 - Contract + MCP surface
+Status: next.
+
 Author the packet contract: `malli` mirror in `contracts/schemas.clj`, JSON
 Schema (new `state-invariants` `$def` or an additive block referenced from the
 impact-analysis response contract), and a `contracts/examples/` sample. Pass the

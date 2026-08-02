@@ -160,13 +160,23 @@ after this memory file.
   (`TraverseRelations`) now expose the same contract and kernel, so the ADR-040
   phased-exposure follow-up is done.
 - Detail-stage raw fetch is now budget-adaptive instead of all-or-nothing: `perform-raw-fetch` measures the full requested-level token requirement (`required_tokens`), degrades the fetch level down the `whole_file -> local_neighborhood -> enclosing_unit -> target_span` ladder to fit the raw-fetch byte cap (`raw_fetch_level_degraded`), and slices the front of an oversized chunk into a partial snippet instead of returning an empty `raw_context` (`raw_snippets_truncated`, `raw_fetch_budget_limited`). When the detail payload is truncated or degraded, the context packet budget, perf `budget_summary`, and stage events carry `suggested_token_budget` (computed by inverting the 10/20/70 stage split and the 35% detail structure share, +10% margin), and the detail result exposes a top-level `next_step` with `recommended_action "raise_token_budget"` so clients can retry once with an adequate budget instead of falling back to manual file reads. The zero-detail-budget path (tiny requested budgets) intentionally still returns an empty, `skipped` raw fetch.
+- `plans/016` Stage 2 is delivered: `impact_analysis` now conditionally adds a
+  bounded `state_invariants` Slice-1 packet for state/lifecycle queries when an
+  entity/model candidate is corroborated by selected, call-graph, or import
+  facts. The dedicated `runtime/state_invariants` policy surfaces one entity
+  representative per path, selected state writers, evidence-prioritized test
+  paths, fixture helpers, and a mandatory whole-file-read guardrail. It makes no
+  field-level claims; JSON Schema/Malli and MCP exposure are the next Stage 3.
 - Antigravity first-contact MCP behavior is now partially verified in production-like use: it successfully stayed on `create_index -> repo_map -> resolve_context` without drifting into manual browsing, but staged continuation still needs one explicit follow-up check to prove that it will keep using `expand_context` and `fetch_context_detail` via `selection_id` / `snapshot_id` instead of switching back to filesystem reads or broad summarization.
 
 ## Next Execution Priorities
 
-1. Stage 3 is code-complete: relation identity/evidence split (ADR-039), the pure bounded traversal kernel (`traverse-relations`), and the bounded, reason-coded relation-backed impact projection (`:relation_support`) are all delivered. Any remaining Stage 3 work is confidence-ceiling recalibration only if future evidence supports it (currently a documented non-bump).
-2. Ambiguous relation-backed flows stay conservative and no public graph-query API exists in Stage 3; the kernel and the projection both default to `:resolved_only true`.
-3. Stage 4 (semantic graph query surface, gap 7) is fully code-complete under
+1. Execute `plans/016` Stage 3 next: define the state-invariant JSON Schema and
+   Malli mirror, add a validated example, and expose the additive packet through
+   MCP `impact_analysis` without moving assembly policy into the transport.
+2. Stage 3 of `plans/013` is code-complete: relation identity/evidence split (ADR-039), the pure bounded traversal kernel (`traverse-relations`), and the bounded, reason-coded relation-backed impact projection (`:relation_support`) are all delivered. Any remaining Stage 3 work is confidence-ceiling recalibration only if future evidence supports it (currently a documented non-bump).
+3. Ambiguous relation-backed flows stay conservative and the traversal kernel and projection both default to `:resolved_only true`.
+4. Stage 4 (semantic graph query surface, gap 7) is fully code-complete under
    ADR-040: JSON/malli contract (4.1), the batched `traverse-relations-with`
    kernel seam (4.2), the public `relation-traversal` on library + MCP
    `traverse_relations` (4.2), the forward-only PostgreSQL
@@ -179,9 +189,9 @@ after this memory file.
    operational Stages 5-7. Stage 5 is fully delivered under ADR-042: complete
    authoritative `.proto`, pinned tool acquisition, deterministic committed
    generated-stub runtime cutover, and descriptor-oracle removal. Stage 6 is also delivered: the HTTP runtime exposes an online policy control-plane (`/v1/policies/registry`, `/v1/policies/promote`, `/v1/policies/retire`) that validates offline decision artifacts, decision-bound approvals, operation-scoped authz, and persistence-before-publication transitions. Stage 7 is delivered under ADR-044 with shared, opt-in HTTP/gRPC runtime-edge rate limiting; the next operational work is incremental hardening rather than an open Stage 5-7 gap.
-4. After the public graph surface, sequence provider catalog/discovery work before the Protobuf/OpenAPI contract-linking vertical slice and the SCIP evidence-provider spike.
-5. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
-6. On the next Antigravity touchpoint, explicitly test staged continuation after `resolve_context`: require `expand_context` and `fetch_context_detail`, verify the client reuses `selection_id` / `snapshot_id`, and check whether evidence quality improves without falling back to manual browsing.
+5. After the public graph surface, sequence provider catalog/discovery work before the Protobuf/OpenAPI contract-linking vertical slice and the SCIP evidence-provider spike.
+6. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
+7. On the next Antigravity touchpoint, explicitly test staged continuation after `resolve_context`: require `expand_context` and `fetch_context_detail`, verify the client reuses `selection_id` / `snapshot_id`, and check whether evidence quality improves without falling back to manual browsing.
 
 ## Update Rule
 

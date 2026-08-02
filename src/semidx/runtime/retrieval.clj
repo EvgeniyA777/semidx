@@ -7,7 +7,8 @@
             [semidx.runtime.index :as idx]
             [semidx.runtime.projections :as projections]
             [semidx.runtime.relations :as relations]
-            [semidx.runtime.retrieval-policy :as rp]))
+            [semidx.runtime.retrieval-policy :as rp]
+            [semidx.runtime.state-invariants :as state-invariants]))
 
 (defn- now-iso []
   (-> (java.time.ZonedDateTime/now java.time.ZoneOffset/UTC)
@@ -1702,9 +1703,17 @@
    (let [selection-result (resolve-context index query opts)
          selection (ensure-selection! index
                                       (:selection_id selection-result)
-                                      (:snapshot_id selection-result))]
-     (build-impact-hints (:bound_index selection)
-                         (or (:focus selection) [])))))
+                                      (:snapshot_id selection-result))
+         bound-index (:bound_index selection)
+         selected (or (:focus selection) [])
+         impact-hints (build-impact-hints bound-index selected)
+         state-invariants (state-invariants/assemble
+                           bound-index
+                           (:query selection)
+                           selected
+                           (:related_tests impact-hints))]
+     (cond-> impact-hints
+       state-invariants (assoc :state_invariants state-invariants)))))
 
 (def ^:private relation-traversal-directions
   {"downstream" :downstream

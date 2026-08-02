@@ -2004,9 +2004,96 @@
 
 (def ^:private build-impact-hints #'retrieval/build-impact-hints)
 
+(defn- write-state-invariant-fixture! [tmp-root]
+  (write-file! tmp-root
+               "src/com/acme/model/ConnectionEntity.java"
+               "package com.acme.model;\n\npublic class ConnectionEntity {\n  public void setStatus(String status) {\n  }\n\n  public void updateValidatedAt(String timestamp) {\n  }\n}\n")
+  (write-file! tmp-root
+               "src/com/acme/service/ConnectionService.java"
+               "package com.acme.service;\n\nimport com.acme.model.ConnectionEntity;\n\npublic class ConnectionService {\n  public void disconnect(ConnectionEntity entity) {\n    entity.setStatus(\"OFF\");\n  }\n\n  public String formatSummary(ConnectionEntity entity) {\n    return \"ok\";\n  }\n}\n")
+  (write-file! tmp-root
+               "src/com/acme/Formatter.java"
+               "package com.acme;\n\npublic class Formatter {\n  public String formatSummary(String value) {\n    return value;\n  }\n}\n")
+  (write-file! tmp-root
+               "test/com/acme/service/ConnectionServiceTest.java"
+               "package com.acme.service;\n\nimport com.acme.model.ConnectionEntity;\nimport com.acme.service.ConnectionService;\n\npublic class ConnectionServiceTest {\n  public void disconnectPreservesTimestamp() {\n    ConnectionEntity entity = buildConnectionEntity();\n    new ConnectionService().disconnect(entity);\n  }\n\n  public ConnectionEntity buildConnectionEntity() {\n    return new ConnectionEntity();\n  }\n}\n"))
+
+(defn- state-invariant-query [details symbol path]
+  {:api_version "1.0"
+   :schema_version "1.0"
+   :intent {:purpose "change_impact"
+            :details details}
+   :targets {:symbols [symbol]
+             :paths [path]}
+   :constraints {:token_budget 2400
+                 :max_raw_code_level "enclosing_unit"
+                 :freshness "current_snapshot"}
+   :hints {:prefer_definitions_over_callers true}
+   :options {:include_tests true
+             :include_impact_hints true
+             :allow_raw_code_escalation false}
+   :trace {:trace_id "11111111-1111-4111-8111-111111111111"
+           :request_id "state-invariant-stage2"}})
+
 (defn- write-flow-fixture! [tmp-root]
   (write-file! tmp-root "src/my/app/flow.clj"
                "(ns my.app.flow)\n\n(defn make-client [config]\n  config)\n\n(defn normalize [order]\n  order)\n\n(defn save! [order client]\n  order)\n\n(defn wrapper [order config]\n  (let [client (make-client config)]\n    (save! order client)\n    (normalize order)))\n"))
+
+(deftest impact-analysis-surfaces-state-invariant-context-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory
+                       "sci-state-invariant-context"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (write-state-invariant-fixture! tmp-root)
+    (let [index (sci/create-index {:root_path tmp-root
+                                   :parser_opts {:java_engine :regex}})
+          result (sci/impact-analysis
+                  index
+                  (state-invariant-query
+                   "Change disconnect status while preserving timestamp state"
+                   "com.acme.service.ConnectionService#disconnect"
+                   "src/com/acme/service/ConnectionService.java"))
+          packet (:state_invariants result)]
+      (testing "the stateful query gets a bounded, honest packet"
+        (is (= "1.0" (:packet_version packet)))
+        (is (= #{"disconnect" "status" "timestamp" "state" "connection"}
+               (set (:triggered_by packet))))
+        (is (every? #(<= (count %) 12)
+                    [(:entity_candidates packet)
+                     (:state_writers packet)
+                     (:assertion_tests packet)
+                     (:fixture_helpers packet)]))
+        (is (= "state_invariants_require_whole_file_read"
+               (get-in packet [:guardrail :code]))))
+      (testing "the entity, writer, assertion test, and fixture helper are surfaced"
+        (is (= ["src/com/acme/model/ConnectionEntity.java"]
+               (mapv :path (:entity_candidates packet))))
+        (is (some #(str/ends-with? (:symbol %) "#disconnect")
+                  (:state_writers packet)))
+        (is (= ["test/com/acme/service/ConnectionServiceTest.java"]
+               (:assertion_tests packet)))
+        (is (= ["com.acme.service.ConnectionServiceTest#buildConnectionEntity"]
+               (mapv :symbol (:fixture_helpers packet)))))
+      (testing "Slice 1 never fabricates unavailable field-level facts"
+        (is (not-any? #(or (contains? % :fields)
+                           (contains? % :field_writes))
+                      (:entity_candidates packet)))))))
+
+(deftest impact-analysis-omits-state-invariants-for-unrelated-intent-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory
+                       "sci-state-invariant-quiet"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (write-state-invariant-fixture! tmp-root)
+    (let [index (sci/create-index {:root_path tmp-root
+                                   :parser_opts {:java_engine :regex}})
+          result (sci/impact-analysis
+                  index
+                  (state-invariant-query
+                   "Locate the formatting implementation"
+                   "com.acme.Formatter#formatSummary"
+                   "src/com/acme/Formatter.java"))]
+      (is (not (contains? result :state_invariants)))
+      (is (= #{:callers :dependents :related_tests :risky_neighbors}
+             (set (keys result)))))))
 
 (deftest impact-relation-support-surfaces-resolved-dataflow-neighbors-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-impact-relation-support" (make-array java.nio.file.attribute.FileAttribute 0)))]
