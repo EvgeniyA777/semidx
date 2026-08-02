@@ -1135,3 +1135,15 @@ as part of this planning review.
   available in this session; the requested evidence-first SOLID review was run
   locally against the full Stage 5 diff.
 - Known blockers: none.
+
+## Stage 6 - Online policy control-plane API
+
+- Status: completed.
+- Scope: Add bounded online policy-management/control-plane surface on HTTP.
+- Changed files:
+  - `adr/043-scope-online-policy-control-plane-api.md`
+  - `contracts/schemas/policy-lifecycle-request.schema.json`
+  - `src/semidx/contracts/schemas.clj`
+  - `src/semidx/runtime/http.clj`
+- Verification: `clojure -M:test` passed. HTTP edge endpoints `/v1/policies/registry`, `/v1/policies/promote`, `/v1/policies/retire` implemented with authz support.
+- Commit: `6102d89`

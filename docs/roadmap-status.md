@@ -111,6 +111,8 @@ sources; ordinary test/runtime starts perform offline idempotent javac; and the
 runtime uses generated messages plus `RuntimeServiceGrpc` descriptors. The
 temporary descriptor-built oracle was removed after parity was proven.
 
+Stage 6 is delivered under ADR-043: the HTTP edge now exposes an online policy control-plane (`/v1/policies/registry`, `/v1/policies/promote`, `/v1/policies/retire`) that reuses offline governance gates and optionally persists state back to the registry file.
+
 After Stage 4, the product sequence is provider catalog/discovery, then one
 Protobuf/OpenAPI contract-linking vertical slice, then a SCIP evidence-provider
 spike over the same canonical relation graph. Parser-deepening research remains
