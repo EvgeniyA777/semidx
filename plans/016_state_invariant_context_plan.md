@@ -2,12 +2,15 @@
 title: "State Invariant Context Plan"
 doc_type: "architecture_plan"
 lifecycle: "active"
-status: "planned"
+status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-07-20"
+updated: "2026-08-02"
 ---
 
 # Architecture Plan: State Invariant Context
+
+Companion progress log:
+`reports/018_state_invariant_context_progress_log.md`.
 
 ## Context
 

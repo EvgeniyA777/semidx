@@ -701,8 +701,7 @@ as part of this planning review.
   - `src/semidx/contracts/schemas.clj`
   - `src/semidx/contracts/validator.clj`
   - `contracts/examples/catalog.json`
-- Commit: the Stage 4.1 contract and documentation lifecycle commit containing
-  this entry.
+- Commit: `81ad582 feat: define bounded relation traversal contract`.
 - Verification:
   - Compile probe for `semidx.contracts.validator` passed.
   - `./scripts/validate-contracts.sh` passed

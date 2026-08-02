@@ -177,6 +177,17 @@
 - If current and historical documents conflict, follow the current document. If multiple current documents conflict, ask for clarification before changing project behavior.
 - Common `lifecycle` values are `active`, `concept`, `accepted`, `completed`, `superseded`, and `archived`.
 - Common `agent_action` values are `reference_for_context`, `use_as_input_for_future_plan_only`, `historical_reference_only`, `do_not_implement_again`, and `do_not_use_for_current_work`.
+- Keep `status` values consistent with document type:
+  - ADR: `proposed`, `accepted`, `rejected`, `deprecated`, `superseded`.
+  - Plan: `draft`, `planned`, `in_progress`, `blocked`, `completed`, `cancelled`.
+  - Progress log: `in_progress`, `blocked`, `completed`.
+  - Review or assessment: `draft`, `final`, `snapshot_complete`.
+  - Bug or follow-up report: `open`, `fixed`, `wont_fix`, `completed`.
+  - Handoff: `ready`, `consumed`, `superseded`.
+  - Idea or source-intake document: `draft`, `proposed`, `source_intake`, `historical`.
+- `lifecycle` describes whether a document is current; `status` describes the
+  workflow state appropriate to its document type. Do not use synonyms such as
+  `done`, `delivered`, or `implemented` in new or materially revised frontmatter.
 - When a document changes lifecycle state, update its frontmatter in the same commit.
 
 ## Plan Execution Progress Logs
