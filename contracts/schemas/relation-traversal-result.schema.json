@@ -13,7 +13,7 @@
     "budgets",
     "nodes",
     "edges",
-    "paths",
+    "discovery_paths",
     "truncated"
   ],
   "additionalProperties": false,
@@ -48,7 +48,7 @@
     "budgets": {
       "type": "object",
       "description": "The applied bounds after clamping, including the resolved-only mode.",
-      "required": ["max_depth", "max_nodes", "max_paths", "resolved_only"],
+      "required": ["max_depth", "max_nodes", "max_discovery_paths", "resolved_only"],
       "additionalProperties": false,
       "properties": {
         "max_depth": {
@@ -59,7 +59,7 @@
           "type": "integer",
           "minimum": 1
         },
-        "max_paths": {
+        "max_discovery_paths": {
           "type": "integer",
           "minimum": 0
         },
@@ -118,7 +118,7 @@
         }
       }
     },
-    "paths": {
+    "discovery_paths": {
       "type": "array",
       "description": "Discovered paths as sequences of relation ids.",
       "maxItems": 50,
@@ -132,7 +132,7 @@
     },
     "truncated": {
       "type": "object",
-      "required": ["max_depth", "max_nodes", "max_paths"],
+      "required": ["max_depth", "max_nodes", "max_discovery_paths"],
       "additionalProperties": false,
       "properties": {
         "max_depth": {
@@ -141,7 +141,7 @@
         "max_nodes": {
           "type": "boolean"
         },
-        "max_paths": {
+        "max_discovery_paths": {
           "type": "boolean"
         }
       }
@@ -160,7 +160,7 @@
       "budgets": {
         "max_depth": 2,
         "max_nodes": 24,
-        "max_paths": 12,
+        "max_discovery_paths": 12,
         "resolved_only": true
       },
       "nodes": [
@@ -177,13 +177,13 @@
           "depth": 1
         }
       ],
-      "paths": [
+      "discovery_paths": [
         ["rel:0f5d2c1b9a8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c"]
       ],
       "truncated": {
         "max_depth": false,
         "max_nodes": false,
-        "max_paths": false
+        "max_discovery_paths": false
       },
       "selection_id": "36e755b1-7acd-4cbb-bfe6-d3499599364c"
     }

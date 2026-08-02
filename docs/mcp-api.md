@@ -452,14 +452,14 @@ Inputs:
 - `direction` => `"downstream"` (source -> target / flows-to) or `"upstream"` (target -> source / flows-from)
 - `relation_types` (optional allow-list; empty means all)
 - `resolved_only` (optional boolean, default `true`; ambiguous/unresolved edges are skipped)
-- `budgets` (optional `max_depth` / `max_nodes` / `max_paths`, clamped to the kernel ceiling)
+- `budgets` (optional `max_depth` / `max_nodes` / `max_discovery_paths`, clamped to the kernel ceiling)
 
 Returns:
 
 - `index_id`
 - `snapshot_id`, `direction`, `start_nodes`, `relation_types`
 - `budgets` (the applied bounds, including `resolved_only`)
-- `nodes` (`unit_id` + `depth`), `edges`, `paths`, `truncated`
+- `nodes` (`unit_id` + `depth`), `edges`, `discovery_paths`, `truncated`
 - `selection_id` — pass it (with `snapshot_id`) to `expand_context` / `fetch_context_detail` to deliver the discovered units' code through the staged-retrieval flow
 
 ### `skeletons`

@@ -87,6 +87,12 @@
           state (:state limiter*)
           now-ms (long ((:now_ms limiter*)))
           subject (subject-key subject-context subject_scope)]
+      ;; INVARIANT: `state` is an atom used as a plain mutable box guarded by
+      ;; this monitor, not through CAS. Every read-modify-write of the limiter
+      ;; state MUST go through `(locking state ...)`; a bare swap!/reset!
+      ;; elsewhere would race with this critical section. The single monitor
+      ;; also serialises all subjects, acceptable only because the limiter is
+      ;; default-off defence-in-depth (ingress owns distributed quotas).
       (locking state
         (let [state* (evict-for-subject @state subject now-ms max_subjects)
               entry (get state* subject)

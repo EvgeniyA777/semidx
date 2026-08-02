@@ -8,7 +8,7 @@
   "budgets": {
     "max_depth": 2,
     "max_nodes": 24,
-    "max_paths": 12
+    "max_discovery_paths": 12
   },
   "snapshot_id": "c2e1d37b-7a1f-451e-b9a9-2ea1cbf02008",
   "trace": {

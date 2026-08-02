@@ -558,7 +558,7 @@
   under the traversal-kernel ceiling (`relations/default-traversal-bounds`) so
   relation support stays a low-weight, bounded signal that never dominates the
   legacy caller/callee hints."
-  {:max_depth 2 :max_nodes 24 :max_paths 12})
+  {:max_depth 2 :max_nodes 24 :max_discovery_paths 12})
 
 (def ^:private relation-support-limit 12)
 
@@ -1790,7 +1790,7 @@
                         (assoc :resolved_only (:resolved_only request))
                         (number? (:max_depth budgets)) (assoc :max_depth (:max_depth budgets))
                         (number? (:max_nodes budgets)) (assoc :max_nodes (:max_nodes budgets))
-                        (number? (:max_paths budgets)) (assoc :max_paths (:max_paths budgets)))
+                        (number? (:max_discovery_paths budgets)) (assoc :max_discovery_paths (:max_discovery_paths budgets)))
            result (relations/traverse-relations index kernel-req)
            discovered (mapv :unit_id (:nodes result))
            selection-id (store-traversal-selection! index discovered
@@ -1803,7 +1803,7 @@
                 :budgets (:budgets result)
                 :nodes (:nodes result)
                 :edges (:edges result)
-                :paths (:paths result)
+                :discovery_paths (:discovery_paths result)
                 :truncated (:truncated result)}
          selection-id (assoc :selection_id selection-id))))))
 

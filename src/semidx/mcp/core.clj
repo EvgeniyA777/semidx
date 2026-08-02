@@ -1088,7 +1088,7 @@
                                "budgets" {:type "object"
                                           :properties {"max_depth" {:type "integer"}
                                                        "max_nodes" {:type "integer"}
-                                                       "max_paths" {:type "integer"}}
+                                                       "max_discovery_paths" {:type "integer"}}
                                           :additionalProperties false}
                                "snapshot_id" {:type "string"}}
                   :required ["index_id" "start_nodes" "direction"]

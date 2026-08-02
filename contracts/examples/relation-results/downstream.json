@@ -7,7 +7,7 @@
   "budgets": {
     "max_depth": 2,
     "max_nodes": 24,
-    "max_paths": 12,
+    "max_discovery_paths": 12,
     "resolved_only": true
   },
   "nodes": [
@@ -24,13 +24,13 @@
       "depth": 1
     }
   ],
-  "paths": [
+  "discovery_paths": [
     ["rel:0f5d2c1b9a8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c"]
   ],
   "truncated": {
     "max_depth": false,
     "max_nodes": false,
-    "max_paths": false
+    "max_discovery_paths": false
   },
   "selection_id": "36e755b1-7acd-4cbb-bfe6-d3499599364c"
 }

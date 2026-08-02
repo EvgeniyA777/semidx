@@ -675,8 +675,8 @@ Returns `impact_hints` only for the same query semantics.
 Bounded traversal over typed semantic relations (dataflow) reusing the Stage 3
 kernel (ADR-040). `direction` is `"downstream"` (source -> target) or
 `"upstream"` (target -> source); `resolved_only` defaults to true;
-`budgets` (`max_depth`/`max_nodes`/`max_paths`) are clamped to the kernel
-ceiling. Returns the compact result (`nodes`, `edges`, `paths`, `budgets`,
+`budgets` (`max_depth`/`max_nodes`/`max_discovery_paths`) are clamped to the kernel
+ceiling. Returns the compact result (`nodes`, `edges`, `discovery_paths`, `budgets`,
 `truncated`) plus a `selection_id` reusable by `expand-context` /
 `fetch-context-detail`. Exposed on library, MCP (`traverse_relations`), HTTP
 (`POST /v1/retrieval/traverse-relations`), and gRPC (`TraverseRelations`).

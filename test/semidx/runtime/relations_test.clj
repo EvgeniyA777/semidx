@@ -230,13 +230,13 @@
                                                          :max_nodes 2})
         path-capped (relations/traverse-relations branch {:direction :downstream
                                                           :start_nodes ["A"]
-                                                          :max_paths 1})]
+                                                          :max_discovery_paths 1})]
     (testing "node budget stops discovery and flags truncation"
       (is (= ["A" "B"] (node-ids node-capped)))
       (is (true? (get-in node-capped [:truncated :max_nodes]))))
     (testing "path budget caps recorded paths and flags truncation"
-      (is (= 1 (count (:paths path-capped))))
-      (is (true? (get-in path-capped [:truncated :max_paths]))))))
+      (is (= 1 (count (:discovery_paths path-capped))))
+      (is (true? (get-in path-capped [:truncated :max_discovery_paths]))))))
 
 (deftest traverse-relations-deterministic-and-guarded-test
   (let [idx (relations/index-relations

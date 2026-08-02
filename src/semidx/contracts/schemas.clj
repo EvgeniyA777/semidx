@@ -562,7 +562,7 @@
     [:map {:closed true}
      [:max_depth {:optional true} nat-int?]
      [:max_nodes {:optional true} pos-int?]
-     [:max_paths {:optional true} nat-int?]]]
+     [:max_discovery_paths {:optional true} nat-int?]]]
    [:snapshot_id {:optional true} bounded-string]
    [:trace trace-ref]])
 
@@ -580,16 +580,16 @@
     [:map {:closed true}
      [:max_depth nat-int?]
      [:max_nodes pos-int?]
-     [:max_paths nat-int?]
+     [:max_discovery_paths nat-int?]
      [:resolved_only boolean?]]]
    [:nodes [:vector {:max 200} relation-traversal-node]]
    [:edges [:vector {:max 1000} relation-traversal-edge]]
-   [:paths [:vector {:max 50} [:vector {:max 4} bounded-string]]]
+   [:discovery_paths [:vector {:max 50} [:vector {:max 4} bounded-string]]]
    [:truncated
     [:map {:closed true}
      [:max_depth boolean?]
      [:max_nodes boolean?]
-     [:max_paths boolean?]]]
+     [:max_discovery_paths boolean?]]]
    [:selection_id {:optional true} bounded-string]])
 
 (def policy-lifecycle-request
