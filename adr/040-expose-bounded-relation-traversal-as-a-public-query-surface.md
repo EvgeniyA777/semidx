@@ -134,6 +134,12 @@ existing `expand_context` / `fetch_context_detail` staged-retrieval flow deliver
 code, rather than a parallel code-delivery mechanism. HTTP and gRPC exposure is a
 documented follow-up that must not change traversal semantics.
 
+The table above records the initial phased decision. That follow-up has since
+been delivered: HTTP (`POST /v1/retrieval/traverse-relations`) and gRPC
+(`TraverseRelations`) now expose the same contract and kernel, so all four
+surfaces are `supported` while the semantics remain single-sourced in the Stage 3
+kernel.
+
 ### Execution backends and the frontier provider
 
 `traverse-relations` stays a pure in-memory function. The BFS is refactored to
@@ -185,7 +191,10 @@ payload or reprojected by an explicit, separate command if needed later.
 ### Follow-Up
 
 - Expose relation traversal on HTTP and gRPC without changing traversal
-  semantics (phased-exposure follow-up).
+  semantics (phased-exposure follow-up). **Delivered:** the HTTP edge
+  (`POST /v1/retrieval/traverse-relations`) and the gRPC edge
+  (`TraverseRelations`) now reuse the same contract and kernel, so all four
+  surfaces (library/MCP/HTTP/gRPC) are aligned.
 - Provide an explicit reprojection command for historical snapshots if the
   PostgreSQL backend needs multi-hop over pre-projection snapshots.
 - Revisit `default-traversal-bounds` only with benchmark evidence; this ADR does

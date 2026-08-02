@@ -210,6 +210,28 @@
             (is (= 1 (get-in diff-resp [:json :summary :total_changes])))
             (is (= "added" (get-in diff-resp [:json :changes 0 :change_type])))))
 
+        (testing "traverse-relations endpoint"
+          (let [ok-resp (post-json client
+                                   (str base-url "/v1/retrieval/traverse-relations")
+                                   {:root_path tmp-root
+                                    :start_nodes ["src/my/app/order.clj::my.app.order/process-order"]
+                                    :direction "downstream"
+                                    :budgets {:max_depth 2}})
+                bad-dir-resp (post-json client
+                                        (str base-url "/v1/retrieval/traverse-relations")
+                                        {:root_path tmp-root
+                                         :start_nodes ["src/my/app/order.clj::my.app.order/process-order"]
+                                         :direction "sideways"})]
+            (is (= 200 (:status ok-resp)))
+            (is (= "downstream" (get-in ok-resp [:json :direction])))
+            (is (contains? (set (map :unit_id (get-in ok-resp [:json :nodes])))
+                           "src/my/app/order.clj::my.app.order/process-order"))
+            (is (string? (get-in ok-resp [:json :snapshot_id])))
+            (is (vector? (get-in ok-resp [:json :edges])))
+            (is (= 400 (:status bad-dir-resp)))
+            (is (= "invalid_request" (get-in bad-dir-resp [:json :error_code])))
+            (is (= "client" (get-in bad-dir-resp [:json :error_category])))))
+
         (testing "method and payload validation"
           (let [method-resp (http-request client "GET" (str base-url "/v1/index/create") nil)
                 invalid-resp (post-json client

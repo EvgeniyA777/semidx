@@ -889,3 +889,61 @@ as part of this planning review.
   possible future addition (older snapshots have no projection rows until
   re-saved).
 - Known blockers: none.
+
+## Stage 4.4 - HTTP And gRPC Relation Traversal Exposure
+
+- Status: completed.
+- Scope: Deliver the ADR-040 phased-exposure follow-up by exposing the bounded
+  relation traversal on the HTTP and gRPC runtime edges, reusing the same
+  contract and the one Stage 3 kernel without changing traversal semantics. This
+  aligns all four surfaces (library, MCP, HTTP, gRPC).
+- Summary:
+  - HTTP: `semidx.runtime.http/handle-traverse-relations` handles
+    `POST /v1/retrieval/traverse-relations`, validates `direction` /
+    `start_nodes` (400 `invalid_request` on bad input), resolves the project
+    index, calls `sci/relation-traversal`, and returns the compact result with
+    the standard correlation/api-version headers.
+  - gRPC: a new `TraverseRelations` unary method
+    (`semidx.runtime.grpc/traverse-relations-method` +
+    `handle-traverse-relations`) with descriptor-built
+    `TraverseRelationsRequest` / `TraverseRelationsResponse` messages in
+    `grpc_proto.clj` (JSON-string encoding consistent with the other RPCs; the
+    result travels in `traverse_relations_result_json`). Bad input raises the
+    unified error taxonomy (`INVALID_ARGUMENT` + `x-sci-error-code`).
+  - The gRPC handler drops nil-valued request keys before calling the library so
+    an unset `resolved_only` keeps the kernel default (true) instead of being
+    coerced to false.
+  - `proto/semidx/runtime/grpc/v1/runtime.proto` gained the two new messages.
+- Changed files:
+  - `src/semidx/runtime/http.clj`
+  - `src/semidx/runtime/grpc.clj`
+  - `src/semidx/runtime/grpc_proto.clj`
+  - `proto/semidx/runtime/grpc/v1/runtime.proto`
+  - `test/semidx/runtime/http_test.clj`
+  - `test/semidx/runtime/grpc_test.clj`
+  - `adr/040-expose-bounded-relation-traversal-as-a-public-query-surface.md`
+  - `MEMORY.md`
+  - `docs/roadmap-status.md`
+  - `docs/runtime-api.md`
+  - `docs/code-context.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - semidx MCP mapped both edges (HTTP routes/handlers/correlation, gRPC
+    method/handler/service registration, descriptor message builders) before
+    editing.
+  - REPL: gRPC request/response descriptor round-trip preserves
+    direction/start_nodes/relation_types/resolved_only/budgets.
+  - `clojure -M:test --namespace semidx.runtime.http-test` (10 tests / 117
+    assertions) and `... semidx.runtime.grpc-test` (10 tests / 89 assertions)
+    both green, including the new `traverse-relations` HTTP endpoint block (200 +
+    400 bad-direction) and gRPC rpc block (success + `INVALID_ARGUMENT` taxonomy).
+  - Full `clojure -M:test` passed (`262 tests / 1766 assertions`),
+    `./scripts/validate-contracts.sh` `contracts_validation=ok`,
+    `./scripts/run-mvp-gates.sh` `mvp_gates=ok`. CCC refreshed.
+- Skipped / limitations: the pinned `.proto` is a pre-existing partial artifact
+  (no `service` block and missing `LiteralFileSlice`/`SnapshotDiff` messages);
+  the runtime source of truth is `grpc_proto.clj`'s descriptor-built definitions.
+  The TraverseRelations messages were added to the `.proto` additively; fully
+  reconciling the `.proto` (service block + missing messages, generated stubs) is
+  Stage 5 (gRPC generated stubs) territory, not this stage.
+- Known blockers: none.

@@ -84,8 +84,8 @@ ADR-039:
 - `build-impact-hints` consumes the kernel through conservative, reason-coded
   `relation_support`, with no confidence-ceiling increase.
 
-Stage 4 of `plans/013` (semantic graph query surface, gap 7) is now delivered
-for the library + MCP scope under ADR-040:
+Stage 4 of `plans/013` (semantic graph query surface, gap 7) is now fully
+delivered across all four runtime surfaces under ADR-040:
 
 - the bounded relation traversal is exposed as `semidx.core/relation-traversal`
   (usage-metrics-wrapped) and the MCP `traverse_relations` tool, returning the
@@ -98,8 +98,11 @@ for the library + MCP scope under ADR-040:
   `storage/pg-relation-neighbor-provider` execute the same traversal at proven
   parity with the pure in-memory kernel (with-redefs parity plus a
   `SEMIDX_TEST_POSTGRES_URL`-gated real-PostgreSQL round-trip test);
-- HTTP/gRPC stay `not_exposed` and are a documented follow-up that must reuse the
-  same contract and semantics.
+- the HTTP edge (`POST /v1/retrieval/traverse-relations`) and the gRPC edge
+  (`TraverseRelations`, descriptor-built JSON-string messages with the unified
+  error taxonomy) now expose the same contract and kernel, so all four surfaces
+  (library/MCP/HTTP/gRPC) are aligned and the ADR-040 phased-exposure follow-up
+  is complete.
 
 After Stage 4, the product sequence is provider catalog/discovery, then one
 Protobuf/OpenAPI contract-linking vertical slice, then a SCIP evidence-provider

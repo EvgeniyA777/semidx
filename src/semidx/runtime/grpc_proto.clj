@@ -110,7 +110,24 @@
 
    :snapshot-diff-response
    {:proto-name "SnapshotDiffResponse"
-    :fields [{:key :snapshot_diff_result_json :proto-name "snapshot_diff_result_json" :number 1 :type :string}]}})
+    :fields [{:key :snapshot_diff_result_json :proto-name "snapshot_diff_result_json" :number 1 :type :string}]}
+
+   :traverse-relations-request
+   {:proto-name "TraverseRelationsRequest"
+    :fields [{:key :root_path :proto-name "root_path" :number 1 :type :string}
+             {:key :paths :proto-name "paths" :number 2 :type :string :repeated? true}
+             {:key :parser_opts_json :proto-name "parser_opts_json" :number 3 :type :string}
+             {:key :direction :proto-name "direction" :number 4 :type :string}
+             {:key :start_nodes :proto-name "start_nodes" :number 5 :type :string :repeated? true}
+             {:key :relation_types :proto-name "relation_types" :number 6 :type :string :repeated? true}
+             {:key :resolved_only :proto-name "resolved_only" :number 7 :type :string}
+             {:key :budgets_json :proto-name "budgets_json" :number 8 :type :string}
+             {:key :snapshot_id :proto-name "snapshot_id" :number 9 :type :string}
+             {:key :language_policy_json :proto-name "language_policy_json" :number 10 :type :string}]}
+
+   :traverse-relations-response
+   {:proto-name "TraverseRelationsResponse"
+    :fields [{:key :traverse_relations_result_json :proto-name "traverse_relations_result_json" :number 1 :type :string}]}})
 
 (defn- require-definition [message-key]
   (or (get message-definitions message-key)
@@ -431,4 +448,44 @@
 (defn snapshot-diff-response->map [message]
   (or (json-field "snapshot_diff_result_json"
                   (string-field :snapshot-diff-response message :snapshot_diff_result_json))
+      {}))
+
+(defn traverse-relations-request [{:keys [root_path paths parser_opts direction start_nodes
+                                          relation_types resolved_only budgets snapshot_id language_policy]}]
+  (build-message :traverse-relations-request
+                 {:root_path root_path
+                  :paths (or paths [])
+                  :parser_opts_json (json-string parser_opts)
+                  :direction direction
+                  :start_nodes (or start_nodes [])
+                  :relation_types (or relation_types [])
+                  :resolved_only (when (some? resolved_only) (str resolved_only))
+                  :budgets_json (json-string budgets)
+                  :snapshot_id snapshot_id
+                  :language_policy_json (json-string language_policy)}))
+
+(defn traverse-relations-request->map [message]
+  {:root_path (not-empty (string-field :traverse-relations-request message :root_path))
+   :paths (not-empty (repeated-string-field :traverse-relations-request message :paths))
+   :parser_opts (json-field "parser_opts_json"
+                            (string-field :traverse-relations-request message :parser_opts_json))
+   :direction (not-empty (string-field :traverse-relations-request message :direction))
+   :start_nodes (not-empty (repeated-string-field :traverse-relations-request message :start_nodes))
+   :relation_types (not-empty (repeated-string-field :traverse-relations-request message :relation_types))
+   :resolved_only (let [raw (some-> (string-field :traverse-relations-request message :resolved_only) not-empty)]
+                    (when raw
+                      (= "true" raw)))
+   :budgets (json-field "budgets_json"
+                        (string-field :traverse-relations-request message :budgets_json))
+   :snapshot_id (not-empty (string-field :traverse-relations-request message :snapshot_id))
+   :language_policy (json-field "language_policy_json"
+                                (string-field :traverse-relations-request message :language_policy_json))})
+
+(defn traverse-relations-response [{:keys [traverse_relations_result] :as payload}]
+  (build-message :traverse-relations-response
+                 {:traverse_relations_result_json (json-string (or traverse_relations_result payload))}))
+
+(defn traverse-relations-response->map [message]
+  (or (json-field "traverse_relations_result_json"
+                  (string-field :traverse-relations-response message :traverse_relations_result_json))
       {}))

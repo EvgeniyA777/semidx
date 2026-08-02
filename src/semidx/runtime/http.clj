@@ -49,17 +49,17 @@
   ([^HttpExchange exchange status payload]
    (write-json! exchange status payload nil))
   ([^HttpExchange exchange status payload response-headers]
-  (let [bytes (.getBytes (json/write-str payload :escape-slash false) "UTF-8")]
-    (doto (.getResponseHeaders exchange)
-      (#(do
-          (doseq [[header-name header-value] response-headers]
-            (when (seq (str header-value))
-              (.set % (str header-name) (str header-value))))
-          %))
-      (.set "Content-Type" "application/json; charset=utf-8"))
-    (.sendResponseHeaders exchange (long status) (long (count bytes)))
-    (with-open [out (.getResponseBody exchange)]
-      (.write out bytes)))))
+   (let [bytes (.getBytes (json/write-str payload :escape-slash false) "UTF-8")]
+     (doto (.getResponseHeaders exchange)
+       (#(do
+           (doseq [[header-name header-value] response-headers]
+             (when (seq (str header-value))
+               (.set % (str header-name) (str header-value))))
+           %))
+       (.set "Content-Type" "application/json; charset=utf-8"))
+     (.sendResponseHeaders exchange (long status) (long (count bytes)))
+     (with-open [out (.getResponseBody exchange)]
+       (.write out bytes)))))
 
 (def ^:private api-version-header {"x-sci-api-version" "1.0"})
 
@@ -190,29 +190,29 @@
 (defn- refresh-project-entry! [auth-config root-path paths parser-opts tenant-id correlation language-policy]
   (let [scope (project-context/project-scope root-path tenant-id)]
     (project-context/refresh-project-index! (:project_registry auth-config)
-                                          scope
-                                          #(build-project-index auth-config
-                                                                (:root_path scope)
-                                                                paths
-                                                                parser-opts
-                                                                tenant-id
-                                                                correlation
-                                                                language-policy
-                                                                false))))
+                                            scope
+                                            #(build-project-index auth-config
+                                                                  (:root_path scope)
+                                                                  paths
+                                                                  parser-opts
+                                                                  tenant-id
+                                                                  correlation
+                                                                  language-policy
+                                                                  false))))
 
 (defn- ensure-project-entry! [auth-config root-path paths parser-opts tenant-id correlation language-policy request]
   (let [scope (project-context/project-scope root-path tenant-id)]
     (project-context/ensure-project-index! (:project_registry auth-config)
-                                         scope
-                                         request
-                                         #(build-project-index auth-config
-                                                               (:root_path scope)
-                                                               paths
-                                                               parser-opts
-                                                               tenant-id
-                                                               correlation
-                                                               language-policy
-                                                               true))))
+                                           scope
+                                           request
+                                           #(build-project-index auth-config
+                                                                 (:root_path scope)
+                                                                 paths
+                                                                 parser-opts
+                                                                 tenant-id
+                                                                 correlation
+                                                                 language-policy
+                                                                 true))))
 
 (defn- enforce-authz! [^HttpExchange exchange auth-config request]
   (let [{:keys [allowed?] :as decision} (authz/evaluate (:authz_check auth-config) request)]
@@ -224,7 +224,7 @@
 
 (defn- handle-health [^HttpExchange exchange]
   (if (= "GET" (request-method exchange))
-    (write-json! exchange 200 {:status "ok" 
+    (write-json! exchange 200 {:status "ok"
                                :service "semidx-runtime-http"
                                :capabilities (capabilities/capabilities-payload "semidx-runtime-http" "1.0")})
     (write-json! exchange 405 {:error "method_not_allowed"
@@ -362,6 +362,59 @@
                            (merge api-version-header
                                   (response-correlation-header-map exchange))))))))))
 
+(defn- handle-traverse-relations [auth-config ^HttpExchange exchange]
+  (if-not (post-request? exchange)
+    (write-json! exchange 405 {:error "method_not_allowed"
+                               :error_code "method_not_allowed"
+                               :error_category "client"
+                               :allowed ["POST"]})
+    (do
+      (remember-correlation! exchange (request-correlation exchange))
+      (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
+        (let [payload (read-json-body exchange)
+              root-path (or (:root_path payload) ".")
+              paths (:paths payload)
+              language-policy (:language_policy payload)
+              direction (:direction payload)
+              start-nodes (:start_nodes payload)
+              request (select-keys payload [:direction :start_nodes :relation_types
+                                            :resolved_only :budgets :snapshot_id])
+              correlation (remember-correlation! exchange
+                                                 (assoc (request-correlation exchange) :tenant_id tenant_id))]
+          (cond
+            (not (contains? #{"downstream" "upstream"} direction))
+            (let [{:keys [status body]} (errors/http-error-body
+                                         {:type :invalid_request
+                                          :message "direction must be \"downstream\" or \"upstream\""})]
+              (write-json! exchange status body (response-correlation-header-map exchange)))
+
+            (not (and (sequential? start-nodes) (seq start-nodes)))
+            (let [{:keys [status body]} (errors/http-error-body
+                                         {:type :invalid_request
+                                          :message "start_nodes must be a non-empty array"})]
+              (write-json! exchange status body (response-correlation-header-map exchange)))
+
+            :else
+            (when (enforce-authz! exchange auth-config
+                                  {:operation :traverse_relations
+                                   :tenant_id tenant_id
+                                   :root_path root-path
+                                   :paths paths})
+              (let [entry (ensure-project-entry! auth-config
+                                                 root-path
+                                                 paths
+                                                 (:parser_opts payload)
+                                                 tenant_id
+                                                 correlation
+                                                 language-policy
+                                                 {:paths paths})
+                    index (:index entry)
+                    result (sci/relation-traversal index request)]
+                (write-json! exchange 200
+                             (assoc result :project_context (project-context-summary entry))
+                             (merge api-version-header
+                                    (response-correlation-header-map exchange)))))))))))
+
 (defn- handle-fetch-context-detail [auth-config ^HttpExchange exchange]
   (if-not (post-request? exchange)
     (write-json! exchange 405 {:error "method_not_allowed"
@@ -496,6 +549,7 @@
     (.createContext server "/v1/retrieval/fetch-context-detail" (with-handler (partial handle-fetch-context-detail auth-config)))
     (.createContext server "/v1/retrieval/literal-file-slice" (with-handler (partial handle-literal-file-slice auth-config)))
     (.createContext server "/v1/retrieval/snapshot-diff" (with-handler (partial handle-snapshot-diff auth-config)))
+    (.createContext server "/v1/retrieval/traverse-relations" (with-handler (partial handle-traverse-relations auth-config)))
     (.setExecutor server nil)
     (.start server)
     server))

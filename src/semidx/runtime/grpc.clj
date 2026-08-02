@@ -57,6 +57,7 @@
 (def fetch-context-detail-method (unary-method "FetchContextDetail" :fetch-context-detail-request :fetch-context-detail-response))
 (def literal-file-slice-method (unary-method "LiteralFileSlice" :literal-file-slice-request :literal-file-slice-response))
 (def snapshot-diff-method (unary-method "SnapshotDiff" :snapshot-diff-request :snapshot-diff-response))
+(def traverse-relations-method (unary-method "TraverseRelations" :traverse-relations-request :traverse-relations-response))
 
 (def ^:private api-key-header
   (Metadata$Key/of "x-api-key" Metadata/ASCII_STRING_MARSHALLER))
@@ -397,6 +398,40 @@
     (assoc (sci/snapshot-diff index diff-opts)
            :project_context (project-context-summary entry))))
 
+(defn- handle-traverse-relations [policy-registry usage-metrics selection-cache project-registry server-language-policy storage-adapter payload]
+  (let [direction (:direction payload)
+        start-nodes (:start_nodes payload)]
+    (when-not (contains? #{"downstream" "upstream"} direction)
+      (throw (ex-info "direction must be \"downstream\" or \"upstream\""
+                      {:type :invalid_request
+                       :message "direction must be \"downstream\" or \"upstream\""})))
+    (when-not (and (sequential? start-nodes) (seq start-nodes))
+      (throw (ex-info "start_nodes must be a non-empty array"
+                      {:type :invalid_request
+                       :message "start_nodes must be a non-empty array"})))
+    (let [scope (project-context/project-scope (or (:root_path payload) ".")
+                                               (current-tenant-id))
+          entry (project-context/ensure-project-index! project-registry
+                                                       scope
+                                                       {:paths (:paths payload)}
+                                                       #(build-project-index policy-registry
+                                                                             usage-metrics
+                                                                             selection-cache
+                                                                             server-language-policy
+                                                                             storage-adapter
+                                                                             payload
+                                                                             (merge {:surface "grpc"} (current-request-correlation))
+                                                                             (:root_path scope)
+                                                                             true))
+          index (:index entry)
+          ;; drop nil-valued keys so an unset resolved_only keeps the kernel
+          ;; default (true) instead of being coerced to false.
+          request (into {} (filter (comp some? val)
+                                   (select-keys payload [:direction :start_nodes :relation_types
+                                                         :resolved_only :budgets :snapshot_id])))]
+      (assoc (sci/relation-traversal index request)
+             :project_context (project-context-summary entry)))))
+
 (defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry usage_metrics selection_cache
                             project_registry language_policy storage]}]
   (let [auth-config {:api_key api_key
@@ -441,6 +476,11 @@
                                                                     (partial handle-snapshot-diff policy_registry usage_metrics selection-cache project-registry language_policy storage-adapter)
                                                                     auth-config
                                                                     :snapshot_diff))
+                    (.addMethod traverse-relations-method (unary-handler grpc-proto/traverse-relations-request->map
+                                                                         grpc-proto/traverse-relations-response
+                                                                         (partial handle-traverse-relations policy_registry usage_metrics selection-cache project-registry language_policy storage-adapter)
+                                                                         auth-config
+                                                                         :traverse_relations))
                     (.build))
         intercepted-service (ServerInterceptors/intercept service (into-array ServerInterceptor [(metadata-context-interceptor)]))
         server (-> (NettyServerBuilder/forAddress (java.net.InetSocketAddress. ^String host (int port)))

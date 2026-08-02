@@ -97,7 +97,7 @@ after this memory file.
 - HTTP/gRPC/MCP surfaces now support server-configured registries and selector-based `resolve_context` policy lookup, but broader online policy-management/control-plane APIs are still intentionally absent.
 - Rate limiting is delegated to ingress/proxy/host layer and not implemented in runtime edges.
 - Tree-sitter remains an optional process-backed acceleration path; regex parsing is the guaranteed default, and CLI resolution now prefers explicit parser opts, environment configuration, and the repo-managed bootstrap link before falling back to ambient `PATH` for developer machines.
-- The semantic graph query surface (gap 7) is delivered as a bounded relation-traversal surface, not a general-purpose graph-query language (deliberate, ADR-040): the Stage 3 kernel is exposed on library + MCP (`traverse_relations`) and executable over a forward-only PostgreSQL `semantic_index_relations` projection at parity with the pure kernel. HTTP/gRPC exposure remains a follow-up.
+- The semantic graph query surface (gap 7) is delivered as a bounded relation-traversal surface, not a general-purpose graph-query language (deliberate, ADR-040): the Stage 3 kernel is exposed on library + MCP (`traverse_relations`) and executable over a forward-only PostgreSQL `semantic_index_relations` projection at parity with the pure kernel. It is now exposed on all four surfaces: library, MCP (`traverse_relations`), HTTP (`POST /v1/retrieval/traverse-relations`), and gRPC (`TraverseRelations`), all reusing the one kernel/contract.
 - Phase 3 roadmap closure is now complete across Clojure, Elixir, Java, Python, and TypeScript; remaining semantic work is post-roadmap deepening rather than an open roadmap tail.
 - Clojure fallback/tree-sitter call extraction now suppresses false same-name global edges when calls are actually owned by local params, destructured bindings, `when-let` locals, comprehension bindings, `as->` locals, or `letfn` helper names.
 - Clojure multimethod/protocol handling now also emits literal dispatch-aware call tokens for `defmulti`/`defmethod` targeting and first-class `defprotocol` method units, while keeping generic multimethod calls from over-linking every implementation.
@@ -134,8 +134,11 @@ after this memory file.
   snapshot, return the compact contract result, and build a stored selection over
   the discovered units so the existing `expand_context` / `fetch_context_detail`
   flow delivers code; the MCP `traverse_relations` tool exposes the same on stdio
-  and `usage-operation` gained `traverse_relations`. HTTP/gRPC stay `not_exposed`
-  per ADR-040. The forward-only PostgreSQL `semantic_index_relations` projection
+  and `usage-operation` gained `traverse_relations`. HTTP
+  (`POST /v1/retrieval/traverse-relations`) and gRPC (`TraverseRelations`,
+  descriptor-built JSON-string messages) now expose the same contract too,
+  reusing the one kernel — so all four surfaces (library/MCP/HTTP/gRPC) are
+  aligned. The forward-only PostgreSQL `semantic_index_relations` projection
   and PostgreSQL frontier provider are delivered: `init-storage!` creates the
   projection (source/target frontier indexes), `save-index-tx!` writes it
   forward-only (no historical backfill in migration),
@@ -143,8 +146,10 @@ after this memory file.
   its output is proven byte-identical to the pure in-memory kernel (with-redefs
   parity plus a `SEMIDX_TEST_POSTGRES_URL`-gated real-PostgreSQL round-trip parity
   test, verified locally against an ephemeral PostgreSQL 17 cluster). Stage 4 is
-  code-complete for the library + MCP scope; HTTP/gRPC exposure is the remaining
-  ADR-040 follow-up.
+  code-complete across all four surfaces: the HTTP edge
+  (`POST /v1/retrieval/traverse-relations`) and the gRPC edge
+  (`TraverseRelations`) now expose the same contract and kernel, so the ADR-040
+  phased-exposure follow-up is done.
 - Detail-stage raw fetch is now budget-adaptive instead of all-or-nothing: `perform-raw-fetch` measures the full requested-level token requirement (`required_tokens`), degrades the fetch level down the `whole_file -> local_neighborhood -> enclosing_unit -> target_span` ladder to fit the raw-fetch byte cap (`raw_fetch_level_degraded`), and slices the front of an oversized chunk into a partial snippet instead of returning an empty `raw_context` (`raw_snippets_truncated`, `raw_fetch_budget_limited`). When the detail payload is truncated or degraded, the context packet budget, perf `budget_summary`, and stage events carry `suggested_token_budget` (computed by inverting the 10/20/70 stage split and the 35% detail structure share, +10% margin), and the detail result exposes a top-level `next_step` with `recommended_action "raise_token_budget"` so clients can retry once with an adequate budget instead of falling back to manual file reads. The zero-detail-budget path (tiny requested budgets) intentionally still returns an empty, `skipped` raw fetch.
 - Antigravity first-contact MCP behavior is now partially verified in production-like use: it successfully stayed on `create_index -> repo_map -> resolve_context` without drifting into manual browsing, but staged continuation still needs one explicit follow-up check to prove that it will keep using `expand_context` and `fetch_context_detail` via `selection_id` / `snapshot_id` instead of switching back to filesystem reads or broad summarization.
 
@@ -152,14 +157,18 @@ after this memory file.
 
 1. Stage 3 is code-complete: relation identity/evidence split (ADR-039), the pure bounded traversal kernel (`traverse-relations`), and the bounded, reason-coded relation-backed impact projection (`:relation_support`) are all delivered. Any remaining Stage 3 work is confidence-ceiling recalibration only if future evidence supports it (currently a documented non-bump).
 2. Ambiguous relation-backed flows stay conservative and no public graph-query API exists in Stage 3; the kernel and the projection both default to `:resolved_only true`.
-3. Stage 4 is code-complete for the library + MCP scope: ADR-040 + JSON/malli
-   contract (4.1), the batched `traverse-relations-with` kernel seam (4.2), the
-   public library `relation-traversal` + MCP `traverse_relations` surface (4.2),
-   and the forward-only PostgreSQL `semantic_index_relations` projection +
-   `pg-relation-neighbor-provider` proven at parity with the pure kernel (4.3).
-   The remaining ADR-040 follow-up is HTTP/gRPC exposure (currently
-   `not_exposed`) without changing traversal semantics, plus an optional explicit
-   reprojection command for pre-projection historical snapshots.
+3. Stage 4 (semantic graph query surface, gap 7) is fully code-complete under
+   ADR-040: JSON/malli contract (4.1), the batched `traverse-relations-with`
+   kernel seam (4.2), the public `relation-traversal` on library + MCP
+   `traverse_relations` (4.2), the forward-only PostgreSQL
+   `semantic_index_relations` projection + `pg-relation-neighbor-provider` at
+   parity with the pure kernel (4.3), and HTTP (`POST
+   /v1/retrieval/traverse-relations`) + gRPC (`TraverseRelations`) exposure of the
+   same contract (4.4). The only optional residual is an explicit reprojection
+   command for snapshots saved before the projection existed. Next frontier: the
+   post-Stage-4 product sequence (provider catalog/discovery) and the independent
+   operational Stages 5-7 (gRPC generated stubs, online policy control-plane,
+   runtime-edge rate limiting).
 4. After the public graph surface, sequence provider catalog/discovery work before the Protobuf/OpenAPI contract-linking vertical slice and the SCIP evidence-provider spike.
 5. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
 6. On the next Antigravity touchpoint, explicitly test staged continuation after `resolve_context`: require `expand_context` and `fetch_context_detail`, verify the client reuses `selection_id` / `snapshot_id`, and check whether evidence quality improves without falling back to manual browsing.

@@ -670,6 +670,23 @@ Returns `impact_hints` only for the same query semantics.
 (sci/impact-analysis index query)
 ```
 
+### `relation-traversal`
+
+Bounded traversal over typed semantic relations (dataflow) reusing the Stage 3
+kernel (ADR-040). `direction` is `"downstream"` (source -> target) or
+`"upstream"` (target -> source); `resolved_only` defaults to true;
+`budgets` (`max_depth`/`max_nodes`/`max_paths`) are clamped to the kernel
+ceiling. Returns the compact result (`nodes`, `edges`, `paths`, `budgets`,
+`truncated`) plus a `selection_id` reusable by `expand-context` /
+`fetch-context-detail`. Exposed on library, MCP (`traverse_relations`), HTTP
+(`POST /v1/retrieval/traverse-relations`), and gRPC (`TraverseRelations`).
+
+```clojure
+(sci/relation-traversal index {:direction "downstream"
+                               :start_nodes ["src/my/app/order.clj::my.app.order/process-order"]
+                               :budgets {:max_depth 2}})
+```
+
 ### `query-units`
 
 Query persisted graph units from a storage adapter.

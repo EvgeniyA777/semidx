@@ -184,6 +184,36 @@
           (is (= 1 (get-in diff [:summary :total_changes])))
           (is (= "added" (get-in diff [:changes 0 :change_type])))))
 
+      (testing "traverse-relations rpc"
+        (let [resp (unary-call channel
+                               runtime-grpc/traverse-relations-method
+                               (grpc-proto/traverse-relations-request
+                                {:root_path tmp-root
+                                 :start_nodes ["src/my/app/order.clj::my.app.order/process-order"]
+                                 :direction "downstream"
+                                 :budgets {:max_depth 2}})
+                               grpc-proto/traverse-relations-response->map)]
+          (is (= "downstream" (:direction resp)))
+          (is (contains? (set (map :unit_id (:nodes resp)))
+                         "src/my/app/order.clj::my.app.order/process-order"))
+          (is (string? (:snapshot_id resp)))
+          (is (vector? (:edges resp))))
+        (try
+          (unary-call channel
+                      runtime-grpc/traverse-relations-method
+                      (grpc-proto/traverse-relations-request
+                       {:root_path tmp-root
+                        :start_nodes ["src/my/app/order.clj::my.app.order/process-order"]
+                        :direction "sideways"})
+                      grpc-proto/traverse-relations-response->map)
+          (is false "expected StatusRuntimeException for bad direction")
+          (catch StatusRuntimeException e
+            (is (= (.getCode Status/INVALID_ARGUMENT)
+                   (.getCode (.getStatus e))))
+            (is (= "invalid_request"
+                   (.get (.getTrailers e)
+                         (Metadata$Key/of "x-sci-error-code" Metadata/ASCII_STRING_MARSHALLER)))))))
+
       (testing "invalid payload returns INVALID_ARGUMENT"
         (try
           (unary-call channel
