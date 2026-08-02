@@ -165,10 +165,12 @@
     {:relations (->> valid (sort-by :relation_id) vec)
      :diagnostics (mapv relation-diagnostic invalid)}))
 
-(defn normalize-relations [relations]
-  (:relations (normalize-relations-with-diagnostics relations)))
-
-(def empty-relation-indexes
+;; Canonical empty relation-index value. Kept as a deliberate public constant for
+;; snapshot/storage initialisation even though no caller references it yet; the
+;; ^:export tag marks it intentional public API and silences the
+;; unused-public-var lint (project .lsp/.clj-kondo configs are gitignored, so the
+;; marker has to live in source).
+(def ^:export empty-relation-indexes
   {:relations {}
    :relation_forward_index {}
    :relation_reverse_index {}
