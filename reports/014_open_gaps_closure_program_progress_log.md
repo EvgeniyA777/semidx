@@ -1229,3 +1229,69 @@ as part of this planning review.
   extraction, ranking, resolution, or confidence. No external reviewer was
   available; the evidence-first SOLID review was run locally on the full diff.
 - Known blockers: none.
+
+## Post-Delivery SOLID Review Fixes (plan 013)
+
+- Status: completed.
+- Trigger: a `solid-architecture-review` pass over the delivered `plans/013`
+  program (Stages 3/6/7 hotspots) surfaced five findings; all were dispositioned
+  and fixed.
+- Review findings and disposition:
+  - **Medium (#1) — online `retire-policy` had no governance gate:** accepted and
+    fixed. The endpoint could retire the `active` baseline, leaving the registry
+    with no active policy. `retire-policy` now refuses `active` (retired only via
+    `promote`'s atomic swap) and idempotently refuses already-`retired` entries,
+    both as `policy_not_eligible` (409). Guard semantics chosen by the owner
+    ("forbid retiring active"). Two http_test cases that encoded the old
+    behaviour were re-pointed at a shadow candidate, plus regression cases for
+    the active-refused and already-retired paths.
+  - **Medium (#2) — `run-policy-transition!` mislabelled all errors as
+    `registry_persistence_failed`:** accepted and fixed by scoping the `catch` to
+    the persistence boundary; exceptions escaping a pure transition now surface
+    as internal errors through `with-handler`. Added a regression test asserting
+    a throwing transition is not relabelled and leaves the registry atom
+    untouched.
+  - **Medium (#3) — traversal `max_paths` semantics were misleading:** accepted.
+    The field records one deterministic shortest first-discovery path per reached
+    node (not multipath enumeration) and effectively duplicated `max_nodes`.
+    Renamed before broad reliance: `max_paths` -> `max_discovery_paths`,
+    `paths` -> `discovery_paths` across kernel, `malli`, JSON Schema, examples,
+    MCP, HTTP/gRPC (opaque JSON passthrough), docs, and tests. Behaviour
+    unchanged; multipath enumeration deliberately not implemented. ADR-040 gained
+    an inline amendment.
+  - **Low (#4) — atom used as a mutable box under `locking`:** accepted; added an
+    invariant comment at the rate-limiter critical section (all read-modify-write
+    must go through the monitor; the single monitor serialises subjects, tolerable
+    only because the limiter is default-off defence-in-depth).
+  - **Low (#5) — SHA-1 vs SHA-256 inconsistency:** documented rather than changed.
+    Added a comment that the relation-id SHA-1 is non-crypto content addressing;
+    changing it is a breaking identity change requiring a `relation-schema-version`
+    bump plus PostgreSQL projection backfill, not a drop-in edit.
+- Changed files:
+  - `src/semidx/runtime/retrieval_policy.clj` (#1)
+  - `src/semidx/runtime/http.clj` (#2)
+  - `src/semidx/runtime/relations.clj` (#3, #5)
+  - `src/semidx/runtime/retrieval.clj` (#3)
+  - `src/semidx/contracts/schemas.clj` (#3)
+  - `src/semidx/mcp/core.clj` (#3)
+  - `src/semidx/runtime/rate_limit.clj` (#4)
+  - `contracts/schemas/relation-traversal-query.schema.json`,
+    `contracts/schemas/relation-traversal-result.schema.json`,
+    `contracts/examples/relation-queries/downstream.json`,
+    `contracts/examples/relation-results/downstream.json` (#3)
+  - `docs/mcp-api.md`, `docs/runtime-api.md` (#3)
+  - `adr/040-expose-bounded-relation-traversal-as-a-public-query-surface.md` (#3)
+  - `test/semidx/runtime/http_test.clj` (#1, #2),
+    `test/semidx/runtime/relations_test.clj` (#3)
+  - `MEMORY.md`, and this progress log.
+- Verification:
+  - `./scripts/validate-contracts.sh` passed (`checked_json_files=68`,
+    `contracts_validation=ok`);
+  - full suite `clojure -M:test` passed (`279 tests / 1887 assertions`,
+    `0 failures, 0 errors`);
+  - traversal kernel checked in REPL: result now carries `discovery_paths`, and
+    `budgets` / `truncated` carry `max_discovery_paths`; no `:paths` key remains.
+- Skipped / limitations: `adr/040` prose predating the rename is preserved
+  (historical record) with an inline amendment rather than a rewrite. Findings #4
+  and #5 are documentation-only by design.
+- Known blockers: none.

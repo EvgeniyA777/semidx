@@ -116,6 +116,17 @@ graph-query language. Its contract mirrors the kernel:
 The JSON Schema under `contracts/schemas/` is the external source of truth and a
 `malli` mirror in `semidx.contracts.schemas` validates it at runtime.
 
+> **Amendment (2026-08-02, plan 013 post-delivery review):** the traversal path
+> fields above were renamed before broad reliance on them — `max_paths` ->
+> `max_discovery_paths` and `paths` -> `discovery_paths` — across the kernel,
+> the `malli`/JSON Schema contracts, the MCP tool, the HTTP/gRPC edges, docs,
+> and tests. The rename is behaviour-preserving: the field carries at most one
+> deterministic shortest first-discovery path per reached node, not an
+> enumeration of alternative routes (multipath enumeration was deliberately not
+> implemented), and the old name misleadingly implied path enumeration and
+> merely duplicated `max_nodes`. Read every `max_paths` / `paths` in the prose
+> above as `max_discovery_paths` / `discovery_paths`.
+
 ### Phased exposure
 
 Stage 4 exposes the surface on library and MCP only. Capability metadata reports
