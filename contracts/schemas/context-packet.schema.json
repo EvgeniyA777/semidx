@@ -129,6 +129,21 @@
         },
         "risky_neighbors": {
           "$ref": "common.schema.json#/$defs/stringArray"
+        },
+        "relation_support": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "downstream": {
+              "$ref": "common.schema.json#/$defs/stringArray"
+            },
+            "upstream": {
+              "$ref": "common.schema.json#/$defs/stringArray"
+            },
+            "reasons": {
+              "$ref": "common.schema.json#/$defs/codedItemArray"
+            }
+          }
         }
       }
     },

@@ -13,6 +13,8 @@
             [semidx.runtime.languages.python :as py-language]
             [semidx.runtime.languages.shared :as shared-language]
             [semidx.runtime.languages.typescript :as ts-language]
+            [semidx.runtime.index :as idx]
+            [semidx.runtime.retrieval :as retrieval]
             [semidx.runtime.retrieval-policy :as rp]
             [semidx.runtime.storage :as storage]))
 
@@ -1999,6 +2001,87 @@
                       (= "order" (:local_name %)))
                 (get by-type "dataflow/passes-argument")))
       (is (contains? (get (:relation_forward_index index) wrapper-id) (:relation_id (first relations)))))))
+
+(def ^:private build-impact-hints #'retrieval/build-impact-hints)
+
+(defn- write-flow-fixture! [tmp-root]
+  (write-file! tmp-root "src/my/app/flow.clj"
+               "(ns my.app.flow)\n\n(defn make-client [config]\n  config)\n\n(defn normalize [order]\n  order)\n\n(defn save! [order client]\n  order)\n\n(defn wrapper [order config]\n  (let [client (make-client config)]\n    (save! order client)\n    (normalize order)))\n"))
+
+(deftest impact-relation-support-surfaces-resolved-dataflow-neighbors-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-impact-relation-support" (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (write-flow-fixture! tmp-root)
+    (let [index (sci/create-index {:root_path tmp-root :parser_opts {:clojure_engine :regex}})
+          make-client-id "src/my/app/flow.clj::my.app.flow/make-client"
+          wrapper-id "src/my/app/flow.clj::my.app.flow/wrapper"
+          upstream-hints (build-impact-hints index [(idx/unit-by-id index make-client-id)])
+          downstream-hints (build-impact-hints index [(idx/unit-by-id index wrapper-id)])]
+      (testing "selecting a callee surfaces the resolved upstream dataflow dependent"
+        (is (= [wrapper-id] (get-in upstream-hints [:relation_support :upstream])))
+        (is (empty? (get-in upstream-hints [:relation_support :downstream])))
+        (is (some #(= "relation_upstream_dataflow" (:code %))
+                  (get-in upstream-hints [:relation_support :reasons]))))
+      (testing "selecting a wrapper surfaces its resolved downstream dataflow dependencies"
+        (is (= #{"src/my/app/flow.clj::my.app.flow/make-client"
+                 "src/my/app/flow.clj::my.app.flow/normalize"
+                 "src/my/app/flow.clj::my.app.flow/save!"}
+               (set (get-in downstream-hints [:relation_support :downstream]))))
+        (is (some #(= "relation_downstream_dataflow" (:code %))
+                  (get-in downstream-hints [:relation_support :reasons]))))
+      (testing "legacy caller/dependent/test/neighbor keys are always present and additive"
+        (is (every? #(contains? upstream-hints %)
+                    [:callers :dependents :related_tests :risky_neighbors]))))))
+
+(deftest impact-relation-support-omitted-without-resolved-dataflow-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-impact-relation-omitted" (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (write-file! tmp-root "src/p/a.clj" "(ns p.a)\n(defn foo [x] x)\n(defn bar [y] y)\n")
+    (let [index (sci/create-index {:root_path tmp-root :parser_opts {:clojure_engine :regex}})
+          foo-hints (build-impact-hints index [(idx/unit-by-id index "src/p/a.clj::p.a/foo")])]
+      (testing "no dataflow relations means the projection is omitted and legacy output is unchanged"
+        (is (not (contains? foo-hints :relation_support)))
+        (is (= #{:callers :dependents :related_tests :risky_neighbors}
+               (set (keys foo-hints)))))))
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-impact-relation-fullgraph" (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (write-flow-fixture! tmp-root)
+    (let [index (sci/create-index {:root_path tmp-root :parser_opts {:clojure_engine :regex}})
+          all-ids ["src/my/app/flow.clj::my.app.flow/make-client"
+                   "src/my/app/flow.clj::my.app.flow/normalize"
+                   "src/my/app/flow.clj::my.app.flow/save!"
+                   "src/my/app/flow.clj::my.app.flow/wrapper"]
+          all-hints (build-impact-hints index (mapv #(idx/unit-by-id index %) all-ids))]
+      (testing "when every relation-reachable node is already selected, nothing extra is surfaced"
+        (is (not (contains? all-hints :relation_support)))))))
+
+(deftest impact-relation-support-skips-ambiguous-targets-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-impact-relation-ambiguous" (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (write-file! tmp-root "src/my/app/a.clj" "(ns my.app.a)\n(defn helper [x] x)\n")
+    (write-file! tmp-root "src/my/app/b.clj" "(ns my.app.b)\n(defn helper [x] x)\n")
+    (write-file! tmp-root "src/my/app/w.clj"
+                 "(ns my.app.w\n  (:require [my.app.a :refer [helper]]\n            [my.app.b :refer [helper]]))\n\n(defn wrap [order]\n  (let [r (helper order)]\n    r))\n")
+    (let [index (sci/create-index {:root_path tmp-root :parser_opts {:clojure_engine :regex}})
+          wrap-id "src/my/app/w.clj::my.app.w/wrap"
+          relations (->> (:relations index) vals (filter #(= wrap-id (:source_unit_id %))) vec)
+          wrap-hints (build-impact-hints index [(idx/unit-by-id index wrap-id)])]
+      (testing "the fixture actually produces ambiguous dataflow relations"
+        (is (seq relations))
+        (is (every? #(= "ambiguous" (:resolution_status %)) relations)))
+      (testing "ambiguous relation targets are never surfaced as relation support"
+        (is (not (contains? wrap-hints :relation_support)))))))
+
+(deftest impact-relation-support-flags-and-bounds-truncation-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-impact-relation-truncate" (make-array java.nio.file.attribute.FileAttribute 0)))
+        callees (str/join "\n" (for [i (range 1 16)] (str "(defn f" i " [x] x)")))
+        binds (str/join "\n    " (for [i (range 1 16)] (str "a" i " (f" i " x)")))
+        body (str "(ns hub.core)\n" callees "\n\n(defn hub [x]\n  (let [" binds "]\n    ["
+                  (str/join " " (for [i (range 1 16)] (str "a" i))) "]))\n")]
+    (write-file! tmp-root "src/hub/core.clj" body)
+    (let [index (sci/create-index {:root_path tmp-root :parser_opts {:clojure_engine :regex}})
+          hints (build-impact-hints index [(idx/unit-by-id index "src/hub/core.clj::hub.core/hub")])
+          downstream (get-in hints [:relation_support :downstream])]
+      (testing "the projection caps its display list and flags the drop"
+        (is (= 12 (count downstream)))
+        (is (some #(= "relation_traversal_truncated" (:code %))
+                  (get-in hints [:relation_support :reasons])))))))
 
 (deftest python-dataflow-relations-resolve-target-units-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-python-dataflow-relations" (make-array java.nio.file.attribute.FileAttribute 0)))

@@ -271,6 +271,16 @@
    [:summary bounded-string]
    [:docstring_excerpt {:optional true} bounded-long-string]])
 
+(def relation-support
+  "Bounded, reason-coded relation-backed impact support. Additive to the legacy
+  caller/callee/dependent hints: `downstream`/`upstream` are distinct unit
+  display strings reached only through resolved dataflow relations, and
+  `reasons` carries the codes explaining the projection."
+  [:map {:closed true}
+   [:downstream string-array]
+   [:upstream string-array]
+   [:reasons coded-item-array]])
+
 (def expansion-result
   [:map {:closed true}
    [:api_version bounded-string]
@@ -290,7 +300,8 @@
      [:callers string-array]
      [:dependents string-array]
      [:related_tests string-array]
-     [:risky_neighbors string-array]]]])
+     [:risky_neighbors string-array]
+     [:relation_support {:optional true} relation-support]]]])
 
 (def context-packet
   [:map {:closed true}
@@ -315,7 +326,8 @@
      [:callers string-array]
      [:dependents string-array]
      [:related_tests string-array]
-     [:risky_neighbors string-array]]]
+     [:risky_neighbors string-array]
+     [:relation_support {:optional true} relation-support]]]
    [:evidence
     [:map {:closed true}
      [:selection_reasons coded-item-array]

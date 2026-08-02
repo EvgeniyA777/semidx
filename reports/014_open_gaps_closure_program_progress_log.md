@@ -582,3 +582,96 @@ as part of this planning review.
   benchmark suite) still passed. Relation-backed retrieval/impact projections
   remain the next Stage 3 sub-step.
 - Known blockers: none.
+
+## Stage 3.7 - Relation-Backed Impact Projection
+
+- Status: completed.
+- Scope: Implement Stage 3 sub-step 6, the last coding sub-step of Stage 3:
+  bounded, reason-coded retrieval/impact projections that consume the
+  `traverse-relations` kernel, keeping ambiguous flows conservative, preserving
+  existing caller/callee/dependent/test outputs, and adding no public
+  graph-query API.
+- Summary:
+  - `semidx.runtime.retrieval/build-impact-hints` now consumes
+    `relations/traverse-relations` and attaches an optional, reason-coded
+    `:relation_support` field to `impact_hints` (shared by `impact_analysis`,
+    detail, and expansion packets). From the selected units it runs the bounded,
+    `:resolved_only true` kernel under a conservative local sub-ceiling
+    (`relation-projection-bounds`: depth 2 / 24 nodes / 12 paths) in both
+    directions: `:downstream` dataflow dependencies and `:upstream` dataflow
+    dependents, returned as distinct `path::symbol` strings excluding the
+    selected units, plus `:reasons` codes (`relation_downstream_dataflow`,
+    `relation_upstream_dataflow`, `relation_traversal_truncated`).
+  - The field is omitted entirely when no resolved relation-backed unit is
+    found, so the legacy `:callers`/`:dependents`/`:related_tests`/
+    `:risky_neighbors` outputs stay byte-identical when there is no
+    interprocedural dataflow signal. Ambiguous and unresolved relations are
+    never surfaced (the kernel and the projection both default to
+    `:resolved_only true`).
+  - The `context_packet` and `expansion-result` `impact_hints` contracts gained
+    an optional `relation_support` object (`{downstream, upstream, reasons}`) in
+    both the JSON schema (`contracts/schemas/context-packet.schema.json`) and
+    the malli mirror (`semidx.contracts.schemas/relation-support`). Existing
+    examples remain valid because the field is optional.
+  - No public graph-query API was added and no `calls`/`imports` migration was
+    performed. Confidence ceilings are unchanged (documented non-bump: the
+    projection is additive low-weight support, not a ranking/resolution change).
+- Changed files:
+  - `src/semidx/runtime/retrieval.clj`
+  - `src/semidx/contracts/schemas.clj`
+  - `contracts/schemas/context-packet.schema.json`
+  - `test/semidx/integration/runtime_test.clj`
+  - `plans/013_open_gaps_closure_program.md` (sub-step 6 marked delivered)
+  - `MEMORY.md`
+  - `docs/roadmap-status.md`
+  - `docs/code-context.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - semidx MCP `create_index -> resolve_context -> fetch_context_detail` mapped
+    `build-impact-hints`, the detail/expansion packet assembly, and the
+    `traverse-relations` kernel before editing.
+  - clojure-mcp REPL smoke confirmed: upstream selection surfaces the resolved
+    dataflow dependent; downstream selection surfaces resolved dependencies;
+    ambiguous targets and no-relation fixtures omit `:relation_support`; the
+    whole-graph selection omits it; and the display cap flags
+    `relation_traversal_truncated`.
+  - `./scripts/validate-contracts.sh` passed (`checked_json_files=61`,
+    `contracts_validation=ok`).
+  - `clojure -M:test` passed (`256 tests / 1712 assertions`).
+  - `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
+  - `./scripts/run-semantic-quality-report.sh` exited `0` with the baseline
+    advisory state unchanged (`expected_change_match_rate=0.8333333333333334`,
+    `identity_stability_rate=1.0`, `move_rename_recovery_rate=1.0`,
+    `implementation_vs_meaning_accuracy=0.6666666666666666`, `unmatched_rate=0.0`).
+  - `./scripts/run-mvp-gates.sh` passed (`mvp_gates=ok`, `21/21` retrieval
+    benchmarks, all query smokes).
+  - `clojure -M:ccc check --root .` passed after refreshing `docs/code-context.md`.
+- New test coverage (`test/semidx/integration/runtime_test.clj`):
+  - `impact-relation-support-surfaces-resolved-dataflow-neighbors-test` -
+    upstream/downstream surfacing plus reason codes and additive legacy keys.
+  - `impact-relation-support-omitted-without-resolved-dataflow-test` - omitted
+    for a no-relation fixture and for whole-graph selection, legacy 4-key output
+    unchanged.
+  - `impact-relation-support-skips-ambiguous-targets-test` - ambiguous dataflow
+    relations never surfaced.
+  - `impact-relation-support-flags-and-bounds-truncation-test` - display cap and
+    `relation_traversal_truncated` flag.
+- Review findings (`/code-review high` on the working diff):
+  - Low (fixed) - post-`(take relation-support-limit)` truncation was not
+    reflected in `:truncated?`: the kernel can return up to `max_nodes` (24)
+    non-start units without hitting its own budget, then the projection displayed
+    only 12 and dropped the rest with no `relation_traversal_truncated` reason.
+    Fixed to OR the display-cap drop into `:truncated?`; added
+    `impact-relation-support-flags-and-bounds-truncation-test`.
+  - Low (fixed) - `:start_nodes` were passed as `(vec selected-ids)` from a set,
+    an unspecified iteration order. Changed to `(sort selected-ids)` for a
+    canonical, stable, explainable start ordering that matches the kernel's
+    determinism ethos.
+  - No correctness regressions: legacy caller/callee/dependent/test outputs are
+    preserved (new key is additive and omitted without signal), and the
+    `path::symbol` display / `bounded-string` / `code` bounds match existing
+    impact-hint conventions.
+- Skipped / limitations: confidence-ceiling recalibration is intentionally a
+  documented non-bump; PostgreSQL relation projection and the public graph-query
+  surface are Stage 4 scope.
+- Known blockers: none.

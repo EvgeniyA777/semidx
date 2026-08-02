@@ -213,6 +213,15 @@ canonical graph for all new graph semantics.
    keeping ambiguous flows conservative (no over-linking) and avoiding a public
    graph-query API in Stage 3. Start with reason-coded, low-weight support and
    preserve existing caller/callee outputs.
+   **Delivered:** `retrieval/build-impact-hints` consumes `traverse-relations`
+   and attaches an optional, reason-coded `:relation_support` field to
+   `impact_hints` (downstream dataflow dependencies / upstream dataflow
+   dependents under a conservative `:resolved_only` sub-ceiling of depth 2 / 24
+   nodes / 12 paths). The field is omitted when there is no resolved
+   relation-backed unit, so legacy caller/callee/dependent/test outputs stay
+   byte-identical; ambiguous/unresolved relations are never surfaced. The
+   optional `relation_support` object is mirrored in the JSON and malli
+   `impact_hints` contracts. No public graph-query API was added.
 7. Recalibrate confidence ceilings only if evidence supports it; otherwise keep
    ceilings unchanged and document the non-bump (as done previously).
 

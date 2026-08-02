@@ -6,6 +6,7 @@
             [semidx.contracts.schemas :as contracts]
             [semidx.runtime.index :as idx]
             [semidx.runtime.projections :as projections]
+            [semidx.runtime.relations :as relations]
             [semidx.runtime.retrieval-policy :as rp]))
 
 (defn- now-iso []
@@ -552,6 +553,71 @@
        distinct
        vec))
 
+(def ^:private relation-projection-bounds
+  "Conservative sub-ceiling for relation-backed impact projections. Kept well
+  under the traversal-kernel ceiling (`relations/default-traversal-bounds`) so
+  relation support stays a low-weight, bounded signal that never dominates the
+  legacy caller/callee hints."
+  {:max_depth 2 :max_nodes 24 :max_paths 12})
+
+(def ^:private relation-support-limit 12)
+
+(defn- relation-traversal-units
+  "Run the bounded, resolved-only traversal kernel from `start-ids` in
+  `direction` over the relation indexes carried by `index`. Returns
+  {:units [display-string ...] :truncated? bool}, where each unit is a distinct
+  `path::symbol` reachable through resolved dataflow relations, excluding the
+  start units themselves. Ambiguous and unresolved relations are never followed,
+  so the projection stays conservative."
+  [index start-ids direction]
+  (if (empty? start-ids)
+    {:units [] :truncated? false}
+    (let [result (relations/traverse-relations
+                  index
+                  (assoc relation-projection-bounds
+                         :direction direction
+                         :start_nodes start-ids
+                         :resolved_only true))
+          start-set (set start-ids)
+          reached (->> (:nodes result)
+                       (map :unit_id)
+                       (remove start-set)
+                       distinct
+                       (keep #(idx/unit-by-id index %))
+                       (map #(str (:path %) "::" (:symbol %)))
+                       distinct
+                       vec)
+          units (vec (take relation-support-limit reached))]
+      {:units units
+       :truncated? (boolean (or (some true? (vals (:truncated result)))
+                                (> (count reached) relation-support-limit)))})))
+
+(defn- relation-support-hints
+  "Reason-coded, low-weight relation-backed impact support for `selected-ids`.
+  Downstream units consume a selected unit's value through resolved dataflow
+  relations; upstream units feed a selected unit. Returns nil when no resolved
+  relation-backed unit is found, so callers keep the legacy
+  caller/callee/dependent/test outputs byte-identical when there is no
+  interprocedural dataflow signal."
+  [index selected-ids]
+  (let [downstream (relation-traversal-units index selected-ids :downstream)
+        upstream (relation-traversal-units index selected-ids :upstream)
+        down (:units downstream)
+        up (:units upstream)]
+    (when (or (seq down) (seq up))
+      {:downstream down
+       :upstream up
+       :reasons (cond-> []
+                  (seq down)
+                  (conj (coded "relation_downstream_dataflow"
+                               "Units reached downstream from selected units through resolved dataflow relations."))
+                  (seq up)
+                  (conj (coded "relation_upstream_dataflow"
+                               "Units reaching selected units through resolved dataflow relations."))
+                  (or (:truncated? downstream) (:truncated? upstream))
+                  (conj (coded "relation_traversal_truncated"
+                               "Relation traversal hit a conservative budget bound; relation support is partial.")))})))
+
 (defn- build-impact-hints [index selected]
   (let [selected-ids (set (map :unit_id selected))
         caller-units (->> selected
@@ -607,11 +673,13 @@
                              (map #(str (:path %) "::" (:symbol %)))
                              distinct
                              (take 12)
-                             vec)]
-    {:callers callers
-     :dependents dependents
-     :related_tests related-tests
-     :risky_neighbors risky-neighbors}))
+                             vec)
+        relation-support (relation-support-hints index (sort selected-ids))]
+    (cond-> {:callers callers
+             :dependents dependents
+             :related_tests related-tests
+             :risky_neighbors risky-neighbors}
+      relation-support (assoc :relation_support relation-support))))
 
 (defn- empty-impact-hints []
   {:callers []
