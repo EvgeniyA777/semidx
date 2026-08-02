@@ -10,8 +10,11 @@ updated: "2026-08-02"
 # Codex Continuation Handoff
 
 Repo: `/Users/ae/workspaces/semidx`
-Branch: `main`
-Latest pushed commit at handoff update: `a19986e feat: add bounded relation traversal kernel`
+Branch: `dev`
+Latest pushed commit at handoff update: `f06b956 feat: add relation-backed impact projection`
+Branch note: active work continues on `dev`; `main` is intentionally left one
+commit behind (`2fcb5ec`) and is fast-forwarded to `dev` manually by the
+maintainer. Continue on `dev`.
 Expected worktree state: clean.
 
 ## Mandatory Rules
@@ -46,6 +49,7 @@ Relevant ADRs:
 - Stage 3.4: Python `dataflow/*` producer.
 - Stage 3.5: relation identity/evidence split and validation hardening (`ADR-039`).
 - Stage 3.6: pure bounded relation traversal kernel.
+- Stage 3.7: relation-backed impact projection (Stage 3 is now code-complete).
 
 Both Clojure and Python emit top-level snapshot relations:
 
@@ -71,45 +75,68 @@ keys: `:direction` (`:downstream` source->target / `:upstream` target->source),
 ambiguous/unresolved edges are skipped), and `:max_depth`/`:max_nodes`/`:max_paths`
 clamped into `[0, default-traversal-bounds]` (depth 4 / 200 nodes / 50 paths).
 It returns `{:direction :start_nodes :relation_types :budgets :nodes :edges
-:paths :truncated}` with per-budget truncation flags. It is internal only: no
-consumer is wired to it and no public graph-query API exists yet.
+:paths :truncated}` with per-budget truncation flags. No public graph-query API
+exists yet; its only consumer is the Stage 3.7 projection.
+
+Stage 3.7: `semidx.runtime.retrieval/build-impact-hints` consumes
+`traverse-relations` and attaches an optional, reason-coded `:relation_support`
+field to `impact_hints` (shared by `impact_analysis`, detail, and expansion
+packets). From the selected units it runs the bounded, `:resolved_only true`
+kernel under a conservative local sub-ceiling (`relation-projection-bounds`:
+depth 2 / 24 nodes / 12 paths) in both directions: `:downstream` dataflow
+dependencies and `:upstream` dataflow dependents, as distinct `path::symbol`
+strings excluding the selected units, plus `:reasons` codes
+(`relation_downstream_dataflow`, `relation_upstream_dataflow`,
+`relation_traversal_truncated`). The field is omitted entirely when no resolved
+relation-backed unit is found, so legacy
+`:callers`/`:dependents`/`:related_tests`/`:risky_neighbors` outputs stay
+byte-identical; ambiguous/unresolved relations are never surfaced. The
+`context_packet` and `expansion-result` `impact_hints` contracts carry an
+optional `relation_support` object (`{downstream, upstream, reasons}`) in both
+the JSON schema and the malli mirror. No public graph-query API was added;
+confidence ceilings are unchanged (documented non-bump). Stage 3 is code-complete.
 
 ## Next Stage
 
-Implement `plans/013` Stage 3 sub-step 6 (the last coding sub-step of Stage 3):
-bounded, reason-coded retrieval/impact projections that consume
-`semidx.runtime.relations/traverse-relations`.
+Implement `plans/013` Stage 4: the semantic graph query surface (gap 7). This
+productizes the Stage 3 traversal semantics as a bounded public graph-query
+surface and adds a PostgreSQL physical projection, without moving graph policy
+into storage. Before starting, read `plans/013` Stage 4 in full.
 
-- Wire relation-backed support into retrieval and `impact_analysis` as
-  reason-coded, low-weight signals. Start conservative; preserve existing
-  caller/callee/dependents/related_tests outputs unchanged.
-- Consume the kernel; do not write a second graph walk. `build-impact-hints`
-  currently reads legacy caller/module/test indexes only.
-- Keep ambiguous flows conservative: rely on the kernel's `:resolved_only true`
-  default; do not over-link.
-- After it lands, recalibrate confidence ceilings only if evidence supports it;
-  otherwise document the non-bump (as in prior sub-steps).
+- Specify the public query surface in a new ADR (next available ADR number at
+  execution time). Reuse the Stage 3 `traverse-relations` semantics and bounds
+  instead of defining a second graph walk.
+- Add JSON Schema under `contracts/schemas/` plus a `malli` mirror in
+  `src/semidx/contracts/` for the new query request/response.
+- Add a `semantic_index_relations` PostgreSQL projection scoped by repository and
+  snapshot (source, target, relation-type, evidence indexes) with an explicit
+  migration/backfill policy.
+- Implement a PostgreSQL execution adapter for the canonical traversal contract
+  and prove parity with the pure in-memory kernel. Storage may optimize
+  execution but must not own traversal semantics.
+- Expose it on the public surfaces only where it fits the staged-retrieval
+  contract; keep MCP/library/HTTP/gRPC aligned.
 
 Constraints:
 
-- Do not add a public graph-query API in Stage 3 (that is Stage 4).
+- Storage optimizes execution but must not own traversal policy/semantics; the
+  pure kernel stays the source of truth.
 - Do not migrate or replace existing `calls` / `imports`.
-- Keep ambiguous relation-backed flows conservative.
-- Do not carry legacy paths forward when a clean new-system implementation is clearer.
+- Keep ambiguous relation-backed flows conservative (`:resolved_only`).
+- Before running PostgreSQL parity tests: detect a running instance -> stop it
+  cleanly -> start fresh with the test config -> only then run (`SCI_TEST_POSTGRES_URL`).
 
-Verification focus for this sub-step (extraction/ranking/resolution-adjacent, so
-gates matter): `clojure -M:test`, `./scripts/run-benchmarks.sh`,
-`./scripts/run-semantic-quality-report.sh` (must show no regression and a
-measurable gain on new interprocedural cases), `./scripts/run-mvp-gates.sh`,
-`clojure -M:ccc check --root .`. Add mirrored `*-test` coverage and consider
-protected replay-case promotion for the hardest new cases.
+Verification focus for Stage 4 (contract + storage surfaces):
+`./scripts/validate-contracts.sh`, `clojure -M:test`, in-memory vs PostgreSQL
+storage parity tests, `./scripts/run-mvp-gates.sh`, `clojure -M:ccc check --root .`.
+Add mirrored `*-test` coverage for the new contract and the storage adapter.
 
 ## Last Known Verification
 
-For commit `a19986e`:
+For commit `f06b956` (Stage 3.7):
 
-- `clojure -M:test -n semidx.runtime.relations-test` passed (`13 tests / 49 assertions`).
-- `clojure -M:test` passed (`252 tests / 1695 assertions`).
+- `./scripts/validate-contracts.sh` passed (`checked_json_files=61`, `contracts_validation=ok`).
+- `clojure -M:test` passed (`256 tests / 1712 assertions`).
 - `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
 - `./scripts/run-semantic-quality-report.sh` exited `0` with advisory state unchanged
   (`expected_change_match_rate=0.8333333333333334`, `identity_stability_rate=1.0`,
@@ -121,9 +148,11 @@ For commit `a19986e`:
 ## Suggested First Prompt
 
 Read `reports/017_codex_continuation_handoff.md`, then continue
-`/Users/ae/workspaces/semidx` from the current `main` branch. Follow `RULES.md`,
-use semidx MCP-first, and implement the next `plans/013` Stage 3 sub-step:
-bounded, reason-coded retrieval/impact projections that consume
-`semidx.runtime.relations/traverse-relations`, keeping ambiguous flows
-conservative and preserving existing caller/callee outputs, with no public
-graph-query API.
+`/Users/ae/workspaces/semidx` from the current `dev` branch. Follow `RULES.md`,
+use semidx MCP-first, and implement `plans/013` Stage 4: the bounded public
+semantic graph-query surface plus a PostgreSQL `semantic_index_relations`
+projection. Reuse the Stage 3 `semidx.runtime.relations/traverse-relations`
+contract and bounds instead of writing a second graph walk, keep traversal
+semantics in the pure kernel (storage only optimizes execution), prove
+in-memory vs PostgreSQL parity, add the JSON + malli contract mirror, and record
+the decision in a new ADR.
