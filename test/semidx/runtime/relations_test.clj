@@ -81,3 +81,68 @@
     (is (= {} (:relation_reverse_index index)))
     (is (map? (:callers_index index)))
     (is (map? (:callees_index index)))))
+
+(deftest relation-id-stable-across-resolution-and-evidence-test
+  (testing "identity derives only from stable semantic fields; resolving an
+  unresolved fact and attaching richer evidence keeps one relation_id"
+    (let [semantic {:source_unit_id "unit:wrapper"
+                    :target_key "save!"
+                    :relation_type "dataflow/passes-argument"
+                    :local_name "order"
+                    :arg_index 0}
+          unresolved (relations/normalize-relation
+                      (assoc semantic
+                             :resolution_status "unresolved"
+                             :evidence_quality "low"))
+          resolved (relations/normalize-relation
+                    (assoc semantic
+                           :target_unit_ids ["unit:save"]
+                           :resolution_status "resolved"
+                           :evidence_quality "high"
+                           :evidence_location {:start_line 10}
+                           :provenance {:producer "scip"}))]
+      (is (= (:relation_id unresolved) (:relation_id resolved)))
+      (is (relations/valid-relation? unresolved))
+      (is (relations/valid-relation? resolved)))))
+
+(deftest relation-validation-surfaces-structured-diagnostics-test
+  (let [ok (relations/normalize-relation
+            {:source_unit_id "unit:src"
+             :target_unit_ids ["unit:dst"]
+             :relation_type "dataflow/returns-call-result"
+             :evidence_quality "medium"})
+        unknown-type (relations/normalize-relation
+                      {:source_unit_id "unit:other"
+                       :target_unit_ids ["unit:dst"]
+                       :relation_type "bogus/type"
+                       :evidence_quality "medium"})
+        resolved-no-targets (assoc ok :resolution_status "resolved" :target_unit_ids [])
+        {:keys [relations diagnostics]}
+        (relations/normalize-relations-with-diagnostics
+         [ok unknown-type resolved-no-targets])
+        codes (set (mapcat #(map :code (:errors %)) diagnostics))]
+    (testing "valid facts pass and invalid facts are excluded"
+      (is (relations/valid-relation? ok))
+      (is (not (relations/valid-relation? unknown-type)))
+      (is (= [(:relation_id ok)] (mapv :relation_id relations))))
+    (testing "invalid facts are surfaced as structured diagnostics, not dropped"
+      (is (= 2 (count diagnostics)))
+      (is (contains? codes :invalid-relation-type))
+      (is (contains? codes :resolved-without-targets)))))
+
+(deftest index-relations-surfaces-invalid-fact-diagnostics-test
+  (let [valid (relations/normalize-relation
+               {:source_unit_id "unit:src"
+                :target_unit_ids ["unit:dst"]
+                :relation_type "dataflow/returns-call-result"
+                :evidence_quality "medium"})
+        invalid (relations/normalize-relation
+                 {:source_unit_id "unit:other"
+                  :target_unit_ids ["unit:dst"]
+                  :relation_type "bogus/type"
+                  :evidence_quality "medium"})
+        indexed (relations/index-relations [valid invalid])]
+    (is (= #{(:relation_id valid)} (set (keys (:relations indexed)))))
+    (is (= 1 (count (:relation_diagnostics indexed))))
+    (is (= :invalid-relation-type
+           (-> indexed :relation_diagnostics first :errors first :code)))))

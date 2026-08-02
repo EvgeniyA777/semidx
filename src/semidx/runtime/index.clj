@@ -492,6 +492,7 @@
        :relations (:relations relation-indexes)
        :relation_forward_index (:relation_forward_index relation-indexes)
        :relation_reverse_index (:relation_reverse_index relation-indexes)
+       :relation_diagnostics (:relation_diagnostics relation-indexes)
        :module_dependents (build-module-dependents (:files files-data))
        :test_target_index (build-test-target-index (:files files-data))
        :detected_languages (:detected_languages activation-metadata)

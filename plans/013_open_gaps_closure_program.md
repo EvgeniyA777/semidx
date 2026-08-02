@@ -189,10 +189,16 @@ canonical graph for all new graph semantics.
    resolution status, resolved target IDs, evidence quality, provenance, and
    evidence location must not create a second semantic edge. Record this
    durable identity/evidence split in the next ADR before changing v1 IDs.
+   **Delivered under `ADR-039`:** `relation-id-input` now selects only
+   `relation_type`, `source_unit_id`, `target_key`, `local_name`, `arg_index`,
+   and `relation_schema_version`.
 4. Replace permissive validation and silent invalid-fact filtering with an
    explicit internal schema plus structured diagnostics. Resolved relations
    require resolved targets; ambiguous/unresolved relations remain
    conservative; relation types and evidence shapes are validated.
+   **Delivered under `ADR-039`:** `relation-errors` is the explicit schema,
+   and `index-relations` surfaces invalid facts as snapshot
+   `:relation_diagnostics` instead of dropping them.
 5. Add a pure, storage-independent bounded traversal kernel under
    `runtime.relations`. Its request must specify start nodes, direction,
    relation-type allow-list, resolved-only behavior, cycle handling,

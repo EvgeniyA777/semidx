@@ -453,3 +453,69 @@ The review also found stale `repo_identity` metadata when a source snapshot is
 reused after documentation-only commits. The independent reproduction is in
 `notes/2026-08-01-reused-index-stale-repo-identity.md`; no runtime fix was made
 as part of this planning review.
+
+## Stage 3.5 - Relation Identity/Evidence Split And Validation Hardening
+
+- Status: completed.
+- Scope: Implement the re-review Follow-up Sequence steps 1 and the schema-hardening
+  half of Stage 3 sub-steps 3-4: separate semantic relation identity from mutable
+  resolution/evidence and replace permissive validation plus silent invalid-fact
+  filtering with an explicit internal schema and structured diagnostics. This is
+  the prerequisite for the bounded traversal kernel and relation-backed consumers.
+- Decision record: `ADR-039 Separate Relation Identity From Resolution And Evidence`.
+- Summary:
+  - `relation-id-input` (and therefore `relation_id`) now derives only from
+    `relation_type`, `source_unit_id`, `target_key`, and flow payload
+    (`local_name` / `arg_index`) scoped by `relation_schema_version`. Mutable
+    `target_unit_ids`, `resolution_status`, `evidence_quality`, `provenance`, and
+    `evidence_location` are excluded, so resolving an unresolved fact or attaching
+    richer evidence enriches one semantic edge instead of minting a second one.
+  - Added `relation-types`, `resolution-statuses`, and `evidence-qualities` value
+    sets plus `relation-errors`, the explicit internal schema returning structured
+    `{:code :field :message}` errors. It rejects non-map facts, missing
+    `relation_id`/`source_unit_id`, unknown relation type/status/evidence quality,
+    schema-version mismatch, resolved-without-targets, and non-map
+    `evidence_location`/`provenance`. Ambiguous/unresolved facts stay conservative.
+  - `valid-relation?` is now an empty `relation-errors`;
+    `normalize-relations-with-diagnostics` partitions valid relations from
+    diagnostics; `index-relations` and `build-index-state` surface invalid facts as
+    snapshot `:relation_diagnostics` instead of dropping them silently.
+- Changed files:
+  - `src/semidx/runtime/relations.clj`
+  - `src/semidx/runtime/index.clj`
+  - `test/semidx/runtime/relations_test.clj`
+  - `adr/039-separate-relation-identity-from-resolution-and-evidence.md`
+  - `plans/013_open_gaps_closure_program.md`
+  - `MEMORY.md`
+  - `docs/roadmap-status.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - semidx MCP `create_index -> resolve_context` mapping located the relation
+    substrate and index resolution seams before editing.
+  - clojure-mcp REPL smoke confirmed `relation_id` stability across
+    unresolved->resolved with growing evidence, structured diagnostics for invalid
+    facts, and a real Clojure index build emitting 4 resolved relations with zero
+    false diagnostics.
+  - `clojure -M:test -n semidx.runtime.relations-test` passed (`7 tests / 29 assertions`).
+  - `clojure -M:test -n semidx.integration.runtime-test` passed (`106 tests / 483 assertions`).
+  - `clojure -M:test` passed (`246 tests / 1678 assertions`).
+  - `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
+  - `./scripts/run-semantic-quality-report.sh` exited `0` with the expected advisory gate state: `expected_change_match_rate=0.8333333333333334`, `identity_stability_rate=1.0`, `move_rename_recovery_rate=1.0`, `implementation_vs_meaning_accuracy=0.6666666666666666`, `unmatched_rate=0.0`.
+  - `./scripts/run-mvp-gates.sh` passed (`mvp_gates=ok`, `21/21` retrieval benchmarks, all query smokes).
+- Review findings (`/code-review high` on the stage diff, `HEAD~1`):
+  - No correctness regressions. New validation is a strict superset of the old
+    presence checks; the only narrowing (unknown `relation_type` now rejected)
+    is safe because every producer emits one of the three known v1 types.
+  - Low - identity derives from `target_key` and excludes resolved
+    `target_unit_ids`, so a future provider emitting resolved unit ids without a
+    symbolic `target_key` could collapse distinct edges into one `relation_id`.
+    Disposition: accepted/deferred - no current producer hits this (Clojure and
+    Python emit `target_key`; index resolution fills `target_unit_ids`), and it
+    is already tracked by the 2026-08-01 re-review Finding #5 (provider endpoint
+    tranche).
+  - Low - `relation-errors` is computed twice for invalid relations
+    (group-by predicate plus `relation-diagnostic`). Disposition: rejected;
+    cold path only (real pipeline yields zero invalid facts) and current form is
+    more readable.
+- Skipped / limitations: bounded traversal kernel and relation-backed retrieval/impact projections remain deferred to the next Stage 3 sub-step by design.
+- Known blockers: none.
