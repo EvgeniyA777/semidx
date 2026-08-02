@@ -252,6 +252,95 @@
         (.shutdownNow channel)
         (.shutdownNow server)))))
 
+(deftest runtime-grpc-rate-limiting-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory
+                       "sci-runtime-grpc-rate-limit"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-grpc-sample-repo! tmp-root)
+        sink (sci/in-memory-usage-metrics)
+        {:keys [server port]} (runtime-grpc/start-server
+                               {:host "127.0.0.1"
+                                :port 0
+                                :usage_metrics sink
+                                :rate_limit {:requests_per_window 1
+                                             :window_ms 60000}})
+        channel (-> (ManagedChannelBuilder/forAddress "127.0.0.1" (int port))
+                    (.usePlaintext)
+                    (.build))
+        headers {"x-tenant-id" "tenant-rate"
+                 "x-actor-id" "actor-a"
+                 "x-trace-id" "08222222-2222-4222-8222-222222222222"}]
+    (try
+      (testing "health remains exempt from runtime limiting"
+        (dotimes [_ 2]
+          (is (= "ok"
+                 (:status
+                  (unary-call channel
+                              runtime-grpc/health-method
+                              (grpc-proto/health-request)
+                              grpc-proto/health-response->map
+                              headers))))))
+      (testing "the same tenant and actor exhaust one shared edge bucket"
+        (is (string?
+             (:snapshot_id
+              (unary-call channel
+                          runtime-grpc/create-index-method
+                          (grpc-proto/create-index-request {:root_path tmp-root})
+                          grpc-proto/create-index-response->map
+                          (assoc headers "x-request-id" "grpc-rate-1")))))
+        (try
+          (unary-call channel
+                      runtime-grpc/create-index-method
+                      (grpc-proto/create-index-request {:root_path tmp-root})
+                      grpc-proto/create-index-response->map
+                      (assoc headers "x-request-id" "grpc-rate-2"))
+          (is false "expected RESOURCE_EXHAUSTED")
+          (catch StatusRuntimeException e
+            (let [trailers (.getTrailers e)]
+              (is (= (.getCode Status/RESOURCE_EXHAUSTED)
+                     (.getCode (.getStatus e))))
+              (is (= "rate_limited"
+                     (.get trailers
+                           (Metadata$Key/of
+                            "x-sci-error-code"
+                            Metadata/ASCII_STRING_MARSHALLER))))
+              (is (= "capacity"
+                     (.get trailers
+                           (Metadata$Key/of
+                            "x-sci-error-category"
+                            Metadata/ASCII_STRING_MARSHALLER))))
+              (is (= "60"
+                     (.get trailers
+                           (Metadata$Key/of
+                            "x-sci-retry-after-seconds"
+                            Metadata/ASCII_STRING_MARSHALLER))))))))
+      (testing "a different actor has an independent bucket"
+        (is (string?
+             (:snapshot_id
+              (unary-call channel
+                          runtime-grpc/create-index-method
+                          (grpc-proto/create-index-request {:root_path tmp-root})
+                          grpc-proto/create-index-response->map
+                          (assoc headers
+                                 "x-actor-id" "actor-b"
+                                 "x-request-id" "grpc-rate-3"))))))
+      (testing "limiter decisions and rejections are visible in usage rollups"
+        (let [events (->> (usage/emitted-events sink)
+                          (filter #(= "rate_limit_decision" (:operation %))))
+              rejection (first (filter #(= "rejected" (:result_status %))
+                                       events))
+              report (usage/slo-report sink {:surface "grpc"})]
+          (is (= "create_index"
+                 (get-in rejection [:payload :limited_operation])))
+          (is (= "tenant-rate" (:tenant_id rejection)))
+          (is (= "actor-a" (:actor_id rejection)))
+          (is (= 3 (get-in report [:totals :rate_limit_decisions])))
+          (is (= 1 (get-in report [:totals :rate_limit_rejections])))
+          (is (= (/ 1.0 3.0) (:rate_limit_rejection_rate report)))))
+      (finally
+        (.shutdownNow channel)
+        (.shutdownNow server)))))
+
 (deftest runtime-grpc-authz-boundary-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-grpc-auth-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-grpc-sample-repo! tmp-root)

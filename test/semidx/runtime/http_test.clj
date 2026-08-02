@@ -252,6 +252,71 @@
       (finally
         (.stop server 0)))))
 
+(deftest runtime-http-rate-limiting-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory
+                       "sci-runtime-http-rate-limit"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-http-sample-repo! tmp-root)
+        sink (sci/in-memory-usage-metrics)
+        server (runtime-http/start-server {:host "127.0.0.1"
+                                           :port 0
+                                           :usage_metrics sink
+                                           :rate_limit {:requests_per_window 1
+                                                        :window_ms 60000}})
+        port (-> server .getAddress .getPort)
+        base-url (str "http://127.0.0.1:" port)
+        client (HttpClient/newHttpClient)
+        headers {"x-tenant-id" "tenant-rate"
+                 "x-actor-id" "actor-a"
+                 "x-trace-id" "07222222-2222-4222-8222-222222222222"}]
+    (try
+      (testing "health remains exempt from runtime limiting"
+        (is (= 200 (:status (wait-health! client base-url))))
+        (is (= 200 (:status (http-request client
+                                          "GET"
+                                          (str base-url "/health")
+                                          nil
+                                          headers)))))
+      (testing "the same tenant and actor exhaust one shared edge bucket"
+        (is (= 200
+               (:status
+                (post-json client
+                           (str base-url "/v1/index/create")
+                           {:root_path tmp-root}
+                           (assoc headers "x-request-id" "http-rate-1")))))
+        (let [rejected (post-json client
+                                  (str base-url "/v1/index/create")
+                                  {:root_path tmp-root}
+                                  (assoc headers "x-request-id" "http-rate-2"))]
+          (is (= 429 (:status rejected)))
+          (is (= "rate_limited" (get-in rejected [:json :error_code])))
+          (is (= "capacity" (get-in rejected [:json :error_category])))
+          (is (= ["60"] (get-in rejected [:headers "retry-after"])))))
+      (testing "a different actor has an independent bucket"
+        (is (= 200
+               (:status
+                (post-json client
+                           (str base-url "/v1/index/create")
+                           {:root_path tmp-root}
+                           (assoc headers
+                                  "x-actor-id" "actor-b"
+                                  "x-request-id" "http-rate-3"))))))
+      (testing "limiter decisions and rejections are visible in usage rollups"
+        (let [events (->> (usage/emitted-events sink)
+                          (filter #(= "rate_limit_decision" (:operation %))))
+              rejection (first (filter #(= "rejected" (:result_status %))
+                                       events))
+              report (usage/slo-report sink {:surface "http"})]
+          (is (= "create_index"
+                 (get-in rejection [:payload :limited_operation])))
+          (is (= "tenant-rate" (:tenant_id rejection)))
+          (is (= "actor-a" (:actor_id rejection)))
+          (is (= 3 (get-in report [:totals :rate_limit_decisions])))
+          (is (= 1 (get-in report [:totals :rate_limit_rejections])))
+          (is (= (/ 1.0 3.0) (:rate_limit_rejection_rate report)))))
+      (finally
+        (.stop server 0)))))
+
 (deftest runtime-http-authz-boundary-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-http-auth-test" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-http-sample-repo! tmp-root)

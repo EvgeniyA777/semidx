@@ -816,6 +816,9 @@ Current SLO-facing metrics include:
 - `cache_hit_ratio`
 - `degraded_rate`
 - `fallback_rate`
+- `totals.rate_limit_decisions`
+- `totals.rate_limit_rejections`
+- `rate_limit_rejection_rate`
 - `policy_version_distribution`
 
 Optional filters:
@@ -1243,6 +1246,23 @@ SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index \
 clojure -M:runtime-http --host 127.0.0.1 --port 8787
 ```
 
+Optional defense-in-depth rate limiting (default off):
+
+```bash
+clojure -M:runtime-http \
+  --rate-limit-requests 120 \
+  --rate-limit-window-ms 60000 \
+  --rate-limit-max-subjects 10000 \
+  --rate-limit-subject-scope tenant_actor
+```
+
+The same settings are available through
+`SEMIDX_RUNTIME_RATE_LIMIT_REQUESTS`, `SEMIDX_RUNTIME_RATE_LIMIT_WINDOW_MS`,
+`SEMIDX_RUNTIME_RATE_LIMIT_MAX_SUBJECTS`, and
+`SEMIDX_RUNTIME_RATE_LIMIT_SUBJECT_SCOPE`. Scope may be `tenant_actor`
+(default) or `tenant`. Health and capabilities stay exempt. Rejections return
+HTTP `429 rate_limited` with `Retry-After`.
+
 Endpoints:
 
 - `GET /health`
@@ -1286,6 +1306,11 @@ Optional usage metrics persistence:
 SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index \
 clojure -M:runtime-grpc --host 127.0.0.1 --port 8789
 ```
+
+The HTTP rate-limit flags and environment variables above are also accepted by
+the gRPC launcher. gRPC Health stays exempt; protected unary RPCs reject excess
+requests with `RESOURCE_EXHAUSTED`, `x-sci-error-code: rate_limited`, and
+`x-sci-retry-after-seconds` trailers.
 
 Service: `semidx.runtime.grpc.v1.RuntimeService`
 
@@ -1357,6 +1382,7 @@ Current stable codes include:
 - `language_refresh_required`
 - `language_activation_in_progress`
 - `language_policy_blocked`
+- `rate_limited`
 - `protocol_error`
 - `internal_contract_error`
 - `invalid_storage_config`

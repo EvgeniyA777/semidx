@@ -99,7 +99,11 @@ after this memory file.
   `RuntimeServiceGrpc` descriptors with the descriptor-built oracle removed.
 - No dynamic external policy backend integration yet (current authz adapter is local file/callback based).
 - HTTP edge now exposes an online policy control-plane (`GET /v1/policies/registry`, `POST /v1/policies/promote`, `POST /v1/policies/retire`). Offline review emits digest/revision-bound promotion decisions; restricted policies require decision-bound approver records; file authz is deny-by-default per policy operation; and serialized transitions atomically replace the registry file before publishing memory state (Stage 6).
-- Rate limiting is delegated to ingress/proxy/host layer and not implemented in runtime edges.
+- Stage 7 runtime-edge rate limiting is delivered under ADR-044: HTTP and gRPC
+  share an optional, default-off, bounded fixed-window limiter with tenant or
+  tenant+actor scope, monotonic windows, unified HTTP 429 / gRPC
+  `RESOURCE_EXHAUSTED` errors, retry metadata, and decision-based usage/SLO
+  metrics. Ingress/proxy/host remains responsible for distributed/global quotas.
 - Tree-sitter remains an optional process-backed acceleration path; regex parsing is the guaranteed default, and CLI resolution now prefers explicit parser opts, environment configuration, and the repo-managed bootstrap link before falling back to ambient `PATH` for developer machines.
 - The semantic graph query surface (gap 7) is delivered as a bounded relation-traversal surface, not a general-purpose graph-query language (deliberate, ADR-040): the Stage 3 kernel is exposed on library + MCP (`traverse_relations`) and executable over a forward-only PostgreSQL `semantic_index_relations` projection at parity with the pure kernel. It is now exposed on all four surfaces: library, MCP (`traverse_relations`), HTTP (`POST /v1/retrieval/traverse-relations`), and gRPC (`TraverseRelations`), all reusing the one kernel/contract.
 - Phase 3 roadmap closure is now complete across Clojure, Elixir, Java, Python, and TypeScript; remaining semantic work is post-roadmap deepening rather than an open roadmap tail.
@@ -173,7 +177,7 @@ after this memory file.
    post-Stage-4 product sequence (provider catalog/discovery) and the independent
    operational Stages 5-7. Stage 5 is fully delivered under ADR-042: complete
    authoritative `.proto`, pinned tool acquisition, deterministic committed
-   generated-stub runtime cutover, and descriptor-oracle removal. Stage 6 is also delivered: the HTTP runtime exposes an online policy control-plane (`/v1/policies/registry`, `/v1/policies/promote`, `/v1/policies/retire`) that validates offline decision artifacts, decision-bound approvals, operation-scoped authz, and persistence-before-publication transitions. Stage 7 remains runtime-edge rate limiting.
+   generated-stub runtime cutover, and descriptor-oracle removal. Stage 6 is also delivered: the HTTP runtime exposes an online policy control-plane (`/v1/policies/registry`, `/v1/policies/promote`, `/v1/policies/retire`) that validates offline decision artifacts, decision-bound approvals, operation-scoped authz, and persistence-before-publication transitions. Stage 7 is delivered under ADR-044 with shared, opt-in HTTP/gRPC runtime-edge rate limiting; the next operational work is incremental hardening rather than an open Stage 5-7 gap.
 4. After the public graph surface, sequence provider catalog/discovery work before the Protobuf/OpenAPI contract-linking vertical slice and the SCIP evidence-provider spike.
 5. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
 6. On the next Antigravity touchpoint, explicitly test staged continuation after `resolve_context`: require `expand_context` and `fetch_context_detail`, verify the client reuses `selection_id` / `snapshot_id`, and check whether evidence quality improves without falling back to manual browsing.

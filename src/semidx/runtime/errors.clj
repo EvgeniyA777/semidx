@@ -70,6 +70,10 @@
                              :error_category "client"
                              :http_status 400
                              :grpc_status Status/INVALID_ARGUMENT}
+   :rate_limited {:error_code "rate_limited"
+                  :error_category "capacity"
+                  :http_status 429
+                  :grpc_status Status/RESOURCE_EXHAUSTED}
    :internal_error {:error_code "internal_error"
                     :error_category "internal"
                     :http_status 500

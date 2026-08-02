@@ -1,9 +1,9 @@
 ---
 title: "Open Semantic and Ops Gaps Closure Program"
 doc_type: "implementation_plan"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-08-02"
 ---
 
@@ -362,19 +362,26 @@ candidates).
 
 ## Stage 7 — Runtime-edge rate limiting (gap 5)
 
+**Status:** Delivered under ADR-044.
+
 **Goal:** Add optional in-runtime rate limiting on HTTP/gRPC edges as defense in
 depth, without displacing ingress/proxy responsibility.
 
-**Current shape:** rate limiting is delegated to ingress/proxy/host; runtime
-edges (`http.clj`, `grpc.clj`) have tenant/correlation context but no limiter.
+**Delivered shape:** `runtime/rate_limit.clj` owns one bounded, monotonic,
+fixed-window kernel shared by HTTP and gRPC. It is default-off, supports tenant
+or tenant+actor scopes, emits unified 429/`RESOURCE_EXHAUSTED` errors with retry
+metadata, and records allow/reject decisions for SLO rollups. Ingress remains
+authoritative for distributed quotas.
 
 **Sub-steps:**
-1. In a new ADR numbered with the next available ADR at execution time, scope
+1. ADR-044 scopes
    an optional, config-gated limiter (per-tenant / per-actor), default off,
-   emitting the unified error taxonomy on rejection.
+   emitting the unified error taxonomy on rejection. **Delivered.**
 2. Implement as edge middleware on HTTP and gRPC, fed by existing
    tenant/correlation context; surface limiter decisions in usage metrics.
+   **Delivered.**
 3. Keep it opt-in so the default in-memory/local path is unchanged.
+   **Delivered.**
 
 **Verification:** edge conformance tests with limiter on/off; usage-metrics
 rollup includes limiter rejections; error taxonomy on 429-equivalent responses.
@@ -394,3 +401,11 @@ rollup includes limiter rejections; error taxonomy on 429-equivalent responses.
 - ADRs 033-039 (as applicable) capture the durable decisions.
 - `clojure -M:test`, `./scripts/run-mvp-gates.sh`, `./scripts/run-benchmarks.sh`,
   and `./scripts/run-semantic-quality-report.sh` are green on the final state.
+
+## Completion Note
+
+All seven implementation stages are delivered. The final MVP gate and benchmark
+suite are green. The standalone semantic-quality command exits successfully but
+continues to report its pre-existing non-gating advisory baseline
+(`gate_eligible=false`, 5/6 expected-change matches); Stage 7 changes only
+runtime edges and does not alter extraction, ranking, resolution, or confidence.

@@ -113,7 +113,14 @@ temporary descriptor-built oracle was removed after parity was proven.
 
 Stage 6 is delivered under ADR-043: the HTTP edge now exposes an online policy control-plane (`/v1/policies/registry`, `/v1/policies/promote`, `/v1/policies/retire`) that reuses offline governance gates and optionally persists state back to the registry file.
 
-After Stage 4, the product sequence is provider catalog/discovery, then one
+Stage 7 is delivered under ADR-044: HTTP and gRPC share an optional, default-off
+fixed-window runtime limiter with bounded process-local state, tenant or
+tenant+actor scoping, unified 429/`RESOURCE_EXHAUSTED` rejections, retry
+metadata, and decision-based usage/SLO metrics. Ingress remains authoritative
+for distributed quotas.
+
+With operational Stages 5-7 complete, the product sequence is provider
+catalog/discovery, then one
 Protobuf/OpenAPI contract-linking vertical slice, then a SCIP evidence-provider
 spike over the same canonical relation graph. Parser-deepening research remains
 future-plan input rather than part of the active Stage 4 queue.

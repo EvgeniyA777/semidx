@@ -1,9 +1,9 @@
 ---
 title: "Open Gaps Closure Program Progress Log"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-08-02"
 ---
 
@@ -1182,3 +1182,50 @@ as part of this planning review.
   - `clojure -M:test` passed (`270 tests / 1827 assertions`);
   - `clojure -M:ccc check --root .` passed after refreshing the code-context
     summary.
+
+## Stage 7 - Runtime-edge rate limiting
+
+- Status: completed; commit is the enclosing Stage 7 commit.
+- Scope: optional, bounded per-tenant/per-actor rate limiting shared by the HTTP
+  and gRPC runtime edges, with default-off behavior, unified rejection errors,
+  and usage-metrics visibility.
+- Architectural decision: ADR-044 selects one process-local fixed-window kernel;
+  ingress remains responsible for global/distributed quotas.
+- Changed files:
+  - `adr/044-add-bounded-runtime-edge-rate-limiting.md`
+  - `src/semidx/runtime/rate_limit.clj`
+  - `src/semidx/runtime/http.clj`
+  - `src/semidx/runtime/grpc.clj`
+  - `src/semidx/runtime/errors.clj`
+  - `src/semidx/runtime/usage_metrics.clj`
+  - `test/semidx/runtime/rate_limit_test.clj`
+  - `test/semidx/runtime/http_test.clj`
+  - `test/semidx/runtime/grpc_test.clj`
+  - `test/semidx/runtime/usage_metrics_test.clj`
+  - `MEMORY.md`, `docs/runtime-api.md`, `docs/roadmap-status.md`,
+    `docs/code-context.md`, and this plan/progress pair.
+- Review findings and disposition:
+  - **Medium — rejection-rate denominator used unrelated usage events:** accepted
+    and fixed. Enabled limiters now record both allowed and rejected
+    `rate_limit_decision` events; SLO rollups divide rejections by limiter
+    decisions and expose both totals.
+  - **Low — wall-clock movement could distort a window:** accepted and fixed by
+    using a monotonic clock while retaining an injectable clock for tests.
+  - **Low — tenant-vs-actor scope was implicit:** accepted and fixed with a
+    validated `tenant` / `tenant_actor` configuration shared by both launchers.
+  - No remaining high or medium SRP/DIP/correctness finding. The transport edges
+    own extraction/error rendering, while the shared module owns rate policy and
+    bounded state.
+- Verification:
+  - focused limiter/HTTP/gRPC/usage suite passed (`45 tests / 440 assertions`);
+  - `./scripts/run-mvp-gates.sh` passed: 68 JSON contracts, full suite
+    (`278 tests / 1879 assertions`), benchmarks (`21/21`), four query smokes,
+    and `mvp_gates=ok`;
+  - `clojure -M:ccc check --root .` passed after refresh;
+  - `git diff --check` passed.
+- Skipped / limitations: the standalone semantic-quality command completed with
+  its existing advisory result (`gate_eligible=false`, 5/6 expected-change
+  matches, identity/move recovery 1.0). Stage 7 does not touch semantic
+  extraction, ranking, resolution, or confidence. No external reviewer was
+  available; the evidence-first SOLID review was run locally on the full diff.
+- Known blockers: none.

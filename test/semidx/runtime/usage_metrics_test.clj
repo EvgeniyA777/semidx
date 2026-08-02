@@ -379,6 +379,26 @@
       (is (pos? (get-in retrieval-only [:retrieval_latency_ms :count])))
       (is (pos? (get-in report [:stage_token_footprint "detail" :returned_tokens :count]))))))
 
+(deftest slo-report-includes-rate-limit-rejections-test
+  (let [sink (usage/in-memory-usage-metrics)]
+    (usage/safe-record-event! sink {:surface "http"
+                                    :operation "rate_limit_decision"
+                                    :status "success"
+                                    :result_status "allowed"})
+    (doseq [surface ["http" "grpc"]]
+      (usage/safe-record-event! sink {:surface surface
+                                      :operation "rate_limit_decision"
+                                      :status "error"
+                                      :result_status "rejected"}))
+    (let [report (usage/slo-report sink)
+          http-report (usage/slo-report sink {:surface "http"})]
+      (is (= 3 (get-in report [:totals :rate_limit_decisions])))
+      (is (= 2 (get-in report [:totals :rate_limit_rejections])))
+      (is (= 2 (get-in http-report [:totals :rate_limit_decisions])))
+      (is (= 1 (get-in http-report [:totals :rate_limit_rejections])))
+      (is (= (/ 2.0 3.0) (:rate_limit_rejection_rate report)))
+      (is (= 0.5 (:rate_limit_rejection_rate http-report))))))
+
 (deftest harvest-replay-dataset-builds-query-expected-shape-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-usage-metrics-harvest" (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (create-sample-repo! tmp-root)

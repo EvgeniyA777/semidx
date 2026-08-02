@@ -11,8 +11,10 @@
             [semidx.runtime.capabilities :as capabilities]
             [semidx.runtime.errors :as errors]
             [semidx.runtime.project-context :as project-context]
+            [semidx.runtime.rate-limit :as rate-limit]
             [semidx.runtime.retrieval-policy :as rp]
-            [semidx.runtime.storage :as storage])
+            [semidx.runtime.storage :as storage]
+            [semidx.runtime.usage-metrics :as usage])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.net InetSocketAddress]))
 
@@ -31,6 +33,10 @@
           "--authz-policy-file" (recur (assoc m :authz_policy_file (or v "")) rest)
           "--policy-registry-file" (recur (assoc m :policy_registry_file (or v "")) rest)
           "--language-policy-file" (recur (assoc m :language_policy_file (or v "")) rest)
+          "--rate-limit-requests" (recur (assoc m :rate_limit_requests v) rest)
+          "--rate-limit-window-ms" (recur (assoc m :rate_limit_window_ms v) rest)
+          "--rate-limit-max-subjects" (recur (assoc m :rate_limit_max_subjects v) rest)
+          "--rate-limit-subject-scope" (recur (assoc m :rate_limit_subject_scope v) rest)
           "--require-tenant" (recur (assoc m :require_tenant true) (cons v rest))
           (recur m rest))))))
 
@@ -149,12 +155,52 @@
       :else
       {:ok? true :tenant_id tenant-id})))
 
+(defn- request-operation [^HttpExchange exchange]
+  (case (some-> exchange .getRequestURI .getPath)
+    "/v1/index/create" :create_index
+    "/v1/retrieval/resolve-context" :resolve_context
+    "/v1/retrieval/expand-context" :expand_context
+    "/v1/retrieval/fetch-context-detail" :fetch_context_detail
+    "/v1/retrieval/literal-file-slice" :literal_file_slice
+    "/v1/retrieval/snapshot-diff" :snapshot_diff
+    "/v1/retrieval/traverse-relations" :traverse_relations
+    "/v1/policies/registry" :policy_read
+    "/v1/policies/promote" :policy_promote
+    "/v1/policies/retire" :policy_retire
+    :unknown))
+
+(defn- enforce-rate-limit! [^HttpExchange exchange auth-config tenant-id]
+  (let [correlation (remember-correlation!
+                     exchange
+                     (assoc (request-correlation exchange) :tenant_id tenant-id))
+        operation (request-operation exchange)
+        decision (rate-limit/check! (:rate_limiter auth-config) correlation)]
+    (when (:enabled? decision)
+      (usage/safe-record-event!
+       (:usage_metrics auth-config)
+       (rate-limit/decision-event "http" operation correlation decision)))
+    (if (:allowed? decision)
+      true
+      (let [error (rate-limit/rejection-exception decision)
+            {:keys [status body]} (errors/http-error-body error)]
+        (write-json! exchange status body (error-response-headers exchange error))
+        false))))
+
 (defn- enforce-authorized! [^HttpExchange exchange auth-config]
-  (let [{:keys [ok? error] :as auth} (authorize-request exchange auth-config)]
-    (if ok?
+  (let [{:keys [ok? error tenant_id] :as auth} (authorize-request exchange auth-config)]
+    (cond
+      (not ok?)
+      (do
+        (write-json! exchange
+                     (:status error)
+                     (:body error)
+                     (response-correlation-header-map exchange))
+        nil)
+
+      (enforce-rate-limit! exchange auth-config tenant_id)
       auth
-      (do (write-json! exchange (:status error) (:body error) (response-correlation-header-map exchange))
-          nil))))
+
+      :else nil)))
 
 (defn- authz-denial->http [{:keys [code message]}]
   (errors/http-error-body {:type code
@@ -655,8 +701,9 @@
                                     (response-correlation-header-map
                                      exchange)))))))))))
 
-(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry policy_registry_file usage_metrics selection_cache
-                            project_registry language_policy storage]}]
+(defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry
+                            policy_registry_file usage_metrics selection_cache project_registry
+                            language_policy storage rate_limit rate_limiter]}]
   (let [server (HttpServer/create (InetSocketAddress. ^String host (int port)) 0)
         selection-cache (or selection_cache (atom {:max_entries 128}))
         project-registry (or project_registry (project-context/project-registry))
@@ -670,7 +717,8 @@
                      :selection_cache selection-cache
                      :project_registry project-registry
                      :storage storage-adapter
-                     :language_policy language_policy}]
+                     :language_policy language_policy
+                     :rate_limiter (or rate_limiter (rate-limit/limiter rate_limit))}]
     (.createContext server "/health" (with-handler handle-health))
     (.createContext server "/capabilities" (with-handler handle-capabilities))
     (.createContext server "/v1/index/create" (with-handler (partial handle-create-index auth-config)))
@@ -688,12 +736,22 @@
     server))
 
 (defn -main [& args]
-  (let [{:keys [host port api_key require_tenant authz_policy_file policy_registry_file language_policy_file]} (parse-args args)
+  (let [{:keys [host port api_key require_tenant authz_policy_file policy_registry_file
+                language_policy_file rate_limit_requests rate_limit_window_ms
+                rate_limit_max_subjects rate_limit_subject_scope]} (parse-args args)
         api-key* (or (not-empty api_key) (System/getenv "SEMIDX_RUNTIME_API_KEY"))
         require-tenant* (or require_tenant (parse-bool (System/getenv "SEMIDX_RUNTIME_REQUIRE_TENANT")))
         authz-policy-file* (or (not-empty authz_policy_file) (System/getenv "SEMIDX_RUNTIME_AUTHZ_POLICY_FILE"))
         policy-registry-file* (or (not-empty policy_registry_file) (System/getenv "SEMIDX_RUNTIME_POLICY_REGISTRY_FILE"))
         language-policy-file* (or (not-empty language_policy_file) (System/getenv "SEMIDX_RUNTIME_LANGUAGE_POLICY_FILE"))
+        rate-limit* {:requests_per_window (or rate_limit_requests
+                                              (System/getenv "SEMIDX_RUNTIME_RATE_LIMIT_REQUESTS"))
+                     :window_ms (or rate_limit_window_ms
+                                    (System/getenv "SEMIDX_RUNTIME_RATE_LIMIT_WINDOW_MS"))
+                     :max_subjects (or rate_limit_max_subjects
+                                       (System/getenv "SEMIDX_RUNTIME_RATE_LIMIT_MAX_SUBJECTS"))
+                     :subject_scope (or rate_limit_subject_scope
+                                        (System/getenv "SEMIDX_RUNTIME_RATE_LIMIT_SUBJECT_SCOPE"))}
         usage-metrics* (when-let [jdbc-url (System/getenv "SEMIDX_USAGE_METRICS_JDBC_URL")]
                          (sci/postgres-usage-metrics {:jdbc-url jdbc-url
                                                       :user (System/getenv "SEMIDX_USAGE_METRICS_DB_USER")
@@ -711,7 +769,8 @@
                                :policy_registry policy-registry*
                                :policy_registry_file policy-registry-file*
                                :language_policy language-policy*
-                               :usage_metrics usage-metrics*})]
+                               :usage_metrics usage-metrics*
+                               :rate_limit rate-limit*})]
     (println (str "runtime_http_server_started host=" host " port=" port))
     (flush)
     @(promise)))
