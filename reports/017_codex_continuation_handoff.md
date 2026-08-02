@@ -11,7 +11,7 @@ updated: "2026-08-02"
 
 Repo: `/Users/ae/workspaces/semidx`
 Branch: `dev`
-Latest pushed commit at handoff update: `f06b956 feat: add relation-backed impact projection`
+Latest pushed commit at handoff update: `646ebb9 feat: expose relation traversal on HTTP and gRPC edges`
 Branch note: active work continues on `dev`; `main` is intentionally left one
 commit behind (`2fcb5ec`) and is fast-forwarded to `dev` manually by the
 maintainer. Continue on `dev`.
@@ -41,6 +41,7 @@ Relevant ADRs:
 - `adr/037-scope-interprocedural-dataflow-v1.md`.
 - `adr/038-make-typed-relations-the-canonical-semantic-graph.md`.
 - `adr/039-separate-relation-identity-from-resolution-and-evidence.md`.
+- `adr/040-expose-bounded-relation-traversal-as-a-public-query-surface.md`.
 
 ## Completed
 
@@ -96,63 +97,79 @@ optional `relation_support` object (`{downstream, upstream, reasons}`) in both
 the JSON schema and the malli mirror. No public graph-query API was added;
 confidence ceilings are unchanged (documented non-bump). Stage 3 is code-complete.
 
+Stage 4 (`plans/013`, gap 7, `ADR-040`) is now fully code-complete across all
+four runtime surfaces:
+
+- 4.1: `ADR-040` plus the `relation-traversal-query` / `relation-traversal-result`
+  JSON Schema + `malli` mirror and validated examples.
+- 4.2: the batched frontier provider seam
+  `semidx.runtime.relations/traverse-relations-with` (byte-identical to the pure
+  in-memory `traverse-relations`), plus the public library
+  `semidx.core/relation-traversal` and MCP `traverse_relations` tool. The result
+  carries a `selection_id` (a stored selection over the discovered units) so
+  `expand_context` / `fetch_context_detail` deliver code.
+- 4.3: the forward-only PostgreSQL `semantic_index_relations` projection
+  (`init-storage!` migration + `save-index-tx!` writes; no historical backfill)
+  and `storage/pg-relation-neighbor-provider`, proven at parity with the pure
+  kernel (with-redefs + a `SEMIDX_TEST_POSTGRES_URL`-gated real-PostgreSQL test).
+- 4.4: HTTP (`POST /v1/retrieval/traverse-relations`) and gRPC
+  (`TraverseRelations`) exposure of the same contract and kernel.
+
+One graph walk owns the semantics (the Stage 3 kernel); storage only optimizes
+neighbor fetch. `usage-operation` gained `traverse_relations`.
+
 ## Next Stage
 
-Implement `plans/013` Stage 4: the semantic graph query surface (gap 7). This
-productizes the Stage 3 traversal semantics as a bounded public graph-query
-surface and adds a PostgreSQL physical projection, without moving graph policy
-into storage. Before starting, read `plans/013` Stage 4 in full.
+Stage 4 is done. Pick the next frontier from `plans/013` and
+`docs/roadmap-status.md`:
 
-- Specify the public query surface in a new ADR (next available ADR number at
-  execution time). Reuse the Stage 3 `traverse-relations` semantics and bounds
-  instead of defining a second graph walk.
-- Add JSON Schema under `contracts/schemas/` plus a `malli` mirror in
-  `src/semidx/contracts/` for the new query request/response.
-- Add a `semantic_index_relations` PostgreSQL projection scoped by repository and
-  snapshot (source, target, relation-type, evidence indexes) with an explicit
-  migration/backfill policy.
-- Implement a PostgreSQL execution adapter for the canonical traversal contract
-  and prove parity with the pure in-memory kernel. Storage may optimize
-  execution but must not own traversal semantics.
-- Expose it on the public surfaces only where it fits the staged-retrieval
-  contract; keep MCP/library/HTTP/gRPC aligned.
+- The post-Stage-4 product sequence (its own plan): provider catalog / arbitration
+  / discovery (`plans/007` Stage 2-3), additive endpoint/entity references, then
+  one Protobuf/OpenAPI contract-linking vertical slice, then a SCIP
+  evidence-provider spike over the same relation contract.
+- The independent operational stages, order-independent among themselves:
+  - Stage 5 — gRPC generated stubs (replace runtime descriptor-built messages
+    with generated Java/Kotlin stubs from
+    `proto/semidx/runtime/grpc/v1/runtime.proto`). Note: the `.proto` is
+    currently a partial artifact (no `service` block; missing `LiteralFileSlice`
+    / `SnapshotDiff` / `TraverseRelations` service wiring) — reconciling it is
+    part of this stage.
+  - Stage 6 — online policy control-plane API.
+  - Stage 7 — runtime-edge rate limiting.
 
-Constraints:
+Optional residual for Stage 4: an explicit reprojection command for snapshots
+saved before the `semantic_index_relations` projection existed (older snapshots
+have no projection rows until re-saved).
 
-- Storage optimizes execution but must not own traversal policy/semantics; the
-  pure kernel stays the source of truth.
-- Do not migrate or replace existing `calls` / `imports`.
-- Keep ambiguous relation-backed flows conservative (`:resolved_only`).
-- Before running PostgreSQL parity tests: detect a running instance -> stop it
-  cleanly -> start fresh with the test config -> only then run (`SEMIDX_TEST_POSTGRES_URL`).
-
-Verification focus for Stage 4 (contract + storage surfaces):
-`./scripts/validate-contracts.sh`, `clojure -M:test`, in-memory vs PostgreSQL
-storage parity tests, `./scripts/run-mvp-gates.sh`, `clojure -M:ccc check --root .`.
-Add mirrored `*-test` coverage for the new contract and the storage adapter.
+Before PostgreSQL parity tests: detect a running instance -> stop it cleanly ->
+start fresh with the test config -> only then run (`SEMIDX_TEST_POSTGRES_URL`).
+Do not touch unrelated local PostgreSQL instances/containers; spin a dedicated
+ephemeral cluster on a free port.
 
 ## Last Known Verification
 
-For commit `f06b956` (Stage 3.7):
+For commit `646ebb9` (Stage 4.4):
 
-- `./scripts/validate-contracts.sh` passed (`checked_json_files=61`, `contracts_validation=ok`).
-- `clojure -M:test` passed (`256 tests / 1712 assertions`).
-- `./scripts/run-benchmarks.sh` passed (`21/21` fixtures).
-- `./scripts/run-semantic-quality-report.sh` exited `0` with advisory state unchanged
-  (`expected_change_match_rate=0.8333333333333334`, `identity_stability_rate=1.0`,
-  `move_rename_recovery_rate=1.0`, `implementation_vs_meaning_accuracy=0.6666666666666666`,
-  `unmatched_rate=0.0`).
+- `clojure -M:test` passed (`262 tests / 1766 assertions`, 0 failures).
+- `./scripts/validate-contracts.sh` passed (`checked_json_files=65`, `contracts_validation=ok`).
 - `./scripts/run-mvp-gates.sh` passed with `mvp_gates=ok`.
 - `clojure -M:ccc check --root .` passed.
+- Real-PostgreSQL relation-traversal parity verified against an ephemeral
+  PostgreSQL 17 cluster via `SEMIDX_TEST_POSTGRES_URL` (`storage-test`
+  `9 tests / 50 assertions`).
+- Benchmarks / semantic-quality were last confirmed unchanged at the Stage 4.2a
+  checkpoint (`21/21`; advisory metrics at baseline); Stages 4.2b-4.4 are
+  additive surface/storage work with no extraction/ranking/resolution impact.
 
 ## Suggested First Prompt
 
 Read `reports/017_codex_continuation_handoff.md`, then continue
-`/Users/ae/workspaces/semidx` from the current `dev` branch. Follow `RULES.md`,
-use semidx MCP-first, and implement `plans/013` Stage 4: the bounded public
-semantic graph-query surface plus a PostgreSQL `semantic_index_relations`
-projection. Reuse the Stage 3 `semidx.runtime.relations/traverse-relations`
-contract and bounds instead of writing a second graph walk, keep traversal
-semantics in the pure kernel (storage only optimizes execution), prove
-in-memory vs PostgreSQL parity, add the JSON + malli contract mirror, and record
-the decision in a new ADR.
+`/Users/ae/workspaces/semidx` from the current `dev` branch. Follow `RULES.md`
+and use semidx MCP-first. Stage 4 (relation-traversal surface, gap 7) is fully
+delivered on library/MCP/HTTP/gRPC plus the PostgreSQL projection. Choose the
+next frontier: the post-Stage-4 product sequence (provider catalog/discovery,
+then a contract-linking vertical slice) or an operational stage (`plans/013`
+Stage 5 gRPC generated stubs, Stage 6 policy control-plane, Stage 7 runtime-edge
+rate limiting). Keep the one-kernel/one-contract discipline from `ADR-040` and
+run the full delivery loop (implement -> verify -> commit -> review -> docs ->
+push) per stage.
