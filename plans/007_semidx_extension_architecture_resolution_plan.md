@@ -4,7 +4,7 @@ doc_type: "architecture_plan"
 lifecycle: "active"
 status: "draft"
 agent_action: "reference_for_context"
-updated: "2026-07-13"
+updated: "2026-08-01"
 ---
 
 # Semidx Extension Architecture Resolution Plan
@@ -58,7 +58,9 @@ This plan does not cover:
 
 - Existing public MCP, HTTP, gRPC, and library contracts remain backward
   compatible.
-- Existing Semantic IR remains the only normalized semantic model.
+- Semantic IR remains the normalized extraction model; typed relation facts and
+  their snapshot indexes are the canonical semantic graph for new graph
+  semantics under ADR-038.
 - Existing `IndexStorage` implementations remain usable without a breaking
   protocol migration.
 - Existing `update-index` remains the first incremental update primitive.
@@ -80,7 +82,7 @@ The architecture must keep the following expected changes local:
 | New file format or parser | Provider registry and file indexer |
 | Provider-selection precedence | Provider selection policy |
 | New semantic operation | Operation capability profile |
-| New relation kind | Semantic IR relation model |
+| New relation kind | Typed relation model and relation indexes |
 | New retrieval behavior | Relation projections and retrieval |
 | New transport field | MCP/HTTP/gRPC presentation adapters |
 
@@ -377,10 +379,11 @@ Do not introduce:
 A protocol may be introduced later for an actual external-provider boundary,
 but the in-process registry does not need one merely to dispatch functions.
 
-### Decision 11. Typed Relations Are Additive And Shadowed
+### Decision 11. Typed Relations Are Canonical For New Graph Semantics And Shadow Legacy Migration
 
-Typed relations extend the existing Semantic IR. They do not immediately
-replace `calls`, `imports`, callers indexes, or callees indexes.
+Typed relations are the canonical graph boundary for new graph semantics. They
+do not immediately replace legacy `calls`, `imports`, callers indexes, or
+callees indexes; those migrate through the shadow and parity gates below.
 
 Migration stages:
 

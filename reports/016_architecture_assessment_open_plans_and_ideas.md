@@ -4,7 +4,7 @@ doc_type: "architecture_assessment"
 lifecycle: "active"
 status: "current"
 agent_action: "reference_for_context"
-updated: "2026-07-19"
+updated: "2026-08-01"
 ---
 
 # Architecture Assessment: Open Plans And Idea Tracks
@@ -31,11 +31,13 @@ Seven-stage program; current state:
   (commits `bc9117f`, `7d3f4ae`, `06201dd`, `12c2605`, `0b4d630`). Remaining:
   the JavaScript lane and collapsing `adapters.clj` into a thin dispatch
   facade over `language_registry` + lane modules.
-- **Stages 2-7: not started.**
+- **Stage 2 is delivered; Stage 3 is partially delivered.**
   2. Remove the tree-sitter external-CLI runtime dependency (ADR-034 decision
-     pending: embed, vendor, or formalize regex fallback as guaranteed default).
-  3. Interprocedural / dataflow-sensitive resolution v1 (the major semantic
-     tranche; see the architectural fork in section 4).
+     has been implemented as the repo-managed optional-toolchain strategy in
+     ADR-036).
+  3. Interprocedural / dataflow-sensitive resolution v1 has its relation
+     substrate plus Clojure/Python producers; bounded retrieval and impact
+     projections remain the next semantic step.
   4. Semantic graph query surface (bounded multi-hop traversal over
      `storage.clj`, contract-first).
   5. gRPC generated stubs (replace runtime descriptor-built messages).
@@ -49,12 +51,11 @@ Seven-stage program; current state:
   policy, index lifecycle coordinator) — implemented via `plans/008` as
   `workspace_state.clj`, `freshness.clj`, `index_lifecycle.clj`; lifecycle
   fields are live in `create_index` responses.
-- **Not started:** Stages 2-8. There is no `providers.clj`,
-  `provider_selection.clj`, or `relations.clj` in `src/semidx/runtime/`.
-  Open in order: minimal provider catalog + deterministic selection policy;
-  discovery separation from language activation; typed relations in shadow
-  mode; Markdown vertical slice; YAML vertical slice; incremental relation
-  resolution; provider expansion (Kotlin, LSP, JetBrains).
+- **Partially delivered:** typed relations now exist under
+  `runtime/relations.clj` as the canonical graph for new semantics (ADR-038).
+  The provider catalog, deterministic provider selection, discovery separation,
+  Markdown/YAML slices, incremental relation resolution, and provider expansion
+  remain open.
 - **Binding constraint already decided:** Markdown/YAML indexing must arrive
   through the provider catalog (Stage 2), never as hardcoded dispatch
   exceptions. Any "index docs now" shortcut violates this architecture plan.
@@ -121,20 +122,14 @@ No implementation should start on this track without that validation slice.
 - **`ideas/009` progress.txt vs semidx** and **`ideas/010` graph tools
   research** — context/source-intake for `ideas/011`; no standalone action.
 
-## 4. Architectural Fork To Resolve Before The Semantic Stage
+## 4. Resolved Architectural Fork
 
-`plans/013` Stage 3 (interprocedural dataflow extending the existing Semantic
-IR) and `plans/007` Stage 4 (typed relations added additively with shadow-mode
-parity, Decision 11) describe **overlapping edge models with different
-migration disciplines**. Both documents are currently `active`; per repository
-rules, conflicting current documents require an explicit decision, not a silent
-choice by the implementing agent.
-
-Decision needed (own ADR before 013 Stage 3 starts): do interprocedural /
-dataflow edges land directly in the existing IR (013's path), or through the
-typed-relation model with dual-write and golden-parity gates (007's path)?
-The 007 path is stricter and protects existing graph consumers; the 013 path
-is lighter but risks a later forced migration.
+ADR-034 and ADR-037 resolved the original fork by landing new dataflow facts as
+typed relations while preserving existing call/import consumers. ADR-038 now
+records the durable architecture: Semantic IR is an extraction intermediate and
+typed relation facts plus snapshot indexes are the canonical graph for all new
+graph semantics. Legacy calls/imports remain compatibility projections until a
+separate parity-gated migration.
 
 ## 5. Recommended Order
 
@@ -142,7 +137,8 @@ is lighter but risks a later forced migration.
    (`74e3d4e`).
 2. Finish 013 Stage 1: JavaScript lane extraction + collapse `adapters.clj`
    into a thin facade; run the full parity gates from the plan.
-3. Resolve the section-4 fork in a dedicated ADR before any 013 Stage 3 work.
+3. Complete bounded retrieval/impact projections over the existing relation
+   indexes, preserving conservative handling of ambiguity.
 4. First new plan from the idea backlog: `ideas/012` state invariant context —
    it fits the existing staged-retrieval contract and does not wait for the
    provider catalog.

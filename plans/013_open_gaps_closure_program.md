@@ -4,7 +4,7 @@ doc_type: "implementation_plan"
 lifecycle: "active"
 status: "planned"
 agent_action: "reference_for_context"
-updated: "2026-07-20"
+updated: "2026-08-01"
 ---
 
 # Implementation Plan: Open Semantic and Ops Gaps Closure Program
@@ -172,25 +172,23 @@ unavailable; parser-mode parity (regex vs tree-sitter) must hold for TS/Java/Clj
 **Goal:** First layer of interprocedural, dataflow-sensitive ownership beyond the
 current single-hop, import/owner-aware resolution — built on the clean lane base.
 
-**Current shape:** `runtime/semantic_ir.clj` is the IR between extraction and
-resolver narrowing; per-lane semantic-cores do import/owner-aware single-hop
-disambiguation; `related_tests` already does one helper-namespace hop.
+**Current shape:** `runtime/semantic_ir.clj` remains the extraction IR, while
+`runtime/relations.clj` owns the typed-relation substrate and snapshot indexes.
+The Clojure and Python lanes emit the v1 `dataflow/*` facts under ADR-037;
+legacy callers/callees remain unchanged. ADR-038 makes typed relations the
+canonical graph for all new graph semantics.
 
 **Sub-steps:**
-1. Follow the relation-first fork accepted in ADR-034 and the Stage 3 v1 scope
-   accepted in ADR-037: `dataflow/local-binding-call-result`,
-   `dataflow/returns-call-result`, and `dataflow/passes-argument` relations,
-   with Clojure first and Python second.
-2. Add the typed-relation schema/index boundary and attach relation indexes to
-   snapshots; do not add new ad-hoc flow keys to `semantic_ir.clj`.
-3. Emit Clojure `dataflow/*` facts from the Clojure lane into the typed relation
-   substrate and resolve `target_key` values to `target_unit_ids` during index
-   construction; do not change existing caller/callee retrieval behavior.
-4. Emit Python `dataflow/*` facts on the same relation contract.
-5. Add bounded retrieval/impact projections that consume relation indexes,
+1. Preserve the delivered relation-first scope from ADR-034 and ADR-037:
+   `dataflow/local-binding-call-result`, `dataflow/returns-call-result`, and
+   `dataflow/passes-argument` facts are emitted by Clojure and Python through
+   snapshot-preserved typed relation indexes.
+2. Treat ADR-038 as the canonical graph decision: do not add new graph fields
+   to `semantic_ir.clj`, and do not create provider-specific graph stores.
+3. Add bounded retrieval/impact projections that consume relation indexes,
    keeping ambiguous flows conservative (no over-linking) and avoiding a public
    graph-query API in Stage 3.
-6. Recalibrate confidence ceilings only if evidence supports it; otherwise keep
+4. Recalibrate confidence ceilings only if evidence supports it; otherwise keep
    ceilings unchanged and document the non-bump (as done previously).
 
 **Verification:** new mirrored `*-test` namespaces per lane; new
@@ -199,7 +197,7 @@ replay/benchmark ambiguity fixtures under `fixtures/`;
 must show no regression and a measurable gain on the new interprocedural cases.
 Consider protected replay-case promotion for the hardest new cases.
 
-**Docs:** ADR-034 plus ADR-037; `MEMORY.md` Current State +
+**Docs:** ADR-034, ADR-037, and ADR-038; `MEMORY.md` Current State +
 Known Gaps (compiler-grade line); `docs/roadmap-status.md`; refresh CCC.
 
 **Risk:** highest semantic risk. Mitigation: land per-lane behind conservative
