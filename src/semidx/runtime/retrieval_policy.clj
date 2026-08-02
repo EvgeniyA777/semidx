@@ -644,14 +644,32 @@
          :registry promoted}))))
 
 (defn retire-policy
-  "Return the pure registry transition for retiring a policy."
+  "Return the pure registry transition for retiring a policy. The online retire
+   surface only decommissions non-active candidates: the active baseline is
+   retired exclusively by `promote-reviewed-policy`, which atomically swaps in a
+   replacement, so a standalone retire can never leave the registry without an
+   active policy. Retiring an already-retired entry is rejected as an idempotent
+   no-op."
   [{:keys [registry policy_id version]}]
   (let [registry* (normalize-registry registry)
         entry (resolve-registry-entry registry* policy_id version)]
-    (if-not entry
+    (cond
+      (not entry)
       {:ok? false
        :error-type :policy_not_found
        :message "policy not found in registry"}
+
+      (= "active" (:state entry))
+      {:ok? false
+       :error-type :policy_not_eligible
+       :message "active policy is retired only by promoting a replacement"}
+
+      (= "retired" (:state entry))
+      {:ok? false
+       :error-type :policy_not_eligible
+       :message "policy is already retired"}
+
+      :else
       {:ok? true
        :registry (set-entry-state registry*
                                   policy_id

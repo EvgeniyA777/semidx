@@ -993,7 +993,7 @@
                  (str base-url "/v1/policies/retire")
                  (request-payload
                   "policy-retire-001"
-                  {:policy_id "heuristic_v2"
+                  {:policy_id "heuristic_v4"
                    :version "2026-08-01"})
                  op-headers)
                 persisted (rp/load-registry tmp-registry-file)]
@@ -1003,8 +1003,43 @@
                    (:state
                     (rp/resolve-registry-entry
                      persisted
+                     "heuristic_v4"
+                     "2026-08-01"))))))
+
+        (testing "the active baseline cannot be retired via the control plane"
+          (let [response
+                (post-json
+                 client
+                 (str base-url "/v1/policies/retire")
+                 (request-payload
+                  "policy-retire-active-001"
+                  {:policy_id "heuristic_v2"
+                   :version "2026-08-01"})
+                 op-headers)
+                persisted (rp/load-registry tmp-registry-file)]
+            (is (= 409 (:status response)))
+            (is (= "policy_not_eligible"
+                   (get-in response [:json :error_code])))
+            (is (= "active"
+                   (:state
+                    (rp/resolve-registry-entry
+                     persisted
                      "heuristic_v2"
                      "2026-08-01"))))))
+
+        (testing "retiring an already-retired policy is refused idempotently"
+          (let [response
+                (post-json
+                 client
+                 (str base-url "/v1/policies/retire")
+                 (request-payload
+                  "policy-retire-retired-001"
+                  {:policy_id "heuristic_v4"
+                   :version "2026-08-01"})
+                 op-headers)]
+            (is (= 409 (:status response)))
+            (is (= "policy_not_eligible"
+                   (get-in response [:json :error_code])))))
 
         (testing "not-found and other errors use the unified taxonomy"
           (let [response
@@ -1050,7 +1085,12 @@
                    :policies
                    [(rp/registry-entry
                      (rp/default-retrieval-policy)
-                     {:state "active"})]})
+                     {:state "active"})
+                    (rp/registry-entry
+                     (assoc (rp/default-retrieval-policy)
+                            :policy_id "heuristic_shadow"
+                            :version "2026-09-01")
+                     {:state "shadow"})]})
         registry-atom (atom registry)
         result (#'runtime-http/run-policy-transition!
                 {:policy_registry_atom registry-atom
@@ -1059,10 +1099,33 @@
                                "missing-parent"
                                "registry.edn"))}
                 rp/retire-policy
-                {:policy_id "heuristic_v1"
-                 :version "2026-03-10"})]
+                {:policy_id "heuristic_shadow"
+                 :version "2026-09-01"})]
     (is (= :registry_persistence_failed (:error-type result)))
     (is (= registry @registry-atom))
+    (is (= "shadow"
+           (:state
+            (rp/resolve-registry-entry @registry-atom
+                                       "heuristic_shadow"
+                                       "2026-09-01"))))
     (is (= "active"
            (:state
             (rp/active-registry-entry @registry-atom))))))
+
+(deftest policy-transition-surfaces-transition-errors-test
+  (let [registry (rp/normalize-registry
+                  {:schema_version "1.0"
+                   :policies
+                   [(rp/registry-entry
+                     (rp/default-retrieval-policy)
+                     {:state "active"})]})
+        registry-atom (atom registry)]
+    (testing "an exception escaping the pure transition is not relabelled as persistence failure"
+      (is (thrown-with-msg?
+           Exception #"boom"
+           (#'runtime-http/run-policy-transition!
+            {:policy_registry_atom registry-atom
+             :policy_registry_file nil}
+            (fn [_] (throw (ex-info "boom" {:type :invalid_request})))
+            {})))
+      (is (= registry @registry-atom)))))

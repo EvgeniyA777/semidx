@@ -586,18 +586,26 @@
   [auth-config transition options]
   (let [registry-atom (:policy_registry_atom auth-config)]
     (locking registry-atom
-      (try
-        (let [result (transition (assoc options :registry @registry-atom))]
-          (when (:ok? result)
+      (let [result (transition (assoc options :registry @registry-atom))]
+        (if-not (:ok? result)
+          ;; Domain-level rejections carry their own :error-type; pass them
+          ;; through untouched. Exceptions escaping the pure transition are
+          ;; genuine bugs and must surface as internal errors via with-handler,
+          ;; not be relabelled as persistence failures.
+          result
+          (try
             (when-let [registry-file (:policy_registry_file auth-config)]
               (rp/write-registry! registry-file (:registry result)))
-            (reset! registry-atom (:registry result)))
-          result)
-        (catch Exception exception
-          {:ok? false
-           :error-type :registry_persistence_failed
-           :message (or (.getMessage exception)
-                        "registry persistence failed")})))))
+            (reset! registry-atom (:registry result))
+            result
+            ;; Only the persistence boundary is caught here: on write failure
+            ;; the atom is left untouched (write precedes reset!), so the
+            ;; in-memory registry never diverges from the unwritten file.
+            (catch Exception exception
+              {:ok? false
+               :error-type :registry_persistence_failed
+               :message (or (.getMessage exception)
+                            "registry persistence failed")})))))))
 
 (defn- handle-policy-registry [auth-config ^HttpExchange exchange]
   (if-not (= "GET" (request-method exchange))
