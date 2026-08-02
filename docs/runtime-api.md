@@ -1416,6 +1416,6 @@ The semantic-quality report lane is advisory in v1:
 Set env var and run tests:
 
 ```bash
-SCI_TEST_POSTGRES_URL='jdbc:postgresql://localhost:5432/semantic_index_test?user=semantic_user&password=semantic_pass' \
+SEMIDX_TEST_POSTGRES_URL='jdbc:postgresql://localhost:5432/semantic_index_test?user=semantic_user&password=semantic_pass' \
 clojure -M:test
 ```

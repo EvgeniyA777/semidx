@@ -272,7 +272,7 @@ Stage 4 public and execution contract; its implementation is in progress.
    is a follow-up and must reuse the same contract and traversal kernel.
 
 **Verification:** `./scripts/validate-contracts.sh`; storage parity tests
-(in-memory vs PostgreSQL, `SCI_TEST_POSTGRES_URL`) — detect/stop/fresh-start the
+(in-memory vs PostgreSQL, `SEMIDX_TEST_POSTGRES_URL`) — detect/stop/fresh-start the
 PostgreSQL instance before running; `clojure -M:test`.
 
 **Docs:** the new Stage 4 ADR; `contracts/` updates; `docs/runtime-api.md` +

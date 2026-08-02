@@ -124,7 +124,7 @@ Constraints:
 - Do not migrate or replace existing `calls` / `imports`.
 - Keep ambiguous relation-backed flows conservative (`:resolved_only`).
 - Before running PostgreSQL parity tests: detect a running instance -> stop it
-  cleanly -> start fresh with the test config -> only then run (`SCI_TEST_POSTGRES_URL`).
+  cleanly -> start fresh with the test config -> only then run (`SEMIDX_TEST_POSTGRES_URL`).
 
 Verification focus for Stage 4 (contract + storage surfaces):
 `./scripts/validate-contracts.sh`, `clojure -M:test`, in-memory vs PostgreSQL

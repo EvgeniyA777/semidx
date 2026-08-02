@@ -877,9 +877,13 @@ as part of this planning review.
   - Benchmarks / semantic-quality were intentionally not re-run: Stage 4.3 is a
     storage/infra change with no extraction, ranking, resolution, or confidence
     impact (per the plan's delivery-loop scoping).
-- Env note: the real-PostgreSQL parity env var is `SEMIDX_TEST_POSTGRES_URL`
-  (the handoff/RULES wording `SCI_TEST_POSTGRES_URL` is stale; the code uses
-  `SEMIDX_TEST_POSTGRES_URL`, matching `postgres-storage-roundtrip-test`).
+- Env note: the real-PostgreSQL parity env var is `SEMIDX_TEST_POSTGRES_URL`,
+  matching `postgres-storage-roundtrip-test`. The stale `SCI_TEST_POSTGRES_URL`
+  wording in the handoff, `plans/013`, `docs/runtime-api.md`, and `MEMORY.md` was
+  corrected to `SEMIDX_TEST_POSTGRES_URL` in this stage. This also fixed a real
+  defect: `.github/workflows/mvp-runtime.yml` exported `SCI_TEST_POSTGRES_URL`,
+  which the code never reads, so the CI PostgreSQL integration smoke had been
+  silently skipping; it now exports `SEMIDX_TEST_POSTGRES_URL` and actually runs.
 - Skipped / limitations: HTTP/gRPC exposure remains an ADR-040 follow-up; an
   explicit reprojection command for pre-projection historical snapshots is a
   possible future addition (older snapshots have no projection rows until

@@ -39,7 +39,7 @@ after this memory file.
 - Retrieval benchmark suite exists and is integrated into gates (`scripts/run-benchmarks.sh`).
 - Retrieval fixtures/benchmarks now include multi-language ambiguity scenarios (Python, Java, Elixir).
 - Retrieval fixtures/benchmarks now include TypeScript baseline and ambiguity onboarding scenarios.
-- Postgres integration smoke exists in tests (enabled by `SCI_TEST_POSTGRES_URL`) and CI service job.
+- Postgres integration smoke exists in tests (enabled by `SEMIDX_TEST_POSTGRES_URL`) and CI service job.
 - Reproducible tree-sitter grammar bootstrap script exists (`scripts/setup-tree-sitter-grammars.sh`) with pinned grammar refs (Clojure/Elixir/Java/TypeScript) and a repo-managed CLI link at `.tree-sitter-grammars/bin/tree-sitter` when an executable source is available.
 - CI runtime gates now install tree-sitter CLI + grammars before running tests.
 - Minimal HTTP runtime edge exists (`clojure -M:runtime-http`) and boundary ADR is documented (`ADR-018`).
