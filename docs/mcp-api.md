@@ -480,6 +480,8 @@ Returns:
 
 ## Operational Notes
 
+- Stage 6 policy lifecycle mutation is intentionally HTTP-only. MCP can consume a configured policy registry for retrieval selection, but it does not expose registry introspection, promotion, approval, or retirement tools.
+
 - MCP does not enforce a root allowlist; `create_index` accepts any existing directory visible to the MCP process.
 - `paths` must be relative and must not contain traversal segments such as `..`.
 - Client-facing MCP responses do not expose internal root restriction state.

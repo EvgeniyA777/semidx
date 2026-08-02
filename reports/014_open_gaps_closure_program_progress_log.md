@@ -1147,3 +1147,38 @@ as part of this planning review.
   - `src/semidx/runtime/http.clj`
 - Verification: `clojure -M:test` passed. HTTP edge endpoints `/v1/policies/registry`, `/v1/policies/promote`, `/v1/policies/retire` implemented with authz support.
 - Commit: `6102d89`
+
+### Stage 6 follow-up review and corrections (2026-08-02)
+
+- Status: completed in the working tree; pending commit.
+- Findings resolved:
+  - Policy lifecycle authorization now denies unlisted operations by default and
+    evaluates `policy_read`, `policy_promote`, and `policy_retire` independently
+    from repository path/root permissions.
+  - Lifecycle mutations now use one serialized transition boundary, persist via
+    same-directory atomic replacement, and update the in-memory registry only
+    after persistence succeeds.
+  - Offline shadow review now emits a versioned, expiring promotion decision
+    bound to the candidate digest, baseline digest, dataset revision, and registry
+    revision; the online promotion path validates that artifact before mutation.
+  - Restricted-tier approval is a separate persisted record bound to the
+    promotion decision, actor, role, and policy identity; a caller-supplied
+    `approval_id` alone cannot authorize promotion.
+  - Promote and retire requests are validated against exact lifecycle contracts;
+    lifecycle and registry responses now have JSON Schema and Malli mirrors.
+  - Lifecycle error taxonomy, API-version headers, persistence-failure behavior,
+    and positive/negative governance paths are covered by tests.
+- Architectural decision: offline evaluation owns promotion eligibility;
+  online control-plane code validates the decision artifact and performs the
+  serialized state transition. Approval remains an independently auditable
+  record rather than a flag embedded in the request.
+- Operational constraint: serialization is process-local. Deployments must not
+  run multiple policy-registry writers against the same file unless an external
+  coordinator or transactional store is introduced.
+- Verification:
+  - focused HTTP and policy-governance suite passed (`39 tests / 336 assertions`);
+  - `./scripts/validate-contracts.sh` passed (`checked_json_files=68`);
+  - `git diff --check` passed;
+  - `clojure -M:test` passed (`270 tests / 1827 assertions`);
+  - `clojure -M:ccc check --root .` passed after refreshing the code-context
+    summary.

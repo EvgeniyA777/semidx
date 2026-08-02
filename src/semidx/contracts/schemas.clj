@@ -593,12 +593,62 @@
    [:selection_id {:optional true} bounded-string]])
 
 (def policy-lifecycle-request
+  [:or
+   [:map {:closed true}
+    [:api_version {:optional true} bounded-string]
+    [:schema_version schema-version]
+    [:policy_id bounded-string]
+    [:version bounded-string]
+    [:decision_id bounded-string]
+    [:approval_id {:optional true} bounded-string]
+    [:trace trace-ref]]
+   [:map {:closed true}
+    [:api_version {:optional true} bounded-string]
+    [:schema_version schema-version]
+    [:policy_id bounded-string]
+    [:version bounded-string]
+    [:trace trace-ref]]])
+
+(def policy-promote-request
+  [:map {:closed true}
+   [:api_version {:optional true} bounded-string]
+   [:schema_version schema-version]
+   [:policy_id bounded-string]
+   [:version bounded-string]
+   [:decision_id bounded-string]
+   [:approval_id {:optional true} bounded-string]
+   [:trace trace-ref]])
+
+(def policy-retire-request
   [:map {:closed true}
    [:api_version {:optional true} bounded-string]
    [:schema_version schema-version]
    [:policy_id bounded-string]
    [:version bounded-string]
    [:trace trace-ref]])
+
+(def policy-registry-entry
+  [:map
+   [:policy_id bounded-string]
+   [:version bounded-string]
+   [:state [:enum "draft" "shadow" "active" "retired"]]
+   [:policy map?]
+   [:governance map?]
+   [:shadow_review {:optional true} map?]
+   [:approvals {:optional true} [:vector map?]]])
+
+(def policy-registry-response
+  [:map {:closed true}
+   [:schema_version schema-version]
+   [:policies [:vector {:max 1000} policy-registry-entry]]])
+
+(def policy-lifecycle-response
+  [:or
+   [:map {:closed true}
+    [:promoted [:= true]]
+    [:decision_id bounded-string]]
+   [:map {:closed true}
+    [:retired [:= true]]]])
 
 (def contracts
   {:example/catalog example-catalog
@@ -618,5 +668,9 @@
    :example/relation-traversal-query relation-traversal-query
    :example/relation-traversal-result relation-traversal-result
    :example/policy-lifecycle-request policy-lifecycle-request
+   :example/policy-promote-request policy-promote-request
+   :example/policy-retire-request policy-retire-request
+   :example/policy-registry-response policy-registry-response
+   :example/policy-lifecycle-response policy-lifecycle-response
    :fixture/corpus fixture-corpus
    :fixture/retrieval retrieval-fixture})

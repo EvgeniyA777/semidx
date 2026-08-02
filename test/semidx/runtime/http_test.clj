@@ -3,14 +3,19 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [malli.core :as m]
+            [semidx.contracts.schemas :as contract-schemas]
             [semidx.core :as sci]
             [semidx.runtime.authz :as runtime-authz]
+            [semidx.runtime.http :as runtime-http]
             [semidx.runtime.project-context :as project-context]
             [semidx.runtime.retrieval-policy :as rp]
-            [semidx.runtime.http :as runtime-http]
             [semidx.runtime.usage-metrics :as usage])
   (:import [java.net URI]
-           [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]))
+           [java.net.http HttpClient
+            HttpRequest
+            HttpRequest$BodyPublishers
+            HttpResponse$BodyHandlers]))
 
 (defn- write-file! [root rel-path content]
   (let [f (io/file root rel-path)]
@@ -30,20 +35,20 @@
   ([^HttpClient client method url body]
    (http-request client method url body {}))
   ([^HttpClient client method url body headers]
-  (let [publisher (if (some? body)
-                    (HttpRequest$BodyPublishers/ofString body)
-                    (HttpRequest$BodyPublishers/noBody))
-        request (-> (HttpRequest/newBuilder (URI/create url))
-                    (.header "Content-Type" "application/json")
-                    (#(reduce (fn [builder [k v]] (.header builder (str k) (str v))) % headers))
-                    (.method method publisher)
-                    (.build))
-        response (.send client request (HttpResponse$BodyHandlers/ofString))
-        text-body (.body response)]
-    {:status (.statusCode response)
-     :headers (.map (.headers response))
-     :body text-body
-     :json (when (seq text-body) (json/read-str text-body :key-fn keyword))})))
+   (let [publisher (if (some? body)
+                     (HttpRequest$BodyPublishers/ofString body)
+                     (HttpRequest$BodyPublishers/noBody))
+         request (-> (HttpRequest/newBuilder (URI/create url))
+                     (.header "Content-Type" "application/json")
+                     (#(reduce (fn [builder [k v]] (.header builder (str k) (str v))) % headers))
+                     (.method method publisher)
+                     (.build))
+         response (.send client request (HttpResponse$BodyHandlers/ofString))
+         text-body (.body response)]
+     {:status (.statusCode response)
+      :headers (.map (.headers response))
+      :body text-body
+      :json (when (seq text-body) (json/read-str text-body :key-fn keyword))})))
 
 (defn- post-json
   ([^HttpClient client url payload]
@@ -659,3 +664,340 @@
         (is (= ["1.0"] (get-in resp [:json :details :supported_api_versions]))))
       (finally
         (.stop server 0)))))
+
+(deftest runtime-http-policy-control-plane-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory
+                       "sci-runtime-policy-test"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-http-sample-repo! tmp-root)
+        tmp-registry-file (str (io/file tmp-root "policy-registry.edn"))
+        active-policy (rp/default-retrieval-policy)
+        auto-policy (assoc active-policy
+                           :policy_id "heuristic_v2"
+                           :version "2026-08-01")
+        blocked-policy (assoc active-policy
+                              :policy_id "heuristic_v3"
+                              :version "2026-08-01")
+        restricted-policy (assoc active-policy
+                                 :policy_id "heuristic_v4"
+                                 :version "2026-08-01")
+        base-registry
+        {:schema_version "1.0"
+         :policies
+         [(rp/registry-entry active-policy {:state "active"})
+          (rp/registry-entry auto-policy
+                             {:state "shadow"
+                              :governance
+                              {:promotion_mode "auto_promotable"
+                               :approval_tier "standard"}})
+          (rp/registry-entry blocked-policy
+                             {:state "shadow"
+                              :governance
+                              {:promotion_mode "blocked"
+                               :approval_tier "critical"}})
+          (rp/registry-entry restricted-policy
+                             {:state "shadow"
+                              :governance
+                              {:promotion_mode "manual_approval_required"
+                               :approval_tier "restricted"}})]}
+        base-registry (rp/normalize-registry base-registry)
+        baseline (rp/active-registry-entry base-registry)
+        revision (rp/registry-revision base-registry)
+        attach-decision
+        (fn [registry policy-id decision-id eligible? outcome]
+          (let [entry (rp/resolve-registry-entry
+                       registry
+                       policy-id
+                       "2026-08-01")
+                decision
+                {:decision_id decision-id
+                 :candidate {:policy_id (:policy_id entry)
+                             :version (:version entry)
+                             :digest (rp/policy-entry-digest entry)}
+                 :baseline {:policy_id (:policy_id baseline)
+                            :version (:version baseline)
+                            :digest (rp/policy-entry-digest baseline)}
+                 :registry_revision revision
+                 :dataset_revision "dataset-001"
+                 :gate_version rp/promotion-gate-version
+                 :outcome outcome
+                 :approval_tier (rp/approval-tier entry)
+                 :reviewed_at "2026-08-01T00:00:00Z"}]
+            (rp/upsert-registry-entry
+             registry
+             (assoc entry
+                    :shadow_review
+                    {:reviewed_at "2026-08-01T00:00:00Z"
+                     :eligible_for_promotion eligible?
+                     :promotion_decision decision}))))
+        registry (-> base-registry
+                     (attach-decision
+                      "heuristic_v2"
+                      "decision-001"
+                      true
+                      "promotion_allowed")
+                     (attach-decision
+                      "heuristic_v3"
+                      "decision-002"
+                      false
+                      "promotion_denied")
+                     (attach-decision
+                      "heuristic_v4"
+                      "decision-003"
+                      true
+                      "approval_required"))
+        restricted-entry (rp/resolve-registry-entry
+                          registry
+                          "heuristic_v4"
+                          "2026-08-01")
+        registry (rp/upsert-registry-entry
+                  registry
+                  (assoc restricted-entry
+                         :approvals
+                         [{:approval_id "approval-003"
+                           :decision_id "decision-003"
+                           :actor_id "approver-1"
+                           :role "policy_approver"
+                           :approved_at "2026-08-01T01:00:00Z"}]))
+        authz-policy-file (str (io/file tmp-root "authz-policy.edn"))
+        operator-policy
+        {:tenants
+         {"operator_tenant"
+          {:allowed_roots [tmp-root]
+           :allowed_operations
+           [:policy_read :policy_promote :policy_retire]}
+          "readonly_tenant"
+          {:allowed_roots [tmp-root]
+           :allowed_operations [:policy_read]}}}
+        _ (write-authz-policy! authz-policy-file operator-policy)
+        server
+        (runtime-http/start-server
+         {:host "127.0.0.1"
+          :port 0
+          :api_key "test-key"
+          :require_tenant true
+          :authz_check
+          (runtime-authz/load-policy-authorizer authz-policy-file)
+          :policy_registry registry
+          :policy_registry_file tmp-registry-file})]
+    (try
+      (let [port (-> server .getAddress .getPort)
+            base-url (str "http://127.0.0.1:" port)
+            client (HttpClient/newHttpClient)
+            _ (wait-health! client base-url)
+            op-headers {"x-api-key" "test-key"
+                        "x-tenant-id" "operator_tenant"}
+            ro-headers {"x-api-key" "test-key"
+                        "x-tenant-id" "readonly_tenant"}
+            request-payload
+            (fn [request-id fields]
+              (merge
+               {:schema_version "1.0"
+                :trace {:trace_id
+                        "11111111-1111-4111-8111-111111111111"
+                        :request_id request-id
+                        :actor_id "operator"}}
+               fields))]
+
+        (testing "authorized tenants can introspect the registry"
+          (doseq [headers [op-headers ro-headers]]
+            (let [response (http-request
+                            client
+                            "GET"
+                            (str base-url "/v1/policies/registry")
+                            nil
+                            headers)]
+              (is (= 200 (:status response)))
+              (is (= "1.0" (get-in response [:json :schema_version])))
+              (is (= 4 (count (get-in response [:json :policies]))))
+              (is (= ["1.0"]
+                     (get-in response
+                             [:headers "x-sci-api-version"]))))))
+
+        (testing "read-only tenant cannot mutate policies"
+          (let [response
+                (post-json
+                 client
+                 (str base-url "/v1/policies/promote")
+                 (request-payload
+                  "policy-readonly-001"
+                  {:policy_id "heuristic_v2"
+                   :version "2026-08-01"
+                   :decision_id "decision-001"})
+                 ro-headers)]
+            (is (= 403 (:status response)))
+            (is (= "forbidden"
+                   (get-in response [:json :error_code])))))
+
+        (testing "missing contract fields are rejected before transition"
+          (let [response
+                (post-json
+                 client
+                 (str base-url "/v1/policies/promote")
+                 {:policy_id "heuristic_v2"
+                  :version "2026-08-01"}
+                 op-headers)]
+            (is (= 400 (:status response)))
+            (is (= "invalid_request"
+                   (get-in response [:json :error_code])))))
+
+        (testing "stale and blocked decisions are rejected"
+          (let [stale
+                (post-json
+                 client
+                 (str base-url "/v1/policies/promote")
+                 (request-payload
+                  "policy-stale-001"
+                  {:policy_id "heuristic_v2"
+                   :version "2026-08-01"
+                   :decision_id "wrong-decision"})
+                 op-headers)
+                blocked
+                (post-json
+                 client
+                 (str base-url "/v1/policies/promote")
+                 (request-payload
+                  "policy-blocked-001"
+                  {:policy_id "heuristic_v3"
+                   :version "2026-08-01"
+                   :decision_id "decision-002"})
+                 op-headers)]
+            (is (= 409 (:status stale)))
+            (is (= "stale_promotion_decision"
+                   (get-in stale [:json :error_code])))
+            (is (= 409 (:status blocked)))
+            (is (= "policy_blocked"
+                   (get-in blocked [:json :error_code])))))
+
+        (testing "arbitrary approval identifiers are not accepted"
+          (let [missing
+                (post-json
+                 client
+                 (str base-url "/v1/policies/promote")
+                 (request-payload
+                  "policy-approval-missing-001"
+                  {:policy_id "heuristic_v4"
+                   :version "2026-08-01"
+                   :decision_id "decision-003"})
+                 op-headers)
+                forged
+                (post-json
+                 client
+                 (str base-url "/v1/policies/promote")
+                 (request-payload
+                  "policy-approval-forged-001"
+                  {:policy_id "heuristic_v4"
+                   :version "2026-08-01"
+                   :decision_id "decision-003"
+                   :approval_id "forged"})
+                 op-headers)]
+            (is (= 409 (:status missing)))
+            (is (= "policy_approval_required"
+                   (get-in missing [:json :error_code])))
+            (is (= 409 (:status forged)))
+            (is (= "policy_approval_required"
+                   (get-in forged [:json :error_code])))))
+
+        (testing "reviewed auto-promotable policy is persisted before success"
+          (let [response
+                (post-json
+                 client
+                 (str base-url "/v1/policies/promote")
+                 (request-payload
+                  "policy-promote-001"
+                  {:policy_id "heuristic_v2"
+                   :version "2026-08-01"
+                   :decision_id "decision-001"})
+                 op-headers)
+                persisted (rp/load-registry tmp-registry-file)]
+            (is (= 200 (:status response)))
+            (is (true? (get-in response [:json :promoted])))
+            (is (= "decision-001"
+                   (get-in response [:json :decision_id])))
+            (is (= "active"
+                   (:state
+                    (rp/resolve-registry-entry
+                     persisted
+                     "heuristic_v2"
+                     "2026-08-01"))))))
+
+        (testing "retirement uses the same serialized persistence boundary"
+          (let [response
+                (post-json
+                 client
+                 (str base-url "/v1/policies/retire")
+                 (request-payload
+                  "policy-retire-001"
+                  {:policy_id "heuristic_v2"
+                   :version "2026-08-01"})
+                 op-headers)
+                persisted (rp/load-registry tmp-registry-file)]
+            (is (= 200 (:status response)))
+            (is (true? (get-in response [:json :retired])))
+            (is (= "retired"
+                   (:state
+                    (rp/resolve-registry-entry
+                     persisted
+                     "heuristic_v2"
+                     "2026-08-01"))))))
+
+        (testing "not-found and other errors use the unified taxonomy"
+          (let [response
+                (post-json
+                 client
+                 (str base-url "/v1/policies/retire")
+                 (request-payload
+                  "policy-retire-missing-001"
+                  {:policy_id "nonexistent"
+                   :version "1.0"})
+                 op-headers)]
+            (is (= 404 (:status response)))
+            (is (= "policy_not_found"
+                   (get-in response [:json :error_code])))
+            (is (some? (get-in response [:json :error_category])))
+            (is (= ["1.0"]
+                   (get-in response
+                           [:headers "x-sci-api-version"]))))))
+      (finally
+        (.stop server 0)))))
+
+(deftest policy-control-plane-response-contracts-test
+  (let [registry (rp/normalize-registry
+                  {:schema_version "1.0"
+                   :policies
+                   [(rp/registry-entry
+                     (rp/default-retrieval-policy)
+                     {:state "active"})]})]
+    (is (m/validate contract-schemas/policy-registry-response
+                    registry))
+    (is (m/validate contract-schemas/policy-lifecycle-response
+                    {:promoted true
+                     :decision_id "decision-001"}))
+    (is (m/validate contract-schemas/policy-lifecycle-response
+                    {:retired true}))))
+
+(deftest policy-transition-does-not-publish-on-persistence-failure-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory
+                       "sci-policy-persistence-failure"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        registry (rp/normalize-registry
+                  {:schema_version "1.0"
+                   :policies
+                   [(rp/registry-entry
+                     (rp/default-retrieval-policy)
+                     {:state "active"})]})
+        registry-atom (atom registry)
+        result (#'runtime-http/run-policy-transition!
+                {:policy_registry_atom registry-atom
+                 :policy_registry_file
+                 (str (io/file tmp-root
+                               "missing-parent"
+                               "registry.edn"))}
+                rp/retire-policy
+                {:policy_id "heuristic_v1"
+                 :version "2026-03-10"})]
+    (is (= :registry_persistence_failed (:error-type result)))
+    (is (= registry @registry-atom))
+    (is (= "active"
+           (:state
+            (rp/active-registry-entry @registry-atom))))))

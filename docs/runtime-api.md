@@ -1392,13 +1392,17 @@ Optional host-integrated authz policy:
 ```clojure
 {:tenants
  {"tenant-001" {:allowed_roots ["<repo-a-root>"]
-                :allowed_path_prefixes ["src/my/app" "test/my/app"]}}}
+                :allowed_path_prefixes ["src/my/app" "test/my/app"]
+                :allowed_operations [:policy_read
+                                     :policy_promote
+                                     :policy_retire]}}}
 ```
 
 Policy semantics:
 
 - `allowed_roots`: required per tenant; request `root_path` must be inside one of these roots.
 - `allowed_path_prefixes`: optional per tenant.
+- `allowed_operations`: required for policy control-plane operations. `policy_read`, `policy_promote`, and `policy_retire` are denied by default when omitted. Repository retrieval operations retain their existing root/path authorization behavior.
 - if `allowed_path_prefixes` is configured, request `paths` must be provided and every path must match an allowed prefix.
 - path checks require relative paths and reject traversal (`..`) segments.
 
@@ -1414,6 +1418,27 @@ Transport mapping for authz denials:
 
 - HTTP: `403` (`:forbidden`), `400` (`:invalid_request`), `500` (`:internal_error`)
 - gRPC: `PERMISSION_DENIED`, `INVALID_ARGUMENT`, `INTERNAL`
+
+### Online policy control plane
+
+The HTTP runtime exposes:
+
+- `GET /v1/policies/registry`
+- `POST /v1/policies/promote`
+- `POST /v1/policies/retire`
+
+Offline `shadow-review` produces a promotion decision containing candidate and
+baseline digests, registry and dataset revisions, the gate version, outcome,
+approval tier, and review timestamp. The promote endpoint requires that
+decision id and rejects stale candidate, baseline, registry, or gate metadata.
+Restricted candidates additionally require an approval record created with
+`semidx.runtime.retrieval-policy/record-policy-approval`; the record is bound to
+the current decision id and a `policy_approver` actor.
+
+Lifecycle writes are serialized inside one runtime process. When a registry
+file is configured, the runtime atomically replaces that file before publishing
+the new in-memory state. Multiple runtime processes must not share one writable
+registry file without an external coordinator.
 
 ## Validation and Gates
 

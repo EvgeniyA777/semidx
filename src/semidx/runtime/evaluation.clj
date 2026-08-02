@@ -556,28 +556,57 @@
                             (filter #(= "shadow" (:state %)))
                             vec)
         reviewed-at (now-iso)
-        reviews (mapv (fn [entry]
-                        (let [candidate-policy (rp/policy-from-entry entry)
-                              comparison (compare-policies {:root_path root_path
-                                                            :dataset dataset
-                                                            :parser_opts parser_opts
-                                                            :baseline_policy baseline-policy
-                                                            :candidate_policy candidate-policy})
-                              decision (promotion-gate-decision comparison)
-                              gate-eligible? (:eligible? decision)
-                              governance-review* (governance-review entry gate-eligible?)]
-                          (merge
-                           {:policy_summary (rp/policy-summary candidate-policy)
-                            :state (:state entry)
-                            :baseline_policy (rp/policy-summary baseline-policy)
-                            :reviewed_at reviewed-at
-                            :eligible_for_promotion gate-eligible?
-                            :failed_checks (failed-checks decision)
-                            :protected_case_summary (:protected_case_summary comparison)
-                            :scorecard (get-in comparison [:candidate :scorecard])
-                            :protected_summary (get-in comparison [:candidate :protected_summary])}
-                           governance-review*)))
-                      shadow-entries)
+        registry-revision (rp/registry-revision registry*)
+        dataset-revision (rp/content-digest dataset)
+        reviews
+        (mapv
+         (fn [entry]
+           (let [candidate-policy (rp/policy-from-entry entry)
+                 comparison (compare-policies
+                             {:root_path root_path
+                              :dataset dataset
+                              :parser_opts parser_opts
+                              :baseline_policy baseline-policy
+                              :candidate_policy candidate-policy})
+                 decision (promotion-gate-decision comparison)
+                 gate-eligible? (:eligible? decision)
+                 governance-review* (governance-review entry gate-eligible?)
+                 outcome (cond
+                           (not gate-eligible?) "promotion_denied"
+                           (:blocked_by_governance governance-review*)
+                           "promotion_denied"
+                           (:manual_review_required governance-review*)
+                           "approval_required"
+                           :else
+                           "promotion_allowed")
+                 promotion-decision
+                 {:decision_id (str (java.util.UUID/randomUUID))
+                  :candidate {:policy_id (:policy_id entry)
+                              :version (:version entry)
+                              :digest (rp/policy-entry-digest entry)}
+                  :baseline {:policy_id (:policy_id baseline-entry)
+                             :version (:version baseline-entry)
+                             :digest (rp/policy-entry-digest baseline-entry)}
+                  :registry_revision registry-revision
+                  :dataset_revision dataset-revision
+                  :gate_version rp/promotion-gate-version
+                  :outcome outcome
+                  :approval_tier (:approval_tier governance-review*)
+                  :reviewed_at reviewed-at}]
+             (merge
+              {:policy_summary (rp/policy-summary candidate-policy)
+               :state (:state entry)
+               :baseline_policy (rp/policy-summary baseline-policy)
+               :reviewed_at reviewed-at
+               :eligible_for_promotion gate-eligible?
+               :failed_checks (failed-checks decision)
+               :protected_case_summary (:protected_case_summary comparison)
+               :scorecard (get-in comparison [:candidate :scorecard])
+               :protected_summary (get-in comparison
+                                          [:candidate :protected_summary])
+               :promotion_decision promotion-decision}
+              governance-review*)))
+         shadow-entries)
         ready (count (filter :eligible_for_promotion reviews))
         blocked (- (count reviews) ready)
         auto-promotable (count (filter :eligible_for_auto_promotion reviews))
@@ -596,26 +625,42 @@
 
 (defn apply-shadow-review
   [registry report]
-  (reduce (fn [acc {:keys [policy_summary reviewed_at eligible_for_promotion eligible_for_auto_promotion manual_review_required blocked_by_governance promotion_mode approval_tier governance_reason failed_checks protected_case_summary]}]
-            (if-let [entry (rp/resolve-registry-entry acc
-                                                      (:policy_id policy_summary)
-                                                      (:version policy_summary))]
-              (rp/upsert-registry-entry
-               acc
-               (assoc entry
-                      :shadow_review {:reviewed_at reviewed_at
-                                      :eligible_for_promotion eligible_for_promotion
-                                      :eligible_for_auto_promotion eligible_for_auto_promotion
-                                      :manual_review_required manual_review_required
-                                      :blocked_by_governance blocked_by_governance
-                                      :promotion_mode promotion_mode
-                                      :approval_tier approval_tier
-                                      :governance_reason governance_reason
-                                      :failed_checks failed_checks
-                                      :protected_case_summary protected_case_summary}))
-              acc))
-          (rp/normalize-registry registry)
-          (:shadow_candidates report)))
+  (reduce
+   (fn [acc
+        {:keys [policy_summary
+                reviewed_at
+                eligible_for_promotion
+                eligible_for_auto_promotion
+                manual_review_required
+                blocked_by_governance
+                promotion_mode
+                approval_tier
+                governance_reason
+                failed_checks
+                protected_case_summary
+                promotion_decision]}]
+     (if-let [entry (rp/resolve-registry-entry
+                     acc
+                     (:policy_id policy_summary)
+                     (:version policy_summary))]
+       (rp/upsert-registry-entry
+        acc
+        (assoc entry
+               :shadow_review
+               {:reviewed_at reviewed_at
+                :eligible_for_promotion eligible_for_promotion
+                :eligible_for_auto_promotion eligible_for_auto_promotion
+                :manual_review_required manual_review_required
+                :blocked_by_governance blocked_by_governance
+                :promotion_mode promotion_mode
+                :approval_tier approval_tier
+                :governance_reason governance_reason
+                :failed_checks failed_checks
+                :protected_case_summary protected_case_summary
+                :promotion_decision promotion_decision}))
+       acc))
+   (rp/normalize-registry registry)
+   (:shadow_candidates report)))
 
 (defn promote-policy
   [{:keys [registry candidate_policy_id candidate_version comparison dry_run manual_approval]
@@ -1526,9 +1571,9 @@
                                                        :parser_opts parser-opts*})]
                   (cond-> {:case_id (or case_id
                                         (str baseline_root "->" current_root))
-                            :baseline_index baseline-index
-                            :current_index current-index
-                            :expected_changes expected_changes}
+                           :baseline_index baseline-index
+                           :current_index current-index
+                           :expected_changes expected_changes}
                     (seq paths) (assoc :paths paths)
                     (contains? case :include_unchanged?) (assoc :include_unchanged? include_unchanged?))))
               cases)]

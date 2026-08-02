@@ -4,13 +4,15 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [malli.core :as m]
+            [semidx.contracts.schemas :as contract-schemas]
+            [semidx.core :as sci]
             [semidx.runtime.authz :as authz]
             [semidx.runtime.capabilities :as capabilities]
             [semidx.runtime.errors :as errors]
             [semidx.runtime.project-context :as project-context]
             [semidx.runtime.retrieval-policy :as rp]
-            [semidx.runtime.storage :as storage]
-            [semidx.core :as sci])
+            [semidx.runtime.storage :as storage])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.net InetSocketAddress]))
 
@@ -111,7 +113,8 @@
              response-correlation-headers))
 
 (defn- error-response-headers [^HttpExchange exchange error]
-  (merge (response-correlation-header-map exchange)
+  (merge api-version-header
+         (response-correlation-header-map exchange)
          (errors/http-error-headers error)))
 
 (defn- with-handler [f]
@@ -526,78 +529,131 @@
                            (merge api-version-header
                                   (response-correlation-header-map exchange))))))))))
 
+(defn- validate-policy-payload! [schema payload]
+  (when-not (m/validate schema payload)
+    (throw (ex-info "policy lifecycle request does not match its contract"
+                    {:type :invalid_request
+                     :message "policy lifecycle request does not match its contract"})))
+  payload)
+
+(defn- run-policy-transition!
+  [auth-config transition options]
+  (let [registry-atom (:policy_registry_atom auth-config)]
+    (locking registry-atom
+      (try
+        (let [result (transition (assoc options :registry @registry-atom))]
+          (when (:ok? result)
+            (when-let [registry-file (:policy_registry_file auth-config)]
+              (rp/write-registry! registry-file (:registry result)))
+            (reset! registry-atom (:registry result)))
+          result)
+        (catch Exception exception
+          {:ok? false
+           :error-type :registry_persistence_failed
+           :message (or (.getMessage exception)
+                        "registry persistence failed")})))))
+
 (defn- handle-policy-registry [auth-config ^HttpExchange exchange]
   (if-not (= "GET" (request-method exchange))
-    (write-json! exchange 405 {:error "method_not_allowed"
-                               :error_code "method_not_allowed"
-                               :error_category "client"
-                               :allowed ["GET"]})
+    (let [{:keys [status body]} (errors/http-error-body {:type :invalid_request
+                                                         :message "method not allowed; use GET"})]
+      (write-json! exchange 405 body (response-correlation-header-map exchange)))
     (do
       (remember-correlation! exchange (request-correlation exchange))
       (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
         (when (enforce-authz! exchange auth-config {:operation :policy_read
                                                     :tenant_id tenant_id})
           (if-let [registry-atom (:policy_registry_atom auth-config)]
-            (write-json! exchange 200 (rp/normalize-registry @registry-atom) (response-correlation-header-map exchange))
-            (write-json! exchange 404 {:error "not_found"
-                                       :message "no policy registry configured"} (response-correlation-header-map exchange))))))))
+            (write-json! exchange 200 (rp/normalize-registry @registry-atom)
+                         (merge api-version-header (response-correlation-header-map exchange)))
+            (let [{:keys [status body]} (errors/http-error-body {:type :policy_registry_not_configured
+                                                                 :message "no policy registry configured"})]
+              (write-json! exchange status body (response-correlation-header-map exchange)))))))))
 
 (defn- handle-policy-promote [auth-config ^HttpExchange exchange]
   (if-not (post-request? exchange)
-    (write-json! exchange 405 {:error "method_not_allowed"
-                               :error_code "method_not_allowed"
-                               :error_category "client"
-                               :allowed ["POST"]})
+    (let [{:keys [body]}
+          (errors/http-error-body {:type :invalid_request
+                                   :message "method not allowed; use POST"})]
+      (write-json! exchange 405 body
+                   (merge api-version-header
+                          (response-correlation-header-map exchange))))
     (do
       (remember-correlation! exchange (request-correlation exchange))
-      (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
-        (let [payload (read-json-body exchange)
-              policy-id (:policy_id payload)
-              version (:version payload)]
-          (when (enforce-authz! exchange auth-config {:operation :policy_promote :tenant_id tenant_id})
-            (let [registry @(:policy_registry_atom auth-config)
-                  entry (rp/resolve-registry-entry registry policy-id version)]
-              (cond
-                (not entry) (write-json! exchange 404 {:error "not_found"})
-                (not (get-in entry [:shadow_review :eligible_for_promotion]))
-                (write-json! exchange 409 {:error "conflict" :message "policy not eligible for promotion"})
-                (and (rp/manual-approval-required? entry) (not (:manual_approval payload)))
-                (write-json! exchange 409 {:error "conflict" :message "manual approval required"})
-                (rp/blocked? entry)
-                (write-json! exchange 409 {:error "conflict" :message "policy promotion is blocked"})
-                :else
-                (let [baseline (rp/active-registry-entry registry)
-                      retired (if (and baseline (not (and (= (:policy_id baseline) policy-id) (= (:version baseline) version))))
-                                (rp/set-entry-state registry (:policy_id baseline) (:version baseline) "retired")
-                                registry)
-                      promoted (rp/set-entry-state retired policy-id version "active")]
-                  (reset! (:policy_registry_atom auth-config) promoted)
-                  (when-let [f (:policy_registry_file auth-config)]
-                    (rp/write-registry! f promoted))
-                  (write-json! exchange 200 {:promoted true} (response-correlation-header-map exchange)))))))))))
+      (when-let [{:keys [tenant_id]}
+                 (enforce-authorized! exchange auth-config)]
+        (when (enforce-authz! exchange
+                              auth-config
+                              {:operation :policy_promote
+                               :tenant_id tenant_id})
+          (let [payload (validate-policy-payload!
+                         contract-schemas/policy-promote-request
+                         (read-json-body exchange))
+                result (run-policy-transition!
+                        auth-config
+                        rp/promote-reviewed-policy
+                        (select-keys payload
+                                     [:policy_id
+                                      :version
+                                      :decision_id
+                                      :approval_id]))]
+            (if (:ok? result)
+              (write-json! exchange
+                           200
+                           {:promoted true
+                            :decision_id (:decision_id result)}
+                           (merge api-version-header
+                                  (response-correlation-header-map exchange)))
+              (let [{:keys [status body]}
+                    (errors/http-error-body
+                     {:type (:error-type result)
+                      :message (:message result)})]
+                (write-json! exchange
+                             status
+                             body
+                             (merge api-version-header
+                                    (response-correlation-header-map
+                                     exchange)))))))))))
 
 (defn- handle-policy-retire [auth-config ^HttpExchange exchange]
   (if-not (post-request? exchange)
-    (write-json! exchange 405 {:error "method_not_allowed"
-                               :error_code "method_not_allowed"
-                               :error_category "client"
-                               :allowed ["POST"]})
+    (let [{:keys [body]}
+          (errors/http-error-body {:type :invalid_request
+                                   :message "method not allowed; use POST"})]
+      (write-json! exchange 405 body
+                   (merge api-version-header
+                          (response-correlation-header-map exchange))))
     (do
       (remember-correlation! exchange (request-correlation exchange))
-      (when-let [{:keys [tenant_id]} (enforce-authorized! exchange auth-config)]
-        (let [payload (read-json-body exchange)
-              policy-id (:policy_id payload)
-              version (:version payload)]
-          (when (enforce-authz! exchange auth-config {:operation :policy_retire :tenant_id tenant_id})
-            (let [registry @(:policy_registry_atom auth-config)
-                  entry (rp/resolve-registry-entry registry policy-id version)]
-              (if-not entry
-                (write-json! exchange 404 {:error "not_found"})
-                (let [retired (rp/set-entry-state registry policy-id version "retired")]
-                  (reset! (:policy_registry_atom auth-config) retired)
-                  (when-let [f (:policy_registry_file auth-config)]
-                    (rp/write-registry! f retired))
-                  (write-json! exchange 200 {:retired true} (response-correlation-header-map exchange)))))))))))
+      (when-let [{:keys [tenant_id]}
+                 (enforce-authorized! exchange auth-config)]
+        (when (enforce-authz! exchange
+                              auth-config
+                              {:operation :policy_retire
+                               :tenant_id tenant_id})
+          (let [payload (validate-policy-payload!
+                         contract-schemas/policy-retire-request
+                         (read-json-body exchange))
+                result (run-policy-transition!
+                        auth-config
+                        rp/retire-policy
+                        (select-keys payload [:policy_id :version]))]
+            (if (:ok? result)
+              (write-json! exchange
+                           200
+                           {:retired true}
+                           (merge api-version-header
+                                  (response-correlation-header-map exchange)))
+              (let [{:keys [status body]}
+                    (errors/http-error-body
+                     {:type (:error-type result)
+                      :message (:message result)})]
+                (write-json! exchange
+                             status
+                             body
+                             (merge api-version-header
+                                    (response-correlation-header-map
+                                     exchange)))))))))))
 
 (defn start-server [{:keys [host port api_key require_tenant authz_check policy_registry policy_registry_file usage_metrics selection_cache
                             project_registry language_policy storage]}]
