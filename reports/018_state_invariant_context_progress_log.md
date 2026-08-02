@@ -83,8 +83,49 @@ Tracks execution of `plans/016_state_invariant_context_plan.md`.
 
 ## Stage 3 - Contract And MCP Surface
 
-- Status: pending (next).
-- Scope: define the JSON Schema and Malli packet contract, add a validated
-  example, pass the section through MCP `impact_analysis`, and keep metrics
-  additive.
+- Status: completed.
+- Summary:
+  - Added the `state-invariants` and `state-invariant-unit-ref` Malli mirrors to
+    `src/semidx/contracts/schemas.clj` and registered
+    `:example/state-invariants` in the `contracts` map. `packet_version` uses an
+    independent `^[0-9]+\.[0-9]+$` pattern (not the strict contract
+    `schema_version`) so the packet can evolve additively.
+  - Added the standalone `contracts/schemas/state-invariants.schema.json` JSON
+    Schema (with a local `unitRef`/`unitRefArray` `$defs` block, all lists capped
+    at 12) and a validated `contracts/examples/state-invariants/impact-analysis-packet.json`
+    example, wired into `contracts/examples/catalog.json` and the
+    path-based mapping in `src/semidx/contracts/validator.clj`.
+  - Bounded `:triggered_by` in `state-invariants/assemble` to the take-12
+    discipline so the `codeArray` (maxItems 12) contract stays truthful; this was
+    the only runtime-facing change and it does not affect gating or existing
+    assertions.
+  - Confirmed MCP passthrough: `tool-impact-analysis` already returns the whole
+    hint map, so the additive `:state_invariants` section rides inside
+    `:impact_hints` unchanged, and the usage-metric payload counters are
+    untouched (still additive).
+- Changed files:
+  - `src/semidx/contracts/schemas.clj`
+  - `src/semidx/contracts/validator.clj`
+  - `src/semidx/runtime/state_invariants.clj`
+  - `contracts/schemas/state-invariants.schema.json`
+  - `contracts/examples/state-invariants/impact-analysis-packet.json`
+  - `contracts/examples/catalog.json`
+  - `test/semidx/integration/runtime_test.clj`
+  - `plans/016_state_invariant_context_plan.md`
+  - `reports/018_state_invariant_context_progress_log.md`
+- Review findings: none outstanding; the one runtime change (`triggered_by`
+  cap) aligns the assembler with the plan's stated take-12 rule and the new
+  contract.
+- Verification:
+  - REPL: example JSON validates against the Malli mirror; the real packet
+    assembled from the Java state fixture conforms to `state-invariants`; a live
+    MCP smoke through `tool-impact-analysis` returns `:state_invariants` inside
+    `:impact_hints` for a stateful query and omits it for a non-stateful query.
+  - `./scripts/validate-contracts.sh`: `checked_json_files=70`,
+    `contracts_validation=ok`.
+  - `clojure -M:test -n semidx.runtime.state-invariants-test -n
+    semidx.integration.runtime-test`: passed, 116 tests / 531 assertions.
+  - `./scripts/run-mvp-gates.sh`: `mvp_gates=ok`; contracts 70/70, benchmarks
+    21/21, four query smokes.
 - Known blockers: none.
+- Next: Stage 4 (HTTP/gRPC parity + optional `expand_context` section).

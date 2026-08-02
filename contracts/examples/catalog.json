@@ -252,6 +252,15 @@
       "adr_refs": ["ADR-040"],
       "purpose": "Compact deterministic result for a bounded downstream relation traversal.",
       "expected_interpretation": "Returns discovered nodes, edges, paths, applied budgets, truncation state, and a staged-retrieval selection handle."
+    },
+    {
+      "example_id": "state_invariants_impact_packet_001",
+      "contract_family": "state_invariants",
+      "path": "state-invariants/impact-analysis-packet.json",
+      "schema": "../schemas/state-invariants.schema.json",
+      "adr_refs": ["ADR-034"],
+      "purpose": "Additive plans/016 Slice-1 state-invariant packet embedded in an impact_analysis response for a state/lifecycle query.",
+      "expected_interpretation": "Surfaces the entity/model file, state writers, assertion tests, and fixture helpers, plus a whole-file-read guardrail; it never asserts field-level write or preservation facts."
     }
   ]
 }

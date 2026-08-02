@@ -282,6 +282,32 @@
    [:upstream string-array]
    [:reasons coded-item-array]])
 
+(def state-invariant-unit-ref
+  "Bounded unit reference inside a state-invariant packet. Carries only display
+  facts the index already has; `path` and `symbol` are optional because some
+  referenced units expose only an identifier."
+  [:map {:closed true}
+   [:unit_id bounded-string]
+   [:path {:optional true} bounded-string]
+   [:symbol {:optional true} bounded-string]])
+
+(def state-invariants
+  "Additive, versioned plans/016 Slice-1 state-invariant packet embedded in the
+  impact_analysis hint map for state/lifecycle/persistence queries. Every list is
+  bounded to the take-12 discipline; field-level write and preservation facts are
+  deliberately absent, and the guardrail directs the agent to read whole files."
+  [:map {:closed true}
+   [:packet_version [:re "^[0-9]+\\.[0-9]+$"]]
+   [:triggered_by code-array]
+   [:entity_candidates [:vector {:max 12} state-invariant-unit-ref]]
+   [:state_writers [:vector {:max 12} state-invariant-unit-ref]]
+   [:assertion_tests [:vector {:max 12} bounded-string]]
+   [:fixture_helpers [:vector {:max 12} state-invariant-unit-ref]]
+   [:guardrail
+    [:map {:closed true}
+     [:code code]
+     [:recommendation bounded-long-string]]]])
+
 (def expansion-result
   [:map {:closed true}
    [:api_version bounded-string]
@@ -667,6 +693,7 @@
    :example/human-review-record human-review-record
    :example/relation-traversal-query relation-traversal-query
    :example/relation-traversal-result relation-traversal-result
+   :example/state-invariants state-invariants
    :example/policy-lifecycle-request policy-lifecycle-request
    :example/policy-promote-request policy-promote-request
    :example/policy-retire-request policy-retire-request

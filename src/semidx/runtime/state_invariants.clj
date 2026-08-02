@@ -115,7 +115,8 @@
    index facts. Returns nil unless the query is stateful and an entity/model
    candidate is found. Field-level facts are deliberately out of scope."
   [index query selected related-test-paths]
-  (let [triggered-by (query-anchors/matched-state-terms query)
+  (let [triggered-by (vec (take output-limit
+                                (query-anchors/matched-state-terms query)))
         entity-units (when (seq triggered-by)
                        (->> (direct-impact-neighbors index selected)
                             (filter entity-unit?)

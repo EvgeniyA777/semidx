@@ -1,0 +1,32 @@
+{
+  "packet_version": "1.0",
+  "triggered_by": ["disconnect", "status", "timestamp", "state", "connection"],
+  "entity_candidates": [
+    {
+      "unit_id": "src/com/acme/model/ConnectionEntity.java::com.acme.model.ConnectionEntity#setStatus$arity1",
+      "path": "src/com/acme/model/ConnectionEntity.java",
+      "symbol": "com.acme.model.ConnectionEntity#setStatus"
+    }
+  ],
+  "state_writers": [
+    {
+      "unit_id": "src/com/acme/service/ConnectionService.java::com.acme.service.ConnectionService#disconnect$arity1",
+      "path": "src/com/acme/service/ConnectionService.java",
+      "symbol": "com.acme.service.ConnectionService#disconnect"
+    }
+  ],
+  "assertion_tests": [
+    "test/com/acme/service/ConnectionServiceTest.java"
+  ],
+  "fixture_helpers": [
+    {
+      "unit_id": "test/com/acme/service/ConnectionServiceTest.java::com.acme.service.ConnectionServiceTest#buildConnectionEntity$arity0",
+      "path": "test/com/acme/service/ConnectionServiceTest.java",
+      "symbol": "com.acme.service.ConnectionServiceTest#buildConnectionEntity"
+    }
+  ],
+  "guardrail": {
+    "code": "state_invariants_require_whole_file_read",
+    "recommendation": "Read the complete entity/model files, primary service tests, and fixture helpers before editing; field-level write and preservation facts are not available in this packet."
+  }
+}

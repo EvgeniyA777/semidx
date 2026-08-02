@@ -247,14 +247,20 @@ Verify against the Stage 1 fixture: entity file surfaced, test tail + fixture
 helper included, guardrail present. `clojure -M:test`.
 
 ### Stage 3 - Contract + MCP surface
-Status: next.
+Status: completed on 2026-08-02; see
+`reports/018_state_invariant_context_progress_log.md`.
 
-Author the packet contract: `malli` mirror in `contracts/schemas.clj`, JSON
-Schema (new `state-invariants` `$def` or an additive block referenced from the
-impact-analysis response contract), and a `contracts/examples/` sample. Pass the
-section through `tool-impact-analysis` in `mcp/core.clj` (keep the usage-metric
-counters additive). `./scripts/validate-contracts.sh`, `clojure -M:test`, MCP
-smoke.
+The packet contract now has a `malli` mirror (`state-invariants` +
+`state-invariant-unit-ref` in `src/semidx/contracts/schemas.clj`), a standalone
+`contracts/schemas/state-invariants.schema.json` JSON Schema, and a validated
+`contracts/examples/state-invariants/impact-analysis-packet.json` sample wired
+into the example catalog and path-based validator mapping. The MCP
+`tool-impact-analysis` handler already returns the whole hint map, so the
+additive `:state_invariants` section passes through inside `:impact_hints`
+unchanged; usage-metric counters stay additive (unchanged). `triggered_by` is now
+bounded to the take-12 discipline so the `codeArray` contract stays honest.
+Verified with `./scripts/validate-contracts.sh`, `clojure -M:test`,
+`./scripts/run-mvp-gates.sh`, and a REPL MCP smoke over the Java state fixture.
 
 ### Stage 4 - Parity + optional expand_context
 Mirror on HTTP/gRPC. Optionally add the section to `expand_context` (requires the

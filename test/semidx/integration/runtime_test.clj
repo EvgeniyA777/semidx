@@ -2073,6 +2073,8 @@
                (:assertion_tests packet)))
         (is (= ["com.acme.service.ConnectionServiceTest#buildConnectionEntity"]
                (mapv :symbol (:fixture_helpers packet)))))
+      (testing "the assembled packet conforms to the state-invariants contract"
+        (is (nil? (m/explain (:example/state-invariants contracts/contracts) packet))))
       (testing "Slice 1 never fabricates unavailable field-level facts"
         (is (not-any? #(or (contains? % :fields)
                            (contains? % :field_writes))

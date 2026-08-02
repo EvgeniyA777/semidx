@@ -149,8 +149,8 @@
 - Use parallel tool execution only for independent reads or checks, never for state-changing commands that depend on each other.
 - Use versioned git hook sources under `scripts/git-hooks/`; install them into `.git/hooks` with `./scripts/install-git-hooks.sh`.
 - If uncommitted files remain in the repo from previous agent runs, explicitly surface them and offer to commit and push them separately.
-- Commit or push only when the user requests or approves it.
-- Do not auto-commit after every file edit. When committing, group related changes into coherent commits.
+- Commit changes every time code or documentation is touched (for example, automatically after completing each implementation stage of a project).
+- Group related changes into coherent commits during an implementation stage, but always ensure the stage ends with a commit.
 - Before risky or multi-file changes, surface the dirty working tree and ask whether to checkpoint it first.
 - Do not revert existing user changes unless explicitly requested.
 
