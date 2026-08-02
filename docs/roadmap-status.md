@@ -84,11 +84,22 @@ ADR-039:
 - `build-impact-hints` consumes the kernel through conservative, reason-coded
   `relation_support`, with no confidence-ceiling increase.
 
-The current semantic focus is Stage 4 under ADR-040: expose the same bounded
-relation traversal through library + MCP, add the forward-only PostgreSQL
-`semantic_index_relations` projection, and prove execution parity without moving
-traversal policy into storage. HTTP/gRPC exposure is deferred and must reuse the
-same contract.
+Stage 4 of `plans/013` (semantic graph query surface, gap 7) is now delivered
+for the library + MCP scope under ADR-040:
+
+- the bounded relation traversal is exposed as `semidx.core/relation-traversal`
+  (usage-metrics-wrapped) and the MCP `traverse_relations` tool, returning the
+  compact `relation-traversal` contract result plus a staged-retrieval
+  `selection_id` that reuses `expand_context` / `fetch_context_detail`;
+- the kernel runs through a batched frontier provider seam
+  (`traverse-relations-with`) so execution backends batch neighbor lookups
+  without owning traversal policy;
+- a forward-only PostgreSQL `semantic_index_relations` projection plus
+  `storage/pg-relation-neighbor-provider` execute the same traversal at proven
+  parity with the pure in-memory kernel (with-redefs parity plus a
+  `SEMIDX_TEST_POSTGRES_URL`-gated real-PostgreSQL round-trip test);
+- HTTP/gRPC stay `not_exposed` and are a documented follow-up that must reuse the
+  same contract and semantics.
 
 After Stage 4, the product sequence is provider catalog/discovery, then one
 Protobuf/OpenAPI contract-linking vertical slice, then a SCIP evidence-provider

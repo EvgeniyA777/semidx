@@ -821,3 +821,67 @@ as part of this planning review.
   was added; exposure is reflected by tool presence in `tools/list` + the library
   API and documented in ADR-040. PostgreSQL projection/provider is Stage 4.3.
 - Known blockers: none.
+
+## Stage 4.3 - PostgreSQL Relation Projection And Execution Adapter
+
+- Status: completed.
+- Scope: Add the forward-only PostgreSQL `semantic_index_relations` projection and
+  a PostgreSQL execution adapter for the canonical traversal contract, proven at
+  parity with the pure in-memory kernel (ADR-040). Storage optimizes neighbor
+  fetch; it does not own traversal semantics.
+- Summary:
+  - `semidx.runtime.storage` `init-storage!` now migrates a
+    `semantic_index_relations` table (root_path, snapshot_id, relation_id,
+    relation_type, resolution_status, source_unit_id, target_unit_id, target_key,
+    evidence_quality) plus `(root_path, snapshot_id, source_unit_id)` and
+    `(root_path, snapshot_id, target_unit_id)` frontier indexes. The migration
+    only creates the table/indexes; it performs no historical backfill.
+  - `save-index-tx!` rewrites the projection forward-only per snapshot: a scoped
+    delete + one flattened row per (relation, target_unit_id) via `relation-rows`.
+    Unresolved relations (no target unit ids) produce no rows, matching in-memory
+    traversal semantics for unit-id nodes.
+  - `storage/pg-relation-neighbor-provider` is the execution adapter: given a
+    frontier and direction it issues one query per depth level
+    (`source_unit_id = any(?)` downstream, `target_unit_id = any(?)` upstream) and
+    returns `{node -> (seq relations)}` shaped for
+    `relations/traverse-relations-with`, reconstructing `target_unit_ids` by
+    grouping. No N+1. Eligibility, fan-out, ordering, cycles, and budgets stay in
+    the kernel.
+- Changed files:
+  - `src/semidx/runtime/storage.clj`
+  - `test/semidx/runtime/storage_test.clj`
+  - `MEMORY.md`
+  - `docs/roadmap-status.md`
+  - `docs/code-context.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - semidx MCP mapped `storage.clj` (protocol, `PostgresStorage`,
+    `save-index-tx!`, `init-storage!`) and the kernel seam before editing.
+  - `postgres-init-storage-creates-relations-projection-test` and
+    `save-index-tx-writes-relation-projection-rows-test` assert the migration and
+    forward-only projection SQL via `with-redefs jdbc/execute!` capture.
+  - `pg-relation-neighbor-provider-parity-test` (always-run) drives the kernel
+    through the PG provider over `with-redefs`-served flattened rows and asserts
+    byte-identical output vs the pure in-memory kernel across downstream,
+    upstream, depth-capped, and node-capped requests, plus one batched query per
+    depth level (no N+1).
+  - `postgres-relation-traversal-roundtrip-parity-test` (gated on
+    `SEMIDX_TEST_POSTGRES_URL`) proves real round-trip parity. Verified locally by
+    spinning an ephemeral PostgreSQL 17 cluster (fresh initdb on a free port,
+    TCP-only, unrelated project containers untouched), running the suite with the
+    env set (`9 tests / 50 assertions`, 0 failures), then stopping and removing
+    the cluster.
+  - `clojure -M:test` passed (`262 tests / 1752 assertions`);
+    `./scripts/validate-contracts.sh` `contracts_validation=ok`;
+    `./scripts/run-mvp-gates.sh` `mvp_gates=ok`. CCC refreshed.
+  - Benchmarks / semantic-quality were intentionally not re-run: Stage 4.3 is a
+    storage/infra change with no extraction, ranking, resolution, or confidence
+    impact (per the plan's delivery-loop scoping).
+- Env note: the real-PostgreSQL parity env var is `SEMIDX_TEST_POSTGRES_URL`
+  (the handoff/RULES wording `SCI_TEST_POSTGRES_URL` is stale; the code uses
+  `SEMIDX_TEST_POSTGRES_URL`, matching `postgres-storage-roundtrip-test`).
+- Skipped / limitations: HTTP/gRPC exposure remains an ADR-040 follow-up; an
+  explicit reprojection command for pre-projection historical snapshots is a
+  possible future addition (older snapshots have no projection rows until
+  re-saved).
+- Known blockers: none.
