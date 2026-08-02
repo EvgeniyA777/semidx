@@ -328,7 +328,8 @@
      [:dependents string-array]
      [:related_tests string-array]
      [:risky_neighbors string-array]
-     [:relation_support {:optional true} relation-support]]]])
+     [:relation_support {:optional true} relation-support]]]
+   [:state_invariants {:optional true} state-invariants]])
 
 (def context-packet
   [:map {:closed true}
@@ -355,6 +356,7 @@
      [:related_tests string-array]
      [:risky_neighbors string-array]
      [:relation_support {:optional true} relation-support]]]
+   [:state_invariants {:optional true} state-invariants]
    [:evidence
     [:map {:closed true}
      [:selection_reasons coded-item-array]

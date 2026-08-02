@@ -26,7 +26,31 @@
   (write-file! root "src/my/app/order.clj"
                "(ns my.app.order)\n\n(defn process-order [ctx order]\n  (validate-order order))\n\n(defn validate-order [order]\n  (if (:id order)\n    order\n    (throw (ex-info \"invalid\" {}))))\n")
   (write-file! root "test/my/app/order_test.clj"
-               "(ns my.app.order-test\n  (:require [clojure.test :refer [deftest is]]\n            [my.app.order :as order]))\n\n(deftest process-order-test\n  (is (map? (order/validate-order {:id 1}))))\n"))
+               "(ns my.app.order-test\n  (:require [clojure.test :refer [deftest is]]\n            [my.app.order :as order]))\n\n(deftest process-order-test\n  (is (map? (order/validate-order {:id 1}))))\n")
+  (write-file! root "src/com/acme/model/ConnectionEntity.java"
+               "package com.acme.model;\n\npublic class ConnectionEntity {\n  public void setStatus(String status) {\n  }\n}\n")
+  (write-file! root "src/com/acme/service/ConnectionService.java"
+               "package com.acme.service;\n\nimport com.acme.model.ConnectionEntity;\n\npublic class ConnectionService {\n  public void disconnect(ConnectionEntity entity) {\n    entity.setStatus(\"OFF\");\n  }\n}\n")
+  (write-file! root "test/com/acme/service/ConnectionServiceTest.java"
+               "package com.acme.service;\n\nimport com.acme.model.ConnectionEntity;\n\npublic class ConnectionServiceTest {\n  public void disconnectPreservesState() {\n    ConnectionEntity entity = buildConnectionEntity();\n    new ConnectionService().disconnect(entity);\n  }\n\n  public ConnectionEntity buildConnectionEntity() {\n    return new ConnectionEntity();\n  }\n}\n"))
+
+(defn- state-invariant-query [request-id]
+  {:api_version "1.0"
+   :schema_version "1.0"
+   :intent {:purpose "change_impact"
+            :details "Change disconnect status while preserving connection state"}
+   :targets {:symbols ["com.acme.service.ConnectionService#disconnect"]
+             :paths ["src/com/acme/service/ConnectionService.java"]}
+   :constraints {:token_budget 6000
+                 :max_raw_code_level "enclosing_unit"
+                 :freshness "current_snapshot"}
+   :hints {:prefer_definitions_over_callers true}
+   :options {:include_tests true
+             :include_impact_hints true
+             :allow_raw_code_escalation false}
+   :trace {:trace_id "03111111-1111-4111-8111-111111111111"
+           :request_id request-id
+           :actor_id "test_runner"}})
 
 (defn- write-authz-policy! [path policy]
   (spit path (pr-str policy)))
@@ -249,6 +273,49 @@
             (is (= 400 (:status invalid-resp)))
             (is (= "invalid_request" (get-in invalid-resp [:json :error_code])))
             (is (= "client" (get-in invalid-resp [:json :error_category]))))))
+      (finally
+        (.stop server 0)))))
+
+(deftest runtime-http-state-invariant-parity-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory
+                       "sci-runtime-http-state-invariant"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-http-sample-repo! tmp-root)
+        server (runtime-http/start-server {:host "127.0.0.1" :port 0})]
+    (try
+      (let [port (-> server .getAddress .getPort)
+            base-url (str "http://127.0.0.1:" port)
+            client (HttpClient/newHttpClient)
+            _ (wait-health! client base-url)
+            create-resp (post-json client
+                                   (str base-url "/v1/index/create")
+                                   {:root_path tmp-root
+                                    :parser_opts {:java_engine "regex"}})
+            resolve-resp (post-json client
+                                    (str base-url "/v1/retrieval/resolve-context")
+                                    {:root_path tmp-root
+                                     :query (state-invariant-query "runtime-http-state-001")})
+            selector {:root_path tmp-root
+                      :selection_id (get-in resolve-resp [:json :selection_id])
+                      :snapshot_id (get-in resolve-resp [:json :snapshot_id])}
+            expand-resp (post-json client
+                                   (str base-url "/v1/retrieval/expand-context")
+                                   selector)
+            detail-resp (post-json client
+                                   (str base-url "/v1/retrieval/fetch-context-detail")
+                                   selector)
+            expansion-packet (get-in expand-resp [:json :state_invariants])
+            detail-packet (get-in detail-resp [:json :context_packet :state_invariants])]
+        (is (= 200 (:status create-resp)))
+        (is (= 200 (:status resolve-resp)))
+        (is (= 200 (:status expand-resp)))
+        (is (= 200 (:status detail-resp)))
+        (is (= ["src/com/acme/model/ConnectionEntity.java"]
+               (mapv :path (:entity_candidates expansion-packet))))
+        (is (= (:entity_candidates expansion-packet)
+               (:entity_candidates detail-packet)))
+        (is (= "state_invariants_require_whole_file_read"
+               (get-in detail-packet [:guardrail :code]))))
       (finally
         (.stop server 0)))))
 

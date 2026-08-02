@@ -1,9 +1,9 @@
 ---
 title: "State Invariant Context Plan"
 doc_type: "architecture_plan"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-08-02"
 ---
 
@@ -263,9 +263,16 @@ Verified with `./scripts/validate-contracts.sh`, `clojure -M:test`,
 `./scripts/run-mvp-gates.sh`, and a REPL MCP smoke over the Java state fixture.
 
 ### Stage 4 - Parity + optional expand_context
-Mirror on HTTP/gRPC. Optionally add the section to `expand_context` (requires the
-context-packet schema + malli change) only if the staged-retrieval ergonomics
-justify it. Cross-surface parity test.
+Status: completed on 2026-08-02; see
+`reports/018_state_invariant_context_progress_log.md`.
+
+The staged-retrieval ergonomics justify exposing the packet after selection:
+agents otherwise need a separate `impact_analysis` call to receive the
+whole-file guardrail. `expand_context` and the detail-stage context packet now
+conditionally carry the same budget-accounted `state_invariants` sibling.
+The Malli expansion/context mirrors and the JSON context-packet schema accept
+the additive section. HTTP and gRPC continue to delegate to the library result
+without transport-owned policy; cross-surface tests prove unchanged passthrough.
 
 ### Deferred (separate plan, gated by ADR-034 / plans/013 Stage 3)
 Setter-to-field write relations, entity-field listing with nullability/annotation

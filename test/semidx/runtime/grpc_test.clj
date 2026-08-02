@@ -21,7 +21,31 @@
   (write-file! root "src/my/app/order.clj"
                "(ns my.app.order)\n\n(defn process-order [ctx order]\n  (validate-order order))\n\n(defn validate-order [order]\n  (if (:id order)\n    order\n    (throw (ex-info \"invalid\" {}))))\n")
   (write-file! root "test/my/app/order_test.clj"
-               "(ns my.app.order-test\n  (:require [clojure.test :refer [deftest is]]\n            [my.app.order :as order]))\n\n(deftest process-order-test\n  (is (map? (order/validate-order {:id 1}))))\n"))
+               "(ns my.app.order-test\n  (:require [clojure.test :refer [deftest is]]\n            [my.app.order :as order]))\n\n(deftest process-order-test\n  (is (map? (order/validate-order {:id 1}))))\n")
+  (write-file! root "src/com/acme/model/ConnectionEntity.java"
+               "package com.acme.model;\n\npublic class ConnectionEntity {\n  public void setStatus(String status) {\n  }\n}\n")
+  (write-file! root "src/com/acme/service/ConnectionService.java"
+               "package com.acme.service;\n\nimport com.acme.model.ConnectionEntity;\n\npublic class ConnectionService {\n  public void disconnect(ConnectionEntity entity) {\n    entity.setStatus(\"OFF\");\n  }\n}\n")
+  (write-file! root "test/com/acme/service/ConnectionServiceTest.java"
+               "package com.acme.service;\n\nimport com.acme.model.ConnectionEntity;\n\npublic class ConnectionServiceTest {\n  public void disconnectPreservesState() {\n    ConnectionEntity entity = buildConnectionEntity();\n    new ConnectionService().disconnect(entity);\n  }\n\n  public ConnectionEntity buildConnectionEntity() {\n    return new ConnectionEntity();\n  }\n}\n"))
+
+(defn- state-invariant-query [request-id]
+  {:api_version "1.0"
+   :schema_version "1.0"
+   :intent {:purpose "change_impact"
+            :details "Change disconnect status while preserving connection state"}
+   :targets {:symbols ["com.acme.service.ConnectionService#disconnect"]
+             :paths ["src/com/acme/service/ConnectionService.java"]}
+   :constraints {:token_budget 6000
+                 :max_raw_code_level "enclosing_unit"
+                 :freshness "current_snapshot"}
+   :hints {:prefer_definitions_over_callers true}
+   :options {:include_tests true
+             :include_impact_hints true
+             :allow_raw_code_escalation false}
+   :trace {:trace_id "03222222-2222-4222-8222-222222222222"
+           :request_id request-id
+           :actor_id "test_runner"}})
 
 (defn- write-authz-policy! [path policy]
   (spit path (pr-str policy)))
@@ -248,6 +272,50 @@
                    (.get (.getTrailers e)
                          (Metadata$Key/of "x-sci-error-category" Metadata/ASCII_STRING_MARSHALLER)))))))
 
+      (finally
+        (.shutdownNow channel)
+        (.shutdownNow server)))))
+
+(deftest runtime-grpc-state-invariant-parity-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory
+                       "sci-runtime-grpc-state-invariant"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        _ (create-grpc-sample-repo! tmp-root)
+        {:keys [server port]} (runtime-grpc/start-server {:host "127.0.0.1" :port 0})
+        channel (-> (ManagedChannelBuilder/forAddress "127.0.0.1" (int port))
+                    (.usePlaintext)
+                    (.build))]
+    (try
+      (unary-call channel
+                  runtime-grpc/create-index-method
+                  (grpc-proto/create-index-request {:root_path tmp-root
+                                                    :parser_opts {:java_engine "regex"}})
+                  grpc-proto/create-index-response->map)
+      (let [selection (unary-call channel
+                                  runtime-grpc/resolve-context-method
+                                  (grpc-proto/resolve-context-request
+                                   {:root_path tmp-root
+                                    :query (state-invariant-query "runtime-grpc-state-001")})
+                                  grpc-proto/resolve-context-response->map)
+            selector {:root_path tmp-root
+                      :selection_id (:selection_id selection)
+                      :snapshot_id (:snapshot_id selection)}
+            expansion (unary-call channel
+                                  runtime-grpc/expand-context-method
+                                  (grpc-proto/expand-context-request selector)
+                                  grpc-proto/expand-context-response->map)
+            detail (unary-call channel
+                               runtime-grpc/fetch-context-detail-method
+                               (grpc-proto/fetch-context-detail-request selector)
+                               grpc-proto/fetch-context-detail-response->map)
+            expansion-packet (:state_invariants expansion)
+            detail-packet (get-in detail [:context_packet :state_invariants])]
+        (is (= ["src/com/acme/model/ConnectionEntity.java"]
+               (mapv :path (:entity_candidates expansion-packet))))
+        (is (= (:entity_candidates expansion-packet)
+               (:entity_candidates detail-packet)))
+        (is (= "state_invariants_require_whole_file_read"
+               (get-in detail-packet [:guardrail :code]))))
       (finally
         (.shutdownNow channel)
         (.shutdownNow server)))))

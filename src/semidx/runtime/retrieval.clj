@@ -488,6 +488,14 @@
          (#(int (Math/ceil (/ (double %) 4.0)))))
     0))
 
+(defn- estimate-state-invariants-tokens [packet]
+  (if (map? packet)
+    (-> (count (pr-str packet))
+        (/ 4.0)
+        Math/ceil
+        int)
+    0))
+
 (defn- estimate-raw-context-tokens [raw-context]
   (->> raw-context
        (map (fn [{:keys [content]}]
@@ -1413,7 +1421,18 @@
         include-impact? (and (seq selected)
                              (<= impact-tokens raw-budget))
         impact (if include-impact? impact-full (empty-impact-hints))
-        raw-budget* (max 0 (- raw-budget (if include-impact? impact-tokens 0)))
+        remaining-after-impact (max 0 (- raw-budget (if include-impact? impact-tokens 0)))
+        state-invariants-full (state-invariants/assemble
+                               index
+                               query
+                               selected
+                               (:related_tests impact-full))
+        state-invariants-tokens (estimate-state-invariants-tokens state-invariants-full)
+        include-state-invariants? (and state-invariants-full
+                                       (<= state-invariants-tokens remaining-after-impact))
+        state-invariants (when include-state-invariants? state-invariants-full)
+        raw-budget* (max 0 (- remaining-after-impact
+                              (if include-state-invariants? state-invariants-tokens 0)))
         structure-estimated (estimate-tokens selected-source)
         capabilities (rp/capability-summary index (capability-units selected))
         base-confidence (build-confidence selected query* policy)
@@ -1428,13 +1447,14 @@
         truncation (cond-> []
                      (:truncated? selected-fit) (conj "selected_units_truncated")
                      (and (seq selected) (not include-impact?)) (conj "impact_hints_omitted")
+                     (and state-invariants-full (not include-state-invariants?)) (conj "state_invariants_omitted")
                      (zero? detail-budget) (conj "detail_budget_exhausted")
                      raw-truncated? (conj "raw_snippets_truncated")
                      raw-level-degraded? (conj "raw_fetch_level_degraded"))
         suggested-budget (when (or raw-shortfall? (:truncated? selected-fit))
                            (suggested-token-budget structure-estimated
                                                    (boolean (:truncated? selected-fit))
-                                                   impact-tokens
+                                                   (+ impact-tokens state-invariants-tokens)
                                                    required-raw-tokens))
         suggested-budget* (when (and suggested-budget (> suggested-budget requested))
                             suggested-budget)
@@ -1442,9 +1462,11 @@
                         :reserved_tokens detail-budget
                         :estimated_tokens (+ structure-estimated
                                              (if include-impact? impact-tokens 0)
+                                             (if include-state-invariants? state-invariants-tokens 0)
                                              raw-fetch-tokens)
                         :returned_tokens (+ selected-structure-tokens
                                             (if include-impact? impact-tokens 0)
+                                            (if include-state-invariants? state-invariants-tokens 0)
                                             raw-fetch-tokens)
                         :truncation_flags (cond-> truncation
                                             (and (pos? (count selected))
@@ -1478,25 +1500,26 @@
         guardrails (build-guardrails confidence impact query* policy capabilities)
         focus-paths (->> selected (map :path) distinct (take 20) vec)
         focus-modules (->> selected (map :module) (remove nil?) distinct (take 20) vec)
-        context-packet {:schema_version "1.0"
-                        :retrieval_policy (rp/policy-summary policy)
-                        :capabilities capabilities
-                        :query summary
-                        :repo_map {:focus_paths focus-paths
-                                   :focus_modules focus-modules
-                                   :summary (str "Selected " (count selected) " units from " (count focus-paths) " files.")}
-                        :relevant_units (mapv compact-unit selected)
-                        :skeletons (mapv compact-skeleton selected)
-                        :impact_hints impact
-                        :evidence {:selection_reasons (top-reasons selected)
-                                   :hint_effects (cond-> []
-                                                   (seq (:hints_summary summary))
-                                                   (conj (coded "hints_applied" "Soft hints were applied during candidate ranking."))
-                                                   (and (not= "none" (:level raw-fetch))
-                                                        (pos? (:snippets raw-fetch)))
-                                                   (conj (coded "raw_code_escalated" "Late raw-code fetch was executed for ranked units.")))}
-                        :budget budget
-                        :confidence confidence}
+        context-packet (cond-> {:schema_version "1.0"
+                                :retrieval_policy (rp/policy-summary policy)
+                                :capabilities capabilities
+                                :query summary
+                                :repo_map {:focus_paths focus-paths
+                                           :focus_modules focus-modules
+                                           :summary (str "Selected " (count selected) " units from " (count focus-paths) " files.")}
+                                :relevant_units (mapv compact-unit selected)
+                                :skeletons (mapv compact-skeleton selected)
+                                :impact_hints impact
+                                :evidence {:selection_reasons (top-reasons selected)
+                                           :hint_effects (cond-> []
+                                                           (seq (:hints_summary summary))
+                                                           (conj (coded "hints_applied" "Soft hints were applied during candidate ranking."))
+                                                           (and (not= "none" (:level raw-fetch))
+                                                                (pos? (:snippets raw-fetch)))
+                                                           (conj (coded "raw_code_escalated" "Late raw-code fetch was executed for ranked units.")))}
+                                :budget budget
+                                :confidence confidence}
+                         state-invariants (assoc :state_invariants state-invariants))
         packet-status (if (or (= "low" (:level confidence))
                               (= "degraded" (:status raw-fetch))
                               (seq truncation))
@@ -1507,7 +1530,8 @@
                        (= "degraded" (:status raw-fetch)) (conj (coded "raw_fetch_degraded" "Raw-code fetch was executed in degraded mode."))
                        (:truncated? selected-fit) (conj (coded "detail_budget_limited" "Detail packet selected units were truncated to fit the reserved stage budget."))
                        raw-truncated? (conj (coded "raw_snippets_truncated" "Raw snippets were truncated to fit the reserved raw-fetch budget."))
-                       (and (seq selected) (not include-impact?)) (conj (coded "impact_hints_omitted" "Impact hints were omitted to keep detail payload within the reserved stage budget.")))
+                       (and (seq selected) (not include-impact?)) (conj (coded "impact_hints_omitted" "Impact hints were omitted to keep detail payload within the reserved stage budget."))
+                       (and state-invariants-full (not include-state-invariants?)) (conj (coded "state_invariants_omitted" "State-invariant context was omitted to keep the detail payload within the reserved stage budget.")))
         stage-packet (build-stage "context_packet_assembly"
                                   packet-status
                                   "Assembled bounded context packet."
@@ -1515,7 +1539,8 @@
                                    :selected_files (count focus-paths)
                                    :reserved_tokens detail-budget
                                    :returned_tokens (+ selected-structure-tokens
-                                                       (if include-impact? impact-tokens 0))}
+                                                       (if include-impact? impact-tokens 0)
+                                                       (if include-state-invariants? state-invariants-tokens 0))}
                                   packet-warns
                                   []
                                   5)
@@ -1653,32 +1678,47 @@
          expansion-budget (get-in selection [:budget :reserved_budget :expansion_tokens] 0)
          skeleton-fit (fit-items-to-budget selected-source estimate-skeleton-tokens expansion-budget)
          selected (vec (:items skeleton-fit))
-         impact-full (when impact? (build-impact-hints bound-index selected))
-         impact-tokens (estimate-impact-hints-tokens impact-full)
-         remaining-budget (max 0 (- expansion-budget (:used_tokens skeleton-fit)))
-         include-impact? (and impact? (<= impact-tokens remaining-budget))
+         impact-full (build-impact-hints bound-index selected)
+         impact-tokens (if impact? (estimate-impact-hints-tokens impact-full) 0)
+         remaining-after-skeletons (max 0 (- expansion-budget (:used_tokens skeleton-fit)))
+         include-impact? (and impact? (<= impact-tokens remaining-after-skeletons))
          impact (when include-impact? impact-full)
+         remaining-after-impact (max 0 (- remaining-after-skeletons
+                                          (if include-impact? impact-tokens 0)))
+         state-invariants-full (state-invariants/assemble
+                                bound-index
+                                (:query selection)
+                                selected
+                                (:related_tests impact-full))
+         state-invariants-tokens (estimate-state-invariants-tokens state-invariants-full)
+         include-state-invariants? (and state-invariants-full
+                                        (<= state-invariants-tokens remaining-after-impact))
+         state-invariants (when include-state-invariants? state-invariants-full)
          truncation-flags (cond-> []
                             (:truncated? skeleton-fit) (conj "skeletons_truncated")
                             (and impact? (seq impact-full) (not include-impact?)) (conj "impact_hints_omitted")
+                            (and state-invariants-full (not include-state-invariants?)) (conj "state_invariants_omitted")
                             (and (seq selected-source) (zero? expansion-budget)) (conj "expansion_budget_exhausted"))
          estimated (+ (reduce + 0 (map estimate-skeleton-tokens selected-source))
-                      (if impact? impact-tokens 0))
+                      impact-tokens
+                      state-invariants-tokens)
          returned (+ (:used_tokens skeleton-fit)
-                     (if include-impact? impact-tokens 0))
+                     (if include-impact? impact-tokens 0)
+                     (if include-state-invariants? state-invariants-tokens 0))
          result-status (stage-result-status selected-source selected truncation-flags)]
      (projections/with-projection
-       {:api_version default-api-version
-        :selection_id selection_id
-        :snapshot_id snapshot_id
-        :result_status result-status
-        :budget_summary {:reserved_tokens expansion-budget
-                         :estimated_tokens estimated
-                         :returned_tokens returned
-                         :within_budget (<= estimated expansion-budget)
-                         :truncation_flags truncation-flags}
-        :skeletons (mapv compact-skeleton selected)
-        :impact_hints impact}
+       (cond-> {:api_version default-api-version
+                :selection_id selection_id
+                :snapshot_id snapshot_id
+                :result_status result-status
+                :budget_summary {:reserved_tokens expansion-budget
+                                 :estimated_tokens estimated
+                                 :returned_tokens returned
+                                 :within_budget (<= estimated expansion-budget)
+                                 :truncation_flags truncation-flags}
+                :skeletons (mapv compact-skeleton selected)
+                :impact_hints impact}
+         state-invariants (assoc :state_invariants state-invariants))
        :api-shape
        :detail))))
 

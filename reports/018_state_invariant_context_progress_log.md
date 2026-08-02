@@ -1,9 +1,9 @@
 ---
 title: "State Invariant Context Progress Log"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-08-02"
 ---
 
@@ -128,4 +128,42 @@ Tracks execution of `plans/016_state_invariant_context_plan.md`.
   - `./scripts/run-mvp-gates.sh`: `mvp_gates=ok`; contracts 70/70, benchmarks
     21/21, four query smokes.
 - Known blockers: none.
-- Next: Stage 4 (HTTP/gRPC parity + optional `expand_context` section).
+
+## Stage 4 - Cross-Surface Parity And Staged Retrieval
+
+- Status: completed.
+- Summary:
+  - Added the conditional `state_invariants` sibling to `expand_context` and
+    the detail-stage context packet. Both paths reuse the Stage 2 assembler and
+    the existing impact evidence; transports remain policy-free passthroughs.
+  - Accounted for the packet in expansion/detail token budgets. When an
+    assembled packet does not fit, the result records
+    `state_invariants_omitted` instead of silently exceeding the reserved
+    stage budget.
+  - Extended the Malli expansion-result/context-packet mirrors and the JSON
+    context-packet schema with the optional packet reference.
+  - Added library, HTTP, and gRPC parity coverage over the Java lifecycle
+    fixture, including entity evidence, the guardrail, non-state intent
+    silence, contract conformance, and budget bounds.
+- Changed files:
+  - `src/semidx/runtime/retrieval.clj`
+  - `src/semidx/contracts/schemas.clj`
+  - `contracts/schemas/context-packet.schema.json`
+  - `test/semidx/integration/runtime_test.clj`
+  - `test/semidx/runtime/http_test.clj`
+  - `test/semidx/runtime/grpc_test.clj`
+  - `plans/016_state_invariant_context_plan.md`
+  - `reports/018_state_invariant_context_progress_log.md`
+  - `MEMORY.md`
+- Verification:
+  - REPL compile/load probes for the retrieval/contracts namespaces and the
+    focused library + HTTP tests: passed.
+  - `clojure -M:test -n semidx.integration.runtime-test -n
+    semidx.runtime.http-test -n semidx.runtime.grpc-test`: passed, 143 tests /
+    825 assertions (the final added expansion-contract assertion also passed in
+    the full gate).
+  - `./scripts/validate-contracts.sh`: passed, 70 JSON files checked.
+  - `./scripts/run-mvp-gates.sh`: passed; contracts 70/70, 287 tests / 1927
+    assertions, benchmarks 21/21, four query smokes, `mvp_gates=ok`.
+- Commit: the enclosing Stage 4 commit.
+- Known blockers: none.

@@ -2080,6 +2080,62 @@
                            (contains? % :field_writes))
                       (:entity_candidates packet)))))))
 
+(deftest staged-retrieval-surfaces-state-invariant-context-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory
+                       "sci-staged-state-invariant-context"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (write-state-invariant-fixture! tmp-root)
+    (let [index (sci/create-index {:root_path tmp-root
+                                   :parser_opts {:java_engine :regex}})
+          query (assoc-in
+                 (state-invariant-query
+                  "Change disconnect status while preserving timestamp state"
+                  "com.acme.service.ConnectionService#disconnect"
+                  "src/com/acme/service/ConnectionService.java")
+                 [:constraints :token_budget]
+                 6000)
+          selection (sci/resolve-context index query)
+          selector {:selection_id (:selection_id selection)
+                    :snapshot_id (:snapshot_id selection)}
+          expansion (sci/expand-context index selector)
+          detail (sci/fetch-context-detail index selector)
+          expansion-packet (:state_invariants expansion)
+          detail-packet (get-in detail [:context_packet :state_invariants])]
+      (testing "expand_context adds the bounded packet within its reserved budget"
+        (is (= "1.0" (:packet_version expansion-packet)))
+        (is (= ["src/com/acme/model/ConnectionEntity.java"]
+               (mapv :path (:entity_candidates expansion-packet))))
+        (is (= "state_invariants_require_whole_file_read"
+               (get-in expansion-packet [:guardrail :code])))
+        (is (<= (get-in expansion [:budget_summary :returned_tokens])
+                (get-in expansion [:budget_summary :reserved_tokens])))
+        (is (nil? (m/explain (:example/expansion-result contracts/contracts)
+                             (dissoc expansion
+                                     :projection_profile
+                                     :recommended_projection_profile)))))
+      (testing "detail context packet retains the same invariant evidence"
+        (is (= (:entity_candidates expansion-packet)
+               (:entity_candidates detail-packet)))
+        (is (= (:assertion_tests expansion-packet)
+               (:assertion_tests detail-packet)))
+        (is (nil? (m/explain (:example/context-packet contracts/contracts)
+                             (:context_packet detail)))))
+      (testing "non-stateful staged retrieval remains quiet"
+        (let [quiet-selection (sci/resolve-context
+                               index
+                               (assoc-in
+                                (state-invariant-query
+                                 "Locate the formatting implementation"
+                                 "com.acme.Formatter#formatSummary"
+                                 "src/com/acme/Formatter.java")
+                                [:constraints :token_budget]
+                                6000))
+              quiet-expansion (sci/expand-context
+                               index
+                               {:selection_id (:selection_id quiet-selection)
+                                :snapshot_id (:snapshot_id quiet-selection)})]
+          (is (not (contains? quiet-expansion :state_invariants))))))))
+
 (deftest impact-analysis-omits-state-invariants-for-unrelated-intent-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory
                        "sci-state-invariant-quiet"

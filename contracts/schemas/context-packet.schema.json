@@ -147,6 +147,9 @@
         }
       }
     },
+    "state_invariants": {
+      "$ref": "state-invariants.schema.json"
+    },
     "evidence": {
       "type": "object",
       "required": ["selection_reasons", "hint_effects"],
