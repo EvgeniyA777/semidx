@@ -1287,15 +1287,34 @@ SCI_USAGE_METRICS_JDBC_URL=jdbc:postgresql://localhost:5432/semantic_index \
 clojure -M:runtime-grpc --host 127.0.0.1 --port 8789
 ```
 
-Service: `semidx.RuntimeService`
+Service: `semidx.runtime.grpc.v1.RuntimeService`
 
 Unary methods:
 
 - `Health` (`HealthRequest` -> `HealthResponse`)
 - `CreateIndex` (`CreateIndexRequest` -> `CreateIndexResponse`)
 - `ResolveContext` (`ResolveContextRequest` -> `ResolveContextResponse`)
+- `ExpandContext` (`ExpandContextRequest` -> `ExpandContextResponse`)
+- `FetchContextDetail` (`FetchContextDetailRequest` -> `FetchContextDetailResponse`)
+- `LiteralFileSlice` (`LiteralFileSliceRequest` -> `LiteralFileSliceResponse`)
+- `SnapshotDiff` (`SnapshotDiffRequest` -> `SnapshotDiffResponse`)
+- `TraverseRelations` (`TraverseRelationsRequest` -> `TraverseRelationsResponse`)
 
 Proto schema source: `proto/semidx/runtime/grpc/v1/runtime.proto`
+
+The `.proto` is the only editable wire-schema source. Generated Java messages
+and `RuntimeServiceGrpc` are committed under `src-generated/java` and verified
+against the pinned build toolchain:
+
+```bash
+clojure -T:build grpc-generate
+clojure -T:build grpc-verify-generated
+clojure -T:build compile-java
+```
+
+Ordinary `clojure -M:test` and `clojure -M:runtime-grpc` runs never invoke
+`protoc` or require network access. They compile the committed Java sources with
+the local JDK only when `target/classes` is missing or stale.
 
 `HealthResponse` carries `capabilities_json`, a JSON-encoded copy of the same versioned capability payload returned by `semidx.core/capabilities`, MCP `capabilities`, and HTTP `GET /capabilities`. gRPC clients should call `Health` as capability preflight before selecting `language_policy_json` for indexing.
 
@@ -1303,7 +1322,8 @@ Current gRPC transport uses dedicated runtime protobuf envelope messages while p
 
 - request scalar fields stay typed (`root_path`, `paths`, counters)
 - complex nested runtime payloads are carried in explicit `*_json` string fields during this migration step, including optional `language_policy_json`
-- the server currently materializes these messages from protobuf descriptors at runtime rather than generated Java classes
+- the server uses generated Java message classes and the generated
+  `RuntimeServiceGrpc` service/method descriptors
 
 When auth boundary is enabled:
 

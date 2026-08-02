@@ -11,14 +11,12 @@
             [semidx.runtime.retrieval-policy :as rp]
             [semidx.runtime.storage :as storage]
             [semidx.core :as sci])
-  (:import [io.grpc MethodDescriptor MethodDescriptor$Marshaller MethodDescriptor$MethodType
-                     Context Contexts Metadata Metadata$Key
-                     ServerCall ServerCall$Listener ServerCallHandler ServerInterceptor ServerInterceptors
-                     ServerServiceDefinition Status]
+  (:import [io.grpc Context Contexts Metadata Metadata$Key
+            ServerCall ServerCall$Listener ServerCallHandler ServerInterceptor ServerInterceptors
+            ServerServiceDefinition Status]
            [io.grpc.stub ServerCalls ServerCalls$UnaryMethod StreamObserver]
-           [io.grpc.netty.shaded.io.grpc.netty NettyServerBuilder]))
-
-(def ^:private service-name "semidx.RuntimeService")
+           [io.grpc.netty.shaded.io.grpc.netty NettyServerBuilder]
+           [semidx.runtime.grpc.v1 RuntimeServiceGrpc]))
 
 (defn- parse-bool [s]
   (contains? #{"1" "true" "yes" "on"} (str/lower-case (str (or s "")))))
@@ -42,22 +40,14 @@
   (when (seq path)
     (-> path slurp edn/read-string)))
 
-(defn- unary-method [method-name request-type response-type]
-  (-> (MethodDescriptor/newBuilder)
-      (.setType MethodDescriptor$MethodType/UNARY)
-      (.setFullMethodName (MethodDescriptor/generateFullMethodName service-name method-name))
-      (.setRequestMarshaller ^MethodDescriptor$Marshaller (grpc-proto/marshaller request-type))
-      (.setResponseMarshaller ^MethodDescriptor$Marshaller (grpc-proto/marshaller response-type))
-      (.build)))
-
-(def health-method (unary-method "Health" :health-request :health-response))
-(def create-index-method (unary-method "CreateIndex" :create-index-request :create-index-response))
-(def resolve-context-method (unary-method "ResolveContext" :resolve-context-request :resolve-context-response))
-(def expand-context-method (unary-method "ExpandContext" :expand-context-request :expand-context-response))
-(def fetch-context-detail-method (unary-method "FetchContextDetail" :fetch-context-detail-request :fetch-context-detail-response))
-(def literal-file-slice-method (unary-method "LiteralFileSlice" :literal-file-slice-request :literal-file-slice-response))
-(def snapshot-diff-method (unary-method "SnapshotDiff" :snapshot-diff-request :snapshot-diff-response))
-(def traverse-relations-method (unary-method "TraverseRelations" :traverse-relations-request :traverse-relations-response))
+(def health-method (RuntimeServiceGrpc/getHealthMethod))
+(def create-index-method (RuntimeServiceGrpc/getCreateIndexMethod))
+(def resolve-context-method (RuntimeServiceGrpc/getResolveContextMethod))
+(def expand-context-method (RuntimeServiceGrpc/getExpandContextMethod))
+(def fetch-context-detail-method (RuntimeServiceGrpc/getFetchContextDetailMethod))
+(def literal-file-slice-method (RuntimeServiceGrpc/getLiteralFileSliceMethod))
+(def snapshot-diff-method (RuntimeServiceGrpc/getSnapshotDiffMethod))
+(def traverse-relations-method (RuntimeServiceGrpc/getTraverseRelationsMethod))
 
 (def ^:private api-key-header
   (Metadata$Key/of "x-api-key" Metadata/ASCII_STRING_MARSHALLER))
@@ -440,7 +430,7 @@
         selection-cache (or selection_cache (atom {:max_entries 128}))
         project-registry (or project_registry (project-context/project-registry))
         storage-adapter (or storage (storage/in-memory-storage))
-        service (-> (ServerServiceDefinition/builder service-name)
+        service (-> (ServerServiceDefinition/builder (RuntimeServiceGrpc/getServiceDescriptor))
                     (.addMethod health-method (unary-handler (constantly {})
                                                              grpc-proto/health-response
                                                              handle-health

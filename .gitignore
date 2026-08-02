@@ -5,8 +5,12 @@
 .cpcache/
 .nrepl-port
 .shadow-cljs/
-target/
-classes/
+/classes/
+target/*
+!target/classes/
+target/classes/*
+!target/classes/.gitkeep
+.cache/semidx/protobuf/
 
 # Clojure tooling caches
 .clj-kondo/

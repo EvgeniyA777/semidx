@@ -1,228 +1,76 @@
 (ns semidx.runtime.grpc-proto
   (:require [clojure.data.json :as json])
-  (:import [com.google.protobuf DynamicMessage
-                                DescriptorProtos$DescriptorProto
-                                DescriptorProtos$FieldDescriptorProto
-                                DescriptorProtos$FieldDescriptorProto$Label
-                                DescriptorProtos$FieldDescriptorProto$Type
-                                DescriptorProtos$FileDescriptorProto
-                                Descriptors$Descriptor
-                                Descriptors$FieldDescriptor
-                                Descriptors$FileDescriptor]
-           [io.grpc.protobuf ProtoUtils]))
+  (:import [com.google.protobuf Descriptors$FieldDescriptor
+                                Descriptors$FieldDescriptor$JavaType
+                                Message]
+           [semidx.runtime.grpc.v1 CreateIndexRequest CreateIndexResponse
+                                   ExpandContextRequest ExpandContextResponse
+                                   FetchContextDetailRequest FetchContextDetailResponse
+                                   HealthRequest HealthResponse
+                                   LiteralFileSliceRequest LiteralFileSliceResponse
+                                   ResolveContextRequest ResolveContextResponse
+                                   SnapshotDiffRequest SnapshotDiffResponse
+                                   TraverseRelationsRequest TraverseRelationsResponse]))
 
-(def ^:private package-name "semidx.runtime.grpc.v1")
+(def ^:private default-instances
+  {:health-request (HealthRequest/getDefaultInstance)
+   :health-response (HealthResponse/getDefaultInstance)
+   :create-index-request (CreateIndexRequest/getDefaultInstance)
+   :create-index-response (CreateIndexResponse/getDefaultInstance)
+   :resolve-context-request (ResolveContextRequest/getDefaultInstance)
+   :resolve-context-response (ResolveContextResponse/getDefaultInstance)
+   :expand-context-request (ExpandContextRequest/getDefaultInstance)
+   :expand-context-response (ExpandContextResponse/getDefaultInstance)
+   :fetch-context-detail-request (FetchContextDetailRequest/getDefaultInstance)
+   :fetch-context-detail-response (FetchContextDetailResponse/getDefaultInstance)
+   :literal-file-slice-request (LiteralFileSliceRequest/getDefaultInstance)
+   :literal-file-slice-response (LiteralFileSliceResponse/getDefaultInstance)
+   :snapshot-diff-request (SnapshotDiffRequest/getDefaultInstance)
+   :snapshot-diff-response (SnapshotDiffResponse/getDefaultInstance)
+   :traverse-relations-request (TraverseRelationsRequest/getDefaultInstance)
+   :traverse-relations-response (TraverseRelationsResponse/getDefaultInstance)})
 
-(def ^:private message-definitions
-  {:health-request
-   {:proto-name "HealthRequest"
-    :fields []}
-
-   :health-response
-   {:proto-name "HealthResponse"
-    :fields [{:key :status :proto-name "status" :number 1 :type :string}
-             {:key :service :proto-name "service" :number 2 :type :string}
-             {:key :capabilities_json :proto-name "capabilities_json" :number 3 :type :string}]}
-
-   :create-index-request
-   {:proto-name "CreateIndexRequest"
-    :fields [{:key :root_path :proto-name "root_path" :number 1 :type :string}
-             {:key :paths :proto-name "paths" :number 2 :type :string :repeated? true}
-             {:key :parser_opts_json :proto-name "parser_opts_json" :number 3 :type :string}
-             {:key :language_policy_json :proto-name "language_policy_json" :number 4 :type :string}]}
-
-   :create-index-response
-   {:proto-name "CreateIndexResponse"
-    :fields [{:key :snapshot_id :proto-name "snapshot_id" :number 1 :type :string}
-             {:key :indexed_at :proto-name "indexed_at" :number 2 :type :string}
-             {:key :file_count :proto-name "file_count" :number 3 :type :int32}
-             {:key :unit_count :proto-name "unit_count" :number 4 :type :int32}
-             {:key :repo_map_json :proto-name "repo_map_json" :number 5 :type :string}
-             {:key :index_lifecycle_json :proto-name "index_lifecycle_json" :number 6 :type :string}]}
-
-   :resolve-context-request
-   {:proto-name "ResolveContextRequest"
-    :fields [{:key :root_path :proto-name "root_path" :number 1 :type :string}
-             {:key :paths :proto-name "paths" :number 2 :type :string :repeated? true}
-             {:key :parser_opts_json :proto-name "parser_opts_json" :number 3 :type :string}
-             {:key :query_json :proto-name "query_json" :number 4 :type :string}
-             {:key :retrieval_policy_json :proto-name "retrieval_policy_json" :number 5 :type :string}
-             {:key :language_policy_json :proto-name "language_policy_json" :number 6 :type :string}]}
-
-   :resolve-context-response
-   {:proto-name "ResolveContextResponse"
-    :fields [{:key :selection_result_json :proto-name "selection_result_json" :number 1 :type :string}]}
-
-   :expand-context-request
-    {:proto-name "ExpandContextRequest"
-     :fields [{:key :root_path :proto-name "root_path" :number 1 :type :string}
-              {:key :paths :proto-name "paths" :number 2 :type :string :repeated? true}
-              {:key :parser_opts_json :proto-name "parser_opts_json" :number 3 :type :string}
-              {:key :selection_id :proto-name "selection_id" :number 4 :type :string}
-              {:key :snapshot_id :proto-name "snapshot_id" :number 5 :type :string}
-              {:key :unit_ids :proto-name "unit_ids" :number 6 :type :string :repeated? true}
-              {:key :include_impact_hints :proto-name "include_impact_hints" :number 7 :type :string}
-              {:key :language_policy_json :proto-name "language_policy_json" :number 8 :type :string}]}
-
-   :expand-context-response
-   {:proto-name "ExpandContextResponse"
-    :fields [{:key :expansion_result_json :proto-name "expansion_result_json" :number 1 :type :string}]}
-
-   :fetch-context-detail-request
-    {:proto-name "FetchContextDetailRequest"
-     :fields [{:key :root_path :proto-name "root_path" :number 1 :type :string}
-              {:key :paths :proto-name "paths" :number 2 :type :string :repeated? true}
-              {:key :parser_opts_json :proto-name "parser_opts_json" :number 3 :type :string}
-              {:key :selection_id :proto-name "selection_id" :number 4 :type :string}
-              {:key :snapshot_id :proto-name "snapshot_id" :number 5 :type :string}
-              {:key :unit_ids :proto-name "unit_ids" :number 6 :type :string :repeated? true}
-              {:key :detail_level :proto-name "detail_level" :number 7 :type :string}
-              {:key :language_policy_json :proto-name "language_policy_json" :number 8 :type :string}]}
-
-   :fetch-context-detail-response
-   {:proto-name "FetchContextDetailResponse"
-    :fields [{:key :detail_result_json :proto-name "detail_result_json" :number 1 :type :string}]}
-
-   :literal-file-slice-request
-   {:proto-name "LiteralFileSliceRequest"
-    :fields [{:key :root_path :proto-name "root_path" :number 1 :type :string}
-             {:key :paths :proto-name "paths" :number 2 :type :string :repeated? true}
-             {:key :parser_opts_json :proto-name "parser_opts_json" :number 3 :type :string}
-             {:key :selection_id :proto-name "selection_id" :number 4 :type :string}
-             {:key :snapshot_id :proto-name "snapshot_id" :number 5 :type :string}
-             {:key :path :proto-name "path" :number 6 :type :string}
-             {:key :start_line :proto-name "start_line" :number 7 :type :int32}
-             {:key :end_line :proto-name "end_line" :number 8 :type :int32}
-             {:key :language_policy_json :proto-name "language_policy_json" :number 9 :type :string}]}
-
-   :literal-file-slice-response
-   {:proto-name "LiteralFileSliceResponse"
-    :fields [{:key :literal_slice_result_json :proto-name "literal_slice_result_json" :number 1 :type :string}]}
-
-   :snapshot-diff-request
-   {:proto-name "SnapshotDiffRequest"
-    :fields [{:key :root_path :proto-name "root_path" :number 1 :type :string}
-             {:key :paths :proto-name "paths" :number 2 :type :string :repeated? true}
-             {:key :parser_opts_json :proto-name "parser_opts_json" :number 3 :type :string}
-             {:key :baseline_snapshot_id :proto-name "baseline_snapshot_id" :number 4 :type :string}
-             {:key :include_unchanged :proto-name "include_unchanged" :number 5 :type :string}
-             {:key :language_policy_json :proto-name "language_policy_json" :number 6 :type :string}]}
-
-   :snapshot-diff-response
-   {:proto-name "SnapshotDiffResponse"
-    :fields [{:key :snapshot_diff_result_json :proto-name "snapshot_diff_result_json" :number 1 :type :string}]}
-
-   :traverse-relations-request
-   {:proto-name "TraverseRelationsRequest"
-    :fields [{:key :root_path :proto-name "root_path" :number 1 :type :string}
-             {:key :paths :proto-name "paths" :number 2 :type :string :repeated? true}
-             {:key :parser_opts_json :proto-name "parser_opts_json" :number 3 :type :string}
-             {:key :direction :proto-name "direction" :number 4 :type :string}
-             {:key :start_nodes :proto-name "start_nodes" :number 5 :type :string :repeated? true}
-             {:key :relation_types :proto-name "relation_types" :number 6 :type :string :repeated? true}
-             {:key :resolved_only :proto-name "resolved_only" :number 7 :type :string}
-             {:key :budgets_json :proto-name "budgets_json" :number 8 :type :string}
-             {:key :snapshot_id :proto-name "snapshot_id" :number 9 :type :string}
-             {:key :language_policy_json :proto-name "language_policy_json" :number 10 :type :string}]}
-
-   :traverse-relations-response
-   {:proto-name "TraverseRelationsResponse"
-    :fields [{:key :traverse_relations_result_json :proto-name "traverse_relations_result_json" :number 1 :type :string}]}})
-
-(defn- require-definition [message-key]
-  (or (get message-definitions message-key)
+(defn default-instance [message-key]
+  (or (get default-instances message-key)
       (throw (ex-info (str "unknown gRPC proto message " message-key)
                       {:message_key message-key}))))
 
-(defn- field-type-enum [field-type]
-  (case field-type
-    :string DescriptorProtos$FieldDescriptorProto$Type/TYPE_STRING
-    :int32 DescriptorProtos$FieldDescriptorProto$Type/TYPE_INT32
-    (throw (ex-info (str "unsupported field type " field-type)
-                    {:field_type field-type}))))
+(defn- field-descriptor [message-key ^Message message field-key]
+  (or (-> message
+          .getDescriptorForType
+          (.findFieldByName (name field-key)))
+      (throw (ex-info "Generated gRPC field is missing"
+                      {:type :generated_grpc_field_missing
+                       :message_key message-key
+                       :field_key field-key}))))
 
-(defn- field-proto [{:keys [proto-name number type repeated?]}]
-  (-> (DescriptorProtos$FieldDescriptorProto/newBuilder)
-      (.setName proto-name)
-      (.setNumber (int number))
-      (.setType (field-type-enum type))
-      (.setLabel (if repeated?
-                   DescriptorProtos$FieldDescriptorProto$Label/LABEL_REPEATED
-                   DescriptorProtos$FieldDescriptorProto$Label/LABEL_OPTIONAL))
-      (.build)))
-
-(defn- message-proto [{:keys [proto-name fields]}]
-  (let [builder (DescriptorProtos$DescriptorProto/newBuilder)]
-    (.setName builder proto-name)
-    (doseq [field fields]
-      (.addField builder (field-proto field)))
-    (.build builder)))
-
-(def ^:private file-descriptor
-  (let [builder (DescriptorProtos$FileDescriptorProto/newBuilder)]
-    (.setName builder "proto/semidx/runtime/grpc/v1/runtime.proto")
-    (.setPackage builder package-name)
-    (.setSyntax builder "proto3")
-    (doseq [[_ definition] message-definitions]
-      (.addMessageType builder (message-proto definition)))
-    (Descriptors$FileDescriptor/buildFrom
-     (.build builder)
-     (make-array Descriptors$FileDescriptor 0))))
-
-(def ^:private descriptors
-  (into {}
-        (map (fn [[message-key {:keys [proto-name]}]]
-               [message-key (.findMessageTypeByName file-descriptor proto-name)]))
-        message-definitions))
-
-(def ^:private field-descriptors
-  (into {}
-        (map (fn [[message-key {:keys [fields]}]]
-               [message-key
-                (into {}
-                      (map (fn [{:keys [key proto-name]}]
-                             [key (.findFieldByName ^Descriptors$Descriptor
-                                                    (get descriptors message-key)
-                                                    proto-name)]))
-                      fields)]))
-        message-definitions))
-
-(defn default-instance [message-key]
-  (DynamicMessage/getDefaultInstance ^Descriptors$Descriptor (get descriptors message-key)))
-
-(defn marshaller [message-key]
-  (ProtoUtils/marshaller (default-instance message-key)))
-
-(defn- coerce-field-value [field-type value]
-  (case field-type
-    :string (str value)
-    :int32 (int (long (or value 0)))
-    value))
+(defn- coerce-field-value [^Descriptors$FieldDescriptor field value]
+  (let [java-type (.getJavaType field)]
+    (cond
+      (= java-type Descriptors$FieldDescriptor$JavaType/STRING) (str value)
+      (= java-type Descriptors$FieldDescriptor$JavaType/INT) (int (long (or value 0)))
+      :else value)))
 
 (defn- build-message [message-key values]
-  (let [definition (require-definition message-key)
-        descriptor ^Descriptors$Descriptor (get descriptors message-key)
-        builder (DynamicMessage/newBuilder descriptor)]
-    (doseq [{:keys [key type repeated?]} (:fields definition)]
-      (let [field-desc ^Descriptors$FieldDescriptor (get-in field-descriptors [message-key key])
-            value (get values key)]
-        (cond
-          repeated?
-          (doseq [item (or value [])]
-            (.addRepeatedField builder field-desc (coerce-field-value type item)))
-
-          (some? value)
-          (.setField builder field-desc (coerce-field-value type value)))))
+  (let [default ^Message (default-instance message-key)
+        builder (.newBuilderForType default)]
+    (doseq [[field-key value] values
+            :when (some? value)]
+      (let [field ^Descriptors$FieldDescriptor (field-descriptor message-key default field-key)]
+        (if (.isRepeated field)
+          (doseq [item value]
+            (.addRepeatedField builder field (coerce-field-value field item)))
+          (.setField builder field (coerce-field-value field value)))))
     (.build builder)))
 
-(defn- string-field [message-key message field-key]
-  (str (.getField ^DynamicMessage message (get-in field-descriptors [message-key field-key]))))
+(defn- string-field [message-key ^Message message field-key]
+  (str (.getField message (field-descriptor message-key message field-key))))
 
-(defn- int-field [message-key message field-key]
-  (int (.getField ^DynamicMessage message (get-in field-descriptors [message-key field-key]))))
+(defn- int-field [message-key ^Message message field-key]
+  (int (.getField message (field-descriptor message-key message field-key))))
 
-(defn- repeated-string-field [message-key message field-key]
-  (->> (.getField ^DynamicMessage message (get-in field-descriptors [message-key field-key]))
+(defn- repeated-string-field [message-key ^Message message field-key]
+  (->> (.getField message (field-descriptor message-key message field-key))
        seq
        (mapv str)))
 

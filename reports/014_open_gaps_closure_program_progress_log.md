@@ -992,3 +992,146 @@ as part of this planning review.
   preparation, runtime cutover, and descriptor-oracle removal belong to the
   remaining Stage 5 delivery slices.
 - Known blockers: none.
+
+## Stage 5.2 - Pinned Toolchain, Generated Sources, And Offline Javac
+
+- Status: completed.
+- Scope: Implement the ADR-042 build contour, commit deterministic generated
+  Java sources, and preserve clean-clone `clojure -M:test` behavior without a
+  system protobuf toolchain or network-dependent ordinary test run.
+- Summary:
+  - Added a `tools.build` alias and tasks for pinned tool acquisition,
+    deterministic generation, committed-source drift verification, and explicit
+    Java compilation.
+  - Pinned and SHA-256-validated `protoc` 3.25.1 and
+    `protoc-gen-grpc-java` 1.63.0 for `osx-aarch_64` and glibc-based
+    `linux-x86_64`; unsupported classifiers fail explicitly.
+  - Generated and committed 34 Java sources under `src-generated/java` from the
+    authoritative `.proto`. Build outputs remain ignored under
+    `target/classes`; a tracked `.gitkeep` makes that path part of the JVM
+    classpath on a clean clone before bootstrap compilation.
+  - Added `semidx.runtime.grpc-prep`, which uses the local JDK compiler only when
+    committed generated sources are newer than or missing from
+    `target/classes`. It never downloads or invokes `protoc`.
+  - The ordinary test runner and the gRPC launcher call the prep seam before
+    dynamically loading namespaces that import generated classes.
+- Changed files:
+  - `build.clj`
+  - `deps.edn`
+  - `.gitignore`
+  - `target/classes/.gitkeep`
+  - `src-generated/java/**`
+  - `src/semidx/runtime/grpc_prep.clj`
+  - `src/semidx/runtime/grpc_launcher.clj`
+  - `src/semidx/test_runner.clj`
+  - `test/semidx/test_runner_test.clj`
+  - `.github/workflows/mvp-runtime.yml`
+- Verification:
+  - `clojure -T:build grpc-toolchain` passed for `osx-aarch_64`.
+  - `clojure -T:build grpc-generate` generated 34 Java sources.
+  - `clojure -T:build grpc-verify-generated` passed with 34 sources and no
+    drift; the final closeout rerun passed too.
+  - `clojure -T:build compile-java` compiled all 34 sources with Java 17
+    bytecode targeting.
+  - After deleting generated class output, ordinary selected tests rebuilt with
+    javac only and passed (`19 tests / 105 assertions`), proving the clean-output
+    bootstrap without `protoc`.
+  - Linux artifact bytes were independently downloaded and hashed before adding
+    CI support; the grpc-java SHA-256 sidecar and protoc SHA-1 sidecar matched
+    the downloaded artifacts.
+- Skipped / limitations: code generation on Apple Silicon requires Rosetta 2
+  because the upstream grpc-java `osx-aarch_64` plugin is an x86_64 Mach-O
+  binary. Linux support is glibc-based; musl/Alpine and unlisted classifiers are
+  intentionally unsupported until separately validated.
+- Known blockers: none.
+
+## Stage 5.3 - Generated Runtime Cutover And Oracle Removal
+
+- Status: completed.
+- Scope: Replace runtime-built protobuf/service descriptors with generated
+  grpc-java messages and service descriptors while preserving semidx envelope
+  semantics, auth, correlation, and the unified error taxonomy.
+- Summary:
+  - Proved the generated descriptor set against the temporary runtime oracle for
+    all 16 messages, including field names, numbers, Java/proto types, and
+    repeated cardinality, then removed the `DescriptorProto` / `DynamicMessage`
+    assembler.
+  - `grpc_proto.clj` now translates maps through generated message builders and
+    generated field descriptors. Its keyword dispatch map selects message
+    classes but does not duplicate protobuf field schema.
+  - `grpc.clj` now uses `RuntimeServiceGrpc` method descriptors and its generated
+    service descriptor. The full service path is the intentionally versioned
+    `/semidx.runtime.grpc.v1.RuntimeService/<Method>` contract accepted by
+    ADR-042.
+  - Auth checks, request correlation, response/error trailers, JSON envelope
+    fields, and handler behavior remain unchanged.
+- Changed files:
+  - `src/semidx/runtime/grpc_proto.clj`
+  - `src/semidx/runtime/grpc.clj`
+  - `test/semidx/runtime/grpc_test.clj`
+- Verification:
+  - One-time descriptor parity passed for all 16 messages before oracle removal.
+  - Generated descriptor contract tests cover the generated message type,
+    versioned service name, full Health path, method descriptor identity, and all
+    eight unary RPC names.
+  - The selected gRPC/capabilities/test-runner suites passed before the full run.
+  - `clojure -M:runtime-grpc --host 127.0.0.1 --port 65404` started successfully
+    with the generated service (`runtime_grpc_server_started`), then was stopped
+    normally after the smoke.
+- Skipped / limitations: the runtime smoke required host-local loopback socket
+  permission because the restricted sandbox rejected bind with `Operation not
+  permitted`. PostgreSQL was not needed because this stage changes no storage
+  behavior.
+- Known blockers: none.
+
+## Stage 5.4 - Architecture Review, Documentation, And Closeout
+
+- Status: completed.
+- Review findings and disposition:
+  - **High — clean-clone classpath path could be absent:** accepted and fixed.
+    Clojure CLI computes the JVM classpath before the test-runner bootstrap; if
+    `target/classes` does not exist at JVM start, javac can populate it but the
+    running JVM cannot load those classes. A tracked
+    `target/classes/.gitkeep` plus narrow clean-output regression coverage fixes
+    the bootstrap ordering invariant.
+  - **Medium — removed generated types could leave stale class output:** accepted
+    and fixed. The prep seam now records a source manifest, deletes only the
+    generated gRPC package before a stale rebuild, and publishes its completion
+    marker only after successful javac. A regression test injects an orphan
+    class plus stale manifest and proves that the rebuild removes it.
+  - **Medium — current docs still described the temporary descriptor runtime and
+    macOS-only validation:** accepted and fixed. ADR-042, runtime API, roadmap,
+    plan, and memory now describe the generated runtime, the versioned service
+    name, all eight RPCs, both validated classifiers, and completed Stage 5.
+  - No remaining SRP/DIP/OCP finding was accepted. The build contour owns
+    network/tool acquisition and deterministic generation; runtime prep owns
+    offline javac only; the launcher owns bootstrap ordering; and the runtime
+    depends on generated `.proto` artifacts rather than a second hand-written
+    schema. Adding more interfaces here would be speculative because there is
+    one stable tool pair and one generated runtime implementation.
+- Documentation updated:
+  - `adr/042-generate-grpc-stubs-from-a-repo-managed-protobuf-toolchain.md`
+  - `docs/runtime-api.md`
+  - `docs/roadmap-status.md`
+  - `plans/013_open_gaps_closure_program.md`
+  - `MEMORY.md`
+  - `docs/code-context.md` (with the ignored local `.ccc/state.edn` refreshed)
+  - this progress log
+- Final verification:
+  - `clojure -T:build grpc-verify-generated` passed
+    (`grpc_generated_sources_verified=34`).
+  - `./scripts/validate-contracts.sh` passed (`checked_json_files=65`,
+    `contracts_validation=ok`).
+  - The final selected gRPC/test-runner suite passed (`20 tests / 108
+    assertions`).
+  - `clojure -M:test` passed (`266 tests / 1778 assertions`).
+  - `./scripts/run-mvp-gates.sh` passed: contracts, the full test suite, all
+    `21/21` retrieval benchmarks, four query smokes, and `mvp_gates=ok`.
+  - `clojure -M:ccc check --root .` passed after the architecture summary was
+    refreshed.
+- Skipped / limitations: the standalone semantic-quality report was not rerun;
+  Stage 5 changes build/bootstrap and the gRPC transport implementation, not
+  extraction, ranking, resolution, or confidence. No external reviewer was
+  available in this session; the requested evidence-first SOLID review was run
+  locally against the full Stage 5 diff.
+- Known blockers: none.

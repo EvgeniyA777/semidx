@@ -9,7 +9,8 @@
             [semidx.runtime.grpc :as runtime-grpc]
             [semidx.runtime.usage-metrics :as usage])
   (:import [io.grpc CallOptions ClientInterceptor ClientInterceptors ManagedChannelBuilder Metadata Metadata$Key Status StatusRuntimeException]
-           [io.grpc.stub ClientCalls MetadataUtils]))
+           [io.grpc.stub ClientCalls MetadataUtils]
+           [semidx.runtime.grpc.v1 HealthRequest RuntimeServiceGrpc]))
 
 (defn- write-file! [root rel-path content]
   (let [f (io/file root rel-path)]
@@ -39,9 +40,24 @@
   ([channel method request response->map]
    (unary-call channel method request response->map {}))
   ([channel method request response->map headers]
-  (let [channel* (with-headers channel headers)
-        response (ClientCalls/blockingUnaryCall channel* method CallOptions/DEFAULT request)]
-    (response->map response))))
+   (let [channel* (with-headers channel headers)
+         response (ClientCalls/blockingUnaryCall channel* method CallOptions/DEFAULT request)]
+     (response->map response))))
+
+(deftest runtime-grpc-generated-descriptor-contract-test
+  (is (instance? HealthRequest (grpc-proto/health-request)))
+  (is (= "semidx.runtime.grpc.v1.RuntimeService"
+         RuntimeServiceGrpc/SERVICE_NAME))
+  (is (identical? runtime-grpc/health-method
+                  (RuntimeServiceGrpc/getHealthMethod)))
+  (is (= "/semidx.runtime.grpc.v1.RuntimeService/Health"
+         (str "/" (.getFullMethodName runtime-grpc/health-method))))
+  (is (= #{"Health" "CreateIndex" "ResolveContext" "ExpandContext"
+           "FetchContextDetail" "LiteralFileSlice" "SnapshotDiff"
+           "TraverseRelations"}
+         (->> (.getMethods (RuntimeServiceGrpc/getServiceDescriptor))
+              (map #(.getBareMethodName %))
+              set))))
 
 (deftest runtime-grpc-edge-conformance-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-runtime-grpc-test" (make-array java.nio.file.attribute.FileAttribute 0)))

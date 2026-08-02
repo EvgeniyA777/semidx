@@ -301,20 +301,26 @@ and should receive its own implementation plan before provider work begins.
 
 ## Stage 5 — gRPC generated stubs (gap 3)
 
+**Status:** Delivered under ADR-042.
+
 **Goal:** Replace runtime descriptor-built gRPC messages with generated
 Java/Kotlin stubs from `proto/semidx/runtime/grpc/v1/runtime.proto`.
 
-**Current shape:** `grpc_proto.clj` (431 lines) builds messages from descriptors
-at runtime; `grpc.clj` is the edge; parity tests are `semidx.runtime-grpc-test`.
+**Delivered shape:** `runtime.proto` is the single editable wire-schema source;
+committed generated Java lives under `src-generated/java`; the build contour
+owns pinned code generation and drift verification; the test/runtime launchers
+perform offline idempotent javac preparation; and `grpc_proto.clj` / `grpc.clj`
+use generated messages and `RuntimeServiceGrpc` descriptors.
 
-**Sub-steps:**
+**Delivered sub-steps:**
 1. Add a protobuf codegen path (build alias in `deps.edn`) producing stubs from
    the pinned `.proto`; record the toolchain decision in a new ADR numbered
    with the next available ADR at execution time.
 2. Wire `grpc_proto.clj` / `grpc.clj` to the generated stubs while preserving the
    dedicated runtime envelope messages and error-trailer taxonomy
    (`x-sci-error-code` / `x-sci-error-category`).
-3. Keep a descriptor fallback only if it does not add silent divergence.
+3. Prove parity against the descriptor-built oracle and remove that oracle so
+   no fallback or parallel schema remains.
 
 **Verification:** `semidx.runtime-grpc-test` parity; `clojure -M:runtime-grpc`
 smoke; error-taxonomy trailers unchanged.

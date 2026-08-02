@@ -119,11 +119,14 @@ Concretely:
      |------|---------|------------|--------|
      | protoc | 3.25.1 | osx-aarch_64 | `b6ed65c0d20a9ab88ec6995644f747d557cb9a087eab0152fef5367c34645dc3` |
      | protoc-gen-grpc-java | 1.63.0 | osx-aarch_64 | `28290117a2ee9ea60f50f94273ab139dc2b3be4b8f2a557bef7e6efefee5b363` |
+     | protoc | 3.25.1 | linux-x86_64 | `936e423041c6977036208366507964d5615782b5a450ec8d3d52ff557ffc7101` |
+     | protoc-gen-grpc-java | 1.63.0 | linux-x86_64 | `0e3e8db80ba1fbddeed97ea3220b52cfaa95764ff8bf00716df7322883ce47e8` |
 
    - A platform is supported only after both artifact hashes have been validated
-     and added to the pinned table. At acceptance time, `osx-aarch_64` is the
-     only validated classifier. Candidate classifiers for later validation are
-     `osx-x86_64`, `linux-x86_64`, `linux-aarch_64`, and `windows-x86_64`.
+     and added to the pinned table. The validated classifiers are
+     `osx-aarch_64` and glibc-based `linux-x86_64`. Candidate classifiers for
+     later validation are `osx-x86_64`, `linux-aarch_64`, and
+     `windows-x86_64`.
      Missing or unsupported classifiers raise an explicit build error rather
      than silently falling back to a system `protoc`.
    - grpc-java 1.63.0 publishes the `osx-aarch_64` plugin artifact as a
@@ -166,12 +169,11 @@ Concretely:
    it runs **javac only** (never `protoc`); otherwise it does nothing. After a
    clean clone the first run compiles once; subsequent runs are no-ops.
 
-6. **Descriptor builder is a temporary parity oracle.** The pre-existing
-   `DynamicMessage` builder is retained only until parity with the generated
-   stubs is proven by `semidx.runtime.grpc-test` and the `clojure -M:runtime-grpc`
-   smoke, then removed. The runtime uses the generated
-   `RuntimeServiceGrpc` method/service descriptors and the generated message
-   classes; the error-trailer taxonomy and correlation trailers are unchanged.
+6. **Descriptor parity precedes cutover.** The pre-existing `DynamicMessage`
+   builder was used once as a parity oracle across all 16 messages, then
+   removed. The runtime now uses the generated `RuntimeServiceGrpc`
+   method/service descriptors and generated message classes; the error-trailer
+   taxonomy and correlation trailers are unchanged.
 
 Option 2 loses because it makes `protoc` and network access a hard dependency of
 every test/CI run, creating hidden developer-machine state and local/CI
@@ -211,12 +213,12 @@ runtime descriptor assembler as the contract.
   **not** a silently supported platform. It must either raise the explicit
   unsupported-platform error or be handled by a separate, explicitly validated
   artifact before Alpine is claimed as supported.
-- Only `osx-aarch_64` SHA-256 values are validated at authoring time; other
-  classifiers' hashes are pinned as they are exercised on those platforms.
+- `linux-x86_64` is validated for the glibc-based GitHub Actions runner. Other
+  classifiers remain unsupported until both executable hashes are validated and
+  pinned.
 - Apple Silicon codegen depends on Rosetta 2 because the grpc-java 1.63.0
   `osx-aarch_64` plugin artifact is actually an x86_64 Mach-O binary. This does
   not affect ordinary tests or runtime after generated sources are committed.
-- Remove the descriptor-built `DynamicMessage` assembler once parity is proven.
 
 ## References
 
