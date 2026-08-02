@@ -710,3 +710,53 @@ as part of this planning review.
     local Markdown links, and `git diff --check` passed during the companion
     documentation lifecycle cleanup.
 - Known blockers: none.
+
+## Stage 4.2a - Batched Frontier Provider Kernel Seam
+
+- Status: completed.
+- Scope: Refactor the Stage 3 traversal kernel onto a batched, per-level frontier
+  provider seam (ADR-040) so a PostgreSQL execution backend can later plug in
+  without owning traversal semantics, while keeping the in-memory output
+  byte-identical. This is the kernel-refactor part of Stage 4.2; the public
+  library API and MCP `traverse_relations` tool remain follow-up work.
+- Summary:
+  - `semidx.runtime.relations/traverse-relations-with` now drives the bounded
+    walk level by level and obtains neighbors through a provider
+    `(fn [frontier-nodes direction] -> {node -> (seq relations)})`, called once
+    per depth level (no N+1). All traversal policy - eligibility
+    (`relation_types`, `resolved_only`), direction fan-out, deterministic
+    ordering, cycle handling, and `max_depth`/`max_nodes`/`max_paths` budgets -
+    stays in the kernel. The former `node-neighbors` was split into a pure
+    `relations->steps` (eligibility + fan-out + deterministic sort) plus the
+    `in-memory-neighbor-provider` (batched relation lookup over the snapshot
+    forward/reverse indexes, no semantics).
+  - `traverse-relations` is now a thin wrapper:
+    `(traverse-relations-with (in-memory-neighbor-provider indexes) request)`.
+    Because a whole depth level is contiguous in the original FIFO queue, level
+    batching preserves the exact node/edge/path ordering, truncation flags, and
+    budgets of the Stage 3 kernel.
+- Changed files:
+  - `src/semidx/runtime/relations.clj`
+  - `test/semidx/runtime/relations_test.clj`
+  - `MEMORY.md`
+  - `reports/014_open_gaps_closure_program_progress_log.md`
+- Verification:
+  - semidx MCP `create_index -> resolve_context -> fetch_context_detail` mapped
+    the kernel and the retrieval/impact consumers before editing.
+  - REPL parity check: on a fixture with cycles, multi-target fan-out, ambiguous
+    edges, node/path budget truncation, and multi-start relation-type filtering,
+    the refactored `traverse-relations` output is `=` to the pre-refactor
+    reference across all five cases (byte-identical).
+  - New `traverse-relations-with-batched-frontier-provider-parity-test` asserts
+    the provider seam equals the pure kernel and that neighbors are fetched once
+    per depth level (`[#{A} #{B C} #{D E}]`), proving batched (no N+1) lookup.
+  - `clojure -M:test` passed (`257 tests / 1716 assertions`).
+  - `./scripts/run-mvp-gates.sh` passed (`mvp_gates=ok`, retrieval smokes green).
+  - `./scripts/run-benchmarks.sh` passed (`21/21`).
+  - `./scripts/run-semantic-quality-report.sh` exited `0` with the baseline
+    advisory state unchanged (`expected_change_match_rate=0.8333333333333334`,
+    `identity_stability_rate=1.0`, `move_rename_recovery_rate=1.0`,
+    `implementation_vs_meaning_accuracy=0.6666666666666666`, `unmatched_rate=0.0`).
+- Skipped / limitations: no PostgreSQL provider yet (Stage 4.3); no public
+  library/MCP handler yet (rest of Stage 4.2).
+- Known blockers: none.
