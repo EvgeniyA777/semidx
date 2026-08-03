@@ -70,7 +70,12 @@ The `plans/013` Stage 1 adapter split is now delivered for the current scope:
 - shared line/signature/token and tree-sitter helper mechanics live in `semidx.runtime.languages.shared`
 - the remaining legacy TypeScript adapter block and adapter-private compatibility wrappers have been removed rather than carried forward
 
-The `plans/013` Stage 2 tree-sitter dependency cleanup is now delivered under `ADR-036`: regex parsing remains the guaranteed default, tree-sitter stays optional, runtime CLI resolution prefers explicit parser options, environment configuration, and the repo-managed `.tree-sitter-grammars/bin/tree-sitter` link, and ambient `PATH` is only a developer fallback.
+The `plans/013` Stage 2 tree-sitter dependency cleanup is delivered. ADR-036 is
+superseded: ADR-047 retains its repo-managed CLI/grammar resolution boundary,
+while accepted ADR-046 and plans/018 replace its regex-default authority policy.
+The current regex-first implementation is a legacy migration baseline, not the
+target architecture: fresh SCIP/LSP evidence is primary per operation,
+tree-sitter fills structural gaps, and regex is explicitly degraded fallback.
 
 Stage 3 of `plans/013` is code-complete under ADR-034, ADR-037, ADR-038, and
 ADR-039:
@@ -119,8 +124,9 @@ tenant+actor scoping, unified 429/`RESOURCE_EXHAUSTED` rejections, retry
 metadata, and decision-based usage/SLO metrics. Ingress remains authoritative
 for distributed quotas.
 
-With operational Stages 5-7 complete, the product sequence is provider
-catalog/discovery, then one
-Protobuf/OpenAPI contract-linking vertical slice, then a SCIP evidence-provider
-spike over the same canonical relation graph. Parser-deepening research remains
-future-plan input rather than part of the active Stage 4 queue.
+With operational Stages 5-7 complete, the next semantic priority is the provider
+catalog/discovery foundation followed by the accepted ADR-046 / plans/018
+semantic-provider authority migration. SCIP batch evidence and LSP live-overlay
+evidence enrich the same canonical relation graph; they are not a future
+parallel-graph spike. The Protobuf/OpenAPI vertical slice follows the provider
+foundation, while broader parser-deepening remains evidence-driven.

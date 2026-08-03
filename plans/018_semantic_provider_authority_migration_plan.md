@@ -2,19 +2,19 @@
 title: "Semantic Provider Authority Migration Plan"
 doc_type: "architecture_plan"
 lifecycle: "active"
-status: "draft"
-agent_action: "use_as_input_for_future_plan_only"
+status: "planned"
+agent_action: "reference_for_context"
 updated: "2026-08-02"
 ---
 
 # Architecture Plan: Semantic Provider Authority Migration
 
-Decision dependency: proposed
+Decision dependency: accepted
 [`ADR-046`](../adr/046-prefer-semantic-evidence-providers-over-structural-and-lexical-fallbacks.md).
 
-This plan is review input, not an implementation queue. Do not execute its
-stages until ADR-046 is independently reviewed and accepted and this plan is
-promoted from `draft`.
+This is the approved architecture plan for the migration. Independent review is
+the required first delivery stage and must complete before source implementation
+begins. The repo-managed tree-sitter operational boundary is ADR-047.
 
 ## Goal
 
@@ -358,7 +358,8 @@ Provider Catalog      Provider Adapters
 
 ### Stage 0. Independent Review And Compatibility Baseline
 
-Goal: approve or reject the authority model before implementation.
+Goal: independently challenge the accepted authority model before source
+implementation.
 
 Deliverables:
 
@@ -371,7 +372,7 @@ Deliverables:
 
 Exit criteria:
 
-- ADR-046 is accepted or the plan is revised/rejected.
+- Independent review findings are recorded and resolved or explicitly deferred.
 - Intentional future semantic differences are named before code changes.
 - Baseline comparisons are deterministic.
 
@@ -524,8 +525,9 @@ Deliverables:
 - Deprecation schedule for engine-specific parser options.
 - Removal of shadow-only legacy branches after the agreed retention window.
 - Decision whether another language justifies provider migration.
-- Updated ADR-036, plans/007, runtime docs, MEMORY, onboarding docs, and
-  capability documentation reflecting the accepted authority model.
+- Updated ADR-036 historical marker, ADR-046/ADR-047 cross-links, plans/007,
+  runtime docs, MEMORY, onboarding docs, and capability documentation reflecting
+  the accepted authority model.
 
 Exit criteria:
 
@@ -619,9 +621,11 @@ confidence change through replay and contract review instead of masking it.
 
 ## Independent Review Brief
 
-The reviewing agent should treat ADR-046 and this plan as proposals, not as
-instructions to confirm. Review against current code, accepted ADRs, and active
-plans, and report findings by severity.
+The reviewing agent should treat ADR-046 as the accepted decision of record and
+this plan as the approved migration direction. Challenge implementation
+readiness, hidden assumptions, and unsafe sequencing rather than reopening the
+authority decision by default. Review against current code, accepted ADRs, and
+active plans, and report findings by severity.
 
 Required review questions:
 
@@ -629,7 +633,7 @@ Required review questions:
    model meet the same correctness requirements?
 2. Are SCIP and LSP correctly treated as peers whose precedence depends on
    freshness and workspace mode?
-3. Is the proposed source-identity rule sufficient to prevent stale exact facts?
+3. Is the source-identity rule sufficient to prevent stale exact facts?
 4. Can current unit and ADR-039 relation identities safely support multi-provider
    evidence merging?
 5. Does `FactEvidence` need a public contract immediately, or should it remain
@@ -640,25 +644,26 @@ Required review questions:
    and incremental-index regressions?
 8. Should TypeScript remain the first SCIP slice, or does concrete Java toolchain
    evidence justify reversing the order?
-9. Which clauses of ADR-036 and plans/007 must be superseded or amended if
-   ADR-046 is accepted?
+9. Verify that ADR-036 supersession, ADR-047 toolchain retention, and the
+   plans/007 amendment leave no active conflicting parser-authority rule.
 10. Identify any simpler design that preserves exact semantic authority,
     deterministic fallback, and explicit degradation with less machinery.
 
 Expected review output:
 
 - findings ordered by severity with file/line evidence;
-- explicit recommendation: accept, accept with changes, or reject;
+- implementation-readiness recommendation: proceed, proceed after named
+  revisions, or block pending a named decision;
 - unresolved decisions that require the project owner;
-- smallest revision set needed before ADR acceptance;
+- smallest revision set needed before implementation;
 - verification performed and limitations.
 
-## Promotion Criteria
+## Execution Admission
 
-This plan may move from `draft` to `planned` only when:
+Stage 1 source implementation may begin only when:
 
 - independent review findings are recorded and resolved or explicitly deferred;
-- ADR-046 is accepted;
-- any supersession/amendment of ADR-036 and plans/007 is documented;
+- ADR-046 and ADR-047 are accepted;
+- ADR-036 supersession and the plans/007 amendment are documented;
 - Stage 0 baseline scope and ownership are approved;
 - the project owner confirms whether TypeScript remains the first vertical slice.

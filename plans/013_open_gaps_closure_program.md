@@ -35,8 +35,9 @@ review findings and their disposition, blockers, skipped checks).
    lanes and shared helpers now own extraction; `adapters.clj` is the thin
    dispatch facade required by the deeper semantic stages.
 2. **Stage 2 — Remove tree-sitter external-CLI runtime dependency** (gap 6) —
-   delivered under ADR-036 with regex as the guaranteed default and the
-   repository-managed toolchain as optional acceleration.
+   delivered with the repository-managed toolchain now recorded by ADR-047. The
+   historical regex-default authority clause in ADR-036 is superseded by
+   ADR-046 and plans/018.
 3. **Stage 3 — Interprocedural / dataflow-sensitive resolution v1** (gap 1). The
    major semantic tranche, built on the clean adapter base from Stage 1.
 4. **Stage 4 — Semantic graph query surface** (gap 7). Builds on the stabilized
@@ -142,16 +143,21 @@ sub-step; benchmark/quality parity is the gate.
 **Goal:** Make tree-sitter extraction work without a runtime dependency on an
 externally-installed tree-sitter CLI; keep pinned-grammar reproducibility.
 
+**Historical-policy note:** this delivered stage established the toolchain only.
+Its original regex-default authority policy is no longer current; ADR-046 makes
+tree-sitter a structural provider and regex degraded fallback, with migration
+sequenced by plans/018.
+
 **Current shape:** `scripts/setup-tree-sitter-grammars.sh` pins grammar refs
 (Clojure/Java/TypeScript); `tree-sitter-available?` / `tree-sitter-cst` in the
 lane layer shell out to the external CLI; `.tree-sitter-grammars/` holds
 bootstrapped grammars.
 
 **Sub-steps:**
-1. Use ADR-036 as the accepted strategy: keep regex parsers as the guaranteed
-   default, keep tree-sitter as optional acceleration, and resolve acceleration
-   through explicit parser options, environment configuration, and a
-   repository-managed toolchain rather than a required external CLI.
+1. Historical implementation used ADR-036 to resolve tree-sitter through
+   explicit parser options, environment configuration, and a repository-managed
+   toolchain rather than a required external CLI. ADR-047 retains that toolchain
+   decision independently of parser authority.
 2. Implement the chosen path in `languages/shared.clj` tree-sitter helpers.
 3. Ensure clean degradation + a diagnostic when the accelerated path is
    unavailable (no silent fallback — surface it).
@@ -291,8 +297,10 @@ the unrelated runtime-operations stages below:
    relations.
 3. Ship one Protobuf/OpenAPI vertical slice that links a contract operation to
    a client call site, implementation, generated artifact, and documentation.
-4. Evaluate SCIP as an evidence provider over the same relation contract; it
-   must enrich existing semantic relations rather than create a parallel graph.
+4. Execute the accepted ADR-046 / plans/018 semantic-provider migration:
+   SCIP/LSP evidence must enrich existing semantic relations rather than create
+   a parallel graph, tree-sitter fills structural gaps, and regex is degraded
+   fallback.
 
 This product sequence is independent of the ordering of operational Stages 5-7
 and should receive its own implementation plan before provider work begins.

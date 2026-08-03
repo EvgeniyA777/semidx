@@ -2,7 +2,7 @@
 file_type: adr
 decision_id: ADR-046
 title: Prefer Semantic Evidence Providers Over Structural And Lexical Fallbacks
-status: proposed
+status: accepted
 date: 2026-08-02
 deciders:
   - project owner
@@ -14,22 +14,24 @@ tags:
   - tree-sitter
   - parsing
 summary: Prefer fresh compiler-grade semantic evidence from SCIP or LSP, use tree-sitter for structural gap filling, and restrict regex extraction to an explicitly degraded last-resort tier.
-agent_summary: This ADR is proposed and must not be implemented as an accepted repository rule yet. Review the per-operation authority ladder, freshness rules, fact arbitration, and migration consequences; if accepted, it replaces the regex-default policy in ADR-036 and requires multi-provider enrichment beyond plans/007 Decision 9.
-supersedes: []
+agent_summary: This ADR is the decision of record for Java and TypeScript evidence authority. Fresh SCIP/LSP evidence is primary per operation, tree-sitter fills structural gaps, and regex is an explicitly degraded fallback. Execute the staged migration in plans/018; use ADR-047 for managed tree-sitter toolchain resolution.
+supersedes:
+  - ADR-036
 superseded_by: null
 links:
   - ADR-004
   - ADR-028
   - ADR-036
   - ADR-039
+  - ADR-047
   - plans/007
   - plans/018
 ---
 
 # ADR-046: Prefer Semantic Evidence Providers Over Structural And Lexical Fallbacks
 
-**Status**: Proposed  
-**Date**: 2026-08-02  
+**Status**: Accepted
+**Date**: 2026-08-02
 **Deciders**: project owner
 
 ---
@@ -99,7 +101,7 @@ one winner for the entire file.
 
 ## Decision
 
-We propose Option 3: per-operation semantic authority with lower-tier gap
+We accept Option 3: per-operation semantic authority with lower-tier gap
 filling.
 
 ### Authority ladder
@@ -249,14 +251,12 @@ ceilings, or observable retrieval behavior.
 
 ## Status Changes
 
-This ADR is proposed only. ADR-036 remains the current decision of record until
-ADR-046 is independently reviewed and accepted. On acceptance:
-
-- ADR-046 supersedes only ADR-036's parser-authority/default policy;
-- ADR-036 remains authoritative for repo-managed tree-sitter executable and
-  grammar resolution unless a separate decision replaces that toolchain;
-- plans/007 Decision 9 must be amended or superseded before multi-provider
-  execution becomes the default.
+ADR-046 supersedes ADR-036's mixed parser-authority decision. The
+repo-managed tree-sitter executable and grammar-resolution boundary is retained
+and restated without regex-default policy in ADR-047. Plans/007 Decision 9 is
+amended by this ADR and plans/018: Java and TypeScript use a bounded
+multi-provider plan, while a single primary provider remains sufficient for
+unrelated simple document-provider cases.
 
 ## References
 
@@ -283,4 +283,3 @@ This decision is fully implemented only when:
    can change snapshot output.
 9. Protected retrieval, relation, impact, snapshot-diff, and storage gates pass
    before the provider pipeline becomes the default.
-

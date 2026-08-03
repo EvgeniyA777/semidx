@@ -2,6 +2,12 @@
 
 This document describes the current MVP in-memory library API.
 
+> Architecture policy: ADR-046 is accepted. Fresh SCIP/LSP evidence is the
+> target semantic-authority tier, tree-sitter is structural gap filling, and
+> regex is degraded fallback. The legacy parser-engine behavior documented below
+> remains current implementation only until plans/018 completes; it is not the
+> target policy. ADR-047 retains the repo-managed tree-sitter toolchain.
+
 ## Namespace
 
 - `semidx.core`
@@ -9,10 +15,10 @@ This document describes the current MVP in-memory library API.
 ## Language Coverage (MVP)
 
 - Clojure (`.clj/.cljc/.cljs`) via `clj-kondo` primary path and regex fallback
-- Java (`.java`) via lightweight regex parser
+- Java (`.java`) via legacy lightweight regex parser pending provider migration
 - Elixir (`.ex/.exs`) via lightweight regex parser with optional tree-sitter path
 - Python (`.py`) via lightweight regex parser
-- TypeScript (`.ts/.tsx`) via lightweight regex parser
+- TypeScript (`.ts/.tsx`) via legacy lightweight regex parser pending provider migration
 - Lua (`.lua`) via lightweight regex parser
 - Java/Elixir/Python/TypeScript/Lua call tokens are normalized for module/class-aware call graph linking
 
@@ -71,7 +77,7 @@ Example with parser options:
                 :tree_sitter_enabled false}})
 ```
 
-Tree-sitter extraction path (optional):
+Legacy tree-sitter extraction path (current implementation):
 
 ```clojure
  (sci/create-index
@@ -88,8 +94,11 @@ Tree-sitter extraction path (optional):
                                        :typescript ".tree-sitter-grammars/tree-sitter-typescript/typescript"}}})
 ```
 
-Regex parsers remain the default and guaranteed path. Tree-sitter is optional:
-when enabled, the runtime resolves the CLI from `:tree_sitter_cli_path`,
+The current legacy parser options default Java and TypeScript to regex while the
+migration is in progress. This is not current architecture policy: ADR-046 /
+plans/018 require provider planning with fresh SCIP/LSP authority, tree-sitter
+structural gap filling, and regex degraded fallback. Tree-sitter execution
+resolves the CLI from `:tree_sitter_cli_path`,
 `SEMIDX_TREE_SITTER_CLI_PATH`, `.tree-sitter-grammars/bin/tree-sitter`, then
 ambient `PATH` as a developer fallback.
 
@@ -1492,8 +1501,13 @@ The semantic-quality report lane is advisory in v1:
 - TypeScript semantic-core now emits object-literal methods, class field arrow methods, default-export alias indirection, and direct re-export alias units through the dedicated TypeScript language module, with regex/tree-sitter parity for those advanced surfaces while still treating the overall language lane as conservative `low`-ceiling coverage.
 - Parsed files and units now also carry additive `semantic_pipeline` metadata, which is the internal anchor for the new semantic stabilization tranche; this does not change the public retrieval schema roots.
 - Language-specific parser entrypoints now live under `semidx.runtime.languages.*`, while `semidx.runtime.adapters/parse-file` remains the canonical facade used by index creation.
-- Java and Python parsers are lightweight regex-based in MVP; Elixir and TypeScript are regex-first with optional tree-sitter paths.
-- `tree-sitter` extraction is implemented for Clojure, Elixir, Java, and TypeScript when corresponding grammar paths are configured.
+- The current Java/TypeScript parser-engine defaults are legacy compatibility
+  behavior pending plans/018, not the authority policy. Fresh SCIP/LSP evidence
+  is primary under ADR-046; tree-sitter fills structural gaps and regex is
+  explicitly degraded fallback.
+- Tree-sitter execution is implemented for Clojure, Elixir, Java, and TypeScript
+  when corresponding grammar paths are configured, using the ADR-047
+  repo-managed toolchain boundary.
 - If tree-sitter is requested but unavailable/misconfigured, runtime falls back with diagnostics (`tree_sitter_*` codes).
 - Raw-code escalation stage is late and opt-in via query options (`allow_raw_code_escalation`) and bounded by `constraints.max_raw_code_level`.
 - Ranking is structural-first and tiered, with hard ceilings when Tier1 evidence is missing.

@@ -50,7 +50,8 @@ This plan does not cover:
 
 - detailed Markdown or YAML extraction rules;
 - AutoParts-specific reference policies;
-- Kotlin, Swift, LSP, or JetBrains implementation details;
+- Kotlin, Swift, or JetBrains implementation details; Java/TypeScript LSP and
+  SCIP authority are defined by ADR-046 and plans/018.
 - user-facing editing, rename, or refactoring operations;
 - embedding model selection.
 
@@ -69,6 +70,9 @@ This plan does not cover:
   freshness guarantees.
 - The first provider-registry version is an in-process Clojure data registry,
   not a plugin framework or remote extension marketplace.
+- ADR-046 amends the V1 one-primary-provider limitation for Java and TypeScript:
+  they use bounded, capability-specific multi-provider plans. A single primary
+  provider remains sufficient for unrelated simple document-provider cases.
 
 ## Change Model
 
@@ -328,18 +332,21 @@ This follows the interface-segregation pattern also visible in LSP, where
 capabilities are advertised per operation instead of treating all servers as
 equivalent.
 
-### Decision 9. Provider Selection Uses A Dedicated Deterministic Policy
+### Decision 9. Provider Planning Uses A Dedicated Deterministic Policy
 
 Provider selection is a pure policy owned outside the orchestrator:
 
 ```text
-select_provider(file_metadata, provider_descriptors, project_overrides)
-  -> selected_provider | no_provider | ambiguous_selection
+plan_providers(file_metadata, requested_operations, provider_descriptors,
+               runtime_status, source_identity, project_overrides)
+  -> ProviderPlan | no_provider | ambiguous_selection
 ```
 
-V1 chooses exactly one primary indexing provider per file. Multi-provider
-enrichment is explicitly postponed until a real use case requires merging
-facts from multiple providers.
+For simple document providers, one primary provider per file remains the
+default. For Java and TypeScript, ADR-046 requires a bounded plan per operation:
+fresh SCIP/LSP semantic evidence, tree-sitter structural gap filling, and regex
+only as degraded fallback. The planner, not a provider implementation, decides
+which providers are eligible and when lower-tier gap filling is needed.
 
 Selection precedence:
 
@@ -356,9 +363,10 @@ Within the same selector class:
 3. a non-fallback provider always beats fallback;
 4. an unresolved top-level tie produces `ambiguous_provider_selection`.
 
-An unresolved tie does not silently select by registration order or provider
-identifier. The affected file is reported as failed or skipped; the rest of the
-repository may still be indexed.
+An unresolved equal-authority tie does not silently select by registration order
+or provider identifier. The affected operation is reported as ambiguous; the
+rest of the repository may still be indexed through eligible non-conflicting
+providers.
 
 This borrows the useful part of VS Code's document-selector model: providers
 declare applicability, selectors receive specificity scores, and selection is
@@ -590,7 +598,7 @@ Primary expected location:
 
 Responsibility:
 
-- select one primary provider or produce an explicit selection diagnostic.
+- produce a bounded ProviderPlan or an explicit selection diagnostic.
 
 Knows about:
 
@@ -785,6 +793,8 @@ Exit criteria:
 - fallback cannot outrank a specific provider;
 - unresolved ties are reported explicitly;
 - provider selection is independently testable.
+- Java/TypeScript multi-provider plans preserve deterministic authority and
+  explicit degradation under ADR-046.
 
 ### Stage 3. Discovery Separation
 
@@ -871,8 +881,9 @@ Goal:
 - add Kotlin, Gradle Kotlin DSL, project structure, and external providers
   without changing the stable provider-selection and relation contracts.
 
-LSP and JetBrains providers must adapt their operation capabilities and runtime
-status into the same runtime-owned schemas.
+Java/TypeScript SCIP and LSP providers are sequenced by plans/018. Future LSP
+and JetBrains providers must adapt their operation capabilities and runtime
+status into the same runtime-owned schemas without changing provider planning.
 
 ## Contract Tests
 
@@ -894,6 +905,8 @@ status into the same runtime-owned schemas.
 - fallback is selected only when no stronger provider is eligible;
 - tied primary providers produce `ambiguous_provider_selection`;
 - registration order does not affect selection.
+- Java/TypeScript lower-authority providers cannot overwrite fresh exact facts;
+  equal-authority conflicts remain observable.
 
 ### Provider Substitution Contract
 
@@ -1008,7 +1021,8 @@ Why it matters:
 Mitigation:
 
 - data registry only;
-- one primary provider per file;
+- bounded provider plans with one primary only where no multi-provider semantic
+  authority is required;
 - no external loading before a concrete provider requires it.
 
 ### [Medium] Relation Dual-Write Diverges
@@ -1060,9 +1074,10 @@ system wholesale:
   while others explicitly merge provider results:
   - <https://code.visualstudio.com/api/references/vscode-api#DocumentSelector>
 
-The `semidx` design intentionally chooses one primary indexing provider per file
-for V1. This is stricter than VS Code's operation-specific merging behavior and
-avoids premature multi-provider fact reconciliation.
+For simple document-provider cases, `semidx` intentionally retains one primary
+indexing provider per file. ADR-046 and plans/018 introduce the first justified
+exception: bounded Java/TypeScript semantic-provider reconciliation with stable
+fact identity, source-identity checks, and explicit conflict diagnostics.
 
 ## First Executable Plan Boundary
 
