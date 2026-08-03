@@ -125,7 +125,9 @@ after this memory file.
 - Runtime hardening is now effectively complete for the main roadmap scope; any remaining ops work is incremental polish rather than a missing Phase 4 primitive.
 - Real self-improvement loop is now operationally complete for the current roadmap scope: replay harvesting, difficult-case capture, calibration reports, weekly review artifacts, protected replay dataset conversion, retained review/governance runs, queue/status reporting, and top-level retained Phase 5 orchestration all exist.
 - Compact-first staged retrieval is now fully aligned as the canonical public flow: `resolve_context` is compact-first, `expand_context` / `fetch_context_detail` are the explicit later stages, selection artifacts are snapshot-bound, and the implementation/docs/examples line is captured by `ADR-024` plus the completed `plans/002_compact_first_staged_retrieval_plan.md`.
-- `plans/019` is the planned LLM delivery/evaluation track: add an external one-shot `get_context` facade over the same snapshot-bound staged state machine, retain ContextPacket as the structured source of truth, make Markdown an optional bounded projection, and compare task value against staged and lexical baselines. ADR-024 remains current; changing the documented canonical default requires comparative evidence and a new ADR.
+- `plans/019` is the planned LLM one-shot delivery track: add an external `get_context` facade over the same snapshot-bound staged state machine, retain ContextPacket as the structured source of truth, make Markdown an optional bounded projection, and contribute staged/one-shot strategy adapters to the benchmark substrate owned exclusively by `plans/020`. Its top-level response budget is authoritative, `structured`/`markdown`/diagnostic allocations are disjoint, and usage telemetry distinguishes aggregate from stage accounting. ADR-024 remains current; changing the documented canonical default requires comparative evidence and a new ADR.
+- `plans/020` is in progress and is the exclusive owner of the real-repository task corpus, immutable `BenchmarkRun`/`TaskAttempt` identities, A/B/C/D strategy harness, provider/API/model usage adapters, price schedules, and success-per-cost aggregation. Stage 1 (`returned_tokens` fidelity) is delivered. Stage 0 plan contracts were corrected after architecture review; they must be version-locked before the pilot, and Stage 2 has not started.
+- `plans/018` remains planned and source-unimplemented. Multi-provider evidence must normalize to a provider-neutral `CanonicalFactKey` before arbitration; provider ids, native symbols, source identity, and mutable evidence are not stable merge keys. Cross-provider Java overload and TypeScript re-export identity fixtures are Stage 0/1 admission gates.
 - Dedicated `impact_analysis` now computes impact hints directly from the resolved selection artifact instead of reading `expand_context`'s budget-gated `:impact_hints` field; it must return a non-null map with `:callers`, `:dependents`, `:related_tests`, and `:risky_neighbors` vectors even when `expand_context` omits impact hints for token-budget reasons.
 - MCP `create_index` handles are workspace-root isolated: stale cache entries whose entry `:root_path` does not match the embedded index `:root_path`, or whose cache key points at a different requested root, are discarded instead of being reused; a storage-loaded index with an unexpected root is rebuilt for the requested canonical root.
 - Intent-only retrieval with `include_tests` now has a test-aware lexical path: file paths participate in lexical matching, `src/test/...` is classified as test code before generic `src/` source code, and `focus_on_tests` boosts already-matched test units without broadening to unrelated tests.
@@ -223,29 +225,30 @@ after this memory file.
 
 ## Next Execution Priorities
 
-1. Stage 3 of `plans/013` is code-complete: relation identity/evidence split (ADR-039), the pure bounded traversal kernel (`traverse-relations`), and the bounded, reason-coded relation-backed impact projection (`:relation_support`) are all delivered. Any remaining Stage 3 work is confidence-ceiling recalibration only if future evidence supports it (currently a documented non-bump).
-2. Ambiguous relation-backed flows stay conservative and the traversal kernel and projection both default to `:resolved_only true`.
-3. Stage 4 (semantic graph query surface, gap 7) is fully code-complete under
-   ADR-040: JSON/malli contract (4.1), the batched `traverse-relations-with`
-   kernel seam (4.2), the public `relation-traversal` on library + MCP
-   `traverse_relations` (4.2), the forward-only PostgreSQL
-   `semantic_index_relations` projection + `pg-relation-neighbor-provider` at
-   parity with the pure kernel (4.3), and HTTP (`POST
-   /v1/retrieval/traverse-relations`) + gRPC (`TraverseRelations`) exposure of the
-   same contract (4.4). The only optional residual is an explicit reprojection
-   command for snapshots saved before the projection existed. Next frontier: the
-   post-Stage-4 product sequence (provider catalog/discovery) and the independent
-   operational Stages 5-7. Stage 5 is fully delivered under ADR-042: complete
-   authoritative `.proto`, pinned tool acquisition, deterministic committed
-   generated-stub runtime cutover, and descriptor-oracle removal. Stage 6 is also delivered: the HTTP runtime exposes an online policy control-plane (`/v1/policies/registry`, `/v1/policies/promote`, `/v1/policies/retire`) that validates offline decision artifacts, decision-bound approvals, operation-scoped authz, and persistence-before-publication transitions. Stage 7 is delivered under ADR-044 with shared, opt-in HTTP/gRPC runtime-edge rate limiting; the next operational work is incremental hardening rather than an open Stage 5-7 gap.
-4. Execute plans/018 after its independent review: provider catalog/planning,
-   fact evidence/arbitration, TypeScript then Java SCIP slices, LSP live overlays,
-   and the default authority switch. Execute the independent plans/019 delivery
-   track as an additive one-shot MCP slice plus comparative evaluation; use its
-   task-value evidence for the plans/018 default switch without coupling delivery
-   code to provider ids. Protobuf/OpenAPI follows the provider foundation.
-5. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
-6. On the next Antigravity touchpoint, explicitly test staged continuation after `resolve_context`: require `expand_context` and `fetch_context_detail`, verify the client reuses `selection_id` / `snapshot_id`, and check whether evidence quality improves without falling back to manual browsing.
+1. Continue `plans/020`: freeze the A/B/C/D arms, suite/run/attempt schemas,
+   shared task-prompt and arm-policy bundle, execution-budget policy, cache
+   protocol, provider usage-adapter versions, and price schedule;
+   then implement the four-arm harness, attempt-first aggregator, and first
+   external-repository evidence run. Do not start the pilot with unresolved
+   pricing semantics.
+2. Complete `plans/018` admission work: approve `CanonicalFactKey`, add
+   cross-provider Java overload and TypeScript re-export identity fixtures, and
+   confirm TypeScript as the first SCIP slice unless toolchain evidence justifies
+   reversing it. Then implement provider evidence/arbitration and shadow planning
+   before any default authority switch.
+3. Execute `plans/019` as an additive one-shot delivery track after its budget
+   ledger and the `plans/020` run/strategy contracts are accepted. Its evaluation
+   stage contributes adapters to `plans/020`; it does not own a second corpus,
+   usage normalizer, or scorecard.
+4. Keep relation-backed flows conservative: ambiguous facts remain excluded from
+   resolved-only traversal, and confidence ceilings change only with replay and
+   task-value evidence.
+5. Keep roadmap, ADRs, examples, runtime surfaces, and active-plan lifecycle
+   metadata aligned with the same canonical staged flow and current ownership.
+6. On the next Antigravity touchpoint, explicitly test staged continuation after
+   `resolve_context`: require `expand_context` and `fetch_context_detail`, verify
+   reuse of `selection_id` / `snapshot_id`, and check that evidence quality
+   improves without fallback to manual browsing.
 
 ## Update Rule
 

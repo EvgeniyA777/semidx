@@ -83,9 +83,11 @@ retrieval.
 - Fact quality via the authority ladder (§4) — SCIP/LSP over tree-sitter over
   regex:
   [`adr/046-prefer-semantic-evidence-providers-over-structural-and-lexical-fallbacks.md`](adr/046-prefer-semantic-evidence-providers-over-structural-and-lexical-fallbacks.md),
-  [`plans/018_semantic_provider_authority_migration_plan.md`](plans/018_semantic_provider_authority_migration_plan.md). **[in-progress]**
+  [`plans/018_semantic_provider_authority_migration_plan.md`](plans/018_semantic_provider_authority_migration_plan.md). **[planned]**
 - One-shot context delivery on top of staging:
-  [`plans/019_llm_one_shot_context_delivery_and_evaluation_plan.md`](plans/019_llm_one_shot_context_delivery_and_evaluation_plan.md). **[in-progress]**
+  [`plans/019_llm_one_shot_context_delivery_and_evaluation_plan.md`](plans/019_llm_one_shot_context_delivery_and_evaluation_plan.md). **[planned]**
+- Comparative real-repository value evidence:
+  [`plans/020_retrieval_value_benchmark_harness_plan.md`](plans/020_retrieval_value_benchmark_harness_plan.md). **[in-progress]**
 
 **Exit gate**: the code-graph value hypothesis (§5.1) passes on real repos.
 
@@ -180,10 +182,11 @@ wall-clock using semidx retrieval *than* with `rg` + reading files (and `rg` +
 LSP where available), *because* graph-backed, structure-ranked, staged, budgeted
 context supplies the relevant code without whole-file dumping.
 
-**North Star candidate.** *Agent task success per unit cost* (cost-weighted
-tokens — cache reads ~0.1× — normalized per agent) on a fixed real-repo suite,
-relative to the best cheap baseline. Inputs: retrieval precision/recall, packet
-compactness under budget, `exact`-tier coverage vs `heuristic` fallback.
+**North Star candidate.** *Agent task success per unit cost* (provider-priced
+input/cache/output/reasoning/tool usage, normalized per agent) on a fixed
+real-repo suite, relative to the preregistered competent `rg`+read baseline.
+Inputs: retrieval precision/recall, packet compactness under budget,
+`exact`-tier coverage vs `heuristic` fallback.
 
 **Why not yet proven.** Current benchmarks build a synthetic repository and score
 against self-authored expectations
@@ -191,22 +194,28 @@ against self-authored expectations
 behavior validation, not comparative product value. Any "N× token savings" figure
 is an internal fixture result.
 
-**Test.** Reproducible real-repo benchmark vs (a) `rg` + reading files, (b) an
-LSP/SCIP baseline where available, (c) a no-index agent. Measured on task
-success, false negatives, wall-clock, tool calls, and cost (cost-weighted tokens,
-normalized per agent — raw usage semantics differ by provider). The three-arm
-measurement harness, per-agent usage normalization, and success-per-cost
-aggregation are specified in
+**Test.** Reproducible real-repo benchmark with four strategy arms: (A) semidx,
+(B) competent `rg` + reading files, (C) `rg` + an LSP/SCIP navigation baseline
+where available, and (D) the agent's versioned native no-index browsing policy.
+Measured on task success, false negatives, wall-clock, tool calls, and cost
+(cost-weighted tokens, normalized per agent — raw usage semantics differ by
+provider). The four-arm measurement harness, per-agent usage normalization, and
+success-per-cost aggregation are specified in
 [`plans/020_retrieval_value_benchmark_harness_plan.md`](plans/020_retrieval_value_benchmark_harness_plan.md).
+
+B is the preregistered primary comparator for the Phase 1 verdict. C and D are
+reported controls; an unavailable C is explicit, and neither control may replace
+B or redefine the pass/fail rule after scoring begins.
 
 - **Success signal** (provisional, *moderate* posture — locked after the Stage 0
   pilot, never after scoring): arm A runs at **≥50% lower cost (≥2×;
-  cost-weighted tokens — cache reads ~0.1×)** than the competent `rg`+read
+  versioned provider/model price schedules)** than the competent `rg`+read
   baseline B, at task success **≥ B − 5 percentage points** (parity within the
   noise band), wall-clock **≤ 1.5× B**, over **≥30 tasks including ≥1 external
   repository**.
-- **Failure signal**: A does not reach 2× lower cost at parity success, or loses
-  more than 5 percentage points of task success vs the best cheap baseline.
+- **Failure signal**: A does not reach 2× lower cost against B at parity success,
+  or loses more than 5 percentage points of task success vs B. C and D inform
+  diagnosis but do not rescue the primary verdict.
 
 **Pilot-then-lock.** The margins above are provisional. Stage 0 of
 [`plans/020`](plans/020_retrieval_value_benchmark_harness_plan.md) runs a small

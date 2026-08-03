@@ -15,8 +15,8 @@ Status: Active, partially implemented architecture plan
 
 Resolve the structural gaps identified in:
 
-- [План работ: расширение `semidx`](../notes/2026-06-09-1015-95e50b0e-5dfa-4033-bc2b-db6db47ffda4.md);
-- [SOLID-обзор: план расширения semidx](../notes/2026-06-09-solid-architecture-review.md).
+- [Original `semidx` extension work plan](../notes/2026-06-09-1015-95e50b0e-5dfa-4033-bc2b-db6db47ffda4.md);
+- [SOLID review of the `semidx` extension plan](../notes/2026-06-09-solid-architecture-review.md).
 
 This document defines the architecture that later implementation plans must
 follow. It answers the open questions around:
@@ -1079,21 +1079,31 @@ indexing provider per file. ADR-046 and plans/018 introduce the first justified
 exception: bounded Java/TypeScript semantic-provider reconciliation with stable
 fact identity, source-identity checks, and explicit conflict diagnostics.
 
-## First Executable Plan Boundary
+## Historical First Boundary And Current Continuations
 
-The next implementation plan must cover only Stages 0 and 1:
+The original first executable boundary covered only Stages 0 and 1: contract
+baselines, workspace state, freshness policy, lifecycle coordination, snapshot
+payload persistence, stale-cache prevention, atomic publication, tests, and
+public lifecycle diagnostics. That boundary was executed by
+[`plans/008`](./008_stage_0_1_workspace_freshness.md) and is historical; agents
+must not treat it as the next work queue.
 
-- contract baselines;
-- workspace state;
-- freshness policy;
-- lifecycle coordination;
-- snapshot payload persistence;
-- stale-cache prevention;
-- atomic publication;
-- tests and public lifecycle diagnostics.
+Current continuations are owned by narrower active plans:
 
-Provider catalog, discovery separation, typed relations, Markdown, and YAML must
-remain outside that first executable plan.
+- [`plans/018`](./018_semantic_provider_authority_migration_plan.md) owns the
+  provider catalog/planning, fact evidence/arbitration, and Java/TypeScript
+  semantic-authority migration. Its provider-neutral `CanonicalFactKey` must be
+  established before multi-provider arbitration.
+- [`plans/019`](./019_llm_one_shot_context_delivery_and_evaluation_plan.md) owns
+  additive one-shot delivery and its strategy adapters.
+- [`plans/020`](./020_retrieval_value_benchmark_harness_plan.md) owns the shared
+  real-repository corpus, benchmark-run identity, cross-strategy harness, usage
+  normalization, price schedules, and comparative aggregation.
+- Markdown/YAML discovery and vertical slices remain later stages of this plan;
+  they require dedicated executable plans after the provider seam is stable.
+
+The typed-relation substrate for new graph semantics is delivered, while legacy
+call/import compatibility migration remains governed by the Stage 4 parity gate.
 
 ## Completion Criteria For This Architecture Plan
 

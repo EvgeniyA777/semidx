@@ -13,7 +13,8 @@ This plan adds an LLM-oriented composite retrieval operation, an optional
 Markdown projection, and evidence that the result is more useful than simpler
 alternatives. It is intentionally separate from
 [`plans/018`](./018_semantic_provider_authority_migration_plan.md): that plan
-owns evidence-provider authority, while this plan owns delivery and evaluation.
+owns evidence-provider authority, while this plan owns one-shot delivery and the
+strategy adapters needed to evaluate that delivery through `plans/020`.
 
 ## Decision Boundary
 
@@ -25,8 +26,17 @@ snapshot-bound selection artifact, budgets, diagnostics, and typed failures.
 Shipping an additive one-shot operation does not require superseding ADR-024.
 Making one-shot the documented canonical default, removing staged operations,
 or weakening selection stability requires a new ADR supported by comparative
-evidence from this plan. Until then, staged operations remain normative and
-one-shot remains a convenience surface for clients that prefer one round trip.
+evidence from `plans/020` using the adapters supplied by this plan. Until then,
+staged operations remain normative and one-shot remains a convenience surface
+for clients that prefer one round trip.
+
+[`plans/020`](./020_retrieval_value_benchmark_harness_plan.md) is the sole owner
+of the real-repository task corpus, benchmark-run and task-attempt schemas,
+cross-strategy harness, provider usage normalization, price schedules, and
+success/cost aggregation. This plan owns only the one-shot delivery surface,
+delivery-specific fixtures, and strategy adapters that plug into that substrate.
+The latest independent review and resolved plan findings are recorded in
+[`reports/022`](../reports/022_latest_active_plans_architecture_review.md).
 
 ## Goal
 
@@ -51,8 +61,8 @@ In:
   after value is demonstrated.
 - A versioned deterministic one-shot policy.
 - Structured, Markdown, and combined response projections.
-- Protected comparative task fixtures and measurement of quality, latency,
-  round trips, and output cost.
+- Delivery-specific protected fixtures plus staged/one-shot strategy adapters
+  that consume the corpus and measurement contracts owned by `plans/020`.
 - Compatibility with provider evidence introduced by `plans/018` without
   provider-specific delivery logic.
 
@@ -92,8 +102,8 @@ Out:
 | Add or change a transport | Thin transport adapter |
 | Change retrieval ranking or graph semantics | Existing retrieval/graph boundary |
 | Add or change an evidence provider | `plans/018` provider pipeline |
-| Add an evaluation strategy | Comparative evaluation harness |
-| Change promotion thresholds | Versioned evaluation policy |
+| Add a one-shot evaluation strategy | One-shot strategy adapter in this plan |
+| Change corpus, run identity, cost normalization, or thresholds | `plans/020` benchmark substrate |
 
 ## Target Architecture
 
@@ -196,18 +206,20 @@ Rules:
 
 Initial location: `src/semidx/runtime/context_renderer.clj`.
 
-### 4. Comparative Evaluation Harness
+### 4. One-Shot Evaluation Adapters
 
-Responsibility: run the same protected tasks against multiple retrieval
-strategies and compare normalized outcomes.
+Responsibility: expose staged, one-shot structured, and one-shot Markdown as
+strategy adapters to the benchmark substrate owned by `plans/020`.
 
-It owns strategy adapters and metrics, not retrieval implementation. A strategy
-adapter returns a common evaluation result containing selected paths/symbols,
-latency, request count, output size, degradation, and task evidence.
+It owns delivery-specific adapters and assertions, not the corpus, run schema,
+usage normalization, price schedule, aggregation, thresholds, or retrieval
+implementation. Each adapter returns the common strategy result defined by
+`plans/020`, including selected paths/symbols, latency, request count, output
+size, degradation, and task evidence.
 
-Initial location: extend `src/semidx/runtime/benchmarks.clj` only for the first
-vertical slice; extract `runtime/task_evaluation.clj` after the second real
-strategy proves a stable contract.
+Initial location: keep the first delivery adapters beside the benchmark adapter
+seam introduced by `plans/020`; do not create a second evaluation framework or
+extract a generic module from this plan alone.
 
 ## One-Shot Contract
 
@@ -228,6 +240,13 @@ strategy proves a stable contract.
 The first slice requires `index_id`. A future workspace reference or cold-start
 mode needs separate lifecycle and authorization review because it combines
 index creation cost with retrieval latency.
+
+The top-level `budget` is the only caller-controlled hard response budget.
+Caller-supplied staged budget fields inside `query.constraints` are rejected as
+`conflicting_budget_sources`; the orchestrator derives internal staged budgets
+from the top-level ledger and passes them to existing operations. The request
+must satisfy `max_code_tokens <= max_output_tokens`, and the first slice also
+enforces a hard serialized-byte ceiling derived from the same policy.
 
 ### Response
 
@@ -251,6 +270,25 @@ index creation cost with retrieval latency.
 Structured mode may omit `agent_markdown`. Markdown mode still returns the
 minimal machine envelope, selection/snapshot identifiers, degradation, budget,
 and continuation; it does not collapse the entire wire contract into prose.
+
+`max_output_tokens` covers the combined variable-size response, not each
+projection independently. The response carries a deterministic budget ledger:
+
+```clojure
+{:max_output_tokens 4000
+ :allocations {:structured_packet 1800
+               :markdown 1000
+               :diagnostics 800
+               :reserve 400}
+ :returned {...}
+ :truncation_flags []}
+```
+
+For `format: both`, structured and Markdown allocations are disjoint and their
+sum plus diagnostics/reserve cannot exceed the hard cap. Markdown renders only
+from the retained packet and only with the remaining allocation; it cannot
+duplicate an uncapped packet. Fixed scalar envelope fields remain mandatory,
+while variable diagnostics and stage events truncate deterministically.
 
 ### Orchestration Sequence
 
@@ -291,19 +329,25 @@ sequenceDiagram
 2. The response always exposes the retained `selection_id` and `snapshot_id`.
 3. A stage failure remains typed and observable; the orchestrator cannot
    silently re-resolve against a newer snapshot.
-4. Total returned content cannot exceed the request hard cap.
+4. Combined variable-size structured, Markdown, diagnostic, and stage-event
+   content cannot exceed the request hard cap.
 5. Detail selection is derived only from the retained selection artifact.
 6. Renderer output never feeds back into ranking or graph construction.
 7. Provider availability may change evidence quality but cannot change the
    one-shot contract shape.
 8. Repeated identical requests against the same retained snapshot and policy
    version produce equivalent semantic selections and deterministic rendering.
+9. A request has one authoritative response-budget ledger; nested staged
+   budgets cannot override it.
+10. Persisted usage events distinguish `accounting_scope: aggregate` from
+    `accounting_scope: stage`. Cost and rollup consumers select exactly one scope
+    and never sum both for the same one-shot operation.
 
 ## Comparative Evaluation
 
 ```mermaid
 flowchart TD
-  corpus["Protected task corpus"] --> harness["Comparison harness"]
+  corpus["plans/020 protected task corpus"] --> harness["plans/020 comparison harness"]
 
   harness --> lexical["rg plus bounded file read"]
   harness --> staged["semidx staged"]
@@ -324,7 +368,7 @@ flowchart TD
   report --> decision["Promotion, revision, or rollback decision"]
 ```
 
-Required metrics:
+Required delivery metrics (normalized and aggregated by `plans/020`):
 
 | Metric | Purpose |
 |---|---|
@@ -351,10 +395,11 @@ Deliverables:
 
 - Independent review of this plan against ADR-024, plans/018, current contracts,
   and current convenience-helper behavior.
-- At least 20 protected tasks spanning code understanding, change impact, test
-  targeting, and bug investigation.
-- Current staged baseline for required paths/symbols, request count, returned
-  tokens, and end-to-end latency.
+- A delivery-specific protected fixture overlay spanning code understanding,
+  change impact, test targeting, and bug investigation, mapped onto the task
+  schema owned by `plans/020`; do not fork its real-repository corpus.
+- Current staged baseline for the delivery fixtures: required paths/symbols,
+  request count, returned tokens, and end-to-end latency.
 - Explicit decision that the first slice is additive and does not change the
   canonical public default.
 
@@ -372,7 +417,10 @@ Deliverables:
 - Structured `get-context` library result.
 - Parity tests proving selection, snapshot, error, and detail equivalence with
   direct staged execution.
-- Stage-level and aggregate usage telemetry without double counting.
+- Stage-level and aggregate usage telemetry with parent correlation and explicit
+  `accounting_scope`. The orchestrator may suppress wrapper-level persistence and
+  emit correlated stage diagnostics itself, or retain wrapper events, but the
+  chosen path must produce exactly one cost-accounting scope.
 
 Exit: no transport exposure and no ranking behavior change.
 
@@ -407,19 +455,23 @@ cost or usability value on protected tasks.
 
 Commit boundary: renderer and additive projection only.
 
-### Stage 4. Comparative Evaluation Gate
+### Stage 4. Comparative Evaluation Gate (consumer of plans/020)
 
 Deliverables:
 
-- Common strategy-result contract.
-- Lexical, staged, one-shot structured, and one-shot Markdown adapters.
+- One-shot structured and one-shot Markdown adapters implementing the common
+  strategy-result contract owned by `plans/020`.
+- Reuse of the lexical, no-index, LSP/SCIP, and staged adapters from `plans/020`;
+  this stage must not reimplement them.
 - Optional provider-aware strategy populated as plans/018 slices become
   available.
-- Comparative scorecard with thresholds and retained baselines.
-- Optional nightly pinned-LLM task evaluation.
+- One-shot result rows incorporated into the `plans/020` scorecard and retained
+  baselines.
+- Optional one-shot participation in the pinned nightly LLM task evaluation
+  owned by `plans/020`.
 
-Exit: the project can answer whether one-shot and semantic providers improve
-task outcomes per unit of latency and output budget.
+Exit: the `plans/020` scorecard can answer whether one-shot improves task
+outcomes per unit of normalized cost, latency, and output budget.
 
 Commit boundary: evaluation only; do not change runtime defaults in this stage.
 
@@ -454,7 +506,7 @@ updated README/runtime docs/examples, and an explicit rollback path.
 - Deterministic renderer snapshot tests and code-byte fidelity.
 - Contract schema, malli, MCP tool-list, and runtime handler parity.
 - Usage metrics count one aggregate request while retaining stage diagnostics.
-- Protected comparative corpus and retained baseline.
+- Delivery fixture overlay plus retained `plans/020` corpus/run baseline.
 - Complete Clojure tests and applicable contract/MVP gates before transport
   promotion.
 - CCC and MEMORY freshness when runtime behavior or priorities change.
@@ -535,7 +587,9 @@ set before Stage 1.
 Stage 1 source implementation may begin only when:
 
 - independent review findings are resolved or explicitly deferred;
-- the protected baseline corpus and metric definitions are accepted;
+- the delivery fixture overlay is accepted and the `plans/020` run identity,
+  usage normalization, and strategy-result contracts are accepted (the complete
+  real-repository harness may land later);
 - the first slice remains additive under ADR-024;
 - one-shot policy and budget ownership are explicit;
 - no provider-specific condition exists in orchestration or rendering.

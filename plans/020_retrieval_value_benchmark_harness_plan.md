@@ -2,7 +2,7 @@
 title: "Retrieval Value Benchmark Harness Plan"
 doc_type: "architecture_plan"
 lifecycle: "active"
-status: "draft"
+status: "in_progress"
 agent_action: "reference_for_context"
 updated: "2026-08-02"
 ---
@@ -13,10 +13,12 @@ This plan operationalizes the falsifiable value hypothesis in
 [`SPEC.md`](../SPEC.md) §5.1: turn one-off token measurements into a
 reproducible, pre-registered benchmark that compares semidx retrieval against
 cheap baselines on real repositories, measuring **task success per unit of
-tokens and time**.
+normalized cost and time**.
 
 It is the reusable measurement substrate. It does not itself claim semidx is
 better; it makes that claim testable.
+The latest independent review and resolved plan findings are recorded in
+[`reports/022`](../reports/022_latest_active_plans_architecture_review.md).
 
 ## Decision Boundary
 
@@ -25,10 +27,12 @@ better; it makes that claim testable.
   threshold (owner-set, pre-registered per Stage 0).
 - Boundary vs [`plans/019`](./019_llm_one_shot_context_delivery_and_evaluation_plan.md):
   019 owns the one-shot `get_context` delivery surface and its comparison
-  fixtures; **020 owns the three-arm real-repo measurement harness and the
-  token/success aggregation substrate.** 019's comparison is one consumer of
-  020's substrate. Where 019 measures one-shot vs staged, 020 measures semidx
-  (staged or one-shot) vs non-semidx baselines.
+  strategy adapters and delivery-specific fixtures; **020 exclusively owns the
+  real-repo task corpus, benchmark-run schema, cross-strategy harness, usage
+  normalization, price schedules, and success/cost aggregation substrate.**
+  019's comparison is one consumer of 020's substrate and must not create a
+  second corpus or aggregation contract. Where 019 measures one-shot vs staged,
+  020 measures semidx (staged or one-shot) vs non-semidx baselines.
 - Additive only. No change to public retrieval contracts. Reuses the existing
   usage-metrics sink, feedback surface, and evaluation-command patterns.
 
@@ -37,11 +41,35 @@ better; it makes that claim testable.
 Convert observations such as "~40k tokens on a cold repo without the index vs
 ~3.4–3.7k with it" into reproducible, falsifiable evidence:
 
-- three arms — **A** semidx, **B** a competent `rg` + targeted-read agent, **C**
-  a no-index agent;
-- measured on task success, false negatives, wall-clock, tool calls, and tokens;
+- four strategy arms — **A** semidx, **B** a competent `rg` + targeted-read
+  agent, **C** an `rg` + LSP/SCIP navigation agent where available, and **D** a
+  native no-index agent;
+- measured on task success, false negatives, wall-clock, tool calls, normalized
+  cost, and diagnostic token counts;
 - against a fixed real-repo task suite;
 - with the success/failure threshold fixed **before** the first run.
+
+## Arm Contract And Experimental Controls
+
+| Arm | Versioned navigation policy | Verdict role |
+| --- | --- | --- |
+| A — semidx | Canonical staged semidx flow; a later registered variant may use the `plans/019` one-shot adapter | candidate |
+| B — competent lexical | Preregistered `rg` queries plus targeted bounded file reads; no semidx, LSP, or SCIP | primary comparator |
+| C — language navigation | The B policy plus registered LSP/SCIP definition/reference navigation | diagnostic control; `not_applicable` when unavailable |
+| D — native no-index | The agent's versioned default repository-browsing policy with ordinary filesystem/shell tools, but no semidx or external semantic-navigation service | ecological diagnostic control |
+
+B and D may expose overlapping low-level tools, but they answer different
+questions: B is the stable, auditable comparator; D measures the agent's native
+no-index workflow. D must not replace B in the primary verdict.
+
+Within a scored benchmark run, arms use the same task wording, repository
+revision and initial state, provider/API/model revision, service tier, seed
+schedule, agent build, and wall-clock/tool budget. They differ only by the
+registered arm policy. Arm order is randomized or counterbalanced, each attempt
+uses an isolated workspace, and cache state (`cold` or a named warm-cache
+protocol) is preregistered. A provider/model, agent-build, or shared-protocol
+change creates a new `benchmark_run_id`; results from incompatible runs are not
+pooled for the primary verdict.
 
 ## Verified current state (grounded)
 
@@ -56,30 +84,35 @@ harness and aggregation layer.
 | Daily rollups (counts, latency, outcomes) — **no tokens** | present, no tokens | `usage_metrics.clj:248` (`semantic_usage_daily_rollups`) |
 | Task success / ground truth capture hook | present, data external | `record-feedback!` → `semantic_usage_feedback` (`feedback_outcome`, `ground_truth_unit_ids/paths`) |
 | Agent total session tokens (e.g., 40k / 3.5k) | **missing** | not observable by the runtime; host/harness only |
-| Three-arm A/B/C orchestration | **missing** | — |
-| Success-per-token aggregator across arms | **missing** | — |
+| Four-arm A/B/C/D orchestration | **missing** | — |
+| Success-per-cost aggregator across arms | **missing** | — |
 
-Known fidelity bug: in `resolve-context` the event payload sets
-`:returned_tokens` to `estimated_tokens` (`src/semidx/core.clj:207`), while
-`expand-context` records the real `:returned_tokens`. The aggregator must either
-consume the fixed value (Stage 1) or treat selection-stage `returned_tokens` as
-an estimate.
+Stage 1 fixed the known fidelity bug: selection no longer duplicates
+`estimated_tokens` into `returned_tokens`. Selection has no separately measured
+return, so its honest cost is `estimated_tokens`; expand/detail use measured
+`returned_tokens`. The aggregator must preserve that distinction.
 
 ## Scope
 
 In:
 
-- A three-arm benchmark harness (A semidx / B competent `rg`+read / C no-index)
-  driving the same task on the same real repository.
+- A benchmark harness driving the same task on the same pinned repository
+  revision through A semidx / B competent `rg`+read / C `rg`+LSP/SCIP where
+  available / D no-index. An unavailable C arm is recorded as `not_applicable`
+  with a reason; it is never silently folded into B.
 - Capture of agent-side totals the runtime cannot see: total session tokens,
   wall-clock, tool-call count — supplied by the harness/host.
-- Per-task outcome recording via `record-feedback!` with a shared `task_id` and
-  ground-truth unit ids/paths.
+- Per-attempt outcome recording via `record-feedback!` with shared
+  `benchmark_run_id`, `task_id`, and `task_attempt_id` plus ground-truth unit
+  ids/paths.
 - Normalization of each agent's raw `usage` into a provider-independent
-  response/usage matrix (per-agent adapters), preserving raw payloads.
-- An aggregator evaluation command that joins `semantic_usage_events.payload`
-  (tokens) and `semantic_usage_feedback` (outcome) by `task_id`, computing
-  success-per-token per arm and applying the pre-registered stop rule.
+  response/usage matrix (provider/API adapters), preserving raw payloads.
+- Versioned benchmark-run and task-attempt identity, including repository
+  revision, seed, shared task prompt, per-arm policy, provider API surface, model
+  revision, and price schedule.
+- An aggregator evaluation command that first aggregates usage by
+  `task_attempt_id`, then joins `semantic_usage_feedback` outcomes and computes
+  success-per-cost per arm without a many-to-many `task_id` join.
 - Fix of the `returned_tokens` fidelity bug plus a regression test.
 - A real-repo task-suite definition, including at least one external repository
   (not semidx itself) to avoid self-tuning bias.
@@ -88,9 +121,36 @@ Out:
 
 - No new public retrieval contract, and no change to ADR-024 staged semantics.
 - No LLM as source of truth; no general-purpose RAG.
-- No modelling of baseline agents' internal prompting beyond token/success
-  capture.
+- No inference of hidden model reasoning. Visible task prompts and arm policies
+  are versioned inputs; provider-reported usage and task outcomes are captured.
 - No promotion of `SPEC.md` §5.1 to `[committed]` until real evidence passes.
+
+## Benchmark run identity
+
+Every observation belongs to an immutable benchmark run and task attempt:
+
+```text
+BenchmarkRun {
+  benchmark_run_id, suite_version, started_at,
+  repo_key, repo_revision, dirty_state,
+  task_prompt_policy_id, arm_policy_bundle_id,
+  execution_budget_policy_id, cache_protocol_id,
+  price_schedule_id, harness_version
+}
+
+TaskAttempt {
+  benchmark_run_id, task_id, task_attempt_id,
+  arm, arm_policy_id, sequence_index, seed,
+  agent_id, agent_build_id, provider, api_surface,
+  model, model_revision, service_tier, outcome
+}
+```
+
+`task_id` identifies the stable task definition. `task_attempt_id` identifies
+one execution of that task under one arm and seed. Aggregation keys on
+`task_attempt_id` first and only then rolls up to
+`(benchmark_run_id, task_id, arm)`; repeated runs must never collapse merely
+because they share `task_id`.
 
 ## Response/usage matrix
 
@@ -106,24 +166,43 @@ response into one matrix before aggregation.
 Per response, map raw usage to unambiguous fields:
 
 - `input_uncached` — full-rate input tokens;
-- `input_cache_read` — cache-read tokens (~0.1× price; 0 if unsupported);
-- `input_cache_write` — cache-write tokens (~1.25×; Anthropic; else 0);
-- `output`;
-- derived: `input_total = uncached + cache_read + cache_write`,
-  `grand_total = input_total + output`, and `cost_usd` via a per-model price
-  table.
+- `input_cache_read` — cache-read tokens priced by the immutable provider/model
+  schedule (0 if unsupported);
+- `input_cache_write_5m` and `input_cache_write_1h` — distinct cache-write
+  classes when the provider exposes them; never assume one write multiplier;
+- `output_visible`, `output_reasoning`, and `output_unclassified` — visible and
+  reasoning/thinking output separated when exposed; an API that reports only a
+  combined output total uses `output_unclassified` rather than pretending the
+  total is visible output;
+- `tool_charges_usd` — non-token provider tool charges, otherwise 0;
+- derived: `input_total`, `output_total`, `grand_total`, and `cost_usd` via an
+  immutable `price_schedule_id` keyed by provider, API surface, model revision,
+  service tier, and cache class.
 
-### Per-agent adapter (raw → canonical)
+The price schedule is a retained artifact, not a live lookup during aggregation.
+It records currency, token unit, exact per-class rates, effective/capture time,
+and official source references so a historical run remains reproducible.
 
-Each agent type owns an adapter that maps its raw usage to the canonical record.
-Anthropic Messages is authoritative (claude-api skill); the others are mapped
-here and must be verified against the provider actually used:
+### Provider/API adapter (raw → canonical)
 
-| Adapter | uncached | cache_read | cache_write | output |
-| --- | --- | --- | --- | --- |
-| anthropic-messages | `input_tokens` | `cache_read_input_tokens` | `cache_creation_input_tokens` | `output_tokens` |
-| openai-chat | `prompt_tokens − cached` | `prompt_tokens_details.cached_tokens` | 0 | `completion_tokens` |
-| gemini | `promptTokenCount − cached` | `cachedContentTokenCount` | 0 | `candidatesTokenCount` |
+Each provider/API surface owns an adapter that maps raw usage to the canonical
+record. Official provider response and pricing contracts are authoritative; the
+table is the initial mapping and every adapter must be verified against the
+actual API surface used by the harness:
+
+| Adapter | uncached | cache read/write | visible output | reasoning/thinking | unclassified output |
+| --- | --- | --- | --- | --- | --- |
+| anthropic-messages | `input_tokens` | `cache_read_input_tokens`; split cache creation by TTL when exposed | provider split when exposed | provider split when exposed | otherwise `output_tokens` |
+| openai-chat | `prompt_tokens − cached` | `prompt_tokens_details.cached_tokens`; write 0 | `completion_tokens − reported reasoning` | `completion_tokens_details.reasoning_tokens` when present | 0 when the split is complete |
+| openai-responses | `input_tokens − cached` | `input_tokens_details.cached_tokens`; write 0 | `output_tokens − reported reasoning` | `output_tokens_details.reasoning_tokens` | 0 when the split is complete |
+| gemini-generate-content | `promptTokenCount − cached` | `cachedContentTokenCount`; write 0 | `candidatesTokenCount` | `thoughtsTokenCount` | 0 when the split is complete |
+
+If the raw response cannot distinguish a billing-relevant class (for example a
+cache-write TTL), the adapter emits `pricing_status: unresolved` and the attempt
+is excluded from the cost verdict until resolved. It must not guess a cheaper
+class. A combined output may remain `output_unclassified` only when all possible
+output classes share the same price; otherwise pricing is unresolved.
+Provider-specific tool charges are retained separately from token cost.
 
 Session totals are computed by **summing the canonical fields over every turn** —
 the LLM API is stateless and exposes no session-total field. The per-turn source
@@ -132,28 +211,39 @@ transcript usage).
 
 ### Matrix shape (tidy / long)
 
-One row per `(task_id × arm × agent_id × turn_index × model)`:
+One row per `(benchmark_run_id × task_attempt_id × turn_index × model_revision)`:
 
 ```
-task_id, arm, agent_id, model, turn_index,
-usage_norm  { input_uncached, input_cache_read, input_cache_write, output,
-              input_total, grand_total, cost_usd },
+benchmark_run_id, task_id, task_attempt_id, arm, seed,
+repo_key, repo_revision, task_prompt_policy_id,
+arm_policy_bundle_id, arm_policy_id,
+execution_budget_policy_id, cache_protocol_id,
+sequence_index, agent_id, agent_build_id, provider, api_surface,
+model, model_revision, service_tier, turn_index,
+usage_norm  { input_uncached, input_cache_read,
+              input_cache_write_5m, input_cache_write_1h,
+              output_visible, output_reasoning, output_unclassified,
+              input_total, output_total, grand_total,
+              token_cost_usd, tool_charges_usd, cost_usd,
+              pricing_status },
 raw_usage   { ...provider payload... },
 response_meta { stop_reason, tool_call_count, output_chars },
-adapter_id, schema_version
+adapter_id, adapter_version, price_schedule_id, schema_version
 ```
 
 Long format (not wide) so later analysis can pivot by any axis (arm, turn, task
 type) without a schema change. Stored harness-side in the `record-feedback!`
-payload keyed by `task_id`; the aggregator sums `usage_norm` per `(task_id, arm)`.
+payload keyed by `task_attempt_id`; the aggregator first sums `usage_norm` per
+task attempt, then rolls up by `(benchmark_run_id, task_id, arm)`.
 
 ### Invariants
 
-- **Always store `raw_usage` + `adapter_id` + `model`.** Canonical fields are
-  derived; raw is the source of truth. If a mapping is later found wrong, or a
-  provider changes its shape, re-derive from raw rather than re-running the suite.
-- **Aggregate on `cost_usd`, not `grand_total`.** Cache reads are ~10× cheaper,
-  so an arm that caches aggressively is not "more expensive" by cost even when its
+- **Always store `raw_usage` + adapter/API/model/price versions.** Canonical
+  fields are derived; raw is the source of truth. If a mapping or price schedule
+  is later found wrong, re-derive from raw rather than re-running the suite.
+- **Aggregate on `cost_usd`, not `grand_total`.** Cache reads may be materially
+  cheaper, with the exact multiplier varying by provider/model/cache class, so an
+  arm that caches aggressively is not necessarily more expensive even when its
   raw token count is higher. Comparing raw tokens across arms with different
   caching would be an artifact.
 
@@ -161,43 +251,52 @@ payload keyed by `task_id`; the aggregator sums `usage_norm` per `(task_id, arm)
 
 Each stage ends with a commit and a progress-log update under `reports/`.
 
-### Stage 0 — Pre-register metric, then pilot-then-lock the threshold
+### Stage 0 — Pre-register arms, identities, metric, then pilot-then-lock
 
 The provisional *moderate* threshold is recorded in `SPEC.md` §5.1: arm A uses
-≥50% fewer tokens (≥2×) than the competent `rg`+read baseline at task success
-within 5 percentage points of it, wall-clock ≤ 1.5× baseline, over ≥30 tasks
-including ≥1 external repository.
+≥50% lower normalized cost (≥2×) than the competent `rg`+read baseline B at task
+success within 5 percentage points of it, wall-clock ≤ 1.5× baseline, over ≥30
+tasks including ≥1 external repository.
+
+Before the pilot, freeze the A/B/C/D arm definitions, `BenchmarkRun` and
+`TaskAttempt` schemas, suite version, shared task-prompt policy, arm-policy
+bundle, execution-budget policy, cache protocol, usage-adapter versions, and
+price schedule. C and D are reported as secondary controls; they cannot be
+substituted silently for the preregistered B comparator.
 
 Because a threshold chosen after seeing results cannot falsify anything, lock it
 in two steps:
 
-1. **Calibration pilot** (5–10 tasks): measure only the competent-baseline token
-   cost and the success-metric noise floor. This produces no verdict.
+1. **Calibration pilot** (5–10 tasks): measure only the competent-baseline
+   normalized cost and the success-metric noise floor. This produces no verdict.
 2. **Lock**: fix the final threshold as "cheaper than the baseline by more than
    the measured noise at parity success", then run scoring. Never adjust the
    threshold after scoring begins.
 
-### Stage 1 — Fidelity fix
+### Stage 1 — Fidelity fix (completed)
 
-Fix `resolve-context` `:returned_tokens` to record the true returned figure (or
-an explicitly named estimate field). Add a regression test asserting selection
-and expand stages report consistent token semantics.
+Delivered: `resolve-context` no longer fabricates `:returned_tokens` from the
+selection estimate. Selection records `estimated_tokens` and a nil measured
+return; expand/detail record measured `returned_tokens`. Regression coverage
+asserts those stage-specific semantics.
 
-### Stage 2 — Task suite + three-arm harness
+### Stage 2 — Task suite + four-arm harness
 
 Define the task suite (≥ a small fixed set spanning task types) and at least one
-external repo. Build the harness that runs each task through A/B/C, tags every
-semidx call and every outcome with a shared `task_id`, and writes outcomes via
-`record-feedback!`. For every turn of every arm, normalize the agent's raw
-`usage` through its adapter into the response/usage matrix and store it in the
-`record-feedback!` payload keyed by `task_id`, preserving `raw_usage`.
+external repo. Build the harness that runs each task through A/B/C/D, tags every
+semidx call and every outcome with `benchmark_run_id` and `task_attempt_id`, and
+writes outcomes via `record-feedback!`. For every turn of every arm, normalize
+the agent's raw `usage` through its adapter into the response/usage matrix and
+store it in the `record-feedback!` payload keyed by `task_attempt_id`, preserving
+`raw_usage`.
 
 ### Stage 3 — Aggregator command
 
 Add an evaluation command (pattern: `run-weekly-review-report-command` in
-`src/semidx/runtime/evaluation.clj`) that joins the response/usage matrix
-(`usage_norm.cost_usd` summed per `(task_id, arm)`) and feedback outcomes by
-`task_id`, emits per-arm **success-per-cost**, and applies the Stage 0 stop rule.
+`src/semidx/runtime/evaluation.clj`) that aggregates the response/usage matrix
+per `task_attempt_id` before joining feedback outcomes, rolls up by
+`(benchmark_run_id, task_id, arm)`, emits per-arm **success-per-cost**, and
+applies the Stage 0 stop rule without a many-to-many join.
 In-memory sink path must work without PostgreSQL.
 
 ### Stage 4 — First real-repo run and evidence write-back
@@ -208,17 +307,19 @@ met, record the kill-criterion trigger.
 
 ## Metric definition
 
-- **Primary (fix-quality variant)**: at equal-or-better task success, the
+- **Primary (fix-quality variant)**: at parity task success, the
   percentage **cost** reduction (`cost_usd`, per the response/usage matrix) of arm
-  A vs the best cheap baseline (B, then C) — **not** a raw token count, because
-  provider caching makes raw tokens non-comparable across arms.
+  A vs preregistered comparator B — **not** a raw token count, because provider
+  caching makes raw tokens non-comparable across arms. C and D are reported as
+  secondary controls and cannot silently replace B.
 - **Guardrail**: wall-clock of A no worse than the baseline by more than a fixed
   factor (the staged round-trip tax; relieved by one-shot per plans/019).
 - **Statistical floor**: significance across the suite (≥ N tasks × seeds;
   non-overlapping confidence, or an agreed test).
 - **Cost source**: `usage_norm.cost_usd` in the response/usage matrix, summed per
-  `(task_id, arm)` — normalized from each agent's raw `usage` via its adapter,
-  never from raw provider fields directly.
+  `task_attempt_id` and then rolled up by `(benchmark_run_id, task_id, arm)` —
+  normalized from each agent's raw `usage` via its adapter, never from raw
+  provider fields directly.
 - **Success source**: `feedback_outcome` in `semantic_usage_feedback`.
 - **semidx-internal cost** (packet tokens) stays available from
   `semantic_usage_events.payload` for diagnosing *where* an arm's cost went, but
@@ -228,10 +329,12 @@ met, record the kill-criterion trigger.
 
 Directly inherit `SPEC.md` §5.1:
 
-- **Success signal**: A beats the baselines on success-per-token by the
-  pre-registered margin, above the statistical floor.
-- **Failure signal**: A does not beat `rg` + reading files (and `rg` + LSP where
-  available) on that ratio → SPEC §5.1 kill-criterion (narrow to Clojure-first).
+- **Success signal**: A beats preregistered comparator B on success-at-parity
+  per normalized cost by the pre-registered margin, above the statistical floor;
+  C and D remain reported controls.
+- **Failure signal**: A does not meet the preregistered cost/success gate against
+  B → SPEC §5.1 kill-criterion (narrow to Clojure-first). C and D may strengthen
+  the diagnosis but cannot rescue or redefine the primary verdict after scoring.
 
 ## Risks
 
@@ -240,18 +343,22 @@ Directly inherit `SPEC.md` §5.1:
   artifact. This is the main threat to validity.
 - **Self-repo bias.** Measuring only on semidx's own repo overstates the result;
   at least one external repo is required.
-- **Fidelity.** Until Stage 1, `resolve-context` `returned_tokens` is an
-  estimate.
+- **Fidelity.** Selection-stage cost is an estimate by design; expand/detail
+  return measured values. Aggregation must not relabel either semantic.
+- **Provider/pricing drift.** Usage schemas, cache classes, reasoning fields,
+  service tiers, and prices can change. Raw usage plus immutable adapter and
+  price-schedule versions are required for replayable cost calculations.
 - **PostgreSQL optionality.** The aggregator must not require Postgres; the
   in-memory sink path is first-class.
 
 ## Definition Of Done
 
-- The provisional threshold and metric are recorded in `SPEC.md` §5.1, and the
-  final threshold is locked after the Stage 0 calibration pilot, before scoring.
+- The arm definitions, run/attempt identity, provisional threshold, metric,
+  adapter versions, and price schedule are recorded before the pilot; the final
+  threshold is locked after calibration and before scoring.
 - The `returned_tokens` fidelity bug is fixed with a regression test.
-- The harness produces a reproducible three-arm success-per-token report on at
-  least one external real repository.
+- The harness produces a reproducible A/B/C/D success-per-cost report on at
+  least one external real repository, with C explicitly marked when unavailable.
 - `SPEC.md` §5.1 can be retagged (pass) or its kill-criterion recorded (fail)
   from that report.
 
@@ -266,3 +373,7 @@ Directly inherit `SPEC.md` §5.1:
 - `src/semidx/core.clj` — `resolve-context` / `expand-context` event payloads.
 - `src/semidx/runtime/usage_metrics.clj` — sink, event/feedback tables, rollups.
 - `src/semidx/runtime/evaluation.clj` — evaluation-command pattern.
+- [Anthropic pricing and cache classes](https://docs.anthropic.com/en/docs/about-claude/pricing)
+- [OpenAI Responses usage contract](https://platform.openai.com/docs/api-reference/responses-streaming)
+- [Gemini usage metadata](https://ai.google.dev/api/generate-content)
+- [Gemini thinking-token pricing](https://ai.google.dev/gemini-api/docs/generate-content/thinking)

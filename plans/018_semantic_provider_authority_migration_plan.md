@@ -15,6 +15,8 @@ Decision dependency: accepted
 This is the approved architecture plan for the migration. Independent review is
 the required first delivery stage and must complete before source implementation
 begins. The repo-managed tree-sitter operational boundary is ADR-047.
+The latest independent review and resolved plan findings are recorded in
+[`reports/022`](../reports/022_latest_active_plans_architecture_review.md).
 
 ## Goal
 
@@ -63,6 +65,13 @@ Out:
 - Provider integration uses client-owned, narrow function roles and data-first
   registration. Introduce a protocol only when an external runtime boundary
   requires substitution that plain functions cannot express cleanly.
+- Provider-native symbols and ids are never merge keys. After source-identity
+  validation, every adapter must derive the same provider-neutral
+  `CanonicalFactKey` from language, path/module owner, fact kind, canonical
+  symbol, and overload/dispatch identity before evidence reaches arbitration.
+  Relation facts use the ADR-039 identity fields anchored to canonical
+  source/target keys. Mutable source identity and evidence are excluded from
+  either stable key.
 - Existing public parser options remain compatibility controls during migration.
 - TypeScript is the first vertical slice because its current confidence ceiling
   and regex brittleness make the improvement easiest to observe; review may
@@ -220,12 +229,14 @@ Primary locations:
 
 ### 5. Fact Arbitrator
 
-Responsibility: merge same-identity facts and surface conflicts.
+Responsibility: merge facts with the same canonical fact key and surface
+conflicts.
 
 Rules:
 
-1. Reject evidence that fails source-identity or schema validation.
-2. Merge agreeing same-identity facts and retain all evidence sources.
+1. Reject evidence that fails source-identity, canonical-key, or schema
+   validation.
+2. Merge agreeing same-key facts and retain all evidence sources.
 3. Let lower authority fill missing facts and missing non-conflicting details.
 4. Never let lower authority replace a higher-authority value.
 5. Mark equal-authority contradictions ambiguous and emit a diagnostic.
@@ -305,11 +316,49 @@ checks. They are not unconditional confidence grants.
  :observed_at "..."}
 ```
 
+### CanonicalFactKey
+
+```clojure
+{:fact_schema_version "1"
+ :language "java"
+ :path "src/example/OrderService.java"
+ :fact_kind "unit"
+ :owner "example.OrderService"
+ :symbol "example.OrderService#handle"
+ :overload_identity {:arity 2
+                     :signature_key "java.lang.String,int"}
+ :dispatch_identity nil}
+```
+
+Relation facts use the corresponding provider-neutral form:
+
+```clojure
+{:fact_schema_version "1"
+ :fact_kind "relation"
+ :relation_type "dataflow/passes-argument"
+ :source_unit_key {...canonical unit fact key...}
+ :target_key {:language "java"
+              :symbol "example.Validator#validate"
+              :overload_identity {:arity 1
+                                  :signature_key "java.lang.String"}}
+ :flow_identity {:arg_index 0}}
+```
+
+The key is computed from provider-neutral normalized fields and is the sole
+input to same-fact arbitration. Provider ids, provider-native symbol ids,
+runtime status, freshness, content digests, locations, and evidence quality are
+not part of the stable key. Adapters may retain native ids in evidence for
+diagnostics. A fact batch is rejected or degraded when it cannot produce a
+canonical key without guessing. Relation projection resolves
+`source_unit_key` to ADR-039's `source_unit_id`; the normalized `target_key` and
+flow identity map directly to ADR-039's remaining stable identity fields.
+
 ### FactEvidence
 
 ```clojure
 {:provider_id "typescript-lsp"
  :provider_version "1"
+ :canonical_fact_key {...}
  :authority "exact"
  :operation "definitions"
  :freshness "exact"
@@ -364,11 +413,14 @@ flowchart TD
   implementations.
 - Transports depend on runtime outputs and do not derive authority themselves.
 
-## Coordination With plans/019
+## Coordination With plans/019 And plans/020
 
-This plan owns the evidence data plane. `plans/019` owns LLM-facing delivery and
-comparative evaluation. Their shared boundary is the canonical snapshot and
-ContextPacket contract, not provider-native payloads.
+This plan owns the evidence data plane. `plans/019` owns LLM-facing one-shot
+delivery and its strategy adapters. `plans/020` exclusively owns the protected
+real-repository corpus, benchmark-run identity, cross-strategy harness, usage
+normalization, price schedules, and comparative aggregation. Their shared
+boundary is the canonical snapshot, ContextPacket, and plans/020 strategy-result
+contract, not provider-native payloads.
 
 ```mermaid
 flowchart LR
@@ -379,14 +431,17 @@ flowchart LR
   oneShot --> packet["Canonical ContextPacket"]
   staged --> packet
   packet --> renderer["Optional Markdown renderer"]
-  packet --> evaluation["Comparative evaluation"]
+  packet --> adapters["plans/019 delivery strategy adapters"]
+  adapters --> evaluation["plans/020 comparative evaluation"]
+  staged --> evaluation
 ```
 
 Coordination rules:
 
 - `plans/019` may ship its first one-shot slice over the current graph before
   the provider authority switch.
-- `plans/018` Stage 6 may consume comparative task-value evidence produced by
+- `plans/018` Stage 6 consumes comparative task-value evidence from the
+  `plans/020` scorecard. The scorecard may include one-shot adapters from
   `plans/019`, but provider correctness remains gated by deterministic provider
   and relation tests in this plan.
 - The one-shot orchestrator and renderer must not branch on provider ids.
@@ -406,10 +461,14 @@ Deliverables:
 - Explicit resolution of review findings.
 - Protected Java and TypeScript fixtures for definitions, references, calls,
   overloads, re-exports, dirty-file behavior, and provider unavailability.
+- Cross-provider identity fixtures proving that regex, tree-sitter, SCIP, and
+  LSP spellings of the same Java overload or TypeScript re-export normalize to
+  one `CanonicalFactKey`, while distinct overloads remain distinct.
 - Baselines for retrieval selections, callers/callees, impact, snapshot diff,
   confidence, latency, and snapshot size.
-- A reusable provider-quality baseline that `plans/019` can include in its
-  cross-strategy comparison without duplicating fixtures.
+- A reusable provider-quality baseline that `plans/020` can include in its
+  cross-strategy scorecard, optionally through the delivery adapters supplied by
+  `plans/019`, without duplicating fixtures.
 
 Exit criteria:
 
@@ -426,7 +485,9 @@ Goal: establish stable contracts without changing default extraction.
 Deliverables:
 
 - Additive FactEvidence and FactBatch normalization.
-- Deterministic same-identity merge.
+- Provider-neutral `CanonicalFactKey` normalization before arbitration,
+  including explicit unkeyable/ambiguous diagnostics.
+- Deterministic same-key merge.
 - Authority, freshness, and conflict rules.
 - Additive multi-source relation evidence compatible with ADR-039.
 - In-memory and PostgreSQL round-trip coverage.
@@ -435,7 +496,10 @@ Deliverables:
 
 Exit criteria:
 
-- Same semantic fact from multiple providers keeps one unit/relation identity.
+- Same semantic fact from multiple providers produces one canonical fact key
+  and keeps one unit/relation identity; provider-native ids remain evidence only.
+- Java overloads, TypeScript re-exports, and dispatch-sensitive identities have
+  cross-provider golden parity before any external provider slice begins.
 - Lower authority cannot overwrite higher authority.
 - Equal-authority contradictions are observable.
 - Existing snapshots remain readable.
@@ -553,9 +617,10 @@ Exit criteria:
   gates pass.
 - Intentional confidence reductions for fallback-only repositories are approved.
 - New semantic improvements are supported by fixture/replay evidence.
-- Comparative task-value evidence from `plans/019` or an equivalent harness
-  shows that the authority switch does not regress required-file recall, output
-  budget, or degraded-workspace availability.
+- Comparative task-value evidence from the `plans/020` scorecard, optionally
+  including `plans/019` one-shot adapters, shows that the authority switch does
+  not regress required-file recall, normalized cost, output budget, or
+  degraded-workspace availability.
 - Forced provider overrides remain available for diagnosis and rollback.
 
 Commit boundary: default switch and public additive contract changes.
@@ -593,7 +658,8 @@ the applicable repository gates. The complete migration gate includes:
 - complete Clojure test suite;
 - semantic-quality report;
 - protected retrieval replay comparison;
-- cross-strategy task-value comparison from `plans/019` when available;
+- cross-strategy task-value comparison from `plans/020`, with `plans/019`
+  one-shot adapters when available;
 - relation projection and traversal parity;
 - snapshot-diff parity;
 - in-memory and PostgreSQL evidence round trips;
@@ -679,8 +745,9 @@ Required review questions:
 2. Are SCIP and LSP correctly treated as peers whose precedence depends on
    freshness and workspace mode?
 3. Is the source-identity rule sufficient to prevent stale exact facts?
-4. Can current unit and ADR-039 relation identities safely support multi-provider
-   evidence merging?
+4. Does the proposed `CanonicalFactKey` normalize current unit and ADR-039
+   relation identities across provider spellings without collapsing distinct
+   Java overloads, TypeScript re-exports, or dispatch-sensitive facts?
 5. Does `FactEvidence` need a public contract immediately, or should it remain
    internal through the shadow stages?
 6. Does the LSP live-overlay scope avoid turning semidx into an LSP lifecycle
@@ -713,4 +780,6 @@ Stage 1 source implementation may begin only when:
 - ADR-046 and ADR-047 are accepted;
 - ADR-036 supersession and the plans/007 amendment are documented;
 - Stage 0 baseline scope and ownership are approved;
+- the provider-neutral `CanonicalFactKey` contract and cross-provider identity
+  fixtures are approved;
 - the project owner confirms whether TypeScript remains the first vertical slice.
