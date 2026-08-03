@@ -1,0 +1,96 @@
+---
+title: "Retrieval Value Benchmark Pre-registration (Stage 0)"
+doc_type: "report"
+lifecycle: "active"
+status: "final"
+agent_action: "reference_for_context"
+updated: "2026-08-03"
+---
+
+# Retrieval Value Benchmark Pre-registration (Stage 0)
+
+This document satisfies Stage 0 of `plans/020_retrieval_value_benchmark_harness_plan.md`. It formally freezes the benchmark experimental design, schemas, and calibration rules before any pilot or scoring runs begin, ensuring falsifiability.
+
+## 1. Arm Definitions
+
+| Arm | Name | Versioned Policy / Tooling | Verdict Role |
+| --- | --- | --- | --- |
+| **A** | semidx staged | Canonical staged semidx flow (`v1`). One-shot adapters (`plans/019`) may be registered as `A2` in future runs. | Candidate |
+| **B** | Competent lexical | `rg` (ripgrep) queries plus bounded targeted file reading. No semantic tools. | Primary comparator |
+| **C** | Language navigation | Arm B tools plus LSP/SCIP definition/reference navigation where available. | Diagnostic control |
+| **D** | Native no-index | The agent's native repository-browsing policy (e.g., full shell/filesystem access without semidx). | Ecological control |
+
+*Rule:* Arm B is the primary comparator. C and D cannot be silently folded into B or used to rescue a primary verdict.
+
+## 2. Experimental Controls and Cache Protocol
+
+- **Task Prompt Policy**: `v1` (shared fixed wording).
+- **Arm Policy Bundle**: `v1` (defines exact CLI/tool constraints for each arm).
+- **Execution Budget**: Fixed wall-clock limit per task attempt and a maximum tool-call limit.
+- **Cache Protocol (`cache_protocol_id: cold_start_v1`)**: Every task attempt begins with a completely cold context cache (no leaked tokens from previous attempts).
+
+## 3. Schemas (Run and Attempt Identity)
+
+```text
+BenchmarkRun {
+  benchmark_run_id: string
+  suite_version: string
+  started_at: timestamp
+  repo_key: string
+  repo_revision: string
+  dirty_state: boolean
+  task_prompt_policy_id: string
+  arm_policy_bundle_id: string
+  execution_budget_policy_id: string
+  cache_protocol_id: string
+  price_schedule_id: string
+  harness_version: string
+}
+
+TaskAttempt {
+  benchmark_run_id: string
+  task_id: string
+  task_attempt_id: string
+  arm: string ("A" | "B" | "C" | "D")
+  arm_policy_id: string
+  sequence_index: int
+  seed: int
+  agent_id: string
+  agent_build_id: string
+  provider: string
+  api_surface: string
+  model: string
+  model_revision: string
+  service_tier: string
+  outcome: string ("success" | "failure" | "error")
+}
+```
+
+Aggregation keys on `task_attempt_id` first, then rolls up to `(benchmark_run_id, task_id, arm)`.
+
+## 4. Usage Adapters and Price Schedule
+
+**Price Schedule ID:** `2026-08-03-anthropic-openai-gemini-v1`
+
+| Adapter / Provider | Uncached | Cache Read | Cache Write (5m/1h) | Visible Output | Reasoning | Unclassified |
+| --- | --- | --- | --- | --- | --- | --- |
+| `anthropic-messages` | `input_tokens` | `cache_read_input_tokens` | `cache_creation_input_tokens` | Provider split | Provider split | `output_tokens` (if no split) |
+| `openai-chat` | `prompt_tokens` - cached | `prompt_tokens_details.cached_tokens` | `0` (implied) | `completion_tokens` - reasoning | `completion_tokens_details.reasoning_tokens` | `0` |
+| `gemini-generate-content`| `promptTokenCount` - cached | `cachedContentTokenCount` | `0` | `candidatesTokenCount` | `thoughtsTokenCount` | `0` |
+
+*Invariant:* All raw tokens are normalized into `cost_usd` per the versioned `price_schedule_id`.
+
+## 5. Pilot and Final Lock Rule
+
+Before the actual scoring run, a **Calibration Pilot** will be conducted:
+- **Scope:** 5–10 tasks.
+- **Measurements:** Cost of the competent baseline (Arm B) and the success-metric noise floor.
+- **Action:** No verdict is produced here. The pilot exists solely to calibrate the "noise" and "baseline cost".
+
+**Final Lock Rule:** 
+Immediately after the pilot and *before* scoring, the final threshold must be locked. It will be defined as:
+> *Arm A is cheaper than Arm B by more than the measured noise floor at parity success.*
+(Provisionally: ≥50% lower cost, success within 5 percentage points, wall-clock ≤ 1.5×).
+
+---
+*Preregistration complete. The experiment harness (Stage 2) and aggregator (Stage 3) may now be built against these locked definitions.*
