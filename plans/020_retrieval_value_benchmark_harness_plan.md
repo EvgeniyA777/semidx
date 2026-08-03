@@ -94,12 +94,21 @@ Out:
 
 Each stage ends with a commit and a progress-log update under `reports/`.
 
-### Stage 0 — Pre-register metric and threshold
+### Stage 0 — Pre-register metric, then pilot-then-lock the threshold
 
-Before any run, record in `SPEC.md` §5.1: the primary metric definition (below),
-the win threshold (owner-set), the guardrail, and the statistical floor. This is
-Riskiest-Assumption discipline: a threshold chosen after seeing results cannot
-falsify anything.
+The provisional *moderate* threshold is recorded in `SPEC.md` §5.1: arm A uses
+≥50% fewer tokens (≥2×) than the competent `rg`+read baseline at task success
+within 5 percentage points of it, wall-clock ≤ 1.5× baseline, over ≥30 tasks
+including ≥1 external repository.
+
+Because a threshold chosen after seeing results cannot falsify anything, lock it
+in two steps:
+
+1. **Calibration pilot** (5–10 tasks): measure only the competent-baseline token
+   cost and the success-metric noise floor. This produces no verdict.
+2. **Lock**: fix the final threshold as "cheaper than the baseline by more than
+   the measured noise at parity success", then run scoring. Never adjust the
+   threshold after scoring begins.
 
 ### Stage 1 — Fidelity fix
 
@@ -163,7 +172,8 @@ Directly inherit `SPEC.md` §5.1:
 
 ## Definition Of Done
 
-- The threshold and metric are pre-registered in `SPEC.md` §5.1 before runs.
+- The provisional threshold and metric are recorded in `SPEC.md` §5.1, and the
+  final threshold is locked after the Stage 0 calibration pilot, before scoring.
 - The `returned_tokens` fidelity bug is fixed with a regression test.
 - The harness produces a reproducible three-arm success-per-token report on at
   least one external real repository.

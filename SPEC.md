@@ -197,10 +197,19 @@ success, false negatives, wall-clock, tool calls, tokens. The three-arm
 measurement harness and success-per-token aggregation are specified in
 [`plans/020_retrieval_value_benchmark_harness_plan.md`](plans/020_retrieval_value_benchmark_harness_plan.md).
 
-- **Success signal**: semidx wins on task success per unit of tokens and time by
-  margin **[owner to set]**.
-- **Failure signal**: semidx does not beat `rg` + reading files (and `rg` + LSP
-  where available) on that ratio.
+- **Success signal** (provisional, *moderate* posture — locked after the Stage 0
+  pilot, never after scoring): arm A uses **≥50% fewer total tokens (≥2×)** than
+  the competent `rg`+read baseline B, at task success **≥ B − 5 percentage
+  points** (parity within the noise band), wall-clock **≤ 1.5× B**, over **≥30
+  tasks including ≥1 external repository**.
+- **Failure signal**: A does not reach 2× fewer tokens at parity success, or
+  loses more than 5 percentage points of task success vs the best cheap baseline.
+
+**Pilot-then-lock.** The margins above are provisional. Stage 0 of
+[`plans/020`](plans/020_retrieval_value_benchmark_harness_plan.md) runs a small
+calibration pilot that measures only the competent-baseline cost and the
+success-metric noise floor — not the verdict — then locks the final threshold
+before the scoring run, preserving falsifiability.
 
 **Kill-criterion.** On the failure signal, narrow scope to Clojure-first
 retrieval (strongest lane) and stop presenting semidx as a general index.
