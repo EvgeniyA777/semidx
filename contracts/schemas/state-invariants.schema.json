@@ -38,6 +38,74 @@
       },
       "maxItems": 12,
       "default": []
+    },
+    "entityFieldsArray": {
+      "type": "array",
+      "maxItems": 12,
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["entity", "fields"],
+        "additionalProperties": false,
+        "properties": {
+          "entity": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "path": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "fields": {
+            "type": "array",
+            "maxItems": 24,
+            "default": [],
+            "items": {
+              "type": "object",
+              "required": ["name"],
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "common.schema.json#/$defs/boundedString"
+                },
+                "nullable": {
+                  "type": "boolean"
+                },
+                "annotations": {
+                  "$ref": "common.schema.json#/$defs/stringArray"
+                },
+                "state_bearing": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fieldWritesArray": {
+      "type": "array",
+      "maxItems": 12,
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["unit_id", "writes"],
+        "additionalProperties": false,
+        "properties": {
+          "unit_id": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "symbol": {
+            "$ref": "common.schema.json#/$defs/boundedString"
+          },
+          "writes": {
+            "type": "array",
+            "maxItems": 24,
+            "default": [],
+            "items": {
+              "$ref": "common.schema.json#/$defs/boundedString"
+            }
+          }
+        }
+      }
     }
   },
   "properties": {
@@ -53,8 +121,14 @@
     "entity_candidates": {
       "$ref": "#/$defs/unitRefArray"
     },
+    "entity_fields": {
+      "$ref": "#/$defs/entityFieldsArray"
+    },
     "state_writers": {
       "$ref": "#/$defs/unitRefArray"
+    },
+    "field_writes": {
+      "$ref": "#/$defs/fieldWritesArray"
     },
     "assertion_tests": {
       "type": "array",

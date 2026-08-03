@@ -9,7 +9,8 @@
   #{"dataflow/local-binding-call-result"
     "dataflow/returns-call-result"
     "dataflow/passes-argument"
-    "structure/declares-field"})
+    "structure/declares-field"
+    "dataflow/writes-field"})
 
 (def resolution-statuses
   "Valid resolution states for a typed relation."

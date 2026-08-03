@@ -2007,7 +2007,24 @@
 (defn- write-state-invariant-fixture! [tmp-root]
   (write-file! tmp-root
                "src/com/acme/model/ConnectionEntity.java"
-               "package com.acme.model;\n\npublic class ConnectionEntity {\n  public void setStatus(String status) {\n  }\n\n  public void updateValidatedAt(String timestamp) {\n  }\n}\n")
+               (str "package com.acme.model;\n\n"
+                    "import java.time.Instant;\n\n"
+                    "@Entity\n"
+                    "public class ConnectionEntity {\n"
+                    "  @Id\n"
+                    "  private Long id;\n\n"
+                    "  @Column(nullable = false)\n"
+                    "  private Instant connectedAt;\n\n"
+                    "  private Instant lastValidatedAt;\n\n"
+                    "  private String spreadsheetId;\n\n"
+                    "  private String status;\n\n"
+                    "  public void setStatus(String status) {\n"
+                    "    this.status = status;\n"
+                    "  }\n\n"
+                    "  public void updateValidatedAt(Instant timestamp) {\n"
+                    "    this.lastValidatedAt = timestamp;\n"
+                    "  }\n"
+                    "}\n"))
   (write-file! tmp-root
                "src/com/acme/service/ConnectionService.java"
                "package com.acme.service;\n\nimport com.acme.model.ConnectionEntity;\n\npublic class ConnectionService {\n  public void disconnect(ConnectionEntity entity) {\n    entity.setStatus(\"OFF\");\n  }\n\n  public String formatSummary(ConnectionEntity entity) {\n    return \"ok\";\n  }\n}\n")
@@ -2053,16 +2070,18 @@
                    "com.acme.service.ConnectionService#disconnect"
                    "src/com/acme/service/ConnectionService.java"))
           packet (:state_invariants result)]
-      (testing "the stateful query gets a bounded, honest packet"
-        (is (= "1.0" (:packet_version packet)))
+      (testing "the stateful query gets a bounded, field-aware packet"
+        (is (= "1.2" (:packet_version packet)))
         (is (= #{"disconnect" "status" "timestamp" "state" "connection"}
                (set (:triggered_by packet))))
         (is (every? #(<= (count %) 12)
                     [(:entity_candidates packet)
+                     (:entity_fields packet)
                      (:state_writers packet)
+                     (:field_writes packet)
                      (:assertion_tests packet)
                      (:fixture_helpers packet)]))
-        (is (= "state_invariants_require_whole_file_read"
+        (is (= "state_invariants_verify_field_preservation"
                (get-in packet [:guardrail :code]))))
       (testing "the entity, writer, assertion test, and fixture helper are surfaced"
         (is (= ["src/com/acme/model/ConnectionEntity.java"]
@@ -2073,12 +2092,23 @@
                (:assertion_tests packet)))
         (is (= ["com.acme.service.ConnectionServiceTest#buildConnectionEntity"]
                (mapv :symbol (:fixture_helpers packet)))))
+      (testing "declared entity fields and their state-bearing hints are surfaced"
+        (let [entry (first (:entity_fields packet))
+              fields (into {} (map (juxt :name identity) (:fields entry)))]
+          (is (= "com.acme.model.ConnectionEntity" (:entity entry)))
+          (is (= "src/com/acme/model/ConnectionEntity.java" (:path entry)))
+          (is (contains? fields "connectedAt"))
+          (is (false? (get-in fields ["connectedAt" :nullable])))
+          (is (true? (get-in fields ["connectedAt" :state_bearing])))
+          (is (some #(str/includes? % "@Column")
+                    (get-in fields ["connectedAt" :annotations])))
+          (is (true? (get-in fields ["status" :state_bearing])))))
+      (testing "field writes attribute the changed field to the disconnect writer"
+        (is (some #(and (str/ends-with? (:symbol %) "#disconnect")
+                        (= ["status"] (:writes %)))
+                  (:field_writes packet))))
       (testing "the assembled packet conforms to the state-invariants contract"
-        (is (nil? (m/explain (:example/state-invariants contracts/contracts) packet))))
-      (testing "Slice 1 never fabricates unavailable field-level facts"
-        (is (not-any? #(or (contains? % :fields)
-                           (contains? % :field_writes))
-                      (:entity_candidates packet)))))))
+        (is (nil? (m/explain (:example/state-invariants contracts/contracts) packet)))))))
 
 (deftest staged-retrieval-surfaces-state-invariant-context-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory
@@ -2093,7 +2123,7 @@
                   "com.acme.service.ConnectionService#disconnect"
                   "src/com/acme/service/ConnectionService.java")
                  [:constraints :token_budget]
-                 6000)
+                 12000)
           selection (sci/resolve-context index query)
           selector {:selection_id (:selection_id selection)
                     :snapshot_id (:snapshot_id selection)}
@@ -2102,10 +2132,10 @@
           expansion-packet (:state_invariants expansion)
           detail-packet (get-in detail [:context_packet :state_invariants])]
       (testing "expand_context adds the bounded packet within its reserved budget"
-        (is (= "1.0" (:packet_version expansion-packet)))
+        (is (= "1.2" (:packet_version expansion-packet)))
         (is (= ["src/com/acme/model/ConnectionEntity.java"]
                (mapv :path (:entity_candidates expansion-packet))))
-        (is (= "state_invariants_require_whole_file_read"
+        (is (= "state_invariants_verify_field_preservation"
                (get-in expansion-packet [:guardrail :code])))
         (is (<= (get-in expansion [:budget_summary :returned_tokens])
                 (get-in expansion [:budget_summary :reserved_tokens])))

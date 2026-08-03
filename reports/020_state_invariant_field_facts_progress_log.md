@@ -1,9 +1,9 @@
 ---
 title: "State Invariant Field Facts Progress Log"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-08-02"
 ---
 
@@ -26,6 +26,63 @@ Tracks execution of `plans/017_state_invariant_field_facts_plan.md`.
   - `reports/020_state_invariant_field_facts_progress_log.md`
 - Verification: documentation only; no code changed in this step.
 - Known blockers: none.
+
+## Stages 2 and 3 - Field-Aware Assembler, entity_fields, writes-field, field_writes
+
+- Status: completed (both stages delivered together in one verification pass at
+  the user's request; tests run once at the end rather than per stage).
+- Summary:
+  - Stage 2: `state-invariants/assemble` now reads `structure/declares-field`
+    relations from the snapshot relation indexes (by the synthetic
+    `path::module` class node) and adds an `entity_fields` section: per entity,
+    the declared fields with annotation/nullability evidence and a
+    `state_bearing` hint (name heuristic plus `nullable=false`). The guardrail
+    upgrades to name state-bearing fields; `packet_version` becomes `1.1` when
+    only fields are available.
+  - Stage 3: registered `dataflow/writes-field`; the Java lane emits it for
+    state-transition methods (writer-named methods or entity-class methods) from
+    setter calls (`x.setStatus(..)`) and, inside entity classes, direct
+    `this.field = ...` assignments. Target keys use a `field:` sentinel so they
+    never resolve to call targets and stay `unresolved` (resolved-only
+    projections and legacy outputs unaffected). The assembler adds `field_writes`
+    per selected state writer; the guardrail contrasts written vs. declared
+    state-bearing fields; `packet_version` becomes `1.2` when writes are present.
+  - Contract: additive `entity_fields` / `field_writes` in the `state-invariants`
+    Malli mirror and JSON Schema (`$defs` `entityFieldsArray` / `fieldWritesArray`,
+    all lists bounded), and the example packet upgraded to the `1.2` shape. Both
+    sections are optional and present only when relations exist, so the Slice-1
+    (`1.0`) packet is unchanged for lanes/queries without field facts.
+  - `impact_analysis`, `expand_context`, and the detail packet all carry the
+    upgraded packet through the existing budget-accounted seams; transports are
+    unchanged passthroughs.
+- Changed files:
+  - `src/semidx/runtime/relations.clj`
+  - `src/semidx/runtime/languages/java.clj`
+  - `src/semidx/runtime/state_invariants.clj`
+  - `src/semidx/contracts/schemas.clj`
+  - `contracts/schemas/state-invariants.schema.json`
+  - `contracts/examples/state-invariants/impact-analysis-packet.json`
+  - `test/semidx/integration/runtime_test.clj`
+  - `plans/017_state_invariant_field_facts_plan.md`
+  - `reports/020_state_invariant_field_facts_progress_log.md`
+  - `MEMORY.md`
+- Verification (single end-to-end pass): see the Final Verification section.
+- Known blockers: none.
+
+## Final Verification
+
+- REPL compile/load probes for `relations`, `languages.java`, `state-invariants`,
+  `contracts.schemas`, `retrieval`, and `core`: all reload clean. Direct
+  `assemble` probe over a JPA-style entity produced `packet_version 1.2`, five
+  declared fields with correct nullability/state-bearing hints, three field
+  writes (`setStatus->status`, `updateValidatedAt->lastValidatedAt`,
+  `disconnect->status`), the `state_invariants_verify_field_preservation`
+  guardrail, and contract conformance.
+- `clojure -M:test`: passed (see command output recorded with the commit).
+- `./scripts/validate-contracts.sh`: passed.
+- `./scripts/run-mvp-gates.sh`: `mvp_gates=ok`.
+- `./scripts/run-semantic-quality-report.sh`: unchanged pre-existing non-gating
+  advisory baseline (`gate_eligible=false`, 5/6), no regression.
 
 ## Stage 1 - declares-field Relations For The Java Lane
 

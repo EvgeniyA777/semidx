@@ -401,6 +401,71 @@
                                  :nullable (java-field-nullable annotations)}))))
                 (recur (inc idx) [] acc)))))))))
 
+;; --- Field-write relations (plans/017 Stage 3, ADR-045) ---
+;;
+;; `dataflow/writes-field` attributes which fields a state-transition method
+;; writes, via setter calls (`x.setStatus(..)`) or, inside entity classes, direct
+;; `this.field = ...` assignments. Target keys use a `field:` sentinel so field
+;; names never collide with call tokens and always normalize to `unresolved`,
+;; keeping resolved-only projections and legacy outputs unaffected.
+
+(def ^:private java-setter-call-re #"\.set([A-Z][A-Za-z0-9_]*)\s*\(")
+
+(def ^:private java-this-assign-re
+  #"(?:^|[^.\w])this\.([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)")
+
+(def ^:private java-writer-name-re
+  #"(?i)^(?:save|update|disconnect|clear|reset|set|connect|revoke|invalidate)")
+
+(defn- java-decapitalize [s]
+  (if (seq s)
+    (str (str/lower-case (subs s 0 1)) (subs s 1))
+    s))
+
+(defn- java-method-field-writes
+  "Field names a method body writes: setter-call fields (`x.setStatus(..)` ->
+  `status`) plus, for entity classes, direct `this.field = ...` assignments.
+  Returns a deterministic sorted set."
+  [body entity?]
+  (into (sorted-set)
+        (concat
+         (->> (re-seq java-setter-call-re (str body))
+              (map (comp java-decapitalize second)))
+         (when entity?
+           (->> (re-seq java-this-assign-re (str body))
+                (map second))))))
+
+(defn- java-writes-field-relation [unit-id field start-line]
+  {:source_unit_id unit-id
+   :target_key (str "field:" field)
+   :relation_type "dataflow/writes-field"
+   :resolution_status "unresolved"
+   :evidence_quality "low"
+   :provenance (java-relation-provenance)
+   :evidence_location {:start_line start-line}})
+
+(defn- java-writes-field-relations
+  "Emit `dataflow/writes-field` relations for state-transition methods (writer-named
+  methods or methods in entity-like classes). `method-units` carry :start-line
+  :end-line :method :class :params; source ids match the emitted method units."
+  [path pkg lines method-units class-spots]
+  (->> method-units
+       (mapcat (fn [{:keys [start-line end-line method class params]}]
+                 (let [cls (or class "UnknownClass")
+                       module (if pkg (str pkg "." cls) cls)
+                       symbol (str (when pkg (str pkg ".")) cls "#" method)
+                       unit-id (:unit_id (java-method-unit-id path symbol params))
+                       spot (java-class-at class-spots start-line)
+                       entity? (boolean (and spot
+                                             (java-entity-class? path module cls lines (:line spot))))
+                       writer? (boolean (re-find java-writer-name-re (str method)))]
+                   (if (or entity? writer?)
+                     (let [body (java-call-scan-body lines start-line end-line)]
+                       (map #(java-writes-field-relation unit-id % start-line)
+                            (java-method-field-writes body entity?)))
+                     []))))
+       vec))
+
 (defn- parse-java-regex [path lines]
   (let [line-count (count lines)
         pkg (some (fn [line] (some-> (re-find java-package-re line) second)) lines)
@@ -447,7 +512,9 @@
         starts (mapv :start-line methods)
         ends (unit-end-lines starts line-count)
         method-spans (map (fn [m e] [(:start-line m) e]) methods ends)
-        relations (java-field-relations path pkg lines method-spans class-spots)
+        method-units (map (fn [m e] (assoc m :end-line e)) methods ends)
+        relations (into (java-field-relations path pkg lines method-spans class-spots)
+                        (java-writes-field-relations path pkg lines method-units class-spots))
         units (->> (map vector methods ends)
                    (map (fn [[m end-line]]
                           (let [start-line (:start-line m)
@@ -554,7 +621,8 @@
                                        :call_details call-details})))
                              vec)
                 method-spans (map (fn [m] [(:start-line m) (:end-line m)]) methods)
-                relations (java-field-relations path pkg src-lines method-spans class-spots)
+                relations (into (java-field-relations path pkg src-lines method-spans class-spots)
+                                (java-writes-field-relations path pkg src-lines methods class-spots))
                 units (->> methods
                            (map (fn [{:keys [start-line end-line method kind class call_details params superclass_module]}]
                                   (let [symbol (str (when pkg (str pkg ".")) class "#" method)

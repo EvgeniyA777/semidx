@@ -300,7 +300,25 @@
    [:packet_version [:re "^[0-9]+\\.[0-9]+$"]]
    [:triggered_by code-array]
    [:entity_candidates [:vector {:max 12} state-invariant-unit-ref]]
+   [:entity_fields {:optional true}
+    [:vector {:max 12}
+     [:map {:closed true}
+      [:entity bounded-string]
+      [:path {:optional true} bounded-string]
+      [:fields
+       [:vector {:max 24}
+        [:map {:closed true}
+         [:name bounded-string]
+         [:nullable {:optional true} boolean?]
+         [:annotations {:optional true} string-array]
+         [:state_bearing {:optional true} boolean?]]]]]]]
    [:state_writers [:vector {:max 12} state-invariant-unit-ref]]
+   [:field_writes {:optional true}
+    [:vector {:max 12}
+     [:map {:closed true}
+      [:unit_id bounded-string]
+      [:symbol {:optional true} bounded-string]
+      [:writes [:vector {:max 24} bounded-string]]]]]
    [:assertion_tests [:vector {:max 12} bounded-string]]
    [:fixture_helpers [:vector {:max 12} state-invariant-unit-ref]]
    [:guardrail

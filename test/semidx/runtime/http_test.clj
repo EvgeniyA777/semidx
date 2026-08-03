@@ -314,7 +314,7 @@
                (mapv :path (:entity_candidates expansion-packet))))
         (is (= (:entity_candidates expansion-packet)
                (:entity_candidates detail-packet)))
-        (is (= "state_invariants_require_whole_file_read"
+        (is (= "state_invariants_verify_field_preservation"
                (get-in detail-packet [:guardrail :code]))))
       (finally
         (.stop server 0)))))

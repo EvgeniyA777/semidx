@@ -1,9 +1,9 @@
 ---
 title: "State Invariant Field Facts Plan"
 doc_type: "architecture_plan"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-08-02"
 ---
 
@@ -254,7 +254,7 @@ and the detail packet, with budget accounting; HTTP/gRPC passthrough only.
 ## Implementation Sequence
 
 ### Stage 1 - `structure/declares-field` relations for the Java lane
-Status: in progress.
+Status: completed.
 
 Register `structure/declares-field` in `relation-types`. Add a Java-lane field
 producer that emits declares-field relations for entity-like classes, capturing
@@ -272,7 +272,7 @@ resolved-only `relation_support`) stays byte-identical. Verify: `clojure -M:test
 `./scripts/validate-language-onboarding.sh java`.
 
 ### Stage 2 - Field-aware assembler + `entity_fields` (packet 1.1)
-Status: planned.
+Status: completed.
 
 Thread the relation indexes into `state-invariants/assemble`; add the
 `entity_fields` section for entity candidates from `structure/declares-field`
@@ -285,7 +285,7 @@ budget accounting; prove HTTP/gRPC passthrough parity. Verify:
 `./scripts/run-mvp-gates.sh`, MCP smoke over the Java fixture.
 
 ### Stage 3 - `dataflow/writes-field` relations + `field_writes` (packet 1.2)
-Status: planned.
+Status: completed.
 
 Register `dataflow/writes-field`. Add a Java-lane field-write producer
 (direct `this.field = ...` / `field = ...` assignment and `setField(...)` calls),

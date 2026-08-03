@@ -110,10 +110,126 @@
          (take output-limit)
          vec)))
 
+(def ^:private field-limit 24)
+
+(defn- relations-from
+  "Typed relations whose source endpoint is `source-id`, read from the snapshot
+   relation indexes. Empty when the index carries no relation facts."
+  [index source-id]
+  (let [rels (:relations index)]
+    (->> (get (:relation_forward_index index) source-id)
+         (keep #(get rels %)))))
+
+(defn- field-name-from-target [target-key]
+  (let [tk (str target-key)]
+    (cond
+      (str/starts-with? tk "field:") (subs tk (count "field:"))
+      (str/includes? tk "#") (last (str/split tk #"#"))
+      :else tk)))
+
+(def ^:private state-field-re
+  #"(?i)(?:at$|_at$|status|state|token|secret|credential|password|connect|validated|enabled|active|expir|timestamp|refresh)")
+
+(defn- state-bearing-field? [field-name nullable]
+  (boolean (or (false? nullable)
+               (re-find state-field-re (str field-name)))))
+
+(defn- entity-field-entries
+  "One entry per entity candidate that has `structure/declares-field` relations,
+   listing its declared fields with annotation/nullability evidence and a
+   state-bearing hint. Empty when no field relations are available (ADR-045)."
+  [index entity-units]
+  (->> entity-units
+       (map (fn [u] {:entity (:module u)
+                     :path (:path u)
+                     :class-node (str (:path u) "::" (:module u))}))
+       distinct
+       (keep (fn [{:keys [entity path class-node]}]
+               (let [decls (->> (relations-from index class-node)
+                                (filter #(= "structure/declares-field" (:relation_type %))))]
+                 (when (seq decls)
+                   (let [fields (->> decls
+                                     (reduce
+                                      (fn [acc r]
+                                        (let [nm (field-name-from-target (:target_key r))]
+                                          (if (contains? acc nm)
+                                            acc
+                                            (let [ev (:evidence_location r)
+                                                  nullable (:nullable ev)]
+                                              (assoc acc nm
+                                                     (cond-> {:name nm
+                                                              :state_bearing (state-bearing-field? nm nullable)}
+                                                       (some? nullable) (assoc :nullable nullable)
+                                                       (seq (:annotations ev)) (assoc :annotations (vec (:annotations ev)))))))))
+                                      (sorted-map))
+                                     vals
+                                     (take field-limit)
+                                     vec)]
+                     (cond-> {:entity entity :fields fields}
+                       path (assoc :path path)))))))
+       (take output-limit)
+       vec))
+
+(defn- field-write-entries
+  "Per selected state-writer, the field names it writes via `dataflow/writes-field`
+   relations. Empty when no such relations exist."
+  [index writer-units]
+  (->> writer-units
+       (keep (fn [u]
+               (let [writes (->> (relations-from index (:unit_id u))
+                                 (filter #(= "dataflow/writes-field" (:relation_type %)))
+                                 (map #(field-name-from-target (:target_key %)))
+                                 distinct
+                                 sort
+                                 (take field-limit)
+                                 vec)]
+                 (when (seq writes)
+                   (cond-> {:unit_id (:unit_id u) :writes writes}
+                     (:symbol u) (assoc :symbol (:symbol u)))))))
+       (take output-limit)
+       vec))
+
+(defn- state-bearing-names [entity-fields]
+  (->> entity-fields
+       (mapcat :fields)
+       (filter :state_bearing)
+       (map :name)
+       distinct
+       sort
+       vec))
+
+(defn- build-guardrail [entity-fields field-writes]
+  (let [bearing (state-bearing-names entity-fields)]
+    (cond
+      (seq field-writes)
+      {:code "state_invariants_verify_field_preservation"
+       :recommendation
+       (str "Selected writers touch fields ["
+            (str/join ", " (->> field-writes (mapcat :writes) distinct sort))
+            "]. The entity declares state-bearing fields [" (str/join ", " bearing)
+            "]. Verify that state-bearing fields not written by the change are"
+            " intentionally preserved, and still read the entity and its tests"
+            " before editing.")}
+
+      (seq entity-fields)
+      {:code "state_invariants_review_declared_fields"
+       :recommendation
+       (str "The entity declares state-bearing fields [" (str/join ", " bearing)
+            "]. Verify your change preserves the ones it must not touch, and read"
+            " the entity/model files, primary service tests, and fixture helpers"
+            " before editing.")}
+
+      :else
+      {:code "state_invariants_require_whole_file_read"
+       :recommendation
+       "Read the complete entity/model files, primary service tests, and fixture helpers before editing; field-level write and preservation facts are not available in this packet."})))
+
 (defn assemble
-  "Assemble the bounded plans/016 Slice-1 state-invariant packet from existing
-   index facts. Returns nil unless the query is stateful and an entity/model
-   candidate is found. Field-level facts are deliberately out of scope."
+  "Assemble the bounded state-invariant packet from index facts and, when
+   available, `structure/declares-field` / `dataflow/writes-field` relations
+   (plans/017, ADR-045). Returns nil unless the query is stateful and an
+   entity/model candidate is found. `packet_version` is 1.2 when field writes are
+   available, 1.1 when only declared fields are, otherwise 1.0 (Slice-1)."
   [index query selected related-test-paths]
   (let [triggered-by (vec (take output-limit
                                 (query-anchors/matched-state-terms query)))
@@ -140,21 +256,25 @@
                                  (sort-by :unit_id)
                                  (take output-limit)
                                  (mapv unit-reference))
-            state-writers (->> selected
-                               (filter writer-unit?)
-                               (sort-by :unit_id)
-                               (take output-limit)
-                               (mapv unit-reference))]
-        {:packet_version "1.0"
-         :triggered_by triggered-by
-         :entity_candidates (->> entity-units
-                                 first-reference-per-path
-                                 (take output-limit)
-                                 vec)
-         :state_writers state-writers
-         :assertion_tests assertion-tests
-         :fixture_helpers fixture-helpers
-         :guardrail
-         {:code "state_invariants_require_whole_file_read"
-          :recommendation
-          "Read the complete entity/model files, primary service tests, and fixture helpers before editing; field-level write and preservation facts are not available in this packet."}}))))
+            writer-units (->> selected
+                              (filter writer-unit?)
+                              (sort-by :unit_id)
+                              (take output-limit)
+                              vec)
+            state-writers (mapv unit-reference writer-units)
+            entity-fields (entity-field-entries index entity-units)
+            field-writes (field-write-entries index writer-units)]
+        (cond-> {:packet_version (cond (seq field-writes) "1.2"
+                                       (seq entity-fields) "1.1"
+                                       :else "1.0")
+                 :triggered_by triggered-by
+                 :entity_candidates (->> entity-units
+                                         first-reference-per-path
+                                         (take output-limit)
+                                         vec)
+                 :state_writers state-writers
+                 :assertion_tests assertion-tests
+                 :fixture_helpers fixture-helpers
+                 :guardrail (build-guardrail entity-fields field-writes)}
+          (seq entity-fields) (assoc :entity_fields entity-fields)
+          (seq field-writes) (assoc :field_writes field-writes))))))
