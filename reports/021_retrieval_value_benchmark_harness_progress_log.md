@@ -136,13 +136,36 @@ Key decisions recorded:
 - `executor_model` vs `evaluated_provider_model` distinction explicit throughout.
 - `BenchmarkRun` and `TaskAttempt` schemas locked; `TaskAttempt` fields use
   `evaluated_*` prefix.
-- Cache protocol `cold_start_no_explicit_cache_v1`: explicit cache objects
-  forbidden; implicit cache reads recorded at Cache Read rate; storage cost = 0.
+- Cache protocol `implicit_cache_observed_v1`: explicit cache objects forbidden;
+  implicit cache reads recorded at Cache Read rate; arm order is randomized or
+  counterbalanced and cache variation is observable rather than labeled cold.
 - Price schedule `2026-08-03-eligible-v1` covers only eligible evaluated models
   (`gemini-2.5-pro`, `gemini-2.5-flash`). Legacy models (`claude-3-5-sonnet-20240620`,
   `gpt-4o-2024-05-13`) moved to historical-only reference, excluded from v1 verdict.
 - Arm D forbidden tools defined once and referenced by both policy and audit rule.
 - Calibration pilot and final threshold lock pending.
+
+### Iteration 5 contract amendment
+
+- `plans/020` and this pre-registration now share the same `evaluated_*`
+  `TaskAttempt` identity fields; executor-model routing remains separate.
+- The cache protocol was renamed from a misleading cold-start claim to
+  `implicit_cache_observed_v1`; explicit cache objects remain forbidden.
+- Arm D uses a finite tool allowlist plus one finite command-prefix denylist for
+  `bash`, and the audit consumes those same lists.
+- The Gemini 2.5 eligible schedule expires on 2026-10-16. Pilot/scoring after
+  that date requires a new preregistered schedule.
+
+### Iteration 5 verification
+
+- `git diff --check`: passed.
+- English-only scan over the amended plan, pre-registration, progress log, and
+  `MEMORY.md`: passed (no Cyrillic matches).
+- Markdown links added by the amendment point to the official Gemini
+  deprecation schedule; existing plan/report links remain unchanged.
+- Runtime tests: skipped; this amendment changes plan and benchmark-admission
+  documentation only, with no runtime source or contract artifact changes.
+- CCC artifacts: not refreshed; `RULES.md` forbids routine per-task refreshes.
 
 ### Sub-gate: calibration pilot and final lock
 

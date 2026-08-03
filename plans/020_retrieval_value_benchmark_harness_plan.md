@@ -63,13 +63,15 @@ questions: B is the stable, auditable comparator; D measures the agent's native
 no-index workflow. D must not replace B in the primary verdict.
 
 Within a scored benchmark run, arms use the same task wording, repository
-revision and initial state, provider/API/model revision, service tier, seed
-schedule, agent build, and wall-clock/tool budget. They differ only by the
-registered arm policy. Arm order is randomized or counterbalanced, each attempt
-uses an isolated workspace, and cache state (`cold` or a named warm-cache
-protocol) is preregistered. A provider/model, agent-build, or shared-protocol
-change creates a new `benchmark_run_id`; results from incompatible runs are not
-pooled for the primary verdict.
+revision and initial state, **evaluated** provider/API/model revision, service
+tier, seed schedule, agent build, and wall-clock/tool budget. They differ only
+by the registered arm policy. The harness executor model is not an evaluated
+model and is never a price-schedule key. Arm order is randomized or
+counterbalanced, each attempt uses an isolated workspace, and the preregistered
+cache protocol is recorded with every attempt. A change to an evaluated
+provider/model, agent build, or shared protocol creates a new
+`benchmark_run_id`; results from incompatible runs are not pooled for the
+primary verdict.
 
 ## Verified current state (grounded)
 
@@ -108,8 +110,9 @@ In:
 - Normalization of each agent's raw `usage` into a provider-independent
   response/usage matrix (provider/API adapters), preserving raw payloads.
 - Versioned benchmark-run and task-attempt identity, including repository
-  revision, seed, shared task prompt, per-arm policy, provider API surface, model
-  revision, and price schedule.
+  revision, seed, shared task prompt, per-arm policy, evaluated provider/API
+  surface/model revision, and price schedule. The executor model remains a
+  routing concern rather than an evaluated-attempt field.
 - An aggregator evaluation command that first aggregates usage by
   `task_attempt_id`, then joins `semantic_usage_feedback` outcomes and computes
   success-per-cost per arm without a many-to-many `task_id` join.
@@ -141,8 +144,11 @@ BenchmarkRun {
 TaskAttempt {
   benchmark_run_id, task_id, task_attempt_id,
   arm, arm_policy_id, sequence_index, seed,
-  agent_id, agent_build_id, provider, api_surface,
-  model, model_revision, service_tier, outcome
+  agent_id, agent_build_id,
+  evaluated_provider, evaluated_api_surface,
+  evaluated_model, evaluated_model_revision,
+  evaluated_service_tier,
+  outcome, not_applicable_reason
 }
 ```
 
@@ -150,7 +156,9 @@ TaskAttempt {
 one execution of that task under one arm and seed. Aggregation keys on
 `task_attempt_id` first and only then rolls up to
 `(benchmark_run_id, task_id, arm)`; repeated runs must never collapse merely
-because they share `task_id`.
+because they share `task_id`. `not_applicable_reason` is required only when an
+attempt outcome is `not_applicable`, which is the sole permitted representation
+of an unavailable Arm C capability.
 
 ## Response/usage matrix
 
@@ -176,8 +184,8 @@ Per response, map raw usage to unambiguous fields:
   total is visible output;
 - `tool_charges_usd` — non-token provider tool charges, otherwise 0;
 - derived: `input_total`, `output_total`, `grand_total`, and `cost_usd` via an
-  immutable `price_schedule_id` keyed by provider, API surface, model revision,
-  service tier, and cache class.
+  immutable `price_schedule_id` keyed by evaluated provider, API surface, model
+  revision, service tier, and cache class.
 
 The price schedule is a retained artifact, not a live lookup during aggregation.
 It records currency, token unit, exact per-class rates, effective/capture time,
@@ -204,6 +212,23 @@ class. A combined output may remain `output_unclassified` only when all possible
 output classes share the same price; otherwise pricing is unresolved.
 Provider-specific tool charges are retained separately from token cost.
 
+### Cache protocol contract
+
+The v1 protocol is `implicit_cache_observed_v1`: explicit provider cache objects
+are prohibited, while provider-initiated implicit cache reads are observed and
+recorded through `input_cache_read`. Therefore
+`input_cache_write_5m` and `input_cache_write_1h` are zero for this protocol;
+no cache-storage charge is eligible. Arms are randomized or counterbalanced and
+each response retains its cache-read observation, so provider cache variation is
+visible rather than mislabeled as a cold run. A future protocol that permits an
+explicit cache requires a new `cache_protocol_id` and `price_schedule_id` with
+the applicable cache-write/storage classes before it can contribute to the
+primary verdict.
+
+The current eligible Gemini 2.5 schedule is valid only through 2026-10-16.
+Calibration or scoring on or after that date is blocked until a newly captured,
+versioned eligible price schedule is preregistered.
+
 Session totals are computed by **summing the canonical fields over every turn** —
 the LLM API is stateless and exposes no session-total field. The per-turn source
 is the response `usage` object (or, for Claude Code, the session `.jsonl`
@@ -211,15 +236,16 @@ transcript usage).
 
 ### Matrix shape (tidy / long)
 
-One row per `(benchmark_run_id × task_attempt_id × turn_index × model_revision)`:
+One row per `(benchmark_run_id × task_attempt_id × turn_index × evaluated_model_revision)`:
 
 ```
 benchmark_run_id, task_id, task_attempt_id, arm, seed,
 repo_key, repo_revision, task_prompt_policy_id,
 arm_policy_bundle_id, arm_policy_id,
 execution_budget_policy_id, cache_protocol_id,
-sequence_index, agent_id, agent_build_id, provider, api_surface,
-model, model_revision, service_tier, turn_index,
+sequence_index, agent_id, agent_build_id,
+evaluated_provider, evaluated_api_surface,
+evaluated_model, evaluated_model_revision, evaluated_service_tier, turn_index,
 usage_norm  { input_uncached, input_cache_read,
               input_cache_write_5m, input_cache_write_1h,
               output_visible, output_reasoning, output_unclassified,

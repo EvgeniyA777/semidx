@@ -54,41 +54,44 @@ Use your available tools to explore the codebase, analyze the problem, and imple
 - **Arm C** allowed tools: Arm B tools + `lsp_definition`, `lsp_references`.
 - **Arm D** allowed tools: `bash`, `grep_search`, `list_dir`, `view_file`.
 
-### Arm D Forbidden Tools (canonical list)
+### Arm D Tool Policy (canonical lists)
 
-The following tools and service invocations are forbidden for Arm D. This single
-list governs both the policy definition and the audit rule — there must be no
-divergence between the two.
+Arm D's allowed tool IDs are the finite allowlist declared above: `bash`,
+`grep_search`, `list_dir`, and `view_file`. Any other tool ID fails the attempt
+with `arm_d_forbidden_tool_violation`.
 
-- `semidx` (any CLI subcommand or MCP tool: `resolve_context`, `expand_context`,
-  `fetch_context_detail`, `repo_map`, `create_index`, `skeletons`, etc.)
-- `lsp_*` (any LSP tool call: `lsp_definition`, `lsp_references`, etc.)
-- `scip_*` (any SCIP tool call)
-- Any other named external semantic-navigation service
+For the allowed `bash` tool, the following command/service prefixes are the
+finite semantic-navigation denylist. This same list governs the command-log
+audit rule.
 
-**Audit rule:** After each Arm D attempt, the harness scans the tool-call log.
-If any tool matching this list appears, the attempt outcome is set to `error`
-with the reason `"arm_d_forbidden_tool_violation"`.
+- `semidx`
+- `scip`
+- `sourcegraph` and `sg`
+- `codeql`
+- `clojure -M:mcp` and `clojure -M:mcp-http`
+
+**Audit rule:** After each Arm D attempt, the harness scans tool IDs against the
+allowlist and `bash` command records against the denylist. A match sets the
+attempt outcome to `error` with the reason `"arm_d_forbidden_tool_violation"`.
 
 ### Execution Budget (`execution_budget_policy_id: budget_v1`)
 
 - Max wall-clock time per task attempt: 300 seconds.
 - Max tool calls per task attempt: 30.
 
-### Cache Protocol (`cache_protocol_id: cold_start_no_explicit_cache_v1`)
+### Cache Protocol (`cache_protocol_id: implicit_cache_observed_v1`)
 
-- Every task attempt begins with a completely cold provider context cache (no
-  leaked tokens from previous attempts).
 - **Explicit caching is forbidden:** The harness must not create explicit Gemini
   `CachedContent` objects, Anthropic extended-TTL cache entries, or any other
   provider-managed cache objects during a benchmark attempt.
 - If a provider returns implicit cache-read tokens (e.g., OpenAI automatic
   prompt caching, or Gemini implicit context caching), those tokens are recorded
-  in `cache_read_tokens` and billed at the Cache Read rate from §4. Because no
-  explicit cache object is created, `cache_storage_token_hours` is always 0 and
-  no storage cost accrues.
-- This policy simplifies cost accounting for v1: the only cache-related billing
-  dimension is implicit reads at the provider's discounted input rate.
+  in `input_cache_read` and billed at the Cache Read rate from §4. Because no
+  explicit cache object is created, `input_cache_write_5m` and
+  `input_cache_write_1h` are zero and no storage cost accrues.
+- The harness preserves the cache-read observation per response and randomizes
+  or counterbalances arm order. Implicit cache variation is therefore visible in
+  the recorded cost rather than misrepresented as a cold-start invariant.
 
 ## 3. Schemas (Run and Attempt Identity)
 
@@ -145,6 +148,8 @@ this schedule.
 **Currency:** USD
 **Token Unit:** Per 1,000,000 tokens (1M tokens)
 **Capture Time:** 2026-08-03T01:02:00Z
+**Eligible Until:** 2026-10-16 (Gemini 2.5 shutdown date; see the official
+[Gemini deprecation schedule](https://ai.google.dev/gemini-api/docs/deprecations?hl=en))
 
 ### 4.1. Eligible Model Price Table (Locked as of 2026-08-03)
 
@@ -160,12 +165,16 @@ verdict until resolved.)*
 
 *(Official Source: [Google AI pricing](https://ai.google.dev/gemini-api/docs/pricing) — fetched 2026-08-03)*
 
-**Cache billing under `cold_start_no_explicit_cache_v1`:** Because explicit
-cache objects are forbidden (§2), there is no Cache Write / Storage column. The
+**Cache billing under `implicit_cache_observed_v1`:** Because explicit cache
+objects are forbidden (§2), there is no Cache Write / Storage column. The
 "Cache Read / implicit" column covers only provider-initiated implicit caching.
 If a future run policy permits explicit caching, a new price schedule version
 must add Cache Write and Storage columns with exact rates and TTL rules before
 that run is eligible for the cost verdict.
+
+No calibration pilot or scoring run may start on or after the eligible-until
+date above. A later run must preregister a new eligible price schedule before
+admission.
 
 ### 4.2. Historical-Only Reference Rates (not eligible for v1 verdict)
 
