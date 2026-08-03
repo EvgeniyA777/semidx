@@ -236,7 +236,10 @@
                               :estimated_tokens (get-in result [:budget_summary :estimated_tokens])
                               :requested_tokens (get-in result [:budget_summary :requested_tokens])
                               :reserved_tokens (get-in result [:budget_summary :reserved_budget :selection_tokens])
-                              :returned_tokens (get-in result [:budget_summary :estimated_tokens])
+                              ;; The selection stage has no separately measured return, so read the
+                              ;; real (absent -> nil) returned figure like expand/detail do rather
+                              ;; than duplicating the estimate. Selection-stage cost is estimated_tokens.
+                              :returned_tokens (get-in result [:budget_summary :returned_tokens])
                               :within_budget (get-in result [:budget_summary :within_budget])
                               :truncation_count (if (= "completed" (:result_status result)) 0 1)
                               :policy_id (get-in result-meta [:retrieval_policy :policy_id])
