@@ -39,7 +39,7 @@ and is appended by later stages.
 | Stage | Status |
 | --- | --- |
 | 0 — Independent review and compatibility baseline | **completed** |
-| 1 — Evidence model and arbitration kernel | **deferred** (owner admission gates open; see NextStageRoutingRecommendation) |
+| 1 — Evidence model and arbitration kernel | **in progress** — pure kernel + tests delivered (owner admitted 2026-08-03: TypeScript-first + Variant C); FactEvidence→snapshot persistence deferred to Stage 2 |
 | 2–7 | not started |
 
 ## Scope Executed (Stage 0)
@@ -285,4 +285,118 @@ fallback_executor_or_model: Claude Sonnet 5 for mechanical fixture upkeep only;
   NOT for the signature_key/arbitration identity decisions.
 model_availability_checked_at: 2026-08-03
 confidence: high (that Stage 1 must be deferred pending the two owner decisions)
+```
+
+Stage 0 recommended deferring Stage 1. The owner subsequently lifted the gate
+(2026-08-03): TypeScript is confirmed as the first vertical slice and Variant C
++ the identity fixtures are approved as the admission baseline. Stage 1 then
+started; its record follows.
+
+---
+
+# Stage 1 — Evidence Model And Arbitration Kernel
+
+## Execution Record
+
+- **Executor**: Claude Code team lead (v2.1.212), no Fable, no Explore agent.
+- **Model**: Claude Opus 4.8 Thinking, high effort (matches the plan's Stage 1
+  routing row: `CanonicalFactKey`, ambiguity, and identity are
+  correctness-critical). Development was REPL-driven via the project nREPL.
+- **Admission**: owner confirmed TypeScript-first and approved the Variant C
+  `CanonicalFactKey` contract + Stage 0 identity fixtures.
+
+## Scope
+
+Additive and default-off. Commit boundary per the plan: **evidence contracts
+and pure arbitration only.** No default extraction, storage schema, or transport
+changed.
+
+## Deliverables
+
+New pure namespace `src/semidx/runtime/fact_arbitration.clj`:
+
+- `fact-schema-version`, the ADR-046 authority ladder
+  (`exact > structural > heuristic > fallback`), freshness vocabulary, and the
+  fact-kind / signature-precision vocabularies.
+- Provider-neutral **CanonicalFactKey** with the Variant C precision-aware
+  overload identity. Unit identity anchors on the core key
+  `(language, path, owner, symbol, dispatch_identity, arity, ordinal)`; the typed
+  signature is a refinement, not part of the core key. Relation keys mirror
+  ADR-039 / `semidx.runtime.relations` identity fields. Identity is a
+  content-addressed hash (`canonical-fact-key-id`) using the same
+  `canonical-value` + SHA-1 discipline as `relations.clj`.
+- **FactEvidence** normalization + validation. Provider-native ids/symbols are
+  retained as evidence only, never in the key. ADR-046 rule enforced:
+  `exact` authority requires fresh source identity (`freshness=exact`), else a
+  structured `:exact-without-fresh-identity` error.
+- **Deterministic same-key arbitration** (`arbitrate-facts`): strongest
+  authority wins; all evidence retained; lower authority never overwrites
+  higher.
+- **F1a same-arity rule** implemented: `<=1` distinct typed signature in a core
+  group merges to one fact whose `fact_identity` equals the core key id (so a
+  regex-only unit keeps its identity when SCIP/LSP attach later — the Variant C
+  invariant); `>=2` distinct typed signatures split into distinct canonical
+  facts, and any unattributable arity-only evidence surfaces an
+  `:arity_ambiguous_heuristic` diagnostic instead of being silently merged.
+
+## Verification
+
+- **`clojure -M:test`**: **302 tests, 1997 assertions, 0 failures, 0 errors**
+  (was 289/1947 at Stage 0; +13 tests in
+  `test/semidx/runtime/fact_arbitration_test.clj`).
+- **REPL** (`clojure -M:nrepl`) confirmed, before the suite run: 4-provider
+  merge → one exact typed fact with all evidence retained; distinct arities and
+  distinct owners never collide; same-arity typed overloads split; arity-only
+  evidence under same-arity overloads yields the F1a diagnostic; the Variant C
+  identity-stability invariant holds; arbitration is order-independent across
+  reverse + 20+ shuffles; `exact+stale` evidence is rejected.
+- **`git diff --check`**: clean. **English-only**: no Cyrillic.
+- **Existing snapshots remain readable**: no storage schema changed; the full
+  suite including `semidx.runtime.storage-test` is green.
+
+## Deferred (named honestly)
+
+- **FactEvidence → snapshot payload + PostgreSQL projection round-trip.** The
+  kernel is pure and its output is plain serializable data, but nothing emits
+  persisted FactEvidence yet. Wiring evidence into the snapshot payload belongs
+  with the Stage 2 provider seam (when a provider first produces facts); adding
+  an unused persistence path now would be speculative. Existing snapshot
+  readability is already preserved (no schema change).
+- **`FactBatch` framing** beyond "a collection of facts" — the per-provider
+  batch envelope (source identity, coverage, diagnostics) lands with the Stage 2
+  provider execution orchestrator that produces batches.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 1 — Evidence Model And Arbitration Kernel (pure kernel + tests)
+recommended_next_stage: Stage 2 — Provider Plan And Legacy Adapter Shadow Path
+recommended_executor: Claude Code team lead (v2.1.212+), no Fable, no Explore agent
+recommended_model: Claude Sonnet 5 (plan default Sonnet 4.6, updated), with the
+  FactEvidence-persistence sub-task escalated to Opus 4.8 if identity/round-trip
+  parity proves tricky
+effort: medium
+effort_justification: Stage 2 is a bounded implementation behind a default-off
+  seam (data-first catalog, ProviderPlan, execution orchestrator, tree-sitter +
+  regex adapters wrapping the existing parse-file facade). It reuses the Stage 1
+  kernel rather than designing new correctness-critical identity contracts. The
+  one careful sub-task — persisting FactEvidence in the snapshot payload with
+  in-memory + PostgreSQL round-trip parity — may warrant a high-effort spike.
+rationale: The pure kernel and identity contract are proven and tested. Stage 2
+  wires providers through the seam in shadow mode without changing default
+  output, which is lower correctness risk than Stage 1.
+prerequisites_or_blockers:
+  - Stage 1 kernel merged (this commit).
+  - Stage 2 must keep default output byte-identical (shadow only) and classify
+    regex evidence as heuristic, never exact (ADR-046).
+  - Carry forward the FactEvidence→snapshot persistence + PG round-trip
+    deliverable listed under "Deferred" above.
+file_ownership_and_conflict_risk: LOW-MEDIUM. Stage 1 touched only
+  src/semidx/runtime/fact_arbitration.clj and its test. Stage 2 will touch the
+  provider seam and the file-indexing path (index.clj / adapters.clj); no
+  overlap with plans/020-owned files.
+fallback_executor_or_model: Claude Opus 4.8 for the persistence/identity
+  round-trip sub-task; Sonnet 5 for the bounded orchestrator/adapters.
+model_availability_checked_at: 2026-08-03
+confidence: high (kernel is solid; Stage 2 is a bounded seam over it)
 ```
