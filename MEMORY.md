@@ -184,6 +184,20 @@ after this memory file.
   and library/HTTP/gRPC parity tests cover the Java lifecycle fixture. When the
   packet cannot fit, staged retrieval emits `state_invariants_omitted` rather
   than exceeding its reserved budget.
+- `plans/017` (ADR-045) opens the deferred field-level state-invariant tranche:
+  entity fields are modeled as relation target keys, never units. Stage 1 is
+  delivered: `structure/declares-field` is a registered relation type, and the
+  Java lane (`languages/java.clj`, both regex and tree-sitter paths) now emits
+  `structure/declares-field` relations for class-body fields of entity-like
+  classes only (entity annotation / entity-or-model path / class/module suffix),
+  excluding method-body locals. Each relation uses source `path::module` (a
+  synthetic class node, not a unit), `target_key` `pkg.Class#field`, and carries
+  annotation/nullability hints in `evidence_location`; it has no target unit so
+  it normalizes to `unresolved` and is ignored by resolved-only traversal,
+  keeping callers/callees, `impact_analysis`, and `relation_support` outputs
+  byte-identical. The assembler does not yet consume these relations (packet
+  stays `1.0`); Stage 2 wires `entity_fields`, Stage 3 adds
+  `dataflow/writes-field`.
 - Antigravity first-contact MCP behavior is now partially verified in production-like use: it successfully stayed on `create_index -> repo_map -> resolve_context` without drifting into manual browsing, but staged continuation still needs one explicit follow-up check to prove that it will keep using `expand_context` and `fetch_context_detail` via `selection_id` / `snapshot_id` instead of switching back to filesystem reads or broad summarization.
 
 ## Next Execution Priorities

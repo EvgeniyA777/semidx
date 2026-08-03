@@ -261,6 +261,146 @@
      :method_arity arity
      :method_signature_key norm}))
 
+;; --- Field-declaration relations (plans/017 Stage 1, ADR-045) ---
+;;
+;; Entity fields are modeled as relation target keys, never units. The producer
+;; emits `structure/declares-field` relations only for entity-like classes and
+;; only for class-body field declarations (method-body locals are excluded), so
+;; the unit model and every existing graph consumer stay byte-identical. These
+;; relations carry no target unit (a field has none), so they normalize to
+;; `unresolved` and are ignored by resolved-only traversal.
+
+(def ^:private java-field-re
+  #"^\s*(?:(?:public|private|protected|static|final|transient|volatile)\s+)+[A-Za-z_][A-Za-z0-9_<>\[\],\.\?\s]*?\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=[^;]*)?;\s*$")
+
+(def ^:private java-annotation-line-re
+  #"^\s*(@[A-Za-z_][A-Za-z0-9_\.]*(?:\([^)]*\))?)\s*$")
+
+(def ^:private java-leading-annotation-re
+  #"^\s*(@[A-Za-z_][A-Za-z0-9_\.]*(?:\([^)]*\))?)\s*")
+
+(def ^:private java-entity-path-re
+  #"(?i)(?:^|/)(?:entity|entities|model|models)(?:/|$)")
+
+(def ^:private java-entity-annotation-re
+  #"(?i)^\s*@(?:Entity|Table|Embeddable|MappedSuperclass|Document)\b")
+
+(defn- java-relation-provenance []
+  {:producer "semidx.runtime.languages.java"
+   :parser_mode "full"})
+
+(defn- strip-leading-annotations
+  "Split leading annotations off a declaration line, returning
+  [annotations remainder] so the field regex can match the modifier-led tail."
+  [line]
+  (loop [s (str line)
+         annos []]
+    (if-let [m (re-find java-leading-annotation-re s)]
+      (recur (subs s (count (first m))) (conj annos (second m)))
+      [annos s])))
+
+(defn- java-field-nullable
+  "Best-effort nullability from annotation evidence. nil means unknown; this is
+  evidence, not identity."
+  [annotations]
+  (let [text (str/join " " annotations)]
+    (cond
+      (re-find #"(?i)nullable\s*=\s*false" text) false
+      (re-find #"(?i)nullable\s*=\s*true" text) true
+      (re-find #"(?i)@(?:Id|NotNull|NonNull)\b" text) false
+      :else nil)))
+
+(defn- java-entity-class?
+  "Conservative entity/model detection: an entity annotation on the class, an
+  entity/model path segment, or an entity/model class or module suffix."
+  [path module cls lines class-line]
+  (let [lower-path (str/lower-case (str path))
+        lower-cls (str/lower-case (str cls))
+        lower-mod (str/lower-case (str module))
+        start (max 0 (- class-line 6))
+        stop (max 0 (dec class-line))
+        preceding (->> lines (drop start) (take (max 0 (- stop start))))
+        annotated? (boolean (some #(re-find java-entity-annotation-re (str %)) preceding))]
+    (boolean
+     (or annotated?
+         (re-find java-entity-path-re lower-path)
+         (str/ends-with? lower-cls "entity")
+         (str/ends-with? lower-cls "model")
+         (str/ends-with? lower-mod "entity")
+         (str/ends-with? lower-mod "model")))))
+
+(defn- java-class-at [class-spots line-no]
+  (->> class-spots
+       (filter #(<= (:line %) line-no))
+       last))
+
+(defn- java-declares-field-relation
+  [{:keys [path module field line-number annotations nullable]}]
+  {:source_unit_id (str path "::" module)
+   :target_key (str module "#" field)
+   :relation_type "structure/declares-field"
+   :resolution_status "unresolved"
+   :evidence_quality "medium"
+   :provenance (java-relation-provenance)
+   :evidence_location (cond-> {:start_line line-number}
+                        (seq annotations) (assoc :annotations (vec annotations))
+                        (some? nullable) (assoc :nullable nullable))})
+
+(defn- java-field-relations
+  "Emit `structure/declares-field` relations for class-body fields of entity-like
+  classes. `method-spans` is a seq of [start-line end-line] pairs whose lines are
+  excluded (method-body locals are not fields). Deterministic, engine-agnostic."
+  [path pkg lines method-spans class-spots]
+  (let [inside-method? (fn [line-no]
+                         (boolean (some (fn [[s e]] (and s e (<= s line-no e)))
+                                        method-spans)))
+        entity? (memoize
+                 (fn [spot]
+                   (when spot
+                     (let [cls (:class spot)
+                           module (if pkg (str pkg "." cls) cls)]
+                       (java-entity-class? path module cls lines (:line spot))))))]
+    (loop [idx 0
+           pending []
+           acc []]
+      (if (>= idx (count lines))
+        (vec acc)
+        (let [line (nth lines idx)
+              line-no (inc idx)
+              trimmed (str/trim (str line))]
+          (cond
+            (str/blank? trimmed)
+            (recur (inc idx) [] acc)
+
+            (re-find java-annotation-line-re line)
+            (recur (inc idx)
+                   (conj pending (second (re-find java-annotation-line-re line)))
+                   acc)
+
+            :else
+            (let [spot (java-class-at class-spots line-no)
+                  [inline-annos remainder] (strip-leading-annotations line)
+                  field-match (re-find java-field-re remainder)]
+              (if (and spot
+                       (entity? spot)
+                       (not (inside-method? line-no))
+                       field-match)
+                (let [field-name (second field-match)
+                      cls (:class spot)
+                      module (if pkg (str pkg "." cls) cls)
+                      annotations (vec (concat pending inline-annos))]
+                  (recur (inc idx)
+                         []
+                         (conj acc
+                               (java-declares-field-relation
+                                {:path path
+                                 :module module
+                                 :field field-name
+                                 :line-number line-no
+                                 :annotations annotations
+                                 :nullable (java-field-nullable annotations)}))))
+                (recur (inc idx) [] acc)))))))))
+
 (defn- parse-java-regex [path lines]
   (let [line-count (count lines)
         pkg (some (fn [line] (some-> (re-find java-package-re line) second)) lines)
@@ -306,6 +446,8 @@
                      vec)
         starts (mapv :start-line methods)
         ends (unit-end-lines starts line-count)
+        method-spans (map (fn [m e] [(:start-line m) e]) methods ends)
+        relations (java-field-relations path pkg lines method-spans class-spots)
         units (->> (map vector methods ends)
                    (map (fn [[m end-line]]
                           (let [start-line (:start-line m)
@@ -338,6 +480,7 @@
      :module pkg
      :imports imports
      :units units
+     :relations relations
      :diagnostics []
      :parser_mode "full"}))
 
@@ -410,6 +553,8 @@
                                        :superclass_module (:superclass_module class-spot)
                                        :call_details call-details})))
                              vec)
+                method-spans (map (fn [m] [(:start-line m) (:end-line m)]) methods)
+                relations (java-field-relations path pkg src-lines method-spans class-spots)
                 units (->> methods
                            (map (fn [{:keys [start-line end-line method kind class call_details params superclass_module]}]
                                   (let [symbol (str (when pkg (str pkg ".")) class "#" method)
@@ -440,6 +585,7 @@
                         :module pkg
                         :imports imports
                         :units units
+                        :relations relations
                         :diagnostics [{:code "tree_sitter_active"
                                        :summary "Java analyzed using tree-sitter CST extraction."}]
                         :parser_mode "full"}}

@@ -8,7 +8,8 @@
   producers emit them; unknown kinds are rejected with a structured diagnostic."
   #{"dataflow/local-binding-call-result"
     "dataflow/returns-call-result"
-    "dataflow/passes-argument"})
+    "dataflow/passes-argument"
+    "structure/declares-field"})
 
 (def resolution-statuses
   "Valid resolution states for a typed relation."

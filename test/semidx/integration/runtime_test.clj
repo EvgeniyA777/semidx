@@ -2298,6 +2298,68 @@
                 (get by-type "dataflow/passes-argument")))
       (is (contains? (get (:relation_forward_index index) wrapper-id) (:relation_id (first relations)))))))
 
+(deftest java-declares-field-relations-extract-entity-fields-test
+  (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-java-declares-field" (make-array java.nio.file.attribute.FileAttribute 0)))
+        entity-rel "src/com/acme/model/ConnectionEntity.java"
+        service-rel "src/com/acme/service/CheckoutService.java"
+        class-node (str entity-rel "::com.acme.model.ConnectionEntity")]
+    (write-file! tmp-root entity-rel
+                 (str "package com.acme.model;\n\n"
+                      "import java.time.Instant;\n\n"
+                      "@Entity\n"
+                      "public class ConnectionEntity {\n"
+                      "  @Id\n"
+                      "  private Long id;\n\n"
+                      "  @Column(nullable = false)\n"
+                      "  private Instant connectedAt;\n\n"
+                      "  private Instant lastValidatedAt;\n"
+                      "  private String status;\n\n"
+                      "  public void setStatus(String status) {\n"
+                      "    this.status = status;\n"
+                      "    final int local = 3;\n"
+                      "  }\n"
+                      "}\n"))
+    (write-file! tmp-root service-rel
+                 (str "package com.acme.service;\n\n"
+                      "public class CheckoutService {\n"
+                      "  private int total;\n\n"
+                      "  public void run() {\n"
+                      "    final int x = 1;\n"
+                      "  }\n"
+                      "}\n"))
+    (let [index (sci/create-index {:root_path tmp-root})
+          declares (->> (:relations index)
+                        vals
+                        (filter #(= "structure/declares-field" (:relation_type %)))
+                        vec)
+          by-field (into {} (map (juxt :target_key identity) declares))]
+      (testing "entity class-body fields are extracted as declares-field relations"
+        (is (= #{"com.acme.model.ConnectionEntity#id"
+                 "com.acme.model.ConnectionEntity#connectedAt"
+                 "com.acme.model.ConnectionEntity#lastValidatedAt"
+                 "com.acme.model.ConnectionEntity#status"}
+               (set (keys by-field)))))
+      (testing "method-body locals are excluded (not fields)"
+        (is (not (contains? by-field "com.acme.model.ConnectionEntity#local")))
+        (is (not (contains? by-field "com.acme.model.ConnectionEntity#x"))))
+      (testing "non-entity classes emit no field relations"
+        (is (empty? (filter #(str/includes? (str (:source_unit_id %)) "CheckoutService")
+                            declares))))
+      (testing "fields carry annotation/nullability evidence and stay unresolved"
+        (let [connected (get by-field "com.acme.model.ConnectionEntity#connectedAt")]
+          (is (= "unresolved" (:resolution_status connected)))
+          (is (false? (:nullable (:evidence_location connected))))
+          (is (some #(str/includes? % "@Column")
+                    (:annotations (:evidence_location connected))))))
+      (testing "every declares-field relation is unresolved, so resolved-only projections ignore it"
+        (is (every? #(= "unresolved" (:resolution_status %)) declares)))
+      (testing "declares-field relations validate without diagnostics"
+        (is (empty? (filter #(= "structure/declares-field" (:relation_type %))
+                            (:relation_diagnostics index)))))
+      (testing "the synthetic class node keys the forward index for its fields"
+        (is (= (set (map :relation_id declares))
+               (get (:relation_forward_index index) class-node)))))))
+
 (deftest tree-sitter-cli-resolution-prefers-explicit-and-managed-toolchain-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-tree-sitter-cli-resolution" (make-array java.nio.file.attribute.FileAttribute 0)))
         explicit-rel "tools/tree-sitter"
