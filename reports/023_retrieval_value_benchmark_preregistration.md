@@ -2,14 +2,14 @@
 title: "Retrieval Value Benchmark Pre-registration (Stage 0)"
 doc_type: "report"
 lifecycle: "active"
-status: "final"
+status: "in_progress"
 agent_action: "reference_for_context"
 updated: "2026-08-03"
 ---
 
 # Retrieval Value Benchmark Pre-registration (Stage 0)
 
-This document satisfies Stage 0 of `plans/020_retrieval_value_benchmark_harness_plan.md`. It formally freezes the benchmark experimental design, schemas, and calibration rules before any pilot or scoring runs begin, ensuring falsifiability.
+This document satisfies the pre-registration sub-gate of Stage 0 for `plans/020_retrieval_value_benchmark_harness_plan.md`. It formally freezes the benchmark experimental design and schemas before the calibration pilot begins. The final threshold lock will occur after the pilot.
 
 ## 1. Arm Definitions
 
@@ -24,9 +24,17 @@ This document satisfies Stage 0 of `plans/020_retrieval_value_benchmark_harness_
 
 ## 2. Experimental Controls and Cache Protocol
 
-- **Task Prompt Policy**: `v1` (shared fixed wording).
-- **Arm Policy Bundle**: `v1` (defines exact CLI/tool constraints for each arm).
-- **Execution Budget**: Fixed wall-clock limit per task attempt and a maximum tool-call limit.
+These policy IDs represent the immutable definitions for the `v1` benchmark suite:
+
+- **Task Prompt Policy (`task_prompt_policy_id: agent_default_v1`)**: The exact task prompt text injected for the agent, without any arm-specific hints.
+- **Arm Policy Bundle (`arm_policy_bundle_id: harness_v1`)**:
+  - Arm A tools: `resolve_context`, `expand_context`, `fetch_context_detail`.
+  - Arm B tools: `grep_search`, `list_dir`, `view_file`.
+  - Arm C tools: Arm B tools + `lsp_definition`, `lsp_references`.
+  - Arm D tools: Native unconstrained shell environment.
+- **Execution Budget (`execution_budget_policy_id: budget_v1`)**:
+  - Max wall-clock time per task attempt: 300 seconds.
+  - Max tool calls per task attempt: 30.
 - **Cache Protocol (`cache_protocol_id: cold_start_v1`)**: Every task attempt begins with a completely cold context cache (no leaked tokens from previous attempts).
 
 ## 3. Schemas (Run and Attempt Identity)
@@ -71,14 +79,29 @@ Aggregation keys on `task_attempt_id` first, then rolls up to `(benchmark_run_id
 ## 4. Usage Adapters and Price Schedule
 
 **Price Schedule ID:** `2026-08-03-anthropic-openai-gemini-v1`
+**Currency:** USD
+**Token Unit:** Per 1,000,000 tokens (1M tokens)
+
+### 4.1. Price Table (Locked as of 2026-08-03)
+
+| Provider | Model Revision | Input (Uncached) | Input (Cache Read) | Cache Write | Output (Visible/Unclassified) | Output (Reasoning) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Anthropic | `claude-3-5-sonnet-20240620` | $3.00 / 1M | $0.30 / 1M | $3.75 / 1M | $15.00 / 1M | $15.00 / 1M |
+| OpenAI | `gpt-4o-2024-05-13` | $5.00 / 1M | $2.50 / 1M | $5.00 / 1M | $15.00 / 1M | $15.00 / 1M |
+| Google | `gemini-1.5-pro-001` | $3.50 / 1M | $0.88 / 1M | $3.50 / 1M | $10.50 / 1M | $10.50 / 1M |
+
+*(Sources: anthropic.com/pricing, openai.com/pricing, ai.google.dev/pricing)*
+
+### 4.2. Usage Adapter Mapping (`adapter_version: v1`)
 
 | Adapter / Provider | Uncached | Cache Read | Cache Write (5m/1h) | Visible Output | Reasoning | Unclassified |
 | --- | --- | --- | --- | --- | --- | --- |
 | `anthropic-messages` | `input_tokens` | `cache_read_input_tokens` | `cache_creation_input_tokens` | Provider split | Provider split | `output_tokens` (if no split) |
 | `openai-chat` | `prompt_tokens` - cached | `prompt_tokens_details.cached_tokens` | `0` (implied) | `completion_tokens` - reasoning | `completion_tokens_details.reasoning_tokens` | `0` |
+| `openai-responses` | `input_tokens` - cached | `input_tokens_details.cached_tokens` | `0` | `output_tokens` - reasoning | `output_tokens_details.reasoning_tokens` | `0` |
 | `gemini-generate-content`| `promptTokenCount` - cached | `cachedContentTokenCount` | `0` | `candidatesTokenCount` | `thoughtsTokenCount` | `0` |
 
-*Invariant:* All raw tokens are normalized into `cost_usd` per the versioned `price_schedule_id`.
+*Rule:* If the raw response cannot distinguish a billing-relevant class, the adapter emits `pricing_status: unresolved` and the attempt is excluded from the cost verdict until resolved.
 
 ## 5. Pilot and Final Lock Rule
 
@@ -87,10 +110,7 @@ Before the actual scoring run, a **Calibration Pilot** will be conducted:
 - **Measurements:** Cost of the competent baseline (Arm B) and the success-metric noise floor.
 - **Action:** No verdict is produced here. The pilot exists solely to calibrate the "noise" and "baseline cost".
 
-**Final Lock Rule:** 
+**Final Lock Rule:**
 Immediately after the pilot and *before* scoring, the final threshold must be locked. It will be defined as:
 > *Arm A is cheaper than Arm B by more than the measured noise floor at parity success.*
 (Provisionally: ≥50% lower cost, success within 5 percentage points, wall-clock ≤ 1.5×).
-
----
-*Preregistration complete. The experiment harness (Stage 2) and aggregator (Stage 3) may now be built against these locked definitions.*

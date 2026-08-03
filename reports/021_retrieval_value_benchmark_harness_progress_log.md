@@ -16,7 +16,7 @@ Companion log for
 
 | Stage | Status |
 | --- | --- |
-| 0 — Pre-register arms/run identity/metric, pilot-then-lock threshold | completed (see `reports/023_retrieval_value_benchmark_preregistration.md`) |
+| 0 — Pre-register arms/run identity/metric, pilot-then-lock threshold | pre-registration sub-gate completed (see `reports/023_retrieval_value_benchmark_preregistration.md`); calibration pilot and final-lock pending |
 | 1 — Fidelity fix (`returned_tokens`) | completed |
 | 2 — Task suite + four-arm harness | not started |
 | 3 — Aggregator command | not started |
@@ -123,20 +123,22 @@ selection stage and `returned_tokens` for expand/detail.
   cost. Revisit only if the benchmark needs measured (not estimated) selection
   cost.
 
-## Stage 0 — Pre-registration and Lock (completed)
+## Stage 0 — Pre-registration and Lock (in progress)
 
 ### Artifacts
 
 - Pre-registration locked in `reports/023_retrieval_value_benchmark_preregistration.md`.
 - Locked the A/B/C/D arm definitions and their roles.
 - Defined `BenchmarkRun` and `TaskAttempt` schemas.
-- Defined `2026-08-03-anthropic-openai-gemini-v1` price schedule.
+- Defined `2026-08-03-anthropic-openai-gemini-v1` price schedule with exact rates.
 - Locked the final threshold calibration rule.
 
 ### NextStageRoutingRecommendation
 
-- **Target Stage:** Stage 2 — Task suite + four-arm harness (Stage 1 is already completed).
-- **Executor:** Antigravity or Claude Sonnet (Thinking).
-- **Recommended Model:** Claude 3.5 Sonnet (Thinking) or Gemini 3.1 Pro.
-- **Effort Level:** High effort.
-- **Effort Justification:** Stage 2 requires creating the actual task suite definition and the four-arm execution harness in Clojure. This involves orchestrating the data collection pipeline, usage normalization against the defined schema, and writing accurate `record-feedback!` calls. A high-effort model with deep coding reasoning is necessary to ensure the harness has zero bugs and correctly processes raw provider token payloads into `cost_usd` per the matrix without duplicating counts.
+- **Target Stage:** Stage 2 — Task suite + four-arm harness (Mechanical Part).
+- **Executor:** Antigravity.
+- **Recommended Model:** Gemini 3.6 Flash (Medium effort) for the mechanical part, and Gemini 3.1 Pro (High effort) only for controversial contracts and final validation.
+- **Rationale:** The mechanical implementation of the harness requires solid but standard data orchestration, which a medium-effort model can handle efficiently without wasting resources.
+- **Prerequisites or Blockers:** Final scoring cannot be done until Stage 0 calibration pilot and lock are complete.
+- **Risk:** Low risk for the file creation phase; validation step mitigates logical errors.
+- **Confidence:** High confidence in this split approach.
