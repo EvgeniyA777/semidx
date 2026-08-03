@@ -80,7 +80,8 @@ review questions are answered after them.
 
 | ID | Severity | Finding | Resolution |
 | --- | --- | --- | --- |
-| F1 | **High** | `CanonicalFactKey.overload_identity.signature_key` is underspecified and **not producible by the heuristic/structural tiers as written**. The plan's example uses fully-qualified, type-only `java.lang.String,int`. The current extractor (`java.clj` `java-normalized-params`, l.237–242; `java-method-unit-id`, l.254–262) emits **simple, parameter-name-inclusive** text: `handle(String order)` → `"Stringorder"` (ground truth via REPL). Regex/tree-sitter cannot resolve `String`→`java.lang.String` without import/classpath resolution, and they include the param name. SCIP/LSP emit `(java.lang.String)` type-only. Without a canonical signature form, the same overload gets **different keys per provider**, violating the Stage 1 exit criterion "same semantic fact from multiple providers produces one canonical fact key." | **Deferred to owner decision** — execution-admission prerequisite (owner decision #1). |
+| F1 | **High** | `CanonicalFactKey.overload_identity.signature_key` is underspecified and **not producible by the heuristic/structural tiers as written**. The plan's example uses fully-qualified, type-only `java.lang.String,int`. The current extractor (`java.clj` `java-normalized-params`, l.237–242; `java-method-unit-id`, l.254–262) emits **simple, parameter-name-inclusive** text: `handle(String order)` → `"Stringorder"` (ground truth via REPL). Regex/tree-sitter cannot resolve `String`→`java.lang.String` without import/classpath resolution, and they include the param name. SCIP/LSP emit `(java.lang.String)` type-only. Without a canonical signature form, the same overload gets **different keys per provider**, violating the Stage 1 exit criterion "same semantic fact from multiple providers produces one canonical fact key." | **Resolved — Variant C adopted** (owner decision, 2026-08-03). Residual same-arity ordinal rule tracked as **F1a**. See "F1 Resolution — Variant C" below. |
+| F1a | Medium | Same-arity overloads (e.g. `handle(String)` vs `handle(int)`, both arity 1) cannot be individually attributed by the heuristic tier under Variant C, because the arity-only core key collides. A provider-neutral disambiguator (source-order ordinal) is deterministic but does not match SCIP's type-based identity. | **Open sub-decision** — Stage 1 must pick the same-arity arbitration rule (explicit ambiguity vs ordinal alignment); tracked below. |
 | F2 | Medium | Source-identity granularity is unspecified: the plan requires a per-document digest or revision+verification, but not whether staleness invalidates a whole document's exact facts or only affected ranges. For overloads, a coarse per-document digest may over-invalidate (one edited method drops all SCIP facts) or, if mis-scoped, under-invalidate. | **Deferred to Stage 3 design** (SCIP slice); recorded as a named design question. |
 | F3 | Medium | Stage 0 baseline captures dirty-file *expectations* but not an executed **incremental / `update-index` re-index** baseline over the corpus. The plan's verification gate names "incremental-index regressions," so a captured incremental baseline strengthens the Stage 1 kernel. | **Accepted gap** — add an incremental re-index baseline in Stage 1; dirty-file expectations already recorded in `behavior/degradation-expectations.json`. |
 | F4 | Medium | Today both regex **and** tree-sitter emit `parser_mode: "full"` (ground truth). Structural (tree-sitter) and heuristic (regex) tiers are **output-indistinguishable**. ADR-046's authority ladder requires them separated. | **Named intentional future difference** — Stage 2 owns the structural/heuristic split; recorded so it is not mistaken for a regression. |
@@ -98,6 +99,61 @@ Supporting evidence for F1 (ground truth, current extractor, default opts):
   hash-only merge key would be unsafe; the plan already mandates
   owner+symbol+path in the key, so the design is sound on this point and the
   fixture locks it in.
+
+### F1 Resolution — Variant C (precision-aware overload identity)
+
+Owner decision (2026-08-03): adopt **Variant C**. The `signature_key` stops
+being one fixed string that every provider must reproduce. Instead
+`overload_identity` becomes a precision-tagged value, and each tier commits only
+to what it can honestly know.
+
+```clojure
+;; heuristic tier (regex / tree-sitter): knows arity only
+{:arity 1 :signature_precision "arity_only" :signature_key nil}
+
+;; exact tier (SCIP / LSP): knows precise parameter types
+{:arity 1 :signature_precision "typed" :signature_key "java.lang.String"}
+```
+
+The canonical key splits into two layers:
+
+- **core key** = `(language, path, fact_kind, owner, symbol, arity)` — every
+  provider can produce it;
+- **refinement** = the typed parameter signature — added only by the exact tier.
+
+**Merge semantics.** Facts are grouped by core key.
+
+1. *Common case (distinct arities, or a single method per arity — the whole
+   protected corpus).* `handle(String)` = arity 1 and `handle(String, int)` =
+   arity 2 have unique core keys. The regex arity-only fact and the SCIP typed
+   fact land in the same group and merge trivially; no guessing occurs.
+2. *Hard case (same-arity overloads, e.g. `handle(String)` vs `handle(int)`,
+   both arity 1).* The core key collides. The exact tier still separates them by
+   type; the heuristic tier cannot attribute its two arity-only facts to a
+   specific typed overload. Arbitration must then apply an explicit rule (F1a):
+   surface `arity_ambiguous` heuristic coverage rather than silently pick, or
+   align by deterministic source-order ordinal. Variant C **isolates** this case
+   and makes it explicit; it does not pretend a signature hash solved it.
+
+**Why C over A/B.** Variant A (simple types, drop names) forces the exact tier
+to *down-convert* `java.lang.String` → `String`, which itself collides
+(`java.util.List` vs a local `List` → `List`), i.e. it degrades good data to
+match weak data. Variant B (FQ + param names) cannot match SCIP/LSP monikers
+(type-only, no names) and is unstable under parameter rename; FQ resolution at
+the regex tier is heuristic (wildcard imports, implicit `java.lang`, type vars)
+and would produce *wrong* keys, which the plan forbids ("reject/degrade when it
+cannot produce a canonical key without guessing"). C keeps the exact tier at
+full precision and lets the heuristic tier commit only to arity.
+
+**Stage 1 consequence — unit identity re-anchoring.** Today `unit_id` embeds a
+typed signature hash (`…$arity1$sig5e75e42b`). Under C a regex-only repository
+has no typed hash, and later attaching SCIP must not change existing `unit_id`s
+(that would break snapshots, retrieval refs, and relations). Therefore Stage 1
+must anchor stable unit identity on the **core key** `(owner, symbol, arity[,
+same-arity ordinal])` and treat the typed signature as **refining evidence**,
+not as part of the primary id. This is cleaner than today's hash-in-id but is a
+deliberate identity-schema change that the Stage 1 in-memory/PostgreSQL
+round-trip gates must cover.
 
 ### Answers To The 11 Required Review Questions
 
@@ -158,12 +214,11 @@ identity fixtures are approved. Until then Stage 1 is **deferred**.
 
 ### Decisions Requiring Owner Approval
 
-1. **Canonical `signature_key` form for Java overloads (blocks F1).** Choose the
-   provider-neutral normalization: (a) simple type names, param names dropped;
-   or (b) fully-qualified type names, param names dropped. Either way the
-   heuristic/structural tiers need a defined, achievable target (option (a) is
-   achievable without type resolution; option (b) requires resolution the regex
-   tier cannot perform and would force regex overload facts to degrade/unkey).
+1. **Canonical `signature_key` form for Java overloads (F1).**
+   **[RESOLVED 2026-08-03 → Variant C.]** Precision-aware `overload_identity`:
+   heuristic tier commits `arity_only`, exact tier adds the `typed` signature;
+   unit identity re-anchors on the core key. Residual **F1a** (same-arity
+   arbitration rule) is delegated to Stage 1 design, not the owner.
 2. **Confirm TypeScript as the first SCIP vertical slice** (plan Execution
    Admission; reports/022 gate).
 3. **Approve the `CanonicalFactKey` normalization contract and the Stage 0
@@ -209,14 +264,17 @@ effort_justification: CanonicalFactKey normalization, same-key merge, ambiguity,
   and in-memory/PostgreSQL storage compatibility are correctness-critical
   contracts; Stage 0 surfaced a High-severity identity gap (F1) that Stage 1
   must encode carefully. Matches the plan's Stage 1 routing row.
-rationale: Stage 0 is complete and deterministic, but the plan's own Execution
-  Admission gates are open. F1 (signature_key canonical form) has no owner
-  decision, and TypeScript-first is not yet owner-confirmed. Starting Stage 1
-  without owner decision #1 would hard-code an unvalidated key contract.
+rationale: Stage 0 is complete and deterministic. F1 (signature_key canonical
+  form) is now RESOLVED as Variant C, but TypeScript-first is not yet
+  owner-confirmed and the identity contract is not yet owner-approved. Starting
+  Stage 1 before owner decision #2 would risk building the SCIP seam in the
+  wrong lane.
 prerequisites_or_blockers:
-  - Owner decision #1: canonical signature_key form (blocks F1).
-  - Owner decision #2: confirm TypeScript as first SCIP vertical slice.
-  - Owner approval of the CanonicalFactKey contract + identity fixtures.
+  - Owner decision #1: canonical signature_key form — RESOLVED 2026-08-03 (Variant C).
+  - Owner decision #2: confirm TypeScript as first SCIP vertical slice (OPEN).
+  - Owner approval of the CanonicalFactKey (Variant C) contract + identity fixtures (OPEN).
+  - Stage 1 must encode: precision-aware overload_identity, core-key unit
+    identity re-anchoring, and the F1a same-arity arbitration rule.
   - ADR-046 and ADR-047 accepted (DONE).
   - ADR-036 supersession + plans/007 amendment documented (DONE; verified, no conflict).
 file_ownership_and_conflict_risk: LOW. Stage 0 touched only

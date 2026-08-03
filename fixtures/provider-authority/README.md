@@ -30,7 +30,8 @@ provider work begins. Stage 0 does not change production extraction.
 - SCIP and LSP provider spellings are **representative**, not verified tool
   output. Stage 3 (SCIP) and Stage 5 (LSP) must re-verify them against real
   provider payloads.
-- `signature_key` canonical values in the identity fixtures are **decision
-  placeholders**. The current extractor cannot produce a provider-neutral
-  signature key (see `reports/024`, finding F1); an owner decision on the
-  canonical signature form is an execution-admission prerequisite for Stage 1.
+- The canonical overload form is **decided**: Variant C (owner decision
+  2026-08-03). `overload_identity` is precision-aware — the heuristic tier
+  commits arity only, the exact tier adds the typed signature, and unit identity
+  anchors on the core key. See `reports/024`, section "F1 Resolution — Variant
+  C". The same-arity arbitration rule (F1a) remains an open Stage 1 decision.

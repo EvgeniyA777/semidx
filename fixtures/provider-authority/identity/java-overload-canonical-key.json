@@ -9,7 +9,7 @@
   "notes": [
     "regex and tree-sitter spellings are GROUND TRUTH captured from the current semidx extractor (semidx.runtime.languages.java/parse-file with default opts).",
     "SCIP and LSP spellings are REPRESENTATIVE provider-native forms, not verified tool output. Stage 3 (SCIP) and Stage 5 (LSP) must re-verify against real provider payloads before relying on them.",
-    "The expected_canonical_key.overload_identity.signature_key value below is a DECISION PLACEHOLDER. The current extractor cannot produce it; see finding F1 in reports/024. An owner decision on the canonical signature form is an execution-admission prerequisite."
+    "F1 RESOLVED (owner decision 2026-08-03): Variant C, precision-aware overload_identity. The heuristic tier commits arity only (signature_precision=arity_only, signature_key=null); the exact tier adds the typed signature. Stable unit identity anchors on the core key, not the typed hash. See reports/024, section 'F1 Resolution — Variant C'. Same-arity disambiguation (F1a) is an open Stage 1 arbitration rule."
   ],
   "same_fact_must_merge": {
     "fact": "example.OrderService#handle(String)",
@@ -22,7 +22,8 @@
         "native_unit_id_suffix": "$arity1$sig5e75e42b",
         "type_names": "simple",
         "includes_param_names": true,
-        "ground_truth": true
+        "ground_truth": true,
+        "variant_c_contribution": {"signature_precision": "arity_only", "signature_key": null}
       },
       {
         "provider_id": "java-tree-sitter",
@@ -32,7 +33,8 @@
         "native_unit_id_suffix": "$arity1$sig5e75e42b",
         "type_names": "simple",
         "includes_param_names": true,
-        "ground_truth": true
+        "ground_truth": true,
+        "variant_c_contribution": {"signature_precision": "arity_only", "signature_key": null}
       },
       {
         "provider_id": "scip-java",
@@ -41,7 +43,8 @@
         "native_signature_key": "java.lang.String",
         "type_names": "fully_qualified",
         "includes_param_names": false,
-        "ground_truth": false
+        "ground_truth": false,
+        "variant_c_contribution": {"signature_precision": "typed", "signature_key": "java.lang.String"}
       },
       {
         "provider_id": "java-lsp",
@@ -50,7 +53,8 @@
         "native_signature_key": "java.lang.String",
         "type_names": "fully_qualified",
         "includes_param_names": false,
-        "ground_truth": false
+        "ground_truth": false,
+        "variant_c_contribution": {"signature_precision": "typed", "signature_key": "java.lang.String"}
       }
     ],
     "expected_canonical_key": {
@@ -60,16 +64,21 @@
       "fact_kind": "unit",
       "owner": "example.OrderService",
       "symbol": "example.OrderService#handle",
+      "core_key": ["java", "src/example/OrderService.java", "unit", "example.OrderService", "example.OrderService#handle", 1],
       "overload_identity": {
         "arity": 1,
-        "signature_key": "<canonical-type-1>"
+        "signature_precision": "typed",
+        "signature_key": "java.lang.String"
       },
-      "dispatch_identity": null
+      "dispatch_identity": null,
+      "note": "Variant C: unit identity anchors on core_key (owner, symbol, arity[, same-arity ordinal]). signature_precision=typed with signature_key is the exact-tier REFINEMENT; a regex-only repo yields signature_precision=arity_only, signature_key=null on the same core_key."
     },
     "normalization_obligations": [
-      "Strip parameter names from every provider's signature spelling.",
-      "Reduce every provider's parameter type spelling to one canonical type form (either consistently simple or consistently fully-qualified); regex/tree-sitter see simple names, SCIP/LSP see fully-qualified names, so at least one side must be canonicalized.",
-      "signature_key must exclude return type (overloads are distinguished by parameter types only)."
+      "Variant C (owner decision 2026-08-03): overload_identity is precision-aware, not one fixed string.",
+      "Heuristic tier (regex/tree-sitter) emits signature_precision=arity_only, signature_key=null; it must NOT guess parameter types.",
+      "Exact tier (SCIP/LSP) emits signature_precision=typed with a fully-qualified, type-only signature_key (return type excluded, parameter names excluded).",
+      "Stable unit identity anchors on the core key (owner, symbol, arity[, same-arity ordinal]); the typed signature is refining evidence, not part of the unit_id.",
+      "Same-arity overloads (F1a) require an explicit Stage 1 arbitration rule; arity alone does not disambiguate them."
     ]
   },
   "distinct_facts_must_not_merge": [
@@ -82,7 +91,9 @@
       },
       "expected_canonical_overload_identity": {
         "arity": 2,
-        "signature_key": "<canonical-type-1>,<canonical-type-int>"
+        "signature_precision": "typed",
+        "signature_key": "java.lang.String,int",
+        "note": "Distinct core_key from arity 1; heuristic tier separates it by arity alone, no ambiguity."
       }
     },
     {
