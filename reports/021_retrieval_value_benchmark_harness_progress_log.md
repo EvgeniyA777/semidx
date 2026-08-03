@@ -136,12 +136,16 @@ selection stage and `returned_tokens` for expand/detail.
 ### NextStageRoutingRecommendation
 
 - **Target Stage:** Stage 2 — Task suite + four-arm harness.
-- **Completed Stage:** Stage 0 (pre-registration sub-gate completed; pilot/lock pending).
+- **Completed Stage:** Stage 0 pre-registration sub-gate. Pilot and final-lock still pending before scoring.
 - **Executor:** Antigravity.
-- **Recommended Model:** Gemini 3.6 Flash (Medium effort) for the mechanical harness implementation, and Gemini 3.1 Pro (High effort) only for controversial contracts and final validation.
-- **Effort Level:** Split (Medium/High).
-- **Effort Justification:** The mechanical implementation of the harness requires solid but standard data orchestration, which a medium-effort model can handle efficiently without wasting resources. High effort is reserved for the final step to ensure the pricing schema correctly processes raw payloads into `cost_usd` per the strict Matrix without duplicating token counts.
-- **File Ownership and Conflict Risk:** Low risk for file creation phase. Ownership lies strictly within the `benchmark/` subdirectory.
-- **Fallback Executor/Model:** If Gemini 3.6 Flash fails at data orchestration, fallback to Claude 3.5 Sonnet (Medium/High effort).
-- **Model Availability Checked At:** 2026-08-03.
-- **Confidence:** High confidence in this split approach.
+- **Recommended Model:**
+  - Mechanical harness implementation: Gemini 2.5 Flash (`gemini-2.5-flash`, `on-demand`).
+  - Controversial contract decisions and final harness validation: Gemini 2.5 Pro (`gemini-2.5-pro`, `on-demand`).
+  - Both models are in the locked price schedule `2026-08-03-anthropic-openai-gemini-v1`.
+- **Effort Level:** Standard for harness implementation; High for contract/schema validation pass.
+- **Effort Justification (High):** The cost-normalization logic (Gemini two-part cache billing: read tokens + storage token-hours) and the aggregation roll-up `(benchmark_run_id, task_id, arm)` are contract-critical paths. A miscount silently produces wrong `cost_usd` values and invalidates the entire Phase 1 verdict. High effort on the final validation pass is required to catch these.
+- **Prerequisites or Blockers:** Stage 2 harness may be built. However, the scoring run (Stage 4) must not begin until Stage 0 calibration pilot is completed and the final threshold is locked.
+- **File Ownership and Conflict Risk:** Medium. Stage 2 will create new files under a `benchmark/` subdirectory but will also need to read and conform to contracts in `src/semidx/runtime/usage_metrics.clj` and `src/semidx/core.clj`. Read-only access to those files is required; any write to them requires a separate targeted PR reviewed against existing tests.
+- **Fallback Executor/Model:** If Gemini 2.5 Flash produces incorrect adapter logic, escalate to Gemini 2.5 Pro for the full implementation. No Claude fallback — not in the agreed model matrix.
+- **Model Availability Checked At:** 2026-08-03 (both `gemini-2.5-flash` and `gemini-2.5-pro` confirmed active on the pricing page).
+- **Confidence:** High.

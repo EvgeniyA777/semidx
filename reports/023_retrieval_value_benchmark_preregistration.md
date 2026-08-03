@@ -18,9 +18,9 @@ This document satisfies the pre-registration sub-gate of Stage 0 for `plans/020_
 | **A** | semidx staged | Canonical staged semidx flow (`v1`). One-shot adapters (`plans/019`) may be registered as `A2` in future runs. | Candidate |
 | **B** | Competent lexical | `rg` (ripgrep) queries plus bounded targeted file reading. No semantic tools. | Primary comparator |
 | **C** | Language navigation | Arm B tools plus LSP/SCIP definition/reference navigation where available. | Diagnostic control |
-| **D** | Native no-index | The agent's native repository-browsing policy (e.g., full shell/filesystem access). *Forbidden:* `semidx` CLI, LSP/SCIP, or any external semantic-navigation services. Audited via `forbidden_tools` in policy. | Ecological control |
+| **D** | Native no-index | The agent's native repository-browsing policy (e.g., full shell/filesystem access). *Forbidden:* `semidx` CLI, any LSP/SCIP tool call (`lsp_*`, `scip_*`), or any other external semantic-navigation service invocation. Audited via tool-call log scan: attempt is voided if any forbidden tool appears. | Ecological control |
 
-*Rule:* Arm B is the primary comparator. C and D cannot be silently folded into B or used to rescue a primary verdict. For Arm C, if LSP/SCIP is unavailable, the attempt outcome must be recorded as `not_applicable` with a required reason.
+*Rule:* Arm B is the primary comparator. C and D cannot be silently folded into B or used to rescue a primary verdict. For Arm C, if LSP/SCIP is unavailable on the target repo, the attempt outcome must be recorded as `not_applicable` and a `not_applicable_reason` string is required.
 
 ## 2. Experimental Controls and Cache Protocol
 
@@ -77,6 +77,7 @@ TaskAttempt {
   model_revision: string
   service_tier: string
   outcome: string ("success" | "failure" | "error" | "not_applicable")
+  not_applicable_reason: string | null  ; required when outcome = "not_applicable"; null otherwise
 }
 ```
 
@@ -87,23 +88,25 @@ Aggregation keys on `task_attempt_id` first, then rolls up to `(benchmark_run_id
 **Price Schedule ID:** `2026-08-03-anthropic-openai-gemini-v1`
 **Currency:** USD
 **Token Unit:** Per 1,000,000 tokens (1M tokens)
-**Capture Time:** 2026-08-03T00:58:00Z
+**Capture Time:** 2026-08-03T01:02:00Z
 
 ### 4.1. Price Table (Locked as of 2026-08-03)
 
-*(Model revision must exactly match this table; otherwise `pricing_status: unresolved` applies)*
+*(Model revision must exactly match this table; otherwise `pricing_status: unresolved` applies.
+For Google: Cache Read is billed separately from Cache Storage; both must be recorded.)*
 
-| Provider | API Surface | Model Revision | Service Tier | Context Tier | Input (Uncached) | Input (Cache Read) | Cache Write (5m) | Cache Write (1h) | Output (Visible/Unclassified) | Output (Reasoning) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Anthropic | `messages` | `claude-3-5-sonnet-20240620` | `on-demand` | `default` | $3.00 / 1M | $0.30 / 1M | $3.75 / 1M | $6.00 / 1M | $15.00 / 1M | $15.00 / 1M |
-| OpenAI | `chat` | `gpt-4o-2024-05-13` | `on-demand` | `default` | $5.00 / 1M | $2.50 / 1M | N/A (0) | N/A (0) | $15.00 / 1M | $15.00 / 1M |
-| OpenAI | `responses` | `gpt-4o-2024-05-13` | `on-demand` | `default` | $5.00 / 1M | $2.50 / 1M | N/A (0) | N/A (0) | $15.00 / 1M | $15.00 / 1M |
-| Google | `generate-content` | `gemini-1.5-pro-001` | `on-demand` | `<= 128k` | $3.50 / 1M | $0.88 / 1M | N/A (0) | N/A (0) | $10.50 / 1M | $10.50 / 1M |
-| Google | `generate-content` | `gemini-1.5-pro-001` | `on-demand` | `> 128k` | $7.00 / 1M | $1.75 / 1M | N/A (0) | N/A (0) | $21.00 / 1M | $21.00 / 1M |
-| Google | `generate-content` | `gemini-1.5-flash-001` | `on-demand` | `<= 128k` | $0.075 / 1M | $0.01875 / 1M | N/A (0) | N/A (0) | $0.30 / 1M | $0.30 / 1M |
-| Google | `generate-content` | `gemini-1.5-flash-001` | `on-demand` | `> 128k` | $0.15 / 1M | $0.0375 / 1M | N/A (0) | N/A (0) | $0.60 / 1M | $0.60 / 1M |
+| Provider | API Surface | Model Revision | Service Tier | Context Tier | Input (Uncached) | Input (Cache Read) | Cache Write / Storage | Output (Visible+Reasoning) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Anthropic | `messages` | `claude-3-5-sonnet-20240620` | `on-demand` | `default` | $3.00 / 1M | $0.30 / 1M | $3.75 (5m TTL) / $6.00 (1h TTL) per 1M | $15.00 / 1M |
+| OpenAI | `chat` | `gpt-4o-2024-05-13` | `on-demand` | `default` | $5.00 / 1M | $2.50 / 1M | N/A — OpenAI caches automatically; no explicit write charge | $15.00 / 1M |
+| OpenAI | `responses` | `gpt-4o-2024-05-13` | `on-demand` | `default` | $5.00 / 1M | $2.50 / 1M | N/A — same as `chat` | $15.00 / 1M |
+| Google | `generate-content` | `gemini-2.5-pro` | `on-demand` | `<= 200k` | $1.25 / 1M | $0.125 / 1M | $4.50 / 1M·hr (storage) | $10.00 / 1M (thinking included) |
+| Google | `generate-content` | `gemini-2.5-pro` | `on-demand` | `> 200k` | $2.50 / 1M | $0.25 / 1M | $4.50 / 1M·hr (storage) | $15.00 / 1M (thinking included) |
+| Google | `generate-content` | `gemini-2.5-flash` | `on-demand` | `any` | $0.30 / 1M | $0.03 / 1M (text/image/video) | $1.00 / 1M·hr (storage) | $2.50 / 1M (thinking included) |
 
-*(Official Source Links: [Anthropic](https://docs.anthropic.com/en/docs/about-claude/pricing), [OpenAI](https://openai.com/api/pricing/), [Google](https://ai.google.dev/pricing))*
+*(Official Source Links: [Anthropic](https://docs.anthropic.com/en/docs/about-claude/pricing), [OpenAI](https://openai.com/api/pricing/), [Google](https://ai.google.dev/gemini-api/docs/pricing) — fetched 2026-08-03)*
+
+**Gemini cache billing rule:** An attempt using Gemini explicit caching must record both `cache_read_tokens` (billed at Cache Read rate) and `cache_storage_token_hours` (billed at Storage rate per 1M·hr). Both are required to compute `cost_usd` correctly. An attempt that cannot separate these emits `pricing_status: unresolved`.
 
 ### 4.2. Usage Adapter Mapping (`adapter_version: v1`)
 
