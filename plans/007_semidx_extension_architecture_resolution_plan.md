@@ -4,7 +4,7 @@ doc_type: "architecture_plan"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-02"
+updated: "2026-08-03"
 ---
 
 # Semidx Extension Architecture Resolution Plan
@@ -1105,14 +1105,55 @@ Current continuations are owned by narrower active plans:
 The typed-relation substrate for new graph semantics is delivered, while legacy
 call/import compatibility migration remains governed by the Stage 4 parity gate.
 
-## Completion Criteria For This Architecture Plan
+## Closure Criteria And Lifecycle Transition
 
-This architecture plan is satisfied when:
+This document remains `active` only while it is the current architecture
+reference for an unresolved scope. It is never an executable work queue. Mark it
+`completed` only when **all** of the following closure gates have recorded
+evidence:
 
-- all implementation plans use the boundaries and dependency direction defined
-  here;
-- stale cache hits are impossible under the documented freshness contract;
-- Markdown and YAML are introduced through the provider catalog;
-- typed relations reach parity before replacing existing graph projections;
-- operation capabilities and degradations are explicit and additive;
-- transports remain free of workspace, provider-selection, and relation policy.
+1. **Continuation ownership is terminal or independently transferred.** Each
+   current continuation (`plans/018`, `plans/019`, `plans/020`) is either
+   `completed`, `cancelled`, or `superseded`, or an explicitly named active
+   successor repeats the boundaries, dependency direction, and admission gates
+   it needs without relying on this plan as its sole implementation source.
+2. **Freshness and lifecycle foundation is closed.** The Stage 0/1 freshness
+   boundary remains delivered with deterministic stale-cache prevention and
+   atomic publication, and any remaining lifecycle compatibility exception is
+   either resolved or accepted in an ADR with a named owner and review trigger.
+3. **Provider-catalog scope is disposed.** Markdown and YAML are introduced by
+   dedicated provider-catalog plans with verified degradation behavior, or an
+   accepted ADR explicitly cancels or defers each scope and defines the condition
+   that reopens it. Java/TypeScript semantic-provider authority is likewise
+   closed by `plans/018` or an equivalent successor.
+4. **Relation migration has a terminal parity decision.** Typed relation
+   identities, storage projection, traversal, retrieval/impact projection, and
+   legacy call/import compatibility have either met their parity gates before
+   replacement, or an accepted ADR has retained the compatibility projection
+   with an explicit reason and reassessment trigger.
+5. **Public architecture boundaries are proven.** Current library, MCP, HTTP,
+   and gRPC surfaces keep workspace state, provider selection, relation policy,
+   capability reporting, and degradation policy in runtime-owned boundaries;
+   applicable contract, replay, and transport-parity verification is recorded.
+6. **Documentation handoff is complete.** No active plan or ADR treats this
+   document as its only current source of implementation direction. The closure
+   progress record links the terminal successor/ADR decisions, verification
+   results, exceptions, and closing commit.
+
+A mere link to a future plan does not satisfy a gate: the successor must be
+active and self-contained for its remaining scope, or its terminal disposition
+must be recorded. If any gate is open, retain `lifecycle: active`,
+`status: in_progress`, and `agent_action: reference_for_context`.
+
+When every gate closes, make this lifecycle transition in the same commit:
+
+```yaml
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
+```
+
+Also relabel the "Current Continuations" section as historical, update
+`MEMORY.md`, and create or update the companion progress log under `reports/`.
+Future implementation must then rely on the named active successor plans and
+accepted ADRs rather than reopening this umbrella plan.
