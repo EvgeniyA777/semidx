@@ -18,20 +18,26 @@ This document satisfies the pre-registration sub-gate of Stage 0 for `plans/020_
 | **A** | semidx staged | Canonical staged semidx flow (`v1`). One-shot adapters (`plans/019`) may be registered as `A2` in future runs. | Candidate |
 | **B** | Competent lexical | `rg` (ripgrep) queries plus bounded targeted file reading. No semantic tools. | Primary comparator |
 | **C** | Language navigation | Arm B tools plus LSP/SCIP definition/reference navigation where available. | Diagnostic control |
-| **D** | Native no-index | The agent's native repository-browsing policy (e.g., full shell/filesystem access without semidx). | Ecological control |
+| **D** | Native no-index | The agent's native repository-browsing policy (e.g., full shell/filesystem access). *Forbidden:* `semidx` CLI, LSP/SCIP, or any external semantic-navigation services. Audited via `forbidden_tools` in policy. | Ecological control |
 
-*Rule:* Arm B is the primary comparator. C and D cannot be silently folded into B or used to rescue a primary verdict.
+*Rule:* Arm B is the primary comparator. C and D cannot be silently folded into B or used to rescue a primary verdict. For Arm C, if LSP/SCIP is unavailable, the attempt outcome must be recorded as `not_applicable` with a required reason.
 
 ## 2. Experimental Controls and Cache Protocol
 
-These policy IDs represent the immutable definitions for the `v1` benchmark suite:
+These policy IDs represent the immutable definitions for the `v1` benchmark suite.
 
-- **Task Prompt Policy (`task_prompt_policy_id: agent_default_v1`)**: The exact task prompt text injected for the agent, without any arm-specific hints.
+- **Task Prompt Policy (`task_prompt_policy_id: agent_default_v1`)**:
+  ```text
+  You are an autonomous AI agent assigned to resolve an issue in this repository.
+  Use your available tools to explore the codebase, analyze the problem, and implement a solution.
+  ```
+
 - **Arm Policy Bundle (`arm_policy_bundle_id: harness_v1`)**:
   - Arm A tools: `resolve_context`, `expand_context`, `fetch_context_detail`.
   - Arm B tools: `grep_search`, `list_dir`, `view_file`.
   - Arm C tools: Arm B tools + `lsp_definition`, `lsp_references`.
-  - Arm D tools: Native unconstrained shell environment.
+  - Arm D tools: Native unconstrained shell environment. *Audit Rule:* Execution fails if `semidx` CLI or `lsp_*` tools are invoked.
+
 - **Execution Budget (`execution_budget_policy_id: budget_v1`)**:
   - Max wall-clock time per task attempt: 300 seconds.
   - Max tool calls per task attempt: 30.
@@ -70,7 +76,7 @@ TaskAttempt {
   model: string
   model_revision: string
   service_tier: string
-  outcome: string ("success" | "failure" | "error")
+  outcome: string ("success" | "failure" | "error" | "not_applicable")
 }
 ```
 
@@ -81,16 +87,23 @@ Aggregation keys on `task_attempt_id` first, then rolls up to `(benchmark_run_id
 **Price Schedule ID:** `2026-08-03-anthropic-openai-gemini-v1`
 **Currency:** USD
 **Token Unit:** Per 1,000,000 tokens (1M tokens)
+**Capture Time:** 2026-08-03T00:58:00Z
 
 ### 4.1. Price Table (Locked as of 2026-08-03)
 
-| Provider | Model Revision | Input (Uncached) | Input (Cache Read) | Cache Write | Output (Visible/Unclassified) | Output (Reasoning) |
-| --- | --- | --- | --- | --- | --- | --- |
-| Anthropic | `claude-3-5-sonnet-20240620` | $3.00 / 1M | $0.30 / 1M | $3.75 / 1M | $15.00 / 1M | $15.00 / 1M |
-| OpenAI | `gpt-4o-2024-05-13` | $5.00 / 1M | $2.50 / 1M | $5.00 / 1M | $15.00 / 1M | $15.00 / 1M |
-| Google | `gemini-1.5-pro-001` | $3.50 / 1M | $0.88 / 1M | $3.50 / 1M | $10.50 / 1M | $10.50 / 1M |
+*(Model revision must exactly match this table; otherwise `pricing_status: unresolved` applies)*
 
-*(Sources: anthropic.com/pricing, openai.com/pricing, ai.google.dev/pricing)*
+| Provider | API Surface | Model Revision | Service Tier | Context Tier | Input (Uncached) | Input (Cache Read) | Cache Write (5m) | Cache Write (1h) | Output (Visible/Unclassified) | Output (Reasoning) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Anthropic | `messages` | `claude-3-5-sonnet-20240620` | `on-demand` | `default` | $3.00 / 1M | $0.30 / 1M | $3.75 / 1M | $6.00 / 1M | $15.00 / 1M | $15.00 / 1M |
+| OpenAI | `chat` | `gpt-4o-2024-05-13` | `on-demand` | `default` | $5.00 / 1M | $2.50 / 1M | N/A (0) | N/A (0) | $15.00 / 1M | $15.00 / 1M |
+| OpenAI | `responses` | `gpt-4o-2024-05-13` | `on-demand` | `default` | $5.00 / 1M | $2.50 / 1M | N/A (0) | N/A (0) | $15.00 / 1M | $15.00 / 1M |
+| Google | `generate-content` | `gemini-1.5-pro-001` | `on-demand` | `<= 128k` | $3.50 / 1M | $0.88 / 1M | N/A (0) | N/A (0) | $10.50 / 1M | $10.50 / 1M |
+| Google | `generate-content` | `gemini-1.5-pro-001` | `on-demand` | `> 128k` | $7.00 / 1M | $1.75 / 1M | N/A (0) | N/A (0) | $21.00 / 1M | $21.00 / 1M |
+| Google | `generate-content` | `gemini-1.5-flash-001` | `on-demand` | `<= 128k` | $0.075 / 1M | $0.01875 / 1M | N/A (0) | N/A (0) | $0.30 / 1M | $0.30 / 1M |
+| Google | `generate-content` | `gemini-1.5-flash-001` | `on-demand` | `> 128k` | $0.15 / 1M | $0.0375 / 1M | N/A (0) | N/A (0) | $0.60 / 1M | $0.60 / 1M |
+
+*(Official Source Links: [Anthropic](https://docs.anthropic.com/en/docs/about-claude/pricing), [OpenAI](https://openai.com/api/pricing/), [Google](https://ai.google.dev/pricing))*
 
 ### 4.2. Usage Adapter Mapping (`adapter_version: v1`)
 
