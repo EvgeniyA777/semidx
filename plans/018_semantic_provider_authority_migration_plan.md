@@ -51,6 +51,9 @@ Out:
 - Replacing typed relations with provider-native graph formats.
 - A general plugin marketplace, runtime classloader, or remote extension SDK.
 - Promoting tree-sitter or regex evidence to compiler-grade authority.
+- One-shot LLM delivery, Markdown rendering, or cross-strategy task evaluation;
+  those belong to
+  [`plans/019`](./019_llm_one_shot_context_delivery_and_evaluation_plan.md).
 
 ## Assumptions
 
@@ -66,6 +69,9 @@ Out:
   reverse Java and TypeScript only with concrete toolchain or fixture evidence.
 - LSP is primarily a live overlay. SCIP is primarily a reproducible batch
   source. Neither assumption grants authority without matching source identity.
+- Provider authority is a data-plane concern. Retrieval orchestration, one-shot
+  delivery, and rendering consume the canonical graph and must not inspect
+  provider implementations.
 
 ## Change Model
 
@@ -85,18 +91,23 @@ provider precedence.
 
 ## Target Flow
 
-```text
-Discovery
-  -> Provider eligibility
-  -> Runtime status and source-identity checks
-  -> Capability-specific ProviderPlan
-  -> Semantic tier: SCIP and/or LSP
-  -> Structural gap filling: tree-sitter
-  -> Heuristic gap filling: regex
-  -> Normalize FactBatch values
-  -> Arbitrate and merge by stable semantic identity
-  -> Semantic IR + typed relations
-  -> Index, storage, capability projection, retrieval
+```mermaid
+flowchart TD
+  discovery["Source discovery"] --> eligibility["Provider eligibility"]
+  eligibility --> validation["Runtime status and source-identity validation"]
+  validation --> plan["Capability-specific ProviderPlan"]
+
+  plan --> semantic["Semantic tier: SCIP and LSP"]
+  plan --> structural["Structural tier: tree-sitter"]
+  plan --> heuristic["Heuristic tier: regex"]
+
+  semantic --> batches["Normalized FactBatch values"]
+  structural --> batches
+  heuristic --> batches
+  batches --> arbitration["Authority and freshness arbitration"]
+  arbitration --> semanticGraph["Semantic IR and typed relations"]
+  semanticGraph --> index["Index and storage"]
+  index --> retrieval["Capability projection and retrieval"]
 ```
 
 Execution order is not a whole-file short circuit. A provider that returns
@@ -330,22 +341,21 @@ checks. They are not unconditional confidence grants.
 
 ## Dependency Direction
 
-```text
-Index Lifecycle / Index Builder
-             |
-             v
-Provider Execution Orchestrator
-      |                    |
-      v                    v
-ProviderPlan          Fact Arbitrator
-      ^                    |
-      |                    v
-Planning Policy     Semantic IR + Relations
-      ^                    ^
-      |                    |
-Provider Catalog      Provider Adapters
-                           |
-                 SCIP / LSP / tree-sitter / regex
+```mermaid
+flowchart TD
+  lifecycle["Index lifecycle and builder"] --> execution["Provider execution orchestrator"]
+  execution --> plan["ProviderPlan"]
+  execution --> arbitrator["Fact arbitrator"]
+
+  policy["Provider planning policy"] --> plan
+  catalog["Provider catalog"] --> policy
+  adapters["Provider adapters"] --> execution
+  tools["SCIP, LSP, tree-sitter, regex"] --> adapters
+
+  plan --> arbitrator
+  arbitrator --> semanticGraph["Semantic IR and typed relations"]
+  semanticGraph --> retrieval["Retrieval and capability projection"]
+  retrieval --> delivery["Staged or one-shot delivery from plans/019"]
 ```
 
 - Policy depends on descriptors and evidence contracts, never SDKs or CLIs.
@@ -353,6 +363,35 @@ Provider Catalog      Provider Adapters
 - Retrieval depends on normalized facts and evidence summaries, never provider
   implementations.
 - Transports depend on runtime outputs and do not derive authority themselves.
+
+## Coordination With plans/019
+
+This plan owns the evidence data plane. `plans/019` owns LLM-facing delivery and
+comparative evaluation. Their shared boundary is the canonical snapshot and
+ContextPacket contract, not provider-native payloads.
+
+```mermaid
+flowchart LR
+  providers["plans/018 provider pipeline"] --> canonicalGraph["Canonical snapshot graph"]
+  canonicalGraph --> retrieval["Existing staged retrieval primitives"]
+  retrieval --> oneShot["plans/019 one-shot orchestrator"]
+  retrieval --> staged["Staged public operations"]
+  oneShot --> packet["Canonical ContextPacket"]
+  staged --> packet
+  packet --> renderer["Optional Markdown renderer"]
+  packet --> evaluation["Comparative evaluation"]
+```
+
+Coordination rules:
+
+- `plans/019` may ship its first one-shot slice over the current graph before
+  the provider authority switch.
+- `plans/018` Stage 6 may consume comparative task-value evidence produced by
+  `plans/019`, but provider correctness remains gated by deterministic provider
+  and relation tests in this plan.
+- The one-shot orchestrator and renderer must not branch on provider ids.
+- Provider-native details stay outside the public retrieval contract except for
+  bounded runtime-owned evidence and degradation summaries.
 
 ## Implementation Sequence
 
@@ -369,6 +408,8 @@ Deliverables:
   overloads, re-exports, dirty-file behavior, and provider unavailability.
 - Baselines for retrieval selections, callers/callees, impact, snapshot diff,
   confidence, latency, and snapshot size.
+- A reusable provider-quality baseline that `plans/019` can include in its
+  cross-strategy comparison without duplicating fixtures.
 
 Exit criteria:
 
@@ -512,6 +553,9 @@ Exit criteria:
   gates pass.
 - Intentional confidence reductions for fallback-only repositories are approved.
 - New semantic improvements are supported by fixture/replay evidence.
+- Comparative task-value evidence from `plans/019` or an equivalent harness
+  shows that the authority switch does not regress required-file recall, output
+  budget, or degraded-workspace availability.
 - Forced provider overrides remain available for diagnosis and rollback.
 
 Commit boundary: default switch and public additive contract changes.
@@ -549,6 +593,7 @@ the applicable repository gates. The complete migration gate includes:
 - complete Clojure test suite;
 - semantic-quality report;
 - protected retrieval replay comparison;
+- cross-strategy task-value comparison from `plans/019` when available;
 - relation projection and traversal parity;
 - snapshot-diff parity;
 - in-memory and PostgreSQL evidence round trips;
@@ -648,6 +693,8 @@ Required review questions:
    plans/007 amendment leave no active conflicting parser-authority rule.
 10. Identify any simpler design that preserves exact semantic authority,
     deterministic fallback, and explicit degradation with less machinery.
+11. Verify that provider ids or provider-native payloads do not leak into the
+    one-shot orchestration and rendering boundaries defined by `plans/019`.
 
 Expected review output:
 

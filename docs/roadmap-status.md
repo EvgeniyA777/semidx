@@ -130,3 +130,11 @@ semantic-provider authority migration. SCIP batch evidence and LSP live-overlay
 evidence enrich the same canonical relation graph; they are not a future
 parallel-graph spike. The Protobuf/OpenAPI vertical slice follows the provider
 foundation, while broader parser-deepening remains evidence-driven.
+
+The independent `plans/019` delivery track is now planned alongside that data
+plane: an additive one-shot `get_context` facade composes the existing
+snapshot-bound staged operations, an optional renderer projects the canonical
+ContextPacket to bounded Markdown, and a comparative harness measures task
+value, latency, round trips, and output cost against staged and lexical
+baselines. ADR-024 remains current; one-shot does not become the documented
+canonical default without comparative evidence and a new decision.

@@ -125,6 +125,7 @@ after this memory file.
 - Runtime hardening is now effectively complete for the main roadmap scope; any remaining ops work is incremental polish rather than a missing Phase 4 primitive.
 - Real self-improvement loop is now operationally complete for the current roadmap scope: replay harvesting, difficult-case capture, calibration reports, weekly review artifacts, protected replay dataset conversion, retained review/governance runs, queue/status reporting, and top-level retained Phase 5 orchestration all exist.
 - Compact-first staged retrieval is now fully aligned as the canonical public flow: `resolve_context` is compact-first, `expand_context` / `fetch_context_detail` are the explicit later stages, selection artifacts are snapshot-bound, and the implementation/docs/examples line is captured by `ADR-024` plus the completed `plans/002_compact_first_staged_retrieval_plan.md`.
+- `plans/019` is the planned LLM delivery/evaluation track: add an external one-shot `get_context` facade over the same snapshot-bound staged state machine, retain ContextPacket as the structured source of truth, make Markdown an optional bounded projection, and compare task value against staged and lexical baselines. ADR-024 remains current; changing the documented canonical default requires comparative evidence and a new ADR.
 - Dedicated `impact_analysis` now computes impact hints directly from the resolved selection artifact instead of reading `expand_context`'s budget-gated `:impact_hints` field; it must return a non-null map with `:callers`, `:dependents`, `:related_tests`, and `:risky_neighbors` vectors even when `expand_context` omits impact hints for token-budget reasons.
 - MCP `create_index` handles are workspace-root isolated: stale cache entries whose entry `:root_path` does not match the embedded index `:root_path`, or whose cache key points at a different requested root, are discarded instead of being reused; a storage-loaded index with an unexpected root is rebuilt for the requested canonical root.
 - Intent-only retrieval with `include_tests` now has a test-aware lexical path: file paths participate in lexical matching, `src/test/...` is classified as test code before generic `src/` source code, and `focus_on_tests` boosts already-matched test units without broadening to unrelated tests.
@@ -239,8 +240,10 @@ after this memory file.
    generated-stub runtime cutover, and descriptor-oracle removal. Stage 6 is also delivered: the HTTP runtime exposes an online policy control-plane (`/v1/policies/registry`, `/v1/policies/promote`, `/v1/policies/retire`) that validates offline decision artifacts, decision-bound approvals, operation-scoped authz, and persistence-before-publication transitions. Stage 7 is delivered under ADR-044 with shared, opt-in HTTP/gRPC runtime-edge rate limiting; the next operational work is incremental hardening rather than an open Stage 5-7 gap.
 4. Execute plans/018 after its independent review: provider catalog/planning,
    fact evidence/arbitration, TypeScript then Java SCIP slices, LSP live overlays,
-   and the default authority switch. This replaces the former future SCIP spike;
-   Protobuf/OpenAPI follows the provider foundation.
+   and the default authority switch. Execute the independent plans/019 delivery
+   track as an additive one-shot MCP slice plus comparative evaluation; use its
+   task-value evidence for the plans/018 default switch without coupling delivery
+   code to provider ids. Protobuf/OpenAPI follows the provider foundation.
 5. Keep tightening operational/docs alignment so roadmap, ADRs, examples, and runtime surfaces continue to describe the same canonical flow.
 6. On the next Antigravity touchpoint, explicitly test staged continuation after `resolve_context`: require `expand_context` and `fetch_context_detail`, verify the client reuses `selection_id` / `snapshot_id`, and check whether evidence quality improves without falling back to manual browsing.
 
