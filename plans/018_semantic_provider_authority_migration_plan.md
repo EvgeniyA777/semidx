@@ -17,6 +17,9 @@ the required first delivery stage and must complete before source implementation
 begins. The repo-managed tree-sitter operational boundary is ADR-047.
 The latest independent review and resolved plan findings are recorded in
 [`reports/022`](../reports/022_latest_active_plans_architecture_review.md).
+The Stage 0 execution, independent review findings, and baseline are recorded in
+the companion progress log
+[`reports/024`](../reports/024_semantic_provider_authority_stage0_progress_log.md).
 
 ## Goal
 

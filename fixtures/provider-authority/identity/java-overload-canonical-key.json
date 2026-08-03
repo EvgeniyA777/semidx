@@ -1,0 +1,107 @@
+{
+  "fixture_id": "provider_authority_java_overload_canonical_key_001",
+  "category": "cross_provider_identity",
+  "purpose": "Prove that regex, tree-sitter, SCIP, and LSP spellings of the SAME Java method overload normalize to one provider-neutral CanonicalFactKey, while distinct overloads of the same method name remain distinct keys.",
+  "plan_refs": ["plans/018"],
+  "adr_refs": ["ADR-039", "ADR-046"],
+  "corpus_ref": "fixtures/provider-authority/corpus/java/src/example/OrderService.java",
+  "status": "specification_for_stage_1",
+  "notes": [
+    "regex and tree-sitter spellings are GROUND TRUTH captured from the current semidx extractor (semidx.runtime.languages.java/parse-file with default opts).",
+    "SCIP and LSP spellings are REPRESENTATIVE provider-native forms, not verified tool output. Stage 3 (SCIP) and Stage 5 (LSP) must re-verify against real provider payloads before relying on them.",
+    "The expected_canonical_key.overload_identity.signature_key value below is a DECISION PLACEHOLDER. The current extractor cannot produce it; see finding F1 in reports/024. An owner decision on the canonical signature form is an execution-admission prerequisite."
+  ],
+  "same_fact_must_merge": {
+    "fact": "example.OrderService#handle(String)",
+    "provider_spellings": [
+      {
+        "provider_id": "java-regex",
+        "authority": "heuristic",
+        "native_symbol": "example.OrderService#handle",
+        "native_signature_key": "Stringorder",
+        "native_unit_id_suffix": "$arity1$sig5e75e42b",
+        "type_names": "simple",
+        "includes_param_names": true,
+        "ground_truth": true
+      },
+      {
+        "provider_id": "java-tree-sitter",
+        "authority": "structural",
+        "native_symbol": "example.OrderService#handle",
+        "native_signature_key": "Stringorder",
+        "native_unit_id_suffix": "$arity1$sig5e75e42b",
+        "type_names": "simple",
+        "includes_param_names": true,
+        "ground_truth": true
+      },
+      {
+        "provider_id": "scip-java",
+        "authority": "exact",
+        "native_symbol": "scip-java maven . . example/OrderService#handle(java.lang.String).",
+        "native_signature_key": "java.lang.String",
+        "type_names": "fully_qualified",
+        "includes_param_names": false,
+        "ground_truth": false
+      },
+      {
+        "provider_id": "java-lsp",
+        "authority": "exact",
+        "native_symbol": "example.OrderService.handle(java.lang.String) : java.lang.String",
+        "native_signature_key": "java.lang.String",
+        "type_names": "fully_qualified",
+        "includes_param_names": false,
+        "ground_truth": false
+      }
+    ],
+    "expected_canonical_key": {
+      "fact_schema_version": "1",
+      "language": "java",
+      "path": "src/example/OrderService.java",
+      "fact_kind": "unit",
+      "owner": "example.OrderService",
+      "symbol": "example.OrderService#handle",
+      "overload_identity": {
+        "arity": 1,
+        "signature_key": "<canonical-type-1>"
+      },
+      "dispatch_identity": null
+    },
+    "normalization_obligations": [
+      "Strip parameter names from every provider's signature spelling.",
+      "Reduce every provider's parameter type spelling to one canonical type form (either consistently simple or consistently fully-qualified); regex/tree-sitter see simple names, SCIP/LSP see fully-qualified names, so at least one side must be canonicalized.",
+      "signature_key must exclude return type (overloads are distinguished by parameter types only)."
+    ]
+  },
+  "distinct_facts_must_not_merge": [
+    {
+      "fact": "example.OrderService#handle(String, int)",
+      "reason": "arity 2 vs arity 1 for the same method name; distinct overload.",
+      "regex_ground_truth": {
+        "native_signature_key": "Stringorder,intretries",
+        "native_unit_id_suffix": "$arity2$sig5902c043"
+      },
+      "expected_canonical_overload_identity": {
+        "arity": 2,
+        "signature_key": "<canonical-type-1>,<canonical-type-int>"
+      }
+    },
+    {
+      "fact": "example.OrderService#handleAll(List<String>)",
+      "reason": "different method name and a generic parameter type; distinct symbol.",
+      "regex_ground_truth": {
+        "native_symbol": "example.OrderService#handleAll",
+        "native_signature_key": "List<String>orders",
+        "native_unit_id_suffix": "$arity1$sigdc13f0cf"
+      }
+    },
+    {
+      "fact": "example.Validator#validate(String)",
+      "reason": "different owner/symbol; MUST NOT collide even though its regex signature hash (sig5e75e42b) is byte-identical to handle(String). A hash-only merge key would be unsafe; the canonical key must include owner+symbol+path, not only the signature hash.",
+      "regex_ground_truth": {
+        "native_symbol": "example.Validator#validate",
+        "native_signature_key": "Stringorder",
+        "native_unit_id_suffix": "$arity1$sig5e75e42b"
+      }
+    }
+  ]
+}

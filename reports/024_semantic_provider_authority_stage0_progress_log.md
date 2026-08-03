@@ -1,0 +1,230 @@
+---
+title: "Semantic Provider Authority Migration — Stage 0 Progress Log"
+doc_type: "progress_log"
+lifecycle: "active"
+status: "in_progress"
+agent_action: "reference_for_context"
+updated: "2026-08-03"
+---
+
+# Progress Log: Semantic Provider Authority Migration (plans/018)
+
+Companion log for
+[`plans/018_semantic_provider_authority_migration_plan.md`](../plans/018_semantic_provider_authority_migration_plan.md).
+This log opens with **Stage 0 — Independent Review And Compatibility Baseline**
+and is appended by later stages.
+
+## Execution Record
+
+- **Executor**: Claude Code v2.1.212; lead reviewer with an independent review
+  pass. Fable and the repository-prohibited Explore agent were **not** used. No
+  sub-agents were spawned.
+- **Model actually used**: **Claude Opus 4.8 Thinking, high effort.** This
+  updates the plan's Stage 0 routing default (Claude Opus 4.6) with the owner's
+  explicit authorization.
+- **High-effort justification**: Stage 0 locks the provider-neutral
+  `CanonicalFactKey` identity assumptions and challenges the migration before any
+  source work. The plan's own routing table rates this row `high` because
+  canonical identity is correctness-critical, and the plan explicitly allows a
+  high-effort override without a separate exception when identity/arbitration
+  risk justifies it. The review surfaced a High-severity identity finding (F1),
+  confirming the risk was real.
+- **Bootstrap performed**: read `RULES.md` in full; confirmed CCC artifacts
+  (`docs/code-context.md`, `.ccc/state.edn`) exist and read the code-context
+  layer; followed the MCP-first workflow (`create_index` → `repo_map` →
+  `resolve_context` → `fetch_context_detail`) for all code discovery.
+
+## Stage Status
+
+| Stage | Status |
+| --- | --- |
+| 0 — Independent review and compatibility baseline | **completed** |
+| 1 — Evidence model and arbitration kernel | **deferred** (owner admission gates open; see NextStageRoutingRecommendation) |
+| 2–7 | not started |
+
+## Scope Executed (Stage 0)
+
+Documentation, baseline, and test fixtures only. **No production
+authority/default extraction was changed.** Confirmed: `src/semidx/runtime/`
+source is byte-identical to the pre-Stage-0 tree; only new artifacts under
+`fixtures/provider-authority/` and this report were added.
+
+### Deliverables produced
+
+1. Independent review of ADR-046, plan 018, ADR-047, ADR-036 supersession, and
+   the plans/007 amendment/closure criteria (below).
+2. Protected Java + TypeScript corpus:
+   `fixtures/provider-authority/corpus/` (definitions, references, calls,
+   overloads, re-exports).
+3. Cross-provider `CanonicalFactKey` identity fixtures:
+   `fixtures/provider-authority/identity/` (Java overload; TypeScript re-export)
+   — regex/tree-sitter/SCIP/LSP spellings → one key; distinct overloads/aliases
+   stay distinct.
+4. Protected extraction baseline (ground truth) and degradation/freshness
+   expectations: `fixtures/provider-authority/behavior/`.
+5. Deterministic retrieval/callers-callees/impact/confidence/snapshot baseline:
+   `fixtures/provider-authority/baseline/`.
+
+`reports/022_latest_active_plans_architecture_review.md` was read **as input
+only**; it is untracked and was not modified, staged, or claimed.
+
+## Independent Review
+
+Posture per the plan's brief: ADR-046 is the accepted decision of record and
+plan 018 the approved direction. The review challenges implementation
+readiness, hidden assumptions, and unsafe sequencing rather than reopening the
+authority decision. Findings are ordered by severity below; the 11 required
+review questions are answered after them.
+
+### Findings
+
+| ID | Severity | Finding | Resolution |
+| --- | --- | --- | --- |
+| F1 | **High** | `CanonicalFactKey.overload_identity.signature_key` is underspecified and **not producible by the heuristic/structural tiers as written**. The plan's example uses fully-qualified, type-only `java.lang.String,int`. The current extractor (`java.clj` `java-normalized-params`, l.237–242; `java-method-unit-id`, l.254–262) emits **simple, parameter-name-inclusive** text: `handle(String order)` → `"Stringorder"` (ground truth via REPL). Regex/tree-sitter cannot resolve `String`→`java.lang.String` without import/classpath resolution, and they include the param name. SCIP/LSP emit `(java.lang.String)` type-only. Without a canonical signature form, the same overload gets **different keys per provider**, violating the Stage 1 exit criterion "same semantic fact from multiple providers produces one canonical fact key." | **Deferred to owner decision** — execution-admission prerequisite (owner decision #1). |
+| F2 | Medium | Source-identity granularity is unspecified: the plan requires a per-document digest or revision+verification, but not whether staleness invalidates a whole document's exact facts or only affected ranges. For overloads, a coarse per-document digest may over-invalidate (one edited method drops all SCIP facts) or, if mis-scoped, under-invalidate. | **Deferred to Stage 3 design** (SCIP slice); recorded as a named design question. |
+| F3 | Medium | Stage 0 baseline captures dirty-file *expectations* but not an executed **incremental / `update-index` re-index** baseline over the corpus. The plan's verification gate names "incremental-index regressions," so a captured incremental baseline strengthens the Stage 1 kernel. | **Accepted gap** — add an incremental re-index baseline in Stage 1; dirty-file expectations already recorded in `behavior/degradation-expectations.json`. |
+| F4 | Medium | Today both regex **and** tree-sitter emit `parser_mode: "full"` (ground truth). Structural (tree-sitter) and heuristic (regex) tiers are **output-indistinguishable**. ADR-046's authority ladder requires them separated. | **Named intentional future difference** — Stage 2 owns the structural/heuristic split; recorded so it is not mistaken for a regression. |
+| F5 | Low | Residual code-vs-ADR-046 gap: regex facts still project `parser_mode: "full"` (not `heuristic`/`fallback`). This is expected — Stage 6 owns the switch — and there is **no active conflicting document-level rule** (see Q9). | **Resolved / no action.** Confirmed no conflicting active parser-authority rule remains across ADR-036/046/047 and plans/007. |
+| F6 | Low (advisory) | Stages 1–2 introduce five new namespaces (catalog, planning, execution, arbitrator, freshness) before the first external provider. Consider collapsing catalog+planning until a second real provider exists (echoing plans/007 Decision 10 "data first, protocol later"). | **Deferred (advisory)** — the plan's data-first-registry defense is acceptable; not blocking. |
+
+Supporting evidence for F1 (ground truth, current extractor, default opts):
+
+- `example.OrderService#handle(String order)` → `method_signature_key
+  "Stringorder"`, `unit_id … $arity1$sig5e75e42b`.
+- `example.OrderService#handle(String order, int retries)` → `"Stringorder,intretries"`,
+  `… $arity2$sig5902c043` (overloads correctly distinct).
+- `example.Validator#validate(String order)` → `"Stringorder"`, `sig5e75e42b`
+  — **byte-identical signature hash to `handle(String)`**. This confirms a
+  hash-only merge key would be unsafe; the plan already mandates
+  owner+symbol+path in the key, so the design is sound on this point and the
+  fixture locks it in.
+
+### Answers To The 11 Required Review Questions
+
+1. **Per-operation authority vs whole-file?** Necessary. LSP can be exact for
+   definitions/references yet lack a complete batch call hierarchy; SCIP can be
+   exact for references yet miss a live-overlay operation. A single-winner
+   whole-file model (plans/007 Decision 9 V1) cannot express "SCIP exact for
+   refs + tree-sitter for call structure." Agree with the plan.
+2. **SCIP and LSP as freshness/mode-dependent peers?** Yes; ADR-046's
+   arbitration section models this correctly (batch-clean prefers SCIP; live/dirty
+   matching version prefers LSP; agreement merges; equal+contradictory ⇒
+   ambiguity). Agree.
+3. **Is the source-identity rule sufficient to prevent stale exact facts?**
+   Directionally yes, but granularity is unspecified — see F2.
+4. **Does `CanonicalFactKey` normalize across spellings without collapsing
+   distinct overloads/re-exports/dispatch?** Structurally yes for
+   owner+symbol+path+arity; **not yet** for `signature_key` — see F1. Distinct
+   overloads and the alias/origin re-export split are proven distinct by the
+   identity fixtures.
+5. **Does `FactEvidence` need a public contract now?** No. Keep it internal;
+   `parser_mode` remains the compatibility projection through the shadow stages
+   (ADR-024 additive discipline). Agree with the plan.
+6. **Does LSP scope avoid a lifecycle manager / nondeterministic batch
+   indexer?** Yes. Stage 5 + the High risk fix LSP as a source-validated live
+   overlay, SCIP as the reproducible batch source, and "semidx does not
+   implement an LSP server." Cancellation/timeout determinism is already a Stage
+   5 deliverable.
+7. **Are the Stage 0–6 gates sufficient?** Nearly; add an incremental re-index
+   baseline (F3). Otherwise retrieval/confidence/storage/relation gates are
+   present.
+8. **TypeScript first, or reverse to Java?** Keep **TypeScript first**. Both
+   lanes are regex-default today; TypeScript's confidence ceiling is lower
+   (per-language ceiling: TS `low`, Java `medium`) and its regex brittleness is
+   the most observable. Stage 0 toolchain evidence does **not** justify
+   reversing. Requires explicit owner confirmation (owner decision #2).
+9. **ADR-036 supersession / ADR-047 / plans/007 amendment — no conflicting
+   rule?** Verified. ADR-036 is `superseded_by: [ADR-046, ADR-047]` with a clear
+   supersession note; its regex-default text is historical only. ADR-046 amends
+   plans/007 Decision 9, and plans/007 already reflects the bounded
+   multi-provider plan (l.335–349, 73–75, 793–797). ADR-047 retains only the
+   tree-sitter toolchain boundary. **No active document-level parser-authority
+   rule conflicts.** The remaining gap is code-vs-target (F5), owned by Stage 6.
+10. **Simpler design with less machinery?** The per-operation plan is close to
+    minimal given exact-authority + deterministic fallback + explicit
+    degradation. Only advisory simplification: F6 (defer catalog/planning split).
+11. **Do provider ids / native payloads leak into plans/019 one-shot /
+    rendering?** Not by design — the plan forbids branching on provider ids in
+    the one-shot orchestrator/renderer and keeps provider-native detail out of
+    the public retrieval contract. No implementation exists yet; this is a
+    guardrail to enforce at the Stage 6 / plans-019 integration.
+
+### Implementation-Readiness Recommendation
+
+**Proceed after named revisions.** Specifically, Stage 1 must not begin until
+owner decision #1 (canonical `signature_key` form, F1) and owner decision #2
+(confirm TypeScript-first) are recorded, and the `CanonicalFactKey` contract +
+identity fixtures are approved. Until then Stage 1 is **deferred**.
+
+### Decisions Requiring Owner Approval
+
+1. **Canonical `signature_key` form for Java overloads (blocks F1).** Choose the
+   provider-neutral normalization: (a) simple type names, param names dropped;
+   or (b) fully-qualified type names, param names dropped. Either way the
+   heuristic/structural tiers need a defined, achievable target (option (a) is
+   achievable without type resolution; option (b) requires resolution the regex
+   tier cannot perform and would force regex overload facts to degrade/unkey).
+2. **Confirm TypeScript as the first SCIP vertical slice** (plan Execution
+   Admission; reports/022 gate).
+3. **Approve the `CanonicalFactKey` normalization contract and the Stage 0
+   identity fixtures** as the admission baseline.
+4. **Accept the intentional `parser_mode`/confidence reduction** for regex-only
+   repositories (F3/F4) as a planned Stage 6 change, subject to replay evidence.
+
+## Verification
+
+Stage 0 changed no production source (documentation, baseline, and test
+fixtures only), so verification targets fixture integrity and the repo gate:
+
+- **JSON validity** of all five new fixtures under
+  `fixtures/provider-authority/`: **pass** (`python3 -m json.tool`).
+- **`clojure -M:test`**: **289 tests, 1947 assertions, 0 failures, 0 errors** —
+  unchanged from the reports/022 baseline; the new fixtures are not auto-consumed
+  by any failing test.
+- **`./scripts/validate-contracts.sh`**: **ok** (70 JSON files checked); no
+  contract schema/example was touched.
+- **`git diff --check`**: clean (no whitespace errors).
+- **English-only scan** over the new/edited files: no Cyrillic.
+- **Ground-truth capture** used the project nREPL (`clojure -M:nrepl`) driving
+  `semidx.runtime.languages.{java,typescript}/parse-file`, and the semidx MCP
+  retrieval/impact surfaces on a corpus index. All asserted identity/baseline
+  values in the fixtures are captured from real runtime output, not guessed.
+- **Not run (not applicable)**: full migration gate (semantic-quality report,
+  protected retrieval replay, snapshot-diff parity, PostgreSQL round trips) —
+  these gate later stages that change extraction; Stage 0 changes none.
+- **Limitation**: SCIP/LSP provider spellings in the identity fixtures are
+  representative, not verified against installed SCIP/LSP tools; Stage 3/5 must
+  re-verify. Latency and snapshot size are recorded as observational, not
+  deterministic gates.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 0 — Independent Review And Compatibility Baseline
+recommended_next_stage: DEFER Stage 1 (Evidence Model And Arbitration Kernel)
+recommended_executor: Claude Code team lead (Claude Code v2.1.212+), no Fable, no Explore agent
+recommended_model: Claude Opus 4.8 Thinking (plan default Opus 4.6 is superseded by owner authorization)
+effort: high
+effort_justification: CanonicalFactKey normalization, same-key merge, ambiguity,
+  and in-memory/PostgreSQL storage compatibility are correctness-critical
+  contracts; Stage 0 surfaced a High-severity identity gap (F1) that Stage 1
+  must encode carefully. Matches the plan's Stage 1 routing row.
+rationale: Stage 0 is complete and deterministic, but the plan's own Execution
+  Admission gates are open. F1 (signature_key canonical form) has no owner
+  decision, and TypeScript-first is not yet owner-confirmed. Starting Stage 1
+  without owner decision #1 would hard-code an unvalidated key contract.
+prerequisites_or_blockers:
+  - Owner decision #1: canonical signature_key form (blocks F1).
+  - Owner decision #2: confirm TypeScript as first SCIP vertical slice.
+  - Owner approval of the CanonicalFactKey contract + identity fixtures.
+  - ADR-046 and ADR-047 accepted (DONE).
+  - ADR-036 supersession + plans/007 amendment documented (DONE; verified, no conflict).
+file_ownership_and_conflict_risk: LOW. Stage 0 touched only
+  fixtures/provider-authority/** and reports/024. It did NOT touch SPEC.md,
+  MEMORY.md, plans/020, reports/021, or reports/023 (plans/020 Stage 0 owned
+  files), so there is no cross-plan file conflict.
+fallback_executor_or_model: Claude Sonnet 5 for mechanical fixture upkeep only;
+  NOT for the signature_key/arbitration identity decisions.
+model_availability_checked_at: 2026-08-03
+confidence: high (that Stage 1 must be deferred pending the two owner decisions)
+```
