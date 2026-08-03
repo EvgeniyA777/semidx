@@ -1,0 +1,664 @@
+---
+title: "Semantic Provider Authority Migration Plan"
+doc_type: "architecture_plan"
+lifecycle: "active"
+status: "draft"
+agent_action: "use_as_input_for_future_plan_only"
+updated: "2026-08-02"
+---
+
+# Architecture Plan: Semantic Provider Authority Migration
+
+Decision dependency: proposed
+[`ADR-046`](../adr/046-prefer-semantic-evidence-providers-over-structural-and-lexical-fallbacks.md).
+
+This plan is review input, not an implementation queue. Do not execute its
+stages until ADR-046 is independently reviewed and accepted and this plan is
+promoted from `draft`.
+
+## Goal
+
+Migrate Java and TypeScript from regex-first single-parser dispatch to a
+capability-specific provider pipeline in which:
+
+- fresh SCIP and LSP facts are the semantic-authority tier;
+- tree-sitter supplies structural facts and fills semantic-provider gaps;
+- regex is a bounded, explicitly degraded last resort;
+- all facts normalize into the existing Semantic IR and canonical typed-relation
+  graph;
+- external provider absence never removes the basic local indexing path.
+
+## Scope
+
+In:
+
+- Provider-plan, fact-batch, evidence, status, and arbitration contracts.
+- Multi-provider orchestration for Java and TypeScript.
+- SCIP artifact ingestion for TypeScript, then Java.
+- LSP live-overlay enrichment for TypeScript, then Java.
+- Tree-sitter and regex adaptation behind the same provider boundary.
+- Source-identity validation, explicit degradation, bounded provider execution,
+  and deterministic evidence merging.
+- Shadow comparison, confidence recalibration, compatibility migration, and
+  public additive provider summaries.
+
+Out:
+
+- Implementing an LSP server or SCIP indexer inside semidx.
+- Making an external provider mandatory for basic indexing.
+- Editing, rename, refactoring, completion, or diagnostic UI features.
+- Migrating every language lane in the first tranche.
+- Replacing typed relations with provider-native graph formats.
+- A general plugin marketplace, runtime classloader, or remote extension SDK.
+- Promoting tree-sitter or regex evidence to compiler-grade authority.
+
+## Assumptions
+
+- ADR-039 relation identity remains stable and excludes mutable evidence.
+- Existing Semantic IR and typed relations remain the only normalized graph
+  model; SCIP and LSP do not create parallel indexes exposed to retrieval.
+- Provider integration uses client-owned, narrow function roles and data-first
+  registration. Introduce a protocol only when an external runtime boundary
+  requires substitution that plain functions cannot express cleanly.
+- Existing public parser options remain compatibility controls during migration.
+- TypeScript is the first vertical slice because its current confidence ceiling
+  and regex brittleness make the improvement easiest to observe; review may
+  reverse Java and TypeScript only with concrete toolchain or fixture evidence.
+- LSP is primarily a live overlay. SCIP is primarily a reproducible batch
+  source. Neither assumption grants authority without matching source identity.
+
+## Change Model
+
+| Expected change | Owning boundary |
+|---|---|
+| Add or replace a semantic provider | Provider catalog and provider adapter |
+| Change authority or fallback order | Provider planning policy |
+| Change freshness requirements | Provider freshness policy |
+| Add an evidence field | Fact evidence contract and storage projection |
+| Change conflict behavior | Fact arbitrator |
+| Add a language-specific normalization rule | Provider adapter for that language |
+| Change repository rebuild identity | Workspace-state provider-plan fingerprint |
+| Change public degradation reporting | Capability projection |
+
+Index lifecycle, retrieval, transports, and individual providers must not own
+provider precedence.
+
+## Target Flow
+
+```text
+Discovery
+  -> Provider eligibility
+  -> Runtime status and source-identity checks
+  -> Capability-specific ProviderPlan
+  -> Semantic tier: SCIP and/or LSP
+  -> Structural gap filling: tree-sitter
+  -> Heuristic gap filling: regex
+  -> Normalize FactBatch values
+  -> Arbitrate and merge by stable semantic identity
+  -> Semantic IR + typed relations
+  -> Index, storage, capability projection, retrieval
+```
+
+Execution order is not a whole-file short circuit. A provider that returns
+definitions does not suppress a lower-tier provider needed for missing structure
+or another operation. Lower tiers execute only for planned gaps or explicit
+shadow comparison. Physical scheduling may precompute tree-sitter structure for
+anchoring or latency reasons; the invariant is the evidence-authority and merge
+order, not process start order.
+
+## Boundaries
+
+### 1. Provider Catalog
+
+Responsibility: own versioned provider descriptors and role functions.
+
+Knows about:
+
+- provider id and version;
+- language/file selectors;
+- operation capability profile;
+- static authority claims;
+- status, freshness, and execution functions.
+
+Does not know about:
+
+- provider precedence;
+- repository traversal;
+- retrieval ranking;
+- storage implementation;
+- transport schemas.
+
+Initial location: `src/semidx/runtime/providers.clj`, evolving the metadata-only
+catalog currently derived from `runtime/language_registry.clj`.
+
+### 2. Provider Planning Policy
+
+Responsibility: produce a deterministic per-file, per-operation execution plan.
+
+Inputs:
+
+- file metadata and content identity;
+- requested indexing operations;
+- eligible descriptors;
+- provider runtime status and freshness;
+- project overrides;
+- shadow/default mode.
+
+Output:
+
+```clojure
+{:path "src/example.ts"
+ :source_identity {:content_digest "sha256:..."}
+ :operations
+ {:definitions [{:provider_id "scip-typescript" :authority "exact"}
+                {:provider_id "typescript-tree-sitter" :authority "structural"}
+                {:provider_id "typescript-regex" :authority "heuristic"}]
+  :references  [{:provider_id "scip-typescript" :authority "exact"}
+                {:provider_id "typescript-lsp" :authority "exact"}
+                {:provider_id "typescript-regex" :authority "heuristic"}]}
+ :mode "shadow"}
+```
+
+Does not know provider execution internals or Semantic IR normalization rules.
+
+Initial location: `src/semidx/runtime/provider_selection.clj`; extend the
+plans/007 selection seam from one winner to a bounded provider plan.
+
+### 3. Provider Execution Orchestrator
+
+Responsibility: execute a ProviderPlan with bounded concurrency, timeouts,
+failure isolation, gap tracking, and diagnostics.
+
+Knows about provider role functions and FactBatch values. Does not decide
+authority, merge semantics, retrieval confidence, or transport formatting.
+
+Initial location: `src/semidx/runtime/provider_execution.clj`; invoked from the
+file-indexing path that currently calls `adapters/parse-file` directly.
+
+### 4. Fact Evidence And Normalization
+
+Responsibility: convert provider-native output into normalized units, relations,
+diagnostics, and evidence records.
+
+Conceptual contract:
+
+```clojure
+{:provider_id "scip-typescript"
+ :provider_version "..."
+ :path "src/example.ts"
+ :source_identity {:content_digest "sha256:..."
+                   :revision "..."}
+ :runtime_status "ready"
+ :facts {:units [...]
+         :relations [...]}
+ :coverage {:definitions "exact"
+            :references "exact"
+            :call_hierarchy "none"}
+ :diagnostics []}
+```
+
+Each fact carries or references one or more evidence records. The current
+`parser_mode` remains a compatibility projection; new authority and provenance
+fields are authoritative internally.
+
+Primary locations:
+
+- `src/semidx/runtime/semantic_ir.clj`;
+- `src/semidx/runtime/relations.clj`;
+- provider-specific adapters under `src/semidx/runtime/providers/`.
+
+### 5. Fact Arbitrator
+
+Responsibility: merge same-identity facts and surface conflicts.
+
+Rules:
+
+1. Reject evidence that fails source-identity or schema validation.
+2. Merge agreeing same-identity facts and retain all evidence sources.
+3. Let lower authority fill missing facts and missing non-conflicting details.
+4. Never let lower authority replace a higher-authority value.
+5. Mark equal-authority contradictions ambiguous and emit a diagnostic.
+6. Produce stable ordering independent of registration or completion order.
+7. Keep fact identity independent from evidence accumulation.
+
+Initial location: `src/semidx/runtime/fact_arbitration.clj`.
+
+### 6. Provider Freshness Policy
+
+Responsibility: decide whether provider output matches the intended source.
+
+SCIP requirements:
+
+- per-document content digest; or
+- artifact revision plus verification that the covered source content matches
+  the current workspace.
+
+LSP requirements:
+
+- intended workspace root;
+- matching open-document version or content digest for live overlays;
+- source identity attached to every accepted batch.
+
+Unknown or stale identity cannot produce exact facts. The provider is skipped or
+degraded for the affected file/operation.
+
+Initial location: pure functions in
+`src/semidx/runtime/provider_freshness.clj`.
+
+### 7. Capability And Degradation Projection
+
+Responsibility: aggregate selected provider evidence into runtime-owned
+capability, coverage, and degradation summaries.
+
+Required outcomes:
+
+- no confidence increase from provider branding alone;
+- fallback-only evidence remains low and review-required;
+- mixed exact/structural/heuristic coverage is visible per operation;
+- `create_index`, `repo_map`, retrieval, MCP, HTTP, and gRPC serialize the same
+  runtime-owned interpretation.
+
+Primary locations:
+
+- `src/semidx/runtime/capabilities.clj`;
+- `src/semidx/runtime/retrieval_policy.clj`;
+- transport passthrough and additive contract mirrors.
+
+## Contracts
+
+### ProviderDescriptor
+
+```clojure
+{:provider_id "typescript-lsp"
+ :provider_version "1"
+ :languages ["typescript"]
+ :classification "semantic"
+ :selectors {:extensions [".ts" ".tsx"]}
+ :operation_capabilities
+ {:definitions "exact"
+  :references "exact"
+  :implementations "exact"
+  :call_hierarchy "structural"
+  :document_symbols "exact"}}
+```
+
+Capability values are claims bounded by successful freshness and runtime-status
+checks. They are not unconditional confidence grants.
+
+### ProviderRuntimeStatus
+
+```clojure
+{:provider_id "typescript-lsp"
+ :state "ready"                 ;; ready | degraded | unavailable
+ :reason_codes []
+ :observed_at "..."}
+```
+
+### FactEvidence
+
+```clojure
+{:provider_id "typescript-lsp"
+ :provider_version "1"
+ :authority "exact"
+ :operation "definitions"
+ :freshness "exact"
+ :source_identity {:content_digest "sha256:..."
+                   :document_version 42}
+ :evidence_location {:path "src/example.ts"
+                     :start_line 7
+                     :end_line 10}}
+```
+
+### ProviderPlan
+
+- Bounded provider list per operation.
+- Deterministic stable order.
+- Explicit default, forced-test, and shadow modes.
+- Exact source identity used to build the plan.
+- Explicit maximum execution count and timeout policy.
+
+### Compatibility Projection
+
+- Existing `units`, `relations`, `calls`, `imports`, and diagnostics remain
+  available while consumers migrate.
+- Existing `parser_mode` remains present during shadow migration.
+- On the final default switch, regex-only Java/TypeScript units project
+  `parser_mode: fallback`; this intentional confidence change requires approved
+  replay evidence.
+- Existing `java_engine`, `typescript_engine`, and `tree_sitter_enabled` options
+  remain temporary explicit overrides and test controls before deprecation.
+
+## Dependency Direction
+
+```text
+Index Lifecycle / Index Builder
+             |
+             v
+Provider Execution Orchestrator
+      |                    |
+      v                    v
+ProviderPlan          Fact Arbitrator
+      ^                    |
+      |                    v
+Planning Policy     Semantic IR + Relations
+      ^                    ^
+      |                    |
+Provider Catalog      Provider Adapters
+                           |
+                 SCIP / LSP / tree-sitter / regex
+```
+
+- Policy depends on descriptors and evidence contracts, never SDKs or CLIs.
+- SCIP, LSP, tree-sitter, and regex details plug into provider-owned adapters.
+- Retrieval depends on normalized facts and evidence summaries, never provider
+  implementations.
+- Transports depend on runtime outputs and do not derive authority themselves.
+
+## Implementation Sequence
+
+### Stage 0. Independent Review And Compatibility Baseline
+
+Goal: approve or reject the authority model before implementation.
+
+Deliverables:
+
+- Independent review of ADR-046 and this plan.
+- Explicit resolution of review findings.
+- Protected Java and TypeScript fixtures for definitions, references, calls,
+  overloads, re-exports, dirty-file behavior, and provider unavailability.
+- Baselines for retrieval selections, callers/callees, impact, snapshot diff,
+  confidence, latency, and snapshot size.
+
+Exit criteria:
+
+- ADR-046 is accepted or the plan is revised/rejected.
+- Intentional future semantic differences are named before code changes.
+- Baseline comparisons are deterministic.
+
+Commit boundary: documentation and baseline fixtures only.
+
+### Stage 1. Evidence Model And Arbitration Kernel
+
+Goal: establish stable contracts without changing default extraction.
+
+Deliverables:
+
+- Additive FactEvidence and FactBatch normalization.
+- Deterministic same-identity merge.
+- Authority, freshness, and conflict rules.
+- Additive multi-source relation evidence compatible with ADR-039.
+- In-memory and PostgreSQL round-trip coverage.
+- Property-style tests proving registration and completion order do not change
+  merged output.
+
+Exit criteria:
+
+- Same semantic fact from multiple providers keeps one unit/relation identity.
+- Lower authority cannot overwrite higher authority.
+- Equal-authority contradictions are observable.
+- Existing snapshots remain readable.
+
+Commit boundary: evidence contracts and pure arbitration only.
+
+### Stage 2. Provider Plan And Legacy Adapter Shadow Path
+
+Goal: prove orchestration using providers already present in the repository.
+
+Deliverables:
+
+- Data-first provider catalog.
+- Capability-specific ProviderPlan.
+- Provider execution orchestrator with bounded concurrency and timeouts.
+- Java/TypeScript tree-sitter provider adapters.
+- Java/TypeScript regex provider adapters classified as heuristic.
+- Compatibility adapter preserving the current `adapters/parse-file` facade.
+- Shadow output that does not affect the active snapshot.
+
+Exit criteria:
+
+- Existing default output remains unchanged.
+- Shadow provider output is deterministic.
+- Tree-sitter unavailability routes to regex with an explicit degradation.
+- Regex shadow facts carry heuristic authority and never exact authority.
+
+Commit boundary: provider seam and shadow execution, no default switch.
+
+### Stage 3. TypeScript SCIP Vertical Slice
+
+Goal: prove reproducible compiler-grade batch evidence in the lowest-confidence
+current lane.
+
+Deliverables:
+
+- SCIP artifact reader behind a provider adapter.
+- Source-identity and artifact-version validation.
+- TypeScript definitions, references, implementations, and available call facts
+  normalized into units and typed relations.
+- Shadow comparison against current TypeScript extraction.
+- Provider coverage, conflict, stale-artifact, latency, and storage metrics.
+
+Exit criteria:
+
+- Stale or mismatched SCIP artifacts never produce exact facts.
+- SCIP facts merge with tree-sitter structure without duplicate semantic
+  identities.
+- Protected TypeScript retrieval cases do not regress; approved improvements are
+  recorded explicitly.
+- Absence of a SCIP artifact degrades to tree-sitter/regex without index failure.
+
+Commit boundary: TypeScript SCIP provider remains shadow/default-off.
+
+### Stage 4. Java SCIP Vertical Slice
+
+Goal: reuse the proven SCIP seam for Java without widening the core contracts.
+
+Deliverables and gates mirror Stage 3, with Java-specific coverage for overloads,
+constructors, inheritance, static imports, method references, entity fields, and
+field-write relations.
+
+Exit criteria:
+
+- No TypeScript-specific rule enters the shared SCIP adapter boundary.
+- Java state-invariant facts preserve stable relation identity while gaining
+  richer evidence.
+- Provider absence and stale artifacts degrade cleanly.
+
+Commit boundary: Java SCIP provider remains shadow/default-off.
+
+### Stage 5. LSP Live Overlay
+
+Goal: add exact evidence for live or dirty workspace content not represented by
+the batch SCIP snapshot.
+
+Deliverables:
+
+- Narrow host-integrated LSP fact-source role; semidx does not implement an LSP
+  server.
+- Workspace-root, document-version, and content-digest validation.
+- TypeScript live overlay first, then Java.
+- Bounded requests, cancellation, timeout, and server-unavailable behavior.
+- Merge tests for clean agreement, dirty LSP override, stale SCIP exclusion, and
+  equal-authority conflict.
+
+Exit criteria:
+
+- LSP facts are accepted only for matching source content.
+- Dirty-file LSP evidence affects only the intended overlay/snapshot scope.
+- LSP timeout or crash cannot fail unrelated files or the whole index.
+- Batch snapshots remain reproducible when live overlay mode is disabled.
+
+Commit boundary: LSP remains opt-in and shadowed.
+
+### Stage 6. Default Authority Switch And Truthful Degradation
+
+Goal: make the reviewed provider plan authoritative for Java and TypeScript.
+
+Deliverables:
+
+- Provider planner becomes the default Java/TypeScript indexing path.
+- Fresh SCIP/LSP facts receive exact authority per supported operation.
+- Tree-sitter becomes the structural gap-filling tier.
+- Regex-only output projects `parser_mode: fallback`, heuristic evidence, and
+  explicit degradation.
+- Workspace fingerprint includes provider plan, provider versions, relevant
+  source identities, and authority-policy version.
+- Capability/confidence recalibration based on selected fact evidence.
+- Additive provider summary and degradation parity across public surfaces.
+
+Exit criteria:
+
+- Protected contract, retrieval, relation, impact, snapshot-diff, and storage
+  gates pass.
+- Intentional confidence reductions for fallback-only repositories are approved.
+- New semantic improvements are supported by fixture/replay evidence.
+- Forced provider overrides remain available for diagnosis and rollback.
+
+Commit boundary: default switch and public additive contract changes.
+
+### Stage 7. Compatibility Cleanup And Expansion Decision
+
+Goal: remove temporary duplication only after the new path is stable.
+
+Deliverables:
+
+- Deprecation schedule for engine-specific parser options.
+- Removal of shadow-only legacy branches after the agreed retention window.
+- Decision whether another language justifies provider migration.
+- Updated ADR-036, plans/007, runtime docs, MEMORY, onboarding docs, and
+  capability documentation reflecting the accepted authority model.
+
+Exit criteria:
+
+- No public consumer depends on removed compatibility behavior.
+- Rollback remains possible through a documented provider-policy override during
+  the retention window.
+- Further language expansion requires evidence, not symmetry.
+
+Commit boundary: cleanup only; do not combine with a new language migration.
+
+## Verification Gates
+
+Every implementation stage must run the narrowest relevant tests first and then
+the applicable repository gates. The complete migration gate includes:
+
+- provider selection and arbitration unit tests;
+- Java and TypeScript onboarding validation;
+- contract validation;
+- complete Clojure test suite;
+- semantic-quality report;
+- protected retrieval replay comparison;
+- relation projection and traversal parity;
+- snapshot-diff parity;
+- in-memory and PostgreSQL evidence round trips;
+- forced provider unavailable, stale, timeout, and conflict cases;
+- CCC freshness check and MEMORY update when runtime behavior changes.
+
+No default switch is justified by tests that cover only provider happy paths.
+
+## Rollback Strategy
+
+- Stage 1-5 changes are additive and default-off or shadow-only.
+- Each provider can be disabled independently by project/runtime policy.
+- Stage 6 retains explicit tree-sitter and regex overrides for diagnosis and
+  emergency rollback.
+- Snapshot provider-policy versions prevent silent reuse across authority-policy
+  changes.
+- A rollback never relabels heuristic evidence as exact; it explicitly reports
+  reduced coverage and confidence.
+
+## Risks
+
+### [High] LSP is treated as a reliable batch indexer
+
+Why it matters: LSP servers are stateful, capability-variable, and optimized for
+interactive operations rather than deterministic repository export.
+
+Mitigation: use LSP primarily as a source-validated live overlay; require bounded
+operation support and retain SCIP as the reproducible semantic batch source.
+
+### [High] Multi-provider merging creates silent semantic conflicts
+
+Why it matters: accepting whichever provider finishes first makes output
+nondeterministic and can conceal ownership disagreements.
+
+Mitigation: pure authority/freshness policy, stable merge ordering, explicit
+ambiguity, and tests randomized by registration/completion order.
+
+### [High] Stale semantic artifacts receive exact authority
+
+Why it matters: precise but stale definitions or references are more dangerous
+than an explicit structural fallback.
+
+Mitigation: content/revision identity is a prerequisite for exact authority;
+unknown identity degrades or excludes the evidence.
+
+### [High] The provider seam becomes a plugin framework
+
+Why it matters: lifecycle hooks, remote loading, and a broad SDK would delay the
+first semantic slice and widen the attack/maintenance surface.
+
+Mitigation: versioned data registry plus narrow role functions only; add a
+protocol when the SCIP/LSP boundary proves a concrete substitution need.
+
+### [Medium] Fact-level evidence expands snapshots significantly
+
+Why it matters: duplicated provider locations and metadata increase memory,
+serialization, and PostgreSQL costs.
+
+Mitigation: measure Stage 3/4 snapshots, deduplicate source identities, bound
+evidence records, and retain detailed provider-native payloads outside the
+canonical snapshot.
+
+### [Medium] Truthful regex degradation lowers apparent product capability
+
+Why it matters: current users may observe lower confidence even when raw
+retrieval selections remain similar.
+
+Mitigation: expose the reason and recommended provider setup; approve the
+confidence change through replay and contract review instead of masking it.
+
+## Independent Review Brief
+
+The reviewing agent should treat ADR-046 and this plan as proposals, not as
+instructions to confirm. Review against current code, accepted ADRs, and active
+plans, and report findings by severity.
+
+Required review questions:
+
+1. Is per-operation authority necessary, or can a simpler whole-file provider
+   model meet the same correctness requirements?
+2. Are SCIP and LSP correctly treated as peers whose precedence depends on
+   freshness and workspace mode?
+3. Is the proposed source-identity rule sufficient to prevent stale exact facts?
+4. Can current unit and ADR-039 relation identities safely support multi-provider
+   evidence merging?
+5. Does `FactEvidence` need a public contract immediately, or should it remain
+   internal through the shadow stages?
+6. Does the LSP live-overlay scope avoid turning semidx into an LSP lifecycle
+   manager or nondeterministic batch indexer?
+7. Are the Stage 0-6 gates sufficient to catch retrieval, confidence, storage,
+   and incremental-index regressions?
+8. Should TypeScript remain the first SCIP slice, or does concrete Java toolchain
+   evidence justify reversing the order?
+9. Which clauses of ADR-036 and plans/007 must be superseded or amended if
+   ADR-046 is accepted?
+10. Identify any simpler design that preserves exact semantic authority,
+    deterministic fallback, and explicit degradation with less machinery.
+
+Expected review output:
+
+- findings ordered by severity with file/line evidence;
+- explicit recommendation: accept, accept with changes, or reject;
+- unresolved decisions that require the project owner;
+- smallest revision set needed before ADR acceptance;
+- verification performed and limitations.
+
+## Promotion Criteria
+
+This plan may move from `draft` to `planned` only when:
+
+- independent review findings are recorded and resolved or explicitly deferred;
+- ADR-046 is accepted;
+- any supersession/amendment of ADR-036 and plans/007 is documented;
+- Stage 0 baseline scope and ownership are approved;
+- the project owner confirms whether TypeScript remains the first vertical slice.
