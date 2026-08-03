@@ -125,27 +125,78 @@ selection stage and `returned_tokens` for expand/detail.
 
 ## Stage 0 — Pre-registration and Lock (in progress)
 
-### Artifacts
+### Sub-gate: pre-registration document
 
-- Pre-registration locked in `reports/023_retrieval_value_benchmark_preregistration.md`.
-- Locked the A/B/C/D arm definitions and their roles.
-- Defined `BenchmarkRun` and `TaskAttempt` schemas.
-- Defined `2026-08-03-anthropic-openai-gemini-v1` price schedule with exact rates.
-- Locked the final threshold calibration rule.
+Completed. The pre-registration is locked in
+`reports/023_retrieval_value_benchmark_preregistration.md`.
+
+Key decisions recorded:
+
+- A/B/C/D arm definitions and verdict roles locked.
+- `executor_model` vs `evaluated_provider_model` distinction explicit throughout.
+- `BenchmarkRun` and `TaskAttempt` schemas locked; `TaskAttempt` fields use
+  `evaluated_*` prefix.
+- Cache protocol `cold_start_no_explicit_cache_v1`: explicit cache objects
+  forbidden; implicit cache reads recorded at Cache Read rate; storage cost = 0.
+- Price schedule `2026-08-03-eligible-v1` covers only eligible evaluated models
+  (`gemini-2.5-pro`, `gemini-2.5-flash`). Legacy models (`claude-3-5-sonnet-20240620`,
+  `gpt-4o-2024-05-13`) moved to historical-only reference, excluded from v1 verdict.
+- Arm D forbidden tools defined once and referenced by both policy and audit rule.
+- Calibration pilot and final threshold lock pending.
+
+### Sub-gate: calibration pilot and final lock
+
+Not started. Must complete before scoring (Stage 4).
+
+### Iteration 4 verification
+
+- `git diff --check`: passed.
+- English-only scan (`grep -rnP '[\x{0400}-\x{04FF}]'` over both changed
+  files): passed (no Cyrillic matches).
+- Runtime tests: skipped; no runtime source was changed.
+- CCC artifacts: not refreshed; `RULES.md` forbids routine per-task refreshes.
 
 ### NextStageRoutingRecommendation
 
-- **Target Stage:** Stage 2 — Task suite + four-arm harness.
-- **Completed Stage:** Stage 0 pre-registration sub-gate. Pilot and final-lock still pending before scoring.
-- **Executor:** Antigravity.
-- **Recommended Model:**
-  - Mechanical harness implementation: Gemini 2.5 Flash (`gemini-2.5-flash`, `on-demand`).
-  - Controversial contract decisions and final harness validation: Gemini 2.5 Pro (`gemini-2.5-pro`, `on-demand`).
-  - Both models are in the locked price schedule `2026-08-03-anthropic-openai-gemini-v1`.
-- **Effort Level:** Standard for harness implementation; High for contract/schema validation pass.
-- **Effort Justification (High):** The cost-normalization logic (Gemini two-part cache billing: read tokens + storage token-hours) and the aggregation roll-up `(benchmark_run_id, task_id, arm)` are contract-critical paths. A miscount silently produces wrong `cost_usd` values and invalidates the entire Phase 1 verdict. High effort on the final validation pass is required to catch these.
-- **Prerequisites or Blockers:** Stage 2 harness may be built. However, the scoring run (Stage 4) must not begin until Stage 0 calibration pilot is completed and the final threshold is locked.
-- **File Ownership and Conflict Risk:** Medium. Stage 2 will create new files under a `benchmark/` subdirectory but will also need to read and conform to contracts in `src/semidx/runtime/usage_metrics.clj` and `src/semidx/core.clj`. Read-only access to those files is required; any write to them requires a separate targeted PR reviewed against existing tests.
-- **Fallback Executor/Model:** If Gemini 2.5 Flash produces incorrect adapter logic, escalate to Gemini 2.5 Pro for the full implementation. No Claude fallback — not in the agreed model matrix.
-- **Model Availability Checked At:** 2026-08-03 (both `gemini-2.5-flash` and `gemini-2.5-pro` confirmed active on the pricing page).
-- **Confidence:** High.
+```text
+completed_stage: Stage 0 pre-registration sub-gate
+recommended_next_stage: Stage 2 — Task suite + four-arm harness
+recommended_executor: Antigravity
+recommended_model:
+  mechanical_implementation: Gemini 3.6 Flash (medium effort)
+  contract_validation: Gemini 3.1 Pro (high effort)
+  fallback: Gemini 3.5 Flash
+effort: medium (default), high (contract validation only)
+effort_justification: >
+  High effort is required only for the contract validation pass:
+  the cost-normalization adapter must correctly map implicit cache-read
+  tokens from each provider's usage response to the Cache Read rate
+  in the price schedule, and the aggregation roll-up
+  (benchmark_run_id, task_id, arm) is contract-critical for the Phase 1
+  verdict. A miscount silently produces wrong cost_usd values.
+rationale: >
+  plans/020 routing table (line 264) assigns Gemini 3.6 Flash / medium
+  for Stage 2. These are executor models inside Antigravity and are
+  unrelated to the evaluated_provider_model in TaskAttempt. The price
+  schedule does not need to list executor models.
+prerequisites_or_blockers: >
+  Stage 2 harness may be built now. Stage 4 scoring must not start
+  until the calibration pilot (Stage 0 sub-gate 2) is completed and
+  the final threshold is locked.
+file_ownership_and_conflict_risk: >
+  Stage 2 will provisionally create files under benchmark/ or
+  src/semidx/runtime/benchmark/. It will also need to read
+  src/semidx/runtime/usage_metrics.clj and src/semidx/core.clj to
+  conform to existing event schemas. Whether Stage 2 requires writes
+  to those files is not yet determined — it depends on whether the
+  existing usage-metrics sink can host benchmark events without
+  schema changes. This is a risk to surface during Stage 2 admission,
+  not a claim resolved here.
+fallback_executor_or_model: Gemini 3.5 Flash (per plans/020 line 270)
+model_availability_checked_at: >
+  deferred — Gemini 3.6 Flash and Gemini 3.1 Pro availability inside
+  Antigravity cannot be confirmed by checking ai.google.dev pricing.
+  Actual availability will be confirmed at Stage 2 admission by the
+  executor. If unavailable, defer to Gemini 3.5 Flash as fallback.
+confidence: high (for the routing recommendation itself)
+```

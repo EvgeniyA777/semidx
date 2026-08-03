@@ -9,7 +9,17 @@ updated: "2026-08-03"
 
 # Retrieval Value Benchmark Pre-registration (Stage 0)
 
-This document satisfies the pre-registration sub-gate of Stage 0 for `plans/020_retrieval_value_benchmark_harness_plan.md`. It formally freezes the benchmark experimental design and schemas before the calibration pilot begins. The final threshold lock will occur after the pilot.
+This document satisfies the pre-registration sub-gate of Stage 0 for
+`plans/020_retrieval_value_benchmark_harness_plan.md`. It formally freezes the
+benchmark experimental design and schemas before the calibration pilot begins.
+The final threshold lock will occur after the pilot.
+
+**Key distinction:** The *executor model* (the model running inside Antigravity
+to build and operate the harness code) is entirely separate from the
+*evaluated provider model* (the model that runs as the agent inside each
+benchmark `TaskAttempt`). The price schedule in §4 covers only evaluated
+provider models. The executor model is governed by the routing recommendation in
+the companion progress log.
 
 ## 1. Arm Definitions
 
@@ -18,30 +28,67 @@ This document satisfies the pre-registration sub-gate of Stage 0 for `plans/020_
 | **A** | semidx staged | Canonical staged semidx flow (`v1`). One-shot adapters (`plans/019`) may be registered as `A2` in future runs. | Candidate |
 | **B** | Competent lexical | `rg` (ripgrep) queries plus bounded targeted file reading. No semantic tools. | Primary comparator |
 | **C** | Language navigation | Arm B tools plus LSP/SCIP definition/reference navigation where available. | Diagnostic control |
-| **D** | Native no-index | The agent's native repository-browsing policy (e.g., full shell/filesystem access). *Forbidden:* `semidx` CLI, any LSP/SCIP tool call (`lsp_*`, `scip_*`), or any other external semantic-navigation service invocation. Audited via tool-call log scan: attempt is voided if any forbidden tool appears. | Ecological control |
+| **D** | Native no-index | The agent's native repository-browsing policy (full shell/filesystem access). See §2 Arm D Forbidden Tools for the canonical exclusion list and audit rule. | Ecological control |
 
-*Rule:* Arm B is the primary comparator. C and D cannot be silently folded into B or used to rescue a primary verdict. For Arm C, if LSP/SCIP is unavailable on the target repo, the attempt outcome must be recorded as `not_applicable` and a `not_applicable_reason` string is required.
+*Rule:* Arm B is the primary comparator. C and D cannot be silently folded into
+B or used to rescue a primary verdict. For Arm C, if LSP/SCIP is unavailable on
+the target repo, the attempt outcome must be recorded as `not_applicable` with a
+required `not_applicable_reason` string explaining why.
 
 ## 2. Experimental Controls and Cache Protocol
 
-These policy IDs represent the immutable definitions for the `v1` benchmark suite.
+These policy IDs represent the immutable definitions for the `v1` benchmark
+suite.
 
-- **Task Prompt Policy (`task_prompt_policy_id: agent_default_v1`)**:
-  ```text
-  You are an autonomous AI agent assigned to resolve an issue in this repository.
-  Use your available tools to explore the codebase, analyze the problem, and implement a solution.
-  ```
+### Task Prompt Policy (`task_prompt_policy_id: agent_default_v1`)
 
-- **Arm Policy Bundle (`arm_policy_bundle_id: harness_v1`)**:
-  - Arm A tools: `resolve_context`, `expand_context`, `fetch_context_detail`.
-  - Arm B tools: `grep_search`, `list_dir`, `view_file`.
-  - Arm C tools: Arm B tools + `lsp_definition`, `lsp_references`.
-  - Arm D tools: Native unconstrained shell environment. *Audit Rule:* Execution fails if `semidx` CLI or `lsp_*` tools are invoked.
+```text
+You are an autonomous AI agent assigned to resolve an issue in this repository.
+Use your available tools to explore the codebase, analyze the problem, and implement a solution.
+```
 
-- **Execution Budget (`execution_budget_policy_id: budget_v1`)**:
-  - Max wall-clock time per task attempt: 300 seconds.
-  - Max tool calls per task attempt: 30.
-- **Cache Protocol (`cache_protocol_id: cold_start_v1`)**: Every task attempt begins with a completely cold context cache (no leaked tokens from previous attempts).
+### Arm Policy Bundle (`arm_policy_bundle_id: harness_v1`)
+
+- **Arm A** allowed tools: `resolve_context`, `expand_context`, `fetch_context_detail`.
+- **Arm B** allowed tools: `grep_search`, `list_dir`, `view_file`.
+- **Arm C** allowed tools: Arm B tools + `lsp_definition`, `lsp_references`.
+- **Arm D** allowed tools: `bash`, `grep_search`, `list_dir`, `view_file`.
+
+### Arm D Forbidden Tools (canonical list)
+
+The following tools and service invocations are forbidden for Arm D. This single
+list governs both the policy definition and the audit rule — there must be no
+divergence between the two.
+
+- `semidx` (any CLI subcommand or MCP tool: `resolve_context`, `expand_context`,
+  `fetch_context_detail`, `repo_map`, `create_index`, `skeletons`, etc.)
+- `lsp_*` (any LSP tool call: `lsp_definition`, `lsp_references`, etc.)
+- `scip_*` (any SCIP tool call)
+- Any other named external semantic-navigation service
+
+**Audit rule:** After each Arm D attempt, the harness scans the tool-call log.
+If any tool matching this list appears, the attempt outcome is set to `error`
+with the reason `"arm_d_forbidden_tool_violation"`.
+
+### Execution Budget (`execution_budget_policy_id: budget_v1`)
+
+- Max wall-clock time per task attempt: 300 seconds.
+- Max tool calls per task attempt: 30.
+
+### Cache Protocol (`cache_protocol_id: cold_start_no_explicit_cache_v1`)
+
+- Every task attempt begins with a completely cold provider context cache (no
+  leaked tokens from previous attempts).
+- **Explicit caching is forbidden:** The harness must not create explicit Gemini
+  `CachedContent` objects, Anthropic extended-TTL cache entries, or any other
+  provider-managed cache objects during a benchmark attempt.
+- If a provider returns implicit cache-read tokens (e.g., OpenAI automatic
+  prompt caching, or Gemini implicit context caching), those tokens are recorded
+  in `cache_read_tokens` and billed at the Cache Read rate from §4. Because no
+  explicit cache object is created, `cache_storage_token_hours` is always 0 and
+  no storage cost accrues.
+- This policy simplifies cost accounting for v1: the only cache-related billing
+  dimension is implicit reads at the provider's discounted input rate.
 
 ## 3. Schemas (Run and Attempt Identity)
 
@@ -71,62 +118,94 @@ TaskAttempt {
   seed: int
   agent_id: string
   agent_build_id: string
-  provider: string
-  api_surface: string
-  model: string
-  model_revision: string
-  service_tier: string
+  evaluated_provider: string
+  evaluated_api_surface: string
+  evaluated_model: string
+  evaluated_model_revision: string
+  evaluated_service_tier: string
   outcome: string ("success" | "failure" | "error" | "not_applicable")
   not_applicable_reason: string | null  ; required when outcome = "not_applicable"; null otherwise
 }
 ```
 
-Aggregation keys on `task_attempt_id` first, then rolls up to `(benchmark_run_id, task_id, arm)`.
+Field names use `evaluated_*` prefix to make clear these describe the model
+under test, not the executor model building the harness.
 
-## 4. Usage Adapters and Price Schedule
+Aggregation keys on `task_attempt_id` first, then rolls up to
+`(benchmark_run_id, task_id, arm)`.
 
-**Price Schedule ID:** `2026-08-03-anthropic-openai-gemini-v1`
+## 4. Evaluated Provider Model Price Schedule
+
+This schedule covers only models eligible to serve as the evaluated agent in
+benchmark attempts. The executor model (e.g., Gemini 3.6 Flash running inside
+Antigravity to build the harness) is not listed here and is not billed through
+this schedule.
+
+**Price Schedule ID:** `2026-08-03-eligible-v1`
 **Currency:** USD
 **Token Unit:** Per 1,000,000 tokens (1M tokens)
 **Capture Time:** 2026-08-03T01:02:00Z
 
-### 4.1. Price Table (Locked as of 2026-08-03)
+### 4.1. Eligible Model Price Table (Locked as of 2026-08-03)
 
-*(Model revision must exactly match this table; otherwise `pricing_status: unresolved` applies.
-For Google: Cache Read is billed separately from Cache Storage; both must be recorded.)*
+*(An evaluated_model_revision must exactly match a row in this table; otherwise
+the attempt gets `pricing_status: unresolved` and is excluded from the cost
+verdict until resolved.)*
 
-| Provider | API Surface | Model Revision | Service Tier | Context Tier | Input (Uncached) | Input (Cache Read) | Cache Write / Storage | Output (Visible+Reasoning) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Anthropic | `messages` | `claude-3-5-sonnet-20240620` | `on-demand` | `default` | $3.00 / 1M | $0.30 / 1M | $3.75 (5m TTL) / $6.00 (1h TTL) per 1M | $15.00 / 1M |
-| OpenAI | `chat` | `gpt-4o-2024-05-13` | `on-demand` | `default` | $5.00 / 1M | $2.50 / 1M | N/A — OpenAI caches automatically; no explicit write charge | $15.00 / 1M |
-| OpenAI | `responses` | `gpt-4o-2024-05-13` | `on-demand` | `default` | $5.00 / 1M | $2.50 / 1M | N/A — same as `chat` | $15.00 / 1M |
-| Google | `generate-content` | `gemini-2.5-pro` | `on-demand` | `<= 200k` | $1.25 / 1M | $0.125 / 1M | $4.50 / 1M·hr (storage) | $10.00 / 1M (thinking included) |
-| Google | `generate-content` | `gemini-2.5-pro` | `on-demand` | `> 200k` | $2.50 / 1M | $0.25 / 1M | $4.50 / 1M·hr (storage) | $15.00 / 1M (thinking included) |
-| Google | `generate-content` | `gemini-2.5-flash` | `on-demand` | `any` | $0.30 / 1M | $0.03 / 1M (text/image/video) | $1.00 / 1M·hr (storage) | $2.50 / 1M (thinking included) |
+| Provider | API Surface | Model Revision | Service Tier | Context Tier | Input (Uncached) | Input (Cache Read / implicit) | Output (incl. reasoning) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Google | `generate-content` | `gemini-2.5-pro` | `on-demand` | `<= 200k` | $1.25 / 1M | $0.125 / 1M | $10.00 / 1M |
+| Google | `generate-content` | `gemini-2.5-pro` | `on-demand` | `> 200k` | $2.50 / 1M | $0.25 / 1M | $15.00 / 1M |
+| Google | `generate-content` | `gemini-2.5-flash` | `on-demand` | `any` | $0.30 / 1M | $0.03 / 1M | $2.50 / 1M |
 
-*(Official Source Links: [Anthropic](https://docs.anthropic.com/en/docs/about-claude/pricing), [OpenAI](https://openai.com/api/pricing/), [Google](https://ai.google.dev/gemini-api/docs/pricing) — fetched 2026-08-03)*
+*(Official Source: [Google AI pricing](https://ai.google.dev/gemini-api/docs/pricing) — fetched 2026-08-03)*
 
-**Gemini cache billing rule:** An attempt using Gemini explicit caching must record both `cache_read_tokens` (billed at Cache Read rate) and `cache_storage_token_hours` (billed at Storage rate per 1M·hr). Both are required to compute `cost_usd` correctly. An attempt that cannot separate these emits `pricing_status: unresolved`.
+**Cache billing under `cold_start_no_explicit_cache_v1`:** Because explicit
+cache objects are forbidden (§2), there is no Cache Write / Storage column. The
+"Cache Read / implicit" column covers only provider-initiated implicit caching.
+If a future run policy permits explicit caching, a new price schedule version
+must add Cache Write and Storage columns with exact rates and TTL rules before
+that run is eligible for the cost verdict.
 
-### 4.2. Usage Adapter Mapping (`adapter_version: v1`)
+### 4.2. Historical-Only Reference Rates (not eligible for v1 verdict)
 
-| Adapter / Provider | Uncached | Cache Read | Cache Write (5m/1h) | Visible Output | Reasoning | Unclassified |
-| --- | --- | --- | --- | --- | --- | --- |
-| `anthropic-messages` | `input_tokens` | `cache_read_input_tokens` | `cache_creation_input_tokens` | Provider split | Provider split | `output_tokens` (if no split) |
-| `openai-chat` | `prompt_tokens` - cached | `prompt_tokens_details.cached_tokens` | `0` (implied) | `completion_tokens` - reasoning | `completion_tokens_details.reasoning_tokens` | `0` |
-| `openai-responses` | `input_tokens` - cached | `input_tokens_details.cached_tokens` | `0` | `output_tokens` - reasoning | `output_tokens_details.reasoning_tokens` | `0` |
-| `gemini-generate-content`| `promptTokenCount` - cached | `cachedContentTokenCount` | `0` | `candidatesTokenCount` | `thoughtsTokenCount` | `0` |
+The following rates are recorded for reference only. These model revisions are
+legacy and will not be used as the evaluated model in v1 benchmark runs. Any
+attempt using them receives `pricing_status: historical_only` and is excluded
+from the primary cost verdict.
 
-*Rule:* If the raw response cannot distinguish a billing-relevant class, the adapter emits `pricing_status: unresolved` and the attempt is excluded from the cost verdict until resolved.
+| Provider | API Surface | Model Revision | Input | Output | Note |
+| --- | --- | --- | --- | --- | --- |
+| Anthropic | `messages` | `claude-3-5-sonnet-20240620` | $3.00 / 1M | $15.00 / 1M | Legacy; superseded by Claude 3.5+ |
+| OpenAI | `chat` / `responses` | `gpt-4o-2024-05-13` | $5.00 / 1M | $15.00 / 1M | Legacy; superseded by GPT-4o+ |
+
+### 4.3. Usage Adapter Mapping (`adapter_version: v1`)
+
+| Adapter / Provider | Uncached Input | Cache Read (implicit) | Visible Output | Reasoning Output | Unclassified |
+| --- | --- | --- | --- | --- | --- |
+| `gemini-generate-content` | `promptTokenCount` - `cachedContentTokenCount` | `cachedContentTokenCount` | `candidatesTokenCount` | `thoughtsTokenCount` | `0` |
+
+Additional adapters (`anthropic-messages`, `openai-chat`, `openai-responses`)
+may be added to a future price schedule version when eligible model revisions
+for those providers are locked and priced.
+
+*Rule:* If the raw response cannot distinguish a billing-relevant class, the
+adapter emits `pricing_status: unresolved` and the attempt is excluded from the
+cost verdict until resolved.
 
 ## 5. Pilot and Final Lock Rule
 
 Before the actual scoring run, a **Calibration Pilot** will be conducted:
 - **Scope:** 5–10 tasks.
-- **Measurements:** Cost of the competent baseline (Arm B) and the success-metric noise floor.
-- **Action:** No verdict is produced here. The pilot exists solely to calibrate the "noise" and "baseline cost".
+- **Measurements:** Cost of the competent baseline (Arm B) and the
+  success-metric noise floor.
+- **Action:** No verdict is produced here. The pilot exists solely to calibrate
+  the "noise" and "baseline cost".
 
 **Final Lock Rule:**
-Immediately after the pilot and *before* scoring, the final threshold must be locked. It will be defined as:
-> *Arm A is cheaper than Arm B by more than the measured noise floor at parity success.*
-(Provisionally: ≥50% lower cost, success within 5 percentage points, wall-clock ≤ 1.5×).
+Immediately after the pilot and *before* scoring, the final threshold must be
+locked. It will be defined as:
+> *Arm A is cheaper than Arm B by more than the measured noise floor at parity
+> success.*
+(Provisionally: >=50% lower cost, success within 5 percentage points,
+wall-clock <= 1.5x).
