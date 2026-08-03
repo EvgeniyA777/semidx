@@ -180,10 +180,10 @@ wall-clock using semidx retrieval *than* with `rg` + reading files (and `rg` +
 LSP where available), *because* graph-backed, structure-ranked, staged, budgeted
 context supplies the relevant code without whole-file dumping.
 
-**North Star candidate.** *Agent task success per 1k retrieval tokens* on a
-fixed real-repo suite, relative to the best cheap baseline. Inputs: retrieval
-precision/recall, packet compactness under budget, `exact`-tier coverage vs
-`heuristic` fallback.
+**North Star candidate.** *Agent task success per unit cost* (cost-weighted
+tokens — cache reads ~0.1× — normalized per agent) on a fixed real-repo suite,
+relative to the best cheap baseline. Inputs: retrieval precision/recall, packet
+compactness under budget, `exact`-tier coverage vs `heuristic` fallback.
 
 **Why not yet proven.** Current benchmarks build a synthetic repository and score
 against self-authored expectations
@@ -193,17 +193,20 @@ is an internal fixture result.
 
 **Test.** Reproducible real-repo benchmark vs (a) `rg` + reading files, (b) an
 LSP/SCIP baseline where available, (c) a no-index agent. Measured on task
-success, false negatives, wall-clock, tool calls, tokens. The three-arm
-measurement harness and success-per-token aggregation are specified in
+success, false negatives, wall-clock, tool calls, and cost (cost-weighted tokens,
+normalized per agent — raw usage semantics differ by provider). The three-arm
+measurement harness, per-agent usage normalization, and success-per-cost
+aggregation are specified in
 [`plans/020_retrieval_value_benchmark_harness_plan.md`](plans/020_retrieval_value_benchmark_harness_plan.md).
 
 - **Success signal** (provisional, *moderate* posture — locked after the Stage 0
-  pilot, never after scoring): arm A uses **≥50% fewer total tokens (≥2×)** than
-  the competent `rg`+read baseline B, at task success **≥ B − 5 percentage
-  points** (parity within the noise band), wall-clock **≤ 1.5× B**, over **≥30
-  tasks including ≥1 external repository**.
-- **Failure signal**: A does not reach 2× fewer tokens at parity success, or
-  loses more than 5 percentage points of task success vs the best cheap baseline.
+  pilot, never after scoring): arm A runs at **≥50% lower cost (≥2×;
+  cost-weighted tokens — cache reads ~0.1×)** than the competent `rg`+read
+  baseline B, at task success **≥ B − 5 percentage points** (parity within the
+  noise band), wall-clock **≤ 1.5× B**, over **≥30 tasks including ≥1 external
+  repository**.
+- **Failure signal**: A does not reach 2× lower cost at parity success, or loses
+  more than 5 percentage points of task success vs the best cheap baseline.
 
 **Pilot-then-lock.** The margins above are provisional. Stage 0 of
 [`plans/020`](plans/020_retrieval_value_benchmark_harness_plan.md) runs a small

@@ -75,6 +75,8 @@ In:
   wall-clock, tool-call count — supplied by the harness/host.
 - Per-task outcome recording via `record-feedback!` with a shared `task_id` and
   ground-truth unit ids/paths.
+- Normalization of each agent's raw `usage` into a provider-independent
+  response/usage matrix (per-agent adapters), preserving raw payloads.
 - An aggregator evaluation command that joins `semantic_usage_events.payload`
   (tokens) and `semantic_usage_feedback` (outcome) by `task_id`, computing
   success-per-token per arm and applying the pre-registered stop rule.
@@ -89,6 +91,71 @@ Out:
 - No modelling of baseline agents' internal prompting beyond token/success
   capture.
 - No promotion of `SPEC.md` §5.1 to `[committed]` until real evidence passes.
+
+## Response/usage matrix
+
+Different agents (semidx-driven, `rg`-baseline, no-index — and different LLM
+providers behind them) emit usage in incompatible shapes *and* semantics. Fields
+with the same name mean different things: Anthropic `input_tokens` **excludes**
+cached input, while OpenAI `prompt_tokens` **includes** it. Raw usage numbers are
+therefore not summable or comparable across arms. The harness normalizes every
+response into one matrix before aggregation.
+
+### Canonical usage record (provider-independent)
+
+Per response, map raw usage to unambiguous fields:
+
+- `input_uncached` — full-rate input tokens;
+- `input_cache_read` — cache-read tokens (~0.1× price; 0 if unsupported);
+- `input_cache_write` — cache-write tokens (~1.25×; Anthropic; else 0);
+- `output`;
+- derived: `input_total = uncached + cache_read + cache_write`,
+  `grand_total = input_total + output`, and `cost_usd` via a per-model price
+  table.
+
+### Per-agent adapter (raw → canonical)
+
+Each agent type owns an adapter that maps its raw usage to the canonical record.
+Anthropic Messages is authoritative (claude-api skill); the others are mapped
+here and must be verified against the provider actually used:
+
+| Adapter | uncached | cache_read | cache_write | output |
+| --- | --- | --- | --- | --- |
+| anthropic-messages | `input_tokens` | `cache_read_input_tokens` | `cache_creation_input_tokens` | `output_tokens` |
+| openai-chat | `prompt_tokens − cached` | `prompt_tokens_details.cached_tokens` | 0 | `completion_tokens` |
+| gemini | `promptTokenCount − cached` | `cachedContentTokenCount` | 0 | `candidatesTokenCount` |
+
+Session totals are computed by **summing the canonical fields over every turn** —
+the LLM API is stateless and exposes no session-total field. The per-turn source
+is the response `usage` object (or, for Claude Code, the session `.jsonl`
+transcript usage).
+
+### Matrix shape (tidy / long)
+
+One row per `(task_id × arm × agent_id × turn_index × model)`:
+
+```
+task_id, arm, agent_id, model, turn_index,
+usage_norm  { input_uncached, input_cache_read, input_cache_write, output,
+              input_total, grand_total, cost_usd },
+raw_usage   { ...provider payload... },
+response_meta { stop_reason, tool_call_count, output_chars },
+adapter_id, schema_version
+```
+
+Long format (not wide) so later analysis can pivot by any axis (arm, turn, task
+type) without a schema change. Stored harness-side in the `record-feedback!`
+payload keyed by `task_id`; the aggregator sums `usage_norm` per `(task_id, arm)`.
+
+### Invariants
+
+- **Always store `raw_usage` + `adapter_id` + `model`.** Canonical fields are
+  derived; raw is the source of truth. If a mapping is later found wrong, or a
+  provider changes its shape, re-derive from raw rather than re-running the suite.
+- **Aggregate on `cost_usd`, not `grand_total`.** Cache reads are ~10× cheaper,
+  so an arm that caches aggressively is not "more expensive" by cost even when its
+  raw token count is higher. Comparing raw tokens across arms with different
+  caching would be an artifact.
 
 ## Stages
 
@@ -121,14 +188,17 @@ and expand stages report consistent token semantics.
 Define the task suite (≥ a small fixed set spanning task types) and at least one
 external repo. Build the harness that runs each task through A/B/C, tags every
 semidx call and every outcome with a shared `task_id`, and writes outcomes via
-`record-feedback!`.
+`record-feedback!`. For every turn of every arm, normalize the agent's raw
+`usage` through its adapter into the response/usage matrix and store it in the
+`record-feedback!` payload keyed by `task_id`, preserving `raw_usage`.
 
 ### Stage 3 — Aggregator command
 
 Add an evaluation command (pattern: `run-weekly-review-report-command` in
-`src/semidx/runtime/evaluation.clj`) that joins events `payload` tokens and
-feedback outcomes by `task_id`, emits per-arm success-per-token, and applies the
-Stage 0 stop rule. In-memory sink path must work without PostgreSQL.
+`src/semidx/runtime/evaluation.clj`) that joins the response/usage matrix
+(`usage_norm.cost_usd` summed per `(task_id, arm)`) and feedback outcomes by
+`task_id`, emits per-arm **success-per-cost**, and applies the Stage 0 stop rule.
+In-memory sink path must work without PostgreSQL.
 
 ### Stage 4 — First real-repo run and evidence write-back
 
@@ -139,15 +209,20 @@ met, record the kill-criterion trigger.
 ## Metric definition
 
 - **Primary (fix-quality variant)**: at equal-or-better task success, the
-  percentage token reduction of arm A vs the best cheap baseline (B, then C).
+  percentage **cost** reduction (`cost_usd`, per the response/usage matrix) of arm
+  A vs the best cheap baseline (B, then C) — **not** a raw token count, because
+  provider caching makes raw tokens non-comparable across arms.
 - **Guardrail**: wall-clock of A no worse than the baseline by more than a fixed
   factor (the staged round-trip tax; relieved by one-shot per plans/019).
 - **Statistical floor**: significance across the suite (≥ N tasks × seeds;
   non-overlapping confidence, or an agreed test).
-- **Token source**: per-event `payload` in `semantic_usage_events` — **not**
-  `semantic_usage_daily_rollups` (no token columns). Plus harness-supplied agent
-  session totals.
+- **Cost source**: `usage_norm.cost_usd` in the response/usage matrix, summed per
+  `(task_id, arm)` — normalized from each agent's raw `usage` via its adapter,
+  never from raw provider fields directly.
 - **Success source**: `feedback_outcome` in `semantic_usage_feedback`.
+- **semidx-internal cost** (packet tokens) stays available from
+  `semantic_usage_events.payload` for diagnosing *where* an arm's cost went, but
+  the scored denominator is the agent's total `cost_usd`.
 
 ## Stop / kill rules
 
