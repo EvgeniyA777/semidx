@@ -4,7 +4,7 @@ doc_type: "architecture_plan"
 lifecycle: "active"
 status: "planned"
 agent_action: "reference_for_context"
-updated: "2026-08-02"
+updated: "2026-08-03"
 ---
 
 # Architecture Plan: LLM One-Shot Context Delivery And Comparative Evaluation
@@ -386,6 +386,62 @@ Required delivery metrics (normalized and aggregated by `plans/020`):
 Per-commit gates remain deterministic. LLM task evaluation runs on a pinned
 model/prompt configuration outside the mandatory correctness lane and reports
 variance across repeated runs.
+
+## Stage Execution Routing And Handoff
+
+The table is the starting routing recommendation, not a permanent model lock.
+High effort is explicitly allowed when justified by contract irreversibility,
+budget/accounting ambiguity, comparative-verdict risk, a possible public-default
+change, conflicting evidence, or repeated verification failures. It does not
+require a separate exception when this table or the preceding stage's handoff
+recommends it. Mechanical schema propagation, renderer snapshots, transport
+parity, and routine test repair should normally use medium effort.
+
+| Stage | Recommended executor | Recommended primary model | Effort | Why |
+| --- | --- | --- | --- | --- |
+| 0 — review and baseline | Antigravity independent review conversation | Claude Sonnet 4.6 (Thinking) | high | challenge additive scope independently and align fixtures with the locked `plans/020` contracts |
+| 1 — library orchestration | Antigravity | Gemini 3.1 Pro | high | response budgets, snapshot stability, and usage accounting form one correctness boundary |
+| 2 — MCP structured slice | Antigravity | Gemini 3.6 Flash | medium | the contract is fixed and the work is bounded schema/handler parity |
+| 3 — Markdown projection | Antigravity | Gemini 3.6 Flash | medium | deterministic rendering and budget tests are implementation-heavy but locally bounded |
+| 4 — comparative gate | Antigravity | Gemini 3.1 Pro | high | task-value interpretation may stop promotion or change the next plan stage |
+| 5 — cross-surface parity | Antigravity | Gemini 3.6 Flash | medium | transport adapters must mirror an already-proven runtime contract |
+| 6 — product default decision | Antigravity | Gemini 3.1 Pro | high | retaining or changing the documented default is an ADR-level decision |
+
+Claude Sonnet 4.6 (Thinking) may also be used as a bounded independent reviewer
+at Stages 1, 4, or 6. Claude Opus 4.6 (Thinking) is reserved for an unresolved
+architecture conflict or contradictory scorecard evidence, not routine
+execution. Gemini 3.5 Flash is the fallback for Gemini 3.6 Flash; GPT-OSS 120B
+(Medium) may provide an adversarial review but does not own critical-path edits.
+
+At the end of every stage, after verification and before the stage-closing
+commit, the executing model must read:
+
+1. the candidate next stage and its routing row in this plan, plus the
+   `plans/020` strategy-result, scorecard, stop-rule, and ownership constraints;
+2. the companion progress log, current `MEMORY.md`, and relevant `SPEC.md`
+   decision or stop rules;
+3. the completed stage diff, verification results, unresolved findings, and
+   current file ownership across parallel worktrees;
+4. current executor/model availability and quota constraints.
+
+It must then add a `NextStageRoutingRecommendation` to the progress log with:
+
+```text
+completed_stage, recommended_next_stage,
+recommended_executor, recommended_model, effort,
+effort_justification, rationale, prerequisites_or_blockers,
+file_ownership_and_conflict_risk,
+fallback_executor_or_model,
+model_availability_checked_at, confidence
+```
+
+The recommendation may retain or override the table default, but any override
+must cite stage evidence. A `high` recommendation must contain a concrete
+`effort_justification`. If no companion progress log exists, Stage 0 creates it
+before recording the recommendation. If a stop/kill rule fires or prerequisites
+are absent, the model must recommend `stop` or `defer` instead of auto-starting
+work. The handoff is recorded in the same commit as the stage progress update
+and never bypasses an owner approval or admission gate.
 
 ## Implementation Sequence
 

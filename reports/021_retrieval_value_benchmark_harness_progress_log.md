@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-02"
+updated: "2026-08-03"
 ---
 
 # Progress Log: Retrieval Value Benchmark Harness
@@ -16,11 +16,35 @@ Companion log for
 
 | Stage | Status |
 | --- | --- |
-| 0 — Pre-register arms/run identity/metric, pilot-then-lock threshold | A/B/C/D arm policies, run/attempt schema, experimental controls, cost semantics, and ownership revised after architecture review; versions and final threshold still need locking before pilot |
+| 0 — Pre-register arms/run identity/metric, pilot-then-lock threshold | A/B/C/D arm policies, run/attempt schema, experimental controls, cost semantics, ownership, and stage-routing protocol revised; versions and final threshold still need locking before pilot |
 | 1 — Fidelity fix (`returned_tokens`) | completed |
 | 2 — Task suite + four-arm harness | not started |
 | 3 — Aggregator command | not started |
 | 4 — First real-repo run + evidence write-back | not started |
+
+## Stage Routing Amendment (2026-08-03)
+
+- `plans/020` now records a recommended executor, primary model, and effort for
+  every stage. High effort is allowed and recommended for preregistration,
+  aggregation, and evidence-verdict decisions where an error could invalidate
+  the experiment or trigger the wrong kill decision.
+- Every future stage closure must record a
+  `NextStageRoutingRecommendation` after reading the candidate next stage,
+  dependent-plan gates, progress/MEMORY/SPEC state, completed diff and checks,
+  file ownership, and current model/quota constraints. A high-effort
+  recommendation must include a concrete `effort_justification`.
+- Stage 1 completed before this protocol. No retrospective routing result is
+  invented; Stage 0 closure or Stage 2 admission produces the first handoff.
+
+### Routing amendment verification
+
+- `git diff --check`: passed.
+- English-only scan over all revised documents: passed (no Cyrillic matches).
+- Runtime tests were skipped because this amendment changes documentation and
+  execution routing only; no source, contract artifact, or generated output was
+  modified.
+- CCC artifacts were not refreshed because the amendment does not require new
+  compression output and `RULES.md` forbids routine per-task refreshes.
 
 ## Architecture Review Findings (accepted and fixed in plan documents)
 

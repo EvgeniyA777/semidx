@@ -4,7 +4,7 @@ doc_type: "architecture_plan"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-02"
+updated: "2026-08-03"
 ---
 
 # Architecture Plan: Retrieval Value Benchmark Harness
@@ -246,6 +246,64 @@ task attempt, then rolls up by `(benchmark_run_id, task_id, arm)`.
   arm that caches aggressively is not necessarily more expensive even when its
   raw token count is higher. Comparing raw tokens across arms with different
   caching would be an artifact.
+
+## Stage Execution Routing And Handoff
+
+The table is the starting routing recommendation, not a permanent model lock.
+High effort is explicitly allowed when justified by preregistration
+irreversibility, pricing/aggregation ambiguity, benchmark-verdict or kill-rule
+risk, conflicting evidence, or repeated verification failures. It does not
+require a separate exception when this table or the preceding stage's handoff
+recommends it. Bulk harness construction, fixture generation, repeated runs, and
+mechanical report production should normally use medium effort.
+
+| Stage | Recommended executor | Recommended primary model | Effort | Why |
+| --- | --- | --- | --- | --- |
+| 0 — preregistration and lock | Antigravity | Gemini 3.1 Pro | high | arm identities, price semantics, and the verdict rule become immutable before scoring |
+| 1 — fidelity fix | Antigravity if reopened | Gemini 3.6 Flash | medium | the delivered regression is narrow and stage-local |
+| 2 — task suite and harness | Antigravity | Gemini 3.6 Flash | medium | most work is bounded orchestration, adapters, fixtures, and isolation controls |
+| 3 — aggregator | Antigravity | Gemini 3.1 Pro | high | attempt-first joins and normalized cost directly determine the verdict |
+| 4 — evidence run/write-back | Antigravity | Gemini 3.1 Pro | high | score interpretation can trigger the Phase 1 success or kill decision |
+
+Gemini 3.6 Flash should perform bulk run orchestration and mechanical report
+generation inside Stage 4, while Gemini 3.1 Pro owns interpretation and
+write-back. Gemini 3.5 Flash is the fallback for Gemini 3.6 Flash. Claude Sonnet
+4.6 (Thinking) may perform a bounded independent review of Stages 0, 3, or 4;
+Claude Opus 4.6 (Thinking) is reserved for unresolved validity or pricing
+conflicts. GPT-OSS 120B (Medium) may provide an adversarial review but does not
+own scoring or critical-path edits.
+
+At the end of every stage, after verification and before the stage-closing
+commit, the executing model must read:
+
+1. the candidate next stage and its routing row in this plan, plus applicable
+   coordination, preregistration, stop/kill, and dependent-plan gates;
+2. the companion progress log, current `MEMORY.md`, and relevant `SPEC.md`
+   decision rules;
+3. the completed stage diff, verification results, unresolved findings, and
+   current file ownership across parallel worktrees;
+4. current executor/model availability and quota constraints.
+
+It must then add a `NextStageRoutingRecommendation` to the progress log with:
+
+```text
+completed_stage, recommended_next_stage,
+recommended_executor, recommended_model, effort,
+effort_justification, rationale, prerequisites_or_blockers,
+file_ownership_and_conflict_risk,
+fallback_executor_or_model,
+model_availability_checked_at, confidence
+```
+
+The recommendation may retain or override the table default, but any override
+must cite stage evidence. A `high` recommendation must contain a concrete
+`effort_justification`. If no companion progress log exists, Stage 0 creates it
+before recording the recommendation. If a stop/kill rule fires or prerequisites
+are absent, the model must recommend `stop` or `defer` instead of auto-starting
+work. The handoff is recorded in the same commit as the stage progress update
+and never bypasses an owner approval or admission gate. Because Stage 1 predates
+this protocol, its first routing recommendation is produced when Stage 0 closes
+or before Stage 2 starts; no historical recommendation is fabricated.
 
 ## Stages
 

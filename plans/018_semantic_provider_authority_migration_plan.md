@@ -4,7 +4,7 @@ doc_type: "architecture_plan"
 lifecycle: "active"
 status: "planned"
 agent_action: "reference_for_context"
-updated: "2026-08-02"
+updated: "2026-08-03"
 ---
 
 # Architecture Plan: Semantic Provider Authority Migration
@@ -447,6 +447,63 @@ Coordination rules:
 - The one-shot orchestrator and renderer must not branch on provider ids.
 - Provider-native details stay outside the public retrieval contract except for
   bounded runtime-owned evidence and degradation summaries.
+
+## Stage Execution Routing And Handoff
+
+The table is the starting routing recommendation, not a permanent model lock.
+High effort is explicitly allowed when the correctness risk justifies its cost;
+it does not require a separate exception when this table or the preceding
+stage's handoff recommends it. Typical justifications are canonical identity,
+arbitration, freshness/concurrency, public authority changes, conflicting
+evidence, or repeated verification failures. Routine fixture maintenance,
+mechanical parity edits, and already-understood test repairs should remain at
+medium effort unless new evidence raises the risk.
+
+| Stage | Recommended executor | Recommended primary model | Effort | Why |
+| --- | --- | --- | --- | --- |
+| 0 — review and baseline | Claude Code 2.1.212+ independent reviewer teammate; lead synthesizes | Claude Opus 4.6 | high | challenge the migration independently and lock provider-neutral identity/toolchain assumptions before source work |
+| 1 — evidence/arbitration | Claude Code team lead | Claude Opus 4.6 | high | `CanonicalFactKey`, ambiguity, and storage compatibility are correctness-critical contracts |
+| 2 — provider shadow path | Claude Code team lead | Claude Sonnet 4.6 | medium | bounded implementation behind a default-off seam |
+| 3 — TypeScript SCIP | Claude Code team lead | Claude Sonnet 4.6 | high | source identity and cross-provider normalization enter the weakest current lane |
+| 4 — Java SCIP | Claude Code team lead | Claude Sonnet 4.6 | high | overload, constructor, import, and relation identities need careful parity |
+| 5 — LSP overlay | Claude Code team lead | Claude Opus 4.6 | high | live freshness, cancellation, and deterministic batch behavior interact |
+| 6 — default switch | Claude Code team lead | Claude Opus 4.6 | high | this is the public authority and truthful-degradation decision gate |
+| 7 — cleanup | Claude Code team lead | Claude Sonnet 4.6 | medium | removal follows proven compatibility and retention gates |
+
+Claude Code may use at most two concurrent teammates for independent fixture,
+toolchain, or read-only regression work. The lead remains the sole owner of
+production edits and stage commits. Teammates must have disjoint file ownership;
+Fable and the repository-prohibited Explore agent are excluded.
+
+At the end of every stage, after verification and before the stage-closing
+commit, the executing model must read:
+
+1. the candidate next stage and its routing row in this plan, plus any applicable
+   coordination or execution-admission gates;
+2. the companion progress log, current `MEMORY.md`, and relevant `SPEC.md`
+   decision or stop rules;
+3. the completed stage diff, verification results, unresolved findings, and
+   current file ownership across parallel worktrees;
+4. current executor/model availability and quota constraints.
+
+It must then add a `NextStageRoutingRecommendation` to the progress log with:
+
+```text
+completed_stage, recommended_next_stage,
+recommended_executor, recommended_model, effort,
+effort_justification, rationale, prerequisites_or_blockers,
+file_ownership_and_conflict_risk,
+fallback_executor_or_model,
+model_availability_checked_at, confidence
+```
+
+The recommendation may retain or override the table default, but any override
+must cite stage evidence. A `high` recommendation must contain a concrete
+`effort_justification`. If no companion progress log exists, Stage 0 creates it
+before recording the recommendation. If a stop/kill rule fires or prerequisites
+are absent, the model must recommend `stop` or `defer` instead of auto-starting
+work. The handoff is recorded in the same commit as the stage progress update
+and never bypasses an owner approval or admission gate.
 
 ## Implementation Sequence
 
