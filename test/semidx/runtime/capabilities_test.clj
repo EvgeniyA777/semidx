@@ -24,6 +24,11 @@
       (is (= "1.0.0" (get-in payload [:server :version])))
       (is (= (count registry/language-lanes) (count (:languages payload))))
       (is (= registry/supported-language-order (:language_policy_options payload)))
+      (let [zig (some #(when (= "zig" (:language %)) %) (:languages payload))]
+        (is (= [".zig"] (:extensions zig)))
+        (is (= "zig-native" (get-in zig [:provider :provider_id])))
+        (is (= "low" (:strength zig)))
+        (is (= "low" (:confidence_ceiling zig))))
       
       (let [schema (get schemas/contracts :example/capabilities)
             explain (m/explain schema payload)]

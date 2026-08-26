@@ -13,7 +13,7 @@
 - This repository is `semidx`: Semantic Code Indexing, a Clojure-first code retrieval and context-packaging system for AI development tools.
 - The primary implementation language is Clojure. The project uses `deps.edn` for project aliases and dependencies.
 - The public surfaces include library APIs, CLI entrypoints, MCP stdio/HTTP tools, minimal HTTP/gRPC runtime edges, JSON Schema contracts, and Clojure `malli` runtime validation mirrors.
-- The runtime supports semantic indexing and retrieval across language lanes such as Clojure, Java, Elixir, Python, TypeScript, and Lua where implemented or onboarded.
+- The runtime supports semantic indexing and retrieval across language lanes such as Clojure, Java, Elixir, Python, TypeScript, Lua, and Zig where implemented or onboarded.
 - PostgreSQL is optional infrastructure for persistence and usage metrics. In-memory storage remains a first-class local/runtime path.
 - Do not copy project-specific rules, paths, stack assumptions, task names, or application-domain guidance from unrelated repositories.
 

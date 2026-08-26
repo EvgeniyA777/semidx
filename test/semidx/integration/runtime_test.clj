@@ -13,6 +13,7 @@
             [semidx.runtime.languages.python :as py-language]
             [semidx.runtime.languages.shared :as shared-language]
             [semidx.runtime.languages.typescript :as ts-language]
+            [semidx.runtime.languages.zig :as zig-language]
             [semidx.runtime.index :as idx]
             [semidx.runtime.retrieval :as retrieval]
             [semidx.runtime.retrieval-policy :as rp]
@@ -2579,12 +2580,19 @@
                                            ""
                                            "def normalize(value):"
                                            "    return value"]
-                                          {})]
+                                          {})
+        zig-parsed (zig-language/parse-file "." "src/example.zig"
+                                            ["const helpers = @import(\"helpers.zig\");"
+                                             "pub fn run(value: []const u8) []const u8 {"
+                                             "  return helpers.normalize(value);"
+                                             "}"]
+                                            {})]
     (is (= "clojure" (:language clj-parsed)))
     (is (= "java" (:language java-parsed)))
     (is (= "elixir" (:language ex-parsed)))
     (is (= "lua" (:language lua-parsed)))
-    (is (= "python" (:language py-parsed)))))
+    (is (= "python" (:language py-parsed)))
+    (is (= "zig" (:language zig-parsed)))))
 
 (deftest lua-parser-module-table-and-method-linking-test
   (let [tmp-root (str (java.nio.file.Files/createTempDirectory "sci-lua-parser-test" (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -2655,7 +2663,7 @@
     (is ex)
     (is (= :no_supported_languages_found (:type (ex-data ex))))
     (is (= "awaiting_language_selection" (get-in (ex-data ex) [:details :activation_state])))
-    (is (= ["clojure" "java" "elixir" "python" "typescript" "javascript" "lua" "html" "css"]
+    (is (= ["clojure" "java" "elixir" "python" "typescript" "javascript" "lua" "zig" "html" "css"]
            (get-in (ex-data ex) [:details :supported_languages])))
     (is (string? (get-in (ex-data ex) [:details :selection_hint])))))
 

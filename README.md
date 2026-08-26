@@ -18,7 +18,7 @@ The project defines how a host system should request code context, how retrieval
 - provides a working in-memory MVP runtime for `create-index`, `update-index`, `repo-map`, `resolve-context`, `expand-context`, `fetch-context-detail`, `resolve-context-detail`, `impact-analysis`, `skeletons`
 - now also provides exact `literal-file-slice`, semantic `snapshot-diff`, and offline `semantic-quality-report` evaluation surfaces
 - provides a Clojure-first `Code Context Compressor` lane for bounded architecture summaries, dependency-graph export, committed repo context docs, and pre-push/CI drift checks
-- includes parser adapters for `Clojure + Java + Elixir + Python + TypeScript` and emits diagnostics/guardrails outputs
+- includes parser adapters for `Clojure + Java + Elixir + Python + TypeScript + JavaScript + Lua + Zig + HTML + CSS` and emits diagnostics/guardrails outputs
 - supports versioned retrieval policy overrides plus emitted capability metadata for replayable ranking behavior
 - supports optional persistence adapters (`in-memory`, `PostgreSQL`) with snapshot + graph projection storage for PostgreSQL
 - supports optional usage metrics adapters (`in-memory`, `PostgreSQL`) for library, HTTP, gRPC, and MCP adoption/usefulness telemetry
@@ -192,8 +192,8 @@ Roadmap status is tracked separately in [docs/roadmap-status.md](docs/roadmap-st
 - Python semantic-core now resolves imported symbols, relative imports, and module aliases more accurately, prefers local module/class ownership over imported-symbol collisions while preserving explicit module-alias calls, links `self`/`cls` and local class-qualified method calls back to class-owned methods, keeps decorated `@classmethod` / `@staticmethod` ownership intact, suppresses false edges from nested local defs/classes through immediate-scope local modeling, keeps methods inside local nested classes from leaking tail-token collisions, preserves conservative `@property` access behavior, and surfaces Python test-file linkage in `related_tests`
 - TypeScript semantic-core now lives on a dedicated language module, resolves named, namespace, and default-import ownership more accurately, preserves local `this.` and class-qualified method targeting, recognizes exported function-expression bindings alongside named functions and arrow bindings, and now keeps object-literal methods, class field arrow methods, `export default foo`, and direct re-export alias surfaces aligned across both regex and tree-sitter paths while the public confidence ceiling intentionally remains `low`
 - parsed files now also carry additive `semantic_pipeline` metadata so extraction can be stabilized internally without changing the public retrieval contracts
-- language entry namespaces now exist for `Clojure`, `Java`, `Elixir`, `Python`, and `TypeScript`, while `runtime/adapters` remains the thin public facade over those parser entrypoints
-- multi-language call/symbol resolution has module/class-aware normalization for Java, Elixir, Python, TypeScript
+- language entry namespaces exist for all supported languages, including the regex-first Zig lane, while `runtime/adapters` remains the thin public facade over those parser entrypoints
+- multi-language call/symbol resolution has module/class-aware normalization for Java, Elixir, Python, TypeScript, Lua, and Zig
 - import-aware and owner-aware disambiguation is applied when resolving ambiguous call targets
 - optional tree-sitter extraction path is available for Clojure/Elixir/Java/TypeScript (grammar-path configured)
 - tiered structural-first ranking and non-compensating confidence model implemented

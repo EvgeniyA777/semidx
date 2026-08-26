@@ -66,7 +66,7 @@ The semantic snapshot productization tail is now also delivered for the current 
 The `plans/013` Stage 1 adapter split is now delivered for the current scope:
 
 - `semidx.runtime.adapters` is a thin public parser facade over the language registry and per-language lane namespaces
-- Clojure, Java, Python, Lua, TypeScript, and JavaScript parser ownership now lives under `semidx.runtime.languages.*`
+- Clojure, Java, Python, Lua, Zig, TypeScript, and JavaScript parser ownership now lives under `semidx.runtime.languages.*`
 - shared line/signature/token and tree-sitter helper mechanics live in `semidx.runtime.languages.shared`
 - the remaining legacy TypeScript adapter block and adapter-private compatibility wrappers have been removed rather than carried forward
 

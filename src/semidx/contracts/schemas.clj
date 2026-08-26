@@ -127,7 +127,7 @@
    [:version bounded-string]])
 
 (def language-policy-option
-  [:enum "clojure" "java" "elixir" "python" "typescript" "javascript" "lua" "html" "css"])
+  [:enum "clojure" "java" "elixir" "python" "typescript" "javascript" "lua" "zig" "html" "css"])
 
 (def capabilities
   [:map {:closed true}
