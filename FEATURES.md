@@ -25,44 +25,57 @@ Status values:
 - `concept` - idea-stage input; needs owner prioritization before planning.
 - `research` - exploratory direction; validate before committing product work.
 
+Priority values:
+
+- `F` - implemented foundation to preserve and extend carefully.
+- `P0` - current proof gate.
+- `P1` - next high-value product or integration work.
+- `P2` - later product expansion after core proof.
+- `P3` - opportunistic deepening after repeated real misses.
+- `P4` - performance or native-runtime experiment after measured need.
+- `R` - separate research track.
+
 ## How To Use This File
 
-For each feature, this file should answer four questions:
+For each feature, this file should answer five questions:
 
 1. What is the feature?
 2. Is it implemented, planned, concept, or research?
-3. Which document owns the detailed decision or plan?
-4. What is the next decision gate?
+3. What is its current priority band?
+4. Which document owns the detailed decision or plan?
+5. What is the next decision gate?
 
 Keep entries short enough to scan. Put deep rationale in ADRs, detailed
 execution in `plans/`, and historical context in `notes/` or `reports/`.
 
 ## Feature Summary
 
-| Feature | Status | Source | Next Gate |
-| --- | --- | --- | --- |
-| Compact-first staged retrieval | implemented | `plans/002`, ADR-024 | Preserve as canonical unless a new ADR changes the default. |
-| Semantic code graph | implemented | ADR-038, ADR-039, ADR-040 | Keep new graph semantics on typed relations. |
-| Multi-language lanes | implemented | ADR-022, onboarding docs | Improve lanes by evidence, not language-count expansion. |
-| Lifecycle and freshness | implemented | `plans/005`, `plans/008`, ADR-031, ADR-032 | Keep stale-state reporting honest across surfaces. |
-| Runtime surfaces | implemented | ADR-018, ADR-020, ADR-042 | Maintain behavior parity across library, MCP, HTTP, and gRPC. |
-| Policy governance loop | implemented | Phase 5 roadmap, ADR-023 | Feed real feedback into replay and promotion gates. |
-| State-invariant context | implemented | `plans/016`, `plans/017`, ADR-045 | Reopen only from repeated real-task misses. |
-| Retrieval value benchmark harness | in_progress | `plans/020` | Finish calibration, harness, aggregator, and first real-repo run. |
-| Semantic provider authority migration | planned | `plans/018`, ADR-046, ADR-047 | Approve fact identity and provider arbitration before source rollout. |
-| One-shot context delivery | planned | `plans/019` | Ship additive MCP slice only after budget/accounting invariants hold. |
-| Agent workflow context surfaces | concept | `ideas/011`, `ideas/008`, `ideas/009` | Pick one workflow surface after prioritization. |
-| Documentation graph | concept | `SPEC.md` Phase 2, `ideas/013` | Start only through provider catalog and lifecycle-aware authority. |
-| Code-documentation linkage | concept | `SPEC.md` Phase 3, `ideas/011` | Require deterministic anchors and false-positive evaluation. |
-| Performance and native runtime experiments | concept | `ideas/014` | Measure Clojure bottlenecks before any full rewrite decision. |
-| Semantic Core / S-Quant | research | `ideas/003`, `ideas/004`, `ideas/005` | Validate hash plus embedding slice before product work. |
+| Priority | Feature | Status | Source | Next Gate |
+| --- | --- | --- | --- | --- |
+| F | Compact-first staged retrieval | implemented | `plans/002`, ADR-024 | Preserve as canonical unless a new ADR changes the default. |
+| F | Semantic code graph | implemented | ADR-038, ADR-039, ADR-040 | Keep new graph semantics on typed relations. |
+| F | Multi-language lanes | implemented | ADR-022, onboarding docs | Improve lanes by evidence, not language-count expansion. |
+| F | Lifecycle and freshness | implemented | `plans/005`, `plans/008`, ADR-031, ADR-032 | Keep stale-state reporting honest across surfaces. |
+| F | Runtime surfaces | implemented | ADR-018, ADR-020, ADR-042 | Maintain behavior parity across library, MCP, HTTP, and gRPC. |
+| F | Policy governance loop | implemented | Phase 5 roadmap, ADR-023 | Feed real feedback into replay and promotion gates. |
+| F/P3 | State-invariant context | implemented | `plans/016`, `plans/017`, ADR-045 | Preserve current Java support; deepen only from repeated real-task misses. |
+| P0 | Retrieval value benchmark harness | in_progress | `plans/020` | Finish calibration, harness, aggregator, and first real-repo run. |
+| P1 | Semantic provider authority migration | planned | `plans/018`, ADR-046, ADR-047 | Approve fact identity and provider arbitration before source rollout. |
+| P1 | One-shot context delivery | planned | `plans/019` | Ship additive MCP slice only after budget/accounting invariants hold. |
+| P1 | Persistent JVM runtime reuse | concept | Runtime process inspection, runtime docs | Confirm client launch model, then add a launcher or client path that reuses a live JVM server before starting one. |
+| P2 | Agent workflow context surfaces | concept | `ideas/011`, `ideas/008`, `ideas/009` | Pick one workflow surface after prioritization. |
+| P2 | Documentation graph | concept | `SPEC.md` Phase 2, `ideas/013` | Start only through provider catalog and lifecycle-aware authority. |
+| P3 | Code-documentation linkage | concept | `SPEC.md` Phase 3, `ideas/011` | Require deterministic anchors and false-positive evaluation. |
+| P4 | Performance and native runtime experiments | concept | `ideas/014` | Measure Clojure bottlenecks before any full rewrite decision. |
+| R | Semantic Core / S-Quant | research | `ideas/003`, `ideas/004`, `ideas/005` | Validate hash plus embedding slice before product work. |
 
 ## Current Priority Bands
 
 | Band | Features | Reason |
 | --- | --- | --- |
+| Foundation | Compact-first staged retrieval; semantic code graph; multi-language lanes; lifecycle/freshness; runtime surfaces; policy governance; delivered Java state-invariant context | These are existing product contracts and should be preserved rather than re-planned. |
 | Current gate | Retrieval value benchmark harness | The Phase 1 value claim must be proven before broadening product scope. |
-| Next planned tracks | Semantic provider authority migration; one-shot context delivery | They improve fact quality and agent ergonomics while preserving staged retrieval. |
+| Next planned tracks | Semantic provider authority migration; one-shot context delivery; persistent JVM runtime reuse | They improve fact quality, agent ergonomics, and runtime usability while preserving staged retrieval. |
 | Later product bets | Documentation graph; code-documentation linkage; workflow context surfaces | They depend on a trustworthy code graph and clear prioritization. |
 | Opportunistic experiments | Performance/native runtime work | Run when concrete latency, memory, or packaging targets justify it. |
 | Separate research | Semantic Core / S-Quant | Keep separate until a small validation slice proves value. |
@@ -251,6 +264,42 @@ Current implementation state:
 
 - Plan exists.
 - No source implementation yet.
+
+### Persistent JVM Runtime Reuse
+
+Status: `concept`.
+
+Purpose: avoid paying Clojure JVM startup cost for every client request when the
+caller uses a short-lived command path or restarts the runtime per invocation.
+
+Current implementation state:
+
+- MCP stdio runs a long-lived request loop for the lifetime of its server
+  process.
+- MCP HTTP, runtime HTTP, and runtime gRPC are long-lived server processes once
+  started.
+- The one-shot runtime CLI starts a JVM, creates or loads context, writes the
+  response, and exits.
+- The repository does not yet ship a daemon or launcher that discovers an
+  already-running local JVM runtime and routes short-lived invocations to it.
+
+Possible capabilities:
+
+- Local launcher that checks a project or user-scoped runtime endpoint before
+  starting a new JVM.
+- Health check plus stale PID or stale port cleanup.
+- `status`, `start`, `stop`, and `request` commands with deterministic lock
+  handling.
+- Reuse of existing MCP HTTP, runtime HTTP, or runtime gRPC servers instead of
+  introducing a second request protocol.
+- Clear documentation that stdio MCP reuse is bounded by the MCP host process
+  lifetime, while HTTP/gRPC can be reused across client invocations.
+
+Implementation direction:
+
+- First confirm which host path is causing repeated JVM launches.
+- Prefer a small launcher/client over changing the core indexer.
+- Keep server process reuse separate from broad native-runtime experiments.
 
 ## Concept Features For Prioritization
 

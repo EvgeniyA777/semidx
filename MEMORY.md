@@ -45,6 +45,7 @@ after this memory file.
 - Minimal HTTP runtime edge exists (`clojure -M:runtime-http`) and boundary ADR is documented (`ADR-018`).
 - HTTP boundary conformance tests exist and run in standard `clojure -M:test` gates (`semidx.runtime-http-test`).
 - Minimal gRPC runtime edge exists (`clojure -M:runtime-grpc`) with parity tests in standard `clojure -M:test` gates (`semidx.runtime-grpc-test`).
+- Runtime process-model inspection (2026-08-27): MCP stdio, MCP HTTP, runtime HTTP, and runtime gRPC are long-lived once started; `clojure -M:runtime` remains a one-shot CLI that exits after the request, and the repo does not yet ship a daemon or launcher that discovers and reuses an existing local JVM runtime across short-lived invocations.
 - Service-mode policy boundary is documented in `ADR-019` and implemented as optional API-key + tenant gate on HTTP/gRPC edges.
 - gRPC transport now uses dedicated runtime protobuf envelope messages defined in `proto/semidx/runtime/grpc/v1/runtime.proto`.
 - Host-integrated authz policy contract is implemented on HTTP/gRPC edges via `:authz_check` callback and optional EDN policy adapter (`--authz-policy-file`, `ADR-021`).

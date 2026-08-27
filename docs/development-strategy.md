@@ -34,13 +34,17 @@ The dependency chain is:
 Prove retrieval value
   -> raise fact authority
   -> improve agent delivery
+  -> remove avoidable runtime startup friction
   -> add workflow surfaces
   -> add documentation graph
   -> link code and documentation
 ```
 
-Performance and native-runtime work is an evidence-driven side track. Semantic
-Core / S-Quant remains a separate research track until validated.
+Persistent JVM reuse is a product-integration track, not a rewrite track:
+server modes are already long-lived once started, but short-lived launcher or
+CLI paths must not pay cold JVM startup for every request. Broader performance
+and native-runtime work remains evidence-driven. Semantic Core / S-Quant
+remains a separate research track until validated.
 
 ## Priority Model
 
@@ -49,6 +53,7 @@ Core / S-Quant remains a separate research track until validated.
 | P0 | Retrieval value benchmark harness | Proves whether semidx is worth using against a competent baseline. | Now |
 | P1 | Semantic provider authority | Raises trust in graph facts through exact, structural, heuristic, and fallback evidence. | Next |
 | P1 | One-shot context delivery | Reduces agent round trips without weakening staged retrieval. | Next |
+| P1 | Persistent JVM runtime reuse | Removes avoidable cold-start tax when clients use short-lived invocations or restart the runtime per request/session. | Integration quick win |
 | P2 | Agent workflow context surfaces | Turns retrieval into planning, review, and handoff support. | After core proof |
 | P2 | Documentation graph | Makes repository docs, ADRs, plans, and reports first-class context. | After Phase 1 evidence |
 | P3 | Code-documentation linkage | Detects drift and contradictions between code and governing documents. | After docs graph |
@@ -133,6 +138,42 @@ Exit decision:
 
 - Keep one-shot additive unless comparative evidence justifies a new ADR that
   changes the documented default.
+
+## Stage 2.5: Remove Runtime Startup Friction
+
+Primary source: runtime process inspection and runtime API documentation.
+
+Why here:
+
+- The core server paths are already long-lived, so this is not a semantic
+  rewrite.
+- The one-shot CLI remains intentionally short-lived and exits after a request.
+- If an MCP host or wrapper launches semidx per query or per short command, the
+  user sees repeated JVM startup cost even though the runtime can serve many
+  requests in-process.
+
+Current evidence:
+
+- MCP stdio creates one session state and processes JSON-RPC messages in a
+  loop until stdin closes.
+- MCP HTTP, runtime HTTP, and runtime gRPC start server processes and block.
+- The runtime CLI calls the indexer and then exits with `System/exit`.
+- There is no repository-owned daemon or launcher that checks for an existing
+  local runtime before starting a new JVM.
+
+Deliver next:
+
+- Confirm the exact host path that is causing repeated JVM startup.
+- Pick the reuse target: MCP HTTP, runtime HTTP, or runtime gRPC.
+- Add a small launcher/client that performs health-check, start-if-needed,
+  request forwarding, stale lock cleanup, and `status`/`stop` operations.
+- Document the distinction between stdio process-lifetime reuse and HTTP/gRPC
+  cross-invocation reuse.
+
+Exit decision:
+
+- Keep the launcher path only if it measurably removes cold-start latency
+  without adding ambiguous runtime ownership or stale-server failure modes.
 
 ## Stage 3: Add Agent Workflow Surfaces
 
