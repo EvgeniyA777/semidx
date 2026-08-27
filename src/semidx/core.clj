@@ -536,13 +536,17 @@
             (merge usage-context
                    (request-trace-fields query)
                    {:operation "impact_analysis"
-                    :status "success"
+                    :status (if (= "degraded" (:result_status result))
+                              "degraded"
+                              "success")
                     :latency_ms (- (now-ms) start-ms)
                     :root_path_hash (usage/hash-root-path (:root_path index))
                     :payload {:callers_count (count (:callers result))
                               :dependents_count (count (:dependents result))
                               :related_tests_count (count (:related_tests result))
-                              :risky_neighbors_count (count (:risky_neighbors result))}})))
+                              :risky_neighbors_count (count (:risky_neighbors result))
+                              :result_status (:result_status result)
+                              :degradation_codes (mapv :code (:degradations result))}})))
          result)
        (catch Exception e
          (when (should-record-usage? sink opts)

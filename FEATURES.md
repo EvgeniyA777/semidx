@@ -60,6 +60,7 @@ execution in `plans/`, and historical context in `notes/` or `reports/`.
 | F | Policy governance loop | implemented | Phase 5 roadmap, ADR-023 | Feed real feedback into replay and promotion gates. |
 | F/P3 | State-invariant context | implemented | `plans/016`, `plans/017`, ADR-045 | Preserve current Java support; deepen only from repeated real-task misses. |
 | P0 | Retrieval value benchmark harness | in_progress | `plans/020` | Finish calibration, harness, aggregator, and first real-repo run. |
+| P0 | Negative-utility retrieval corpus | in_progress | `plans/020`, `notes/2026-08-27-zig-negative-utility-triage.md` | Prove the harness catches losses, not only wins, starting with Zig failures. |
 | P1 | Semantic provider authority migration | planned | `plans/018`, ADR-046, ADR-047 | Approve fact identity and provider arbitration before source rollout. |
 | P1 | One-shot context delivery | planned | `plans/019` | Ship additive MCP slice only after budget/accounting invariants hold. |
 | P1 | Persistent JVM runtime reuse | in_progress | `plans/021`, runtime docs | Runtime-http reuse ships in Stage 2; MCP HTTP profile and hardening remain. |
@@ -74,7 +75,7 @@ execution in `plans/`, and historical context in `notes/` or `reports/`.
 | Band | Features | Reason |
 | --- | --- | --- |
 | Foundation | Compact-first staged retrieval; semantic code graph; multi-language lanes; lifecycle/freshness; runtime surfaces; policy governance; delivered Java state-invariant context | These are existing product contracts and should be preserved rather than re-planned. |
-| Current gate | Retrieval value benchmark harness | The Phase 1 value claim must be proven before broadening product scope. |
+| Current gate | Retrieval value benchmark harness; negative-utility retrieval corpus | The Phase 1 value claim must be proven against competent baselines, including cases where semidx may lose. |
 | Next planned tracks | Semantic provider authority migration; one-shot context delivery; persistent JVM runtime reuse | They improve fact quality, agent ergonomics, and runtime usability while preserving staged retrieval. |
 | Later product bets | Documentation graph; code-documentation linkage; workflow context surfaces | They depend on a trustworthy code graph and clear prioritization. |
 | Opportunistic experiments | Performance/native runtime work | Run when concrete latency, memory, or packaging targets justify it. |
@@ -242,6 +243,29 @@ Current implementation state:
 
 - Stage 0 review and baseline fixtures exist.
 - Core source implementation for the provider pipeline is still pending.
+
+### Negative-Utility Retrieval Corpus
+
+Status: `in_progress`.
+
+Purpose: ensure the benchmark harness can record semidx losses against competent
+baselines instead of only confirming expected wins.
+
+Current required cases:
+
+- Zig API-surface/signature extraction compared against targeted lexical
+  extraction, not whole-file reads.
+- Zig container/config field discovery where missing field facts count as false
+  negatives.
+- Zig blast-radius discovery where an unrelated seed selection counts as a
+  failure.
+- Stale-snapshot-after-edit behavior separated from ranking quality.
+
+Current implementation state:
+
+- Routed into `plans/020` Stage 2.
+- Initial triage note exists; exact MCP request/response repro data still needs
+  capture before source-level Zig fixes.
 
 ### One-Shot Context Delivery
 

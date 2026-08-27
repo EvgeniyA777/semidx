@@ -682,6 +682,12 @@ Returns `impact_hints` only for the same query semantics.
 (sci/impact-analysis index query)
 ```
 
+If the selected impact seed is missing, ambiguous, low-confidence, or stale, the
+returned impact map keeps the legacy list keys empty and adds
+`:result_status "degraded"`, `:degradations`, `:confidence`, and `:guardrails`.
+Callers must treat that as "do not trust this blast radius without narrower
+retrieval or exact source verification."
+
 ### `relation-traversal`
 
 Bounded traversal over typed semantic relations (dataflow) reusing the Stage 3

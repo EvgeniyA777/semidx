@@ -447,6 +447,12 @@ Returns:
 - `index_id`
 - `impact_hints`
 
+When seed selection is unsafe, `impact_hints` remains shape-compatible with
+empty `callers`, `dependents`, `related_tests`, and `risky_neighbors`, and adds
+`result_status: "degraded"`, `degradations`, `confidence`, and `guardrails`.
+This prevents ambiguous or low-confidence retrieval from being presented as a
+trustworthy blast-radius result.
+
 ### `traverse_relations`
 
 Run a bounded traversal over typed semantic relations (dataflow) from one or more start unit ids, reusing the Stage 3 traversal kernel (ADR-040). It is a bounded relation walk, not a general-purpose graph-query language. Exposed on library and MCP; HTTP/gRPC are not exposed in this stage.

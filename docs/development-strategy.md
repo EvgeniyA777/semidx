@@ -50,7 +50,7 @@ remains a separate research track until validated.
 
 | Priority | Direction | Value | Stage |
 | --- | --- | --- | --- |
-| P0 | Retrieval value benchmark harness | Proves whether semidx is worth using against a competent baseline. | Now |
+| P0 | Retrieval value benchmark harness | Proves whether semidx is worth using against a competent baseline, including explicit negative-utility cases. | Now |
 | P1 | Semantic provider authority | Raises trust in graph facts through exact, structural, heuristic, and fallback evidence. | Next |
 | P1 | One-shot context delivery | Reduces agent round trips without weakening staged retrieval. | Next |
 | P1 | Persistent JVM runtime reuse | Removes avoidable cold-start tax when clients use short-lived invocations or restart the runtime per request/session. | Integration quick win |
@@ -77,6 +77,9 @@ Deliver next:
 
 - Finish Stage 0 calibration and final threshold lock.
 - Build the four-arm task harness.
+- Add the negative-utility calibration slice before the verdict run: Zig
+  signature/API extraction, Zig struct/config fields, Zig blast-radius seed
+  correctness, and stale-snapshot-after-edit behavior.
 - Add attempt-first aggregation over normalized provider cost.
 - Run the first real-repository evidence suite.
 - Write the verdict back into `SPEC.md`.
@@ -107,6 +110,9 @@ Deliver next:
 - Add provider planning and shadow execution.
 - Land the first TypeScript or Java SCIP slice based on toolchain evidence.
 - Add LSP overlay only after source identity and freshness behavior are proven.
+- Keep Zig value-recovery as evidence-triggered follow-up work: do not raise the
+  Zig lane beyond structural/skeleton usefulness until the negative-utility
+  cases isolate missing facts from ranking and freshness defects.
 
 Exit decision:
 

@@ -696,6 +696,66 @@
    :related_tests []
    :risky_neighbors []})
 
+(declare build-guardrails)
+
+(defn- evidence-codes [confidence section]
+  (set (map :code (get confidence section))))
+
+(defn- impact-seed-degradations [selection]
+  (let [selected (or (:focus selection) [])
+        query (:query selection)
+        confidence (:confidence selection)
+        capabilities (:capabilities selection)
+        warning-codes (evidence-codes confidence :warnings)
+        missing-codes (evidence-codes confidence :missing_evidence)
+        level (:level confidence "low")
+        capability-ceiling (:confidence_ceiling capabilities "low")
+        requested-symbols (concat (get-in query [:targets :symbols] [])
+                                  (get-in query [:hints :suspected_symbols] []))
+        exact-target-missing? (contains? missing-codes "exact_target_resolution_missing")
+        ambiguous? (contains? warning-codes "target_ambiguous")
+        low-confidence? (= "low" level)
+        capability-limited? (not= "high" capability-ceiling)
+        stale-index? (true? (:index_stale capabilities))]
+    (cond-> []
+      (empty? selected)
+      (conj (coded "impact_seed_missing"
+                   "Impact analysis did not resolve a seed unit."))
+
+      low-confidence?
+      (conj (coded "impact_seed_confidence_low"
+                   "Impact analysis requires a trustworthy seed; retrieval confidence is low."))
+
+      ambiguous?
+      (conj (coded "impact_seed_ambiguous"
+                   "Impact analysis seed selection is ambiguous."))
+
+      (and exact-target-missing? (or low-confidence? (seq requested-symbols)))
+      (conj (coded "impact_seed_exact_target_missing"
+                   "Impact analysis did not resolve the requested symbol to an exact seed."))
+
+      (and low-confidence? capability-limited?)
+      (conj (coded "impact_seed_capability_limited"
+                   "Selected language support does not justify semantic blast-radius confidence."))
+
+      stale-index?
+      (conj (coded "impact_seed_stale_index"
+                   "Impact analysis seed comes from a stale index snapshot.")))))
+
+(defn- degraded-impact-hints [selection degradations]
+  (let [empty-impact (empty-impact-hints)
+        confidence (:confidence selection)
+        query (:query selection)
+        policy (:policy selection)
+        capabilities (:capabilities selection)]
+    (assoc empty-impact
+           :result_status "degraded"
+           :degradation_reason "impact_seed_not_trustworthy"
+           :degradations (vec degradations)
+           :selected_unit_ids (mapv :unit_id (or (:focus selection) []))
+           :confidence confidence
+           :guardrails (build-guardrails confidence empty-impact query policy capabilities))))
+
 (defn- build-confidence [selected query policy]
   (let [top (first selected)
         second-best (second selected)
@@ -1746,14 +1806,17 @@
                                       (:snapshot_id selection-result))
          bound-index (:bound_index selection)
          selected (or (:focus selection) [])
-         impact-hints (build-impact-hints bound-index selected)
-         state-invariants (state-invariants/assemble
-                           bound-index
-                           (:query selection)
-                           selected
-                           (:related_tests impact-hints))]
-     (cond-> impact-hints
-       state-invariants (assoc :state_invariants state-invariants)))))
+         seed-degradations (impact-seed-degradations selection)]
+     (if (seq seed-degradations)
+       (degraded-impact-hints selection seed-degradations)
+       (let [impact-hints (build-impact-hints bound-index selected)
+             state-invariants (state-invariants/assemble
+                               bound-index
+                               (:query selection)
+                               selected
+                               (:related_tests impact-hints))]
+         (cond-> impact-hints
+           state-invariants (assoc :state_invariants state-invariants)))))))
 
 (def ^:private relation-traversal-directions
   {"downstream" :downstream

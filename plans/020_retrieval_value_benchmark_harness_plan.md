@@ -4,7 +4,7 @@ doc_type: "architecture_plan"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-03"
+updated: "2026-08-27"
 ---
 
 # Architecture Plan: Retrieval Value Benchmark Harness
@@ -119,6 +119,16 @@ In:
 - Fix of the `returned_tokens` fidelity bug plus a regression test.
 - A real-repo task-suite definition, including at least one external repository
   (not semidx itself) to avoid self-tuning bias.
+- Negative-utility calibration cases that can show when semidx is worse than a
+  competent baseline, not only when it wins. The initial required cases are:
+  Zig API-surface/signature extraction, where `skeletons` must be compared
+  against targeted `rg` patterns rather than naive whole-file reads; Zig
+  container/config field discovery, where missing struct-field facts must be
+  recorded as a false negative; Zig blast-radius discovery for a named runtime
+  symbol, where `impact_analysis` must be scored as failed if the seed selection
+  resolves to an unrelated module; and stale-snapshot-after-edit behavior, where
+  any reuse of a pre-edit snapshot must be surfaced separately from retrieval
+  ranking quality.
 
 Out:
 
@@ -374,6 +384,13 @@ the agent's raw `usage` through its adapter into the response/usage matrix and
 store it in the `record-feedback!` payload keyed by `task_attempt_id`, preserving
 `raw_usage`.
 
+Stage 2 must include the Zig negative-utility calibration slice before any
+Phase 1 verdict run. These tasks are diagnostic, not a language-priority
+commitment: they verify that the harness can record semidx losses against a
+competent lexical baseline, distinguish low-confidence language ceilings from
+ranking defects, and preserve the exact query/response evidence needed for a
+later Zig value-recovery plan.
+
 ### Stage 3 — Aggregator command
 
 Add an evaluation command (pattern: `run-weekly-review-report-command` in
@@ -425,6 +442,10 @@ Directly inherit `SPEC.md` §5.1:
 - **Strawman baseline.** The 40k figure is likely a cold broad-read, not a
   competent `rg`+read agent. Arm B must be genuinely competent or a win is an
   artifact. This is the main threat to validity.
+- **Positive-only corpus.** A suite that includes only tasks where structural
+  retrieval is expected to win will overstate product value. Keep explicit
+  negative-utility cases, including low-confidence language lanes, so failure
+  modes are measured instead of hidden.
 - **Self-repo bias.** Measuring only on semidx's own repo overstates the result;
   at least one external repo is required.
 - **Fidelity.** Selection-stage cost is an estimate by design; expand/detail
@@ -440,6 +461,9 @@ Directly inherit `SPEC.md` §5.1:
 - The arm definitions, run/attempt identity, provisional threshold, metric,
   adapter versions, and price schedule are recorded before the pilot; the final
   threshold is locked after calibration and before scoring.
+- The task suite includes negative-utility calibration cases for API-surface
+  extraction, missing field/container facts, wrong blast-radius seed selection,
+  and stale snapshot reuse.
 - The `returned_tokens` fidelity bug is fixed with a regression test.
 - The harness produces a reproducible A/B/C/D success-per-cost report on at
   least one external real repository, with C explicitly marked when unavailable.
