@@ -2,7 +2,10 @@
 file_type: adr
 decision_id: ADR-048
 title: "Add Zig as a Separate Semantic Search Language"
-status: accepted
+status: superseded
+lifecycle: superseded
+agent_action: historical_reference_only
+updated: 2026-08-26
 date: 2026-08-26
 deciders:
   - project owner
@@ -12,7 +15,7 @@ tags:
 summary: "Expose Zig as a first-class low-strength language lane with bounded regex parsing and standard onboarding governance."
 agent_summary: "Zig is an accepted public language lane. Keep its v1 regex parser bounded, preserve the low confidence ceiling, and use ADR-022 fixtures, tests, docs, and gates for future changes."
 supersedes: []
-superseded_by: null
+superseded_by: ADR-049
 links:
   - ADR-004
   - ADR-014
@@ -22,8 +25,10 @@ links:
 
 # ADR-048: Add Zig as a Separate Semantic Search Language
 
-**Status**: Accepted  
-**Date**: 2026-08-26  
+**Status**: Superseded by ADR-049
+
+**Date**: 2026-08-26
+
 **Deciders**: project owner
 
 ## Context

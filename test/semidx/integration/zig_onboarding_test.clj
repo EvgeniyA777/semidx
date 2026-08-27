@@ -70,7 +70,9 @@
       (is (= "full" (get-in index [:files "src/main.zig" :parser_mode])))
       (is (some #{"zig"} (:detected_languages index)))
       (is (some #{"zig"} (:active_languages index)))
-      (is (= "zig-native" (provider-for index "src/main.zig"))))
+      (is (= "zig-zls" (provider-for index "src/main.zig")))
+      (is (contains? #{"zig_zls_active" "zig_zls_unavailable" "zig_zls_fallback"}
+                     (get-in index [:files "src/main.zig" :diagnostics 0 :code]))))
     (testing "functions, container methods, imports, and tests become stable units"
       (is (some #(= "src.main/run" (:symbol %)) main-units))
       (is (some #(= "src.main.Runner#execute" (:symbol %)) main-units))

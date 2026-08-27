@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: 8a7abc61d99211abc7c035c688e70c524922b191
+- fingerprint: e9740ebfeeb03374f95e5b95d48c28282604d1d5
 
 ## Tree
 ```text
@@ -53,7 +53,7 @@ semidx
 - semidx.integration.lua-onboarding-test
 - semidx.integration.policy-governance-test
 - semidx.integration.runtime-test
-- ... +23 more
+- ... +25 more
 ### other
 - semidx.contracts.cli
 - semidx.contracts.schemas
@@ -63,7 +63,7 @@ semidx
 - semidx.mcp.session-registry
 - semidx.runtime.adapters
 - semidx.runtime.authz
-- ... +50 more
+- ... +51 more
 
 ## Domain Model
 - IndexStorage [protocol]
@@ -95,7 +95,7 @@ semidx
 - semidx.core -> semidx.runtime.usage-metrics
 - semidx.integration.css-onboarding-test -> clojure.java.io
 - semidx.integration.css-onboarding-test -> clojure.test
-- ... +363 more
+- ... +370 more
 
 ## Namespaces
 ### semidx.contracts.cli
@@ -202,12 +202,12 @@ semidx
 - symbols:
 - language-by-path [function]
 - source-path? [function]
+- with-parser-context [function]
 - slurp-lines [function]
 - trim-signature [function]
 - fallback-unit [function]
 - parse-elixir-language-file [function]
 - parse-html [function]
-- parse-css [function]
 ### semidx.runtime.authz
 - path: src/semidx/runtime/authz.clj
 - requires: clojure.edn, clojure.java.io, clojure.string

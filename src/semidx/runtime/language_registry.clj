@@ -32,7 +32,7 @@
     :strength "low"}
    {:language "zig"
     :extensions [".zig"]
-    :provider {:provider_id "zig-native" :provider_version "1" :classification "source"}
+    :provider {:provider_id "zig-zls" :provider_version "2" :classification "source"}
     :strength "low"}
    {:language "html"
     :extensions [".html" ".htm"]

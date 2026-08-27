@@ -21,7 +21,7 @@ This document describes the current MVP in-memory library API.
 - TypeScript (`.ts/.tsx`) via legacy lightweight regex parser pending provider migration
 - JavaScript (`.js/.jsx/.mjs/.cjs`) through the shared ECMAScript parser core
 - Lua (`.lua`) via lightweight regex parser
-- Zig (`.zig`) via bounded lightweight regex parser
+- Zig (`.zig`) via ZLS document symbols for definitions/ownership, with bounded regex fallback and supplemental import/call extraction
 - HTML (`.html/.htm`) and CSS (`.css`) via bounded static-document parsers
 - Java/Elixir/Python/TypeScript/Lua/Zig call tokens are normalized for module/class-aware call graph linking
 

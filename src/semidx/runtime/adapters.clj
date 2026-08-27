@@ -19,6 +19,11 @@
 (defn source-path? [path]
   (language-registry/source-path? path))
 
+(defn with-parser-context
+  "Run f with per-index parser resources, such as a shared Zig ZLS session."
+  [root-path paths parser-opts f]
+  (zig-language/with-parser-context root-path paths parser-opts f))
+
 (defn- slurp-lines [file]
   (shared-language/slurp-lines file))
 
