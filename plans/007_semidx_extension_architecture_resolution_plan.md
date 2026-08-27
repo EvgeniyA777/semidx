@@ -1,15 +1,36 @@
 ---
 title: "semidx Extension Architecture Resolution Plan"
 doc_type: "architecture_plan"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
-updated: "2026-08-03"
+lifecycle: "archived"
+status: "completed"
+agent_action: "historical_reference_only"
+updated: "2026-08-27"
 ---
 
 # Semidx Extension Architecture Resolution Plan
 
-Status: Active, partially implemented architecture plan
+Status: Archived historical architecture bridge
+
+## Closure Note
+
+This document is no longer an active execution queue. It resolved the extension
+architecture boundaries that later work now owns through more specific plans
+and ADRs.
+
+Current continuation owners:
+
+- `plans/018_semantic_provider_authority_migration_plan.md` owns provider
+  authority, canonical fact identity, evidence, arbitration, and SCIP/LSP
+  migration.
+- `plans/019_llm_one_shot_context_delivery_and_evaluation_plan.md` owns
+  additive one-shot context delivery.
+- `plans/020_retrieval_value_benchmark_harness_plan.md` owns comparative
+  value measurement and is the current highest-priority execution substrate.
+- `ideas/015_semidx_feature_inventory_for_prioritization.md` records the
+  feature inventory that will feed a new plan after owner prioritization.
+
+Do not execute this plan directly. Use it only as historical context for why the
+provider, lifecycle, typed-relation, and degradation boundaries exist.
 
 ## Goal
 

@@ -225,6 +225,11 @@ after this memory file.
   budget-accounted seams. Non-Java lanes, migration/schema linkage, and richer
   column facts remain deferred to a future plan reusing these relation types.
 - Antigravity first-contact MCP behavior is now partially verified in production-like use: it successfully stayed on `create_index -> repo_map -> resolve_context` without drifting into manual browsing, but staged continuation still needs one explicit follow-up check to prove that it will keep using `expand_context` and `fetch_context_detail` via `selection_id` / `snapshot_id` instead of switching back to filesystem reads or broad summarization.
+- `plans/007` is now archived as a historical architecture bridge. It must not
+  be used as an active execution queue; current continuation ownership lives in
+  `plans/018`, `plans/019`, and `plans/020`. The feature inventory in
+  `ideas/015_semidx_feature_inventory_for_prioritization.md` is the input for a
+  future numbered plan after owner prioritization.
 
 ## Next Execution Priorities
 
