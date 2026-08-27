@@ -92,13 +92,42 @@
 
 ## Clojure Editing Rules
 
-- For `.clj`, `.cljc`, `.cljs`, and `.edn` structural edits, you MUST use `clojure-mcp` tools (e.g., `clojure_edit`, `clojure_edit_replace_sexp`) if the server is connected. 
-- **CRITICAL**: Do NOT use raw text tools like `replace_file_content` or `multi_replace_file_content` for Clojure code unless structural tools explicitly fail or are unavailable.
-- Use `clojure_eval` via `clojure-mcp` to test changes interactively in the REPL before resorting to running the full `clojure -M:test` suite.
-- Avoid large raw `apply_patch` rewrites of deeply nested forms when a narrower edit will work.
-- Keep Clojure patches scoped to one top-level form where possible.
-- After any manual `apply_patch` that changes Clojure forms, run an immediate syntax or compile probe before continuing with more edits.
-- If Clojure reports `Unmatched delimiter`, `EOF while reading`, or `defn` spec errors after an edit, inspect the just-edited form tail first and repair delimiters (or use `paren_repair`) before making additional changes.
+Choose the editing tool by the risk of the edit, not by file extension. Every
+row below carries a required safety step. The safety step is not optional.
+
+| Situation | Tool | Required follow-up |
+| --- | --- | --- |
+| New file written in full | `Write` or heredoc | Compile probe |
+| Replacing or inserting a whole top-level form | `clojure_edit` | Confirm the returned diff |
+| Narrow edit inside a large existing form | `Edit` | Compile probe |
+| `.edn` data files such as `deps.edn` | `clojure_edit_replace_sexp`, or `Edit` | Compile probe or read check |
+| Markdown, scripts, and other non-Clojure files | `Edit` | Normal review |
+
+- **The compile probe is mandatory, not advisory.** After any `Write` or `Edit`
+  that changes Clojure forms, run an immediate syntax or compile probe such as
+  `clojure -M -e "(require 'the.changed.ns) (println :ok)"` before making
+  further edits. This rule permits raw text edits on Clojure files precisely
+  because the probe replaces the delimiter safety that structural tools provide.
+  Skipping the probe removes the only remaining guard, and an unbalanced form
+  then goes unnoticed until the full suite runs.
+- Prefer `clojure_edit` whenever the unit of change is an entire top-level form.
+  It repairs missing trailing delimiters in the submitted content, so a
+  whole-form rewrite cannot land unbalanced.
+- `clojure_edit` returns no output when an edit produces no change. Treat an
+  empty response as "nothing was written", not as success, and re-read the
+  target before continuing.
+- `clojure_edit` addresses top-level `def`, `defn`, `defmethod`, `deftest`, and
+  `ns` forms by identifier. Plain data files such as `deps.edn` expose no such
+  form; use `clojure_edit_replace_sexp` there.
+- `clojure-mcp` tools are restricted to the repository root. Use ordinary file
+  tools for scratch or temporary paths outside it.
+- Keep Clojure patches scoped to one top-level form where possible, and avoid
+  large rewrites of deeply nested forms when a narrower edit will work.
+- Use `clojure_eval` via `clojure-mcp` to test changes interactively in the REPL
+  before resorting to running the full `clojure -M:test` suite.
+- If Clojure reports `Unmatched delimiter`, `EOF while reading`, or `defn` spec
+  errors after an edit, inspect the just-edited form tail first and repair
+  delimiters (or use `paren_repair`) before making additional changes.
 
 ## Clojure MCP nREPL Bootstrap
 

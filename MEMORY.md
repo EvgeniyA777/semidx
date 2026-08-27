@@ -93,6 +93,7 @@ after this memory file.
 - Outputs must remain bounded and contract-valid (`context_packet`, diagnostics, guardrails, events).
 - If limits are exhausted, stop immediately and wait for explicit user instruction.
 - Before any service-backed tests (PostgreSQL or other servers): detect running instance -> shutdown if running -> start fresh with required config -> only then run tests.
+- Clojure editing policy (2026-08-27, `RULES.md` -> Clojure Editing Rules): tool choice is risk-based, not extension-based. `Edit` is allowed on `.clj`/`.edn` for narrow edits inside an existing form, and the immediate compile probe afterwards is mandatory because it replaces the delimiter safety that `clojure_edit` provides. Verified `clojure-mcp` behavior behind this rule: `clojure_edit` auto-repairs missing trailing delimiters in submitted content, returns an empty response when an edit changes nothing (an empty response means nothing was written, not success), cannot address plain data files such as `deps.edn` (use `clojure_edit_replace_sexp`), and is sandboxed to the repository root.
 
 ## Known Gaps
 
