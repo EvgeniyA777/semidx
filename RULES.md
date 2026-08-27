@@ -88,7 +88,41 @@
 
 - Use semidx MCP for high-level project mapping, code retrieval, dependency context, impact analysis, and staged context expansion.
 - Once relevant Clojure context is resolved, prefer form-aware Clojure editing or REPL tools when available for structural edits and evaluation.
-- Use semidx for retrieval only; do not use it as a replacement for a REPL or formatter.
+- Use semidx for retrieval only; do not use it as a replacement for a REPL, a formatter, or a file reader.
+
+## Code Reading Rules
+
+Choose the reading tool by the question being answered, not by file type.
+semidx and `read_file` answer different questions and do not compete: semidx
+finds which code matters, `read_file` shows a file that has already been
+identified.
+
+| Question | Tool |
+| --- | --- |
+| Which code is relevant? Who calls this? What is the blast radius? | semidx (`resolve_context`, `impact_analysis`) — always first |
+| What is the shape of one already-identified file? | clojure-mcp `read_file` (collapsed view) |
+| Which exact lines am I about to patch? | `Read` with `offset`/`limit` |
+| What is the body of one symbol from an existing selection? | semidx `fetch_context_detail` with `selection_id` |
+
+- **`read_file` never substitutes for the first semidx call.** If it is not yet
+  known which file is needed, that is semidx's job. Opening files one after
+  another to get oriented is prohibited, however cheap each individual read
+  looks. This is the failure mode semidx exists to prevent.
+- Do not route narrow reads through semidx. `fetch_context_detail` wraps the
+  code in a full retrieval envelope (stage events, capabilities, guardrails,
+  diagnostics), so it is the wrong tool for "show me the lines I am about to
+  edit". Use `Read` with `offset`/`limit` there.
+- Prefer `read_file` over a full `Read` when orienting inside a single large
+  known file: the collapsed, structure-aware view costs less than dumping the
+  whole file and is more reliable than guessing line ranges.
+- `clojure-mcp` tools are path-contained by their `:allowed-directories`
+  setting, which defaults to the project the server was started in and can be
+  widened in `~/.clojure-mcp/config.edn`. When a target lies outside the
+  configured set, `read_file` and the structural editors are unavailable and
+  `Read` plus a compile probe is the only option.
+- No hook enforces any of this. The `semidx-first` guard matches only `Grep`,
+  `Glob`, and `Bash`, and has no visibility into MCP tool calls. These rules
+  hold by discipline alone.
 
 ## Clojure Editing Rules
 
