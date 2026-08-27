@@ -1227,10 +1227,55 @@ Smoke helper:
 
 Process model: `clojure -M:runtime` is intentionally one-shot. It starts a JVM,
 handles the request, writes the result, and exits. Repeated short-lived
-invocations therefore pay repeated JVM startup until the planned local
-launcher/reuse path in
-[plans/021_persistent_jvm_runtime_reuse_plan.md](../plans/021_persistent_jvm_runtime_reuse_plan.md)
-is implemented.
+invocations therefore pay repeated JVM startup and a repeated index build. Use
+the runtime launcher below when the same root is queried more than once.
+
+## Runtime Launcher (Local Process Reuse)
+
+The launcher is a thin local command path that reuses a long-lived runtime
+instead of paying cold JVM startup per request. It does not define a retrieval
+protocol of its own: `request` forwards to the existing runtime HTTP endpoints
+and returns the unchanged runtime response body.
+
+```bash
+clojure -M:launcher status  --root . [--profile runtime-http] [--host 127.0.0.1] [--port 8787]
+clojure -M:launcher start   --root . [--port 8787] [--start-timeout-ms 90000]
+clojure -M:launcher stop    --root .
+clojure -M:launcher request --root . --query contracts/examples/queries/symbol-target.json \
+  --out "${TMPDIR:-.tmp}/sci.json"
+```
+
+`request` output is the same detail payload the one-shot CLI writes, plus the
+additive `project_context` metadata that every runtime HTTP response carries.
+
+Behavior:
+
+- `status` never starts a process. `running` reports whether a healthy runtime
+  is reusable for this root and profile.
+- `start` and `request` reuse a healthy runtime, and otherwise start one while
+  holding an exclusive per-slot lock. Health is re-checked after the lock is
+  acquired so two concurrent clients cannot start two runtimes.
+- A runtime already listening on the requested endpoint is *adopted*, not
+  duplicated. Adopted runtimes are recorded with `owned false`, and `stop`
+  refuses to kill them.
+- Stale metadata (dead PID, closed port, failed health, profile or endpoint
+  change) is cleaned before a replacement is started.
+
+State layout: one slot per workspace and profile, keyed by workspace identity,
+under `~/.cache/semidx/runtime/<workspace_key>-<profile>/`. It holds
+`state.edn`, `start.lock`, and `runtime.log`. State never lives inside the
+repository. Override the location with `SEMIDX_RUNTIME_LAUNCHER_HOME`.
+
+Auth: `--api-key` is sent as `x-api-key` on forwarded requests and passed to a
+launcher-started runtime through `SEMIDX_RUNTIME_API_KEY`. Key values are never
+written to launcher state, reports, or logs.
+
+Reuse is project-safe because every forwarded request carries `root_path`
+explicitly, and the runtime HTTP edge keys its project registry by canonical
+root. Design and staging are in
+[plans/021_persistent_jvm_runtime_reuse_plan.md](../plans/021_persistent_jvm_runtime_reuse_plan.md).
+MCP stdio reuse is out of scope for this profile: it is bound to the MCP host
+process lifetime.
 
 ## Minimal HTTP Edge
 

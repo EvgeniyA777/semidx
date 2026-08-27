@@ -295,6 +295,8 @@ Acceptance:
 
 ### Stage 2: Runtime HTTP request reuse slice
 
+Status: completed on 2026-08-27.
+
 - Add a launcher command alias for `status`, `start`, `stop`, and `request`.
 - Make `request` reuse a healthy runtime HTTP server or start one under lock.
 - Forward the existing one-shot query file shape to runtime HTTP and preserve
@@ -302,10 +304,35 @@ Acceptance:
 - Add a narrow smoke test that proves two sequential requests reuse one runtime
   process.
 
+Delivered:
+
+- `semidx.runtime.launcher-state` owns the per-slot state file, start lock, and
+  log placement under `~/.cache/semidx/runtime/<workspace_key>-<profile>/`,
+  outside the repository, with owner-only permissions.
+- `semidx.runtime.launcher-http` owns the health client and the request client.
+  `resolve-context-detail` mirrors `semidx.core/resolve-context-detail` by
+  forwarding to `/v1/retrieval/resolve-context` and
+  `/v1/retrieval/fetch-context-detail` without reshaping bodies.
+- `semidx.runtime.launcher-process` owns command construction, PID liveness,
+  port probing, process start, and graceful/forced stop.
+- `semidx.runtime.launcher-cli` orchestrates `status`, `start`, `stop`, and
+  `request` over injectable roles, re-checking health after acquiring the start
+  lock.
+- `semidx.runtime.launcher/runtime-slot-key` and an additive `owned` state field
+  extend the pure kernel for slot addressing and adoption.
+- A runtime already listening on the requested endpoint is adopted with
+  `owned false`; `stop` refuses to terminate a runtime the launcher did not
+  start.
+- `deps.edn` gained the `:launcher` alias.
+
 Acceptance:
 
-- The second `request` invocation does not start a second JVM.
-- Output matches the existing runtime CLI for the same root and query.
+- The second `request` invocation does not start a second JVM. Verified by the
+  in-process reuse smoke test and by a manual two-invocation run against a real
+  spawned runtime JVM.
+- Output matches the existing runtime CLI for the same root and query, plus the
+  additive `project_context` field that every runtime HTTP response already
+  carries.
 
 ### Stage 3: MCP HTTP profile and docs
 

@@ -102,6 +102,19 @@
      :host (or (trim-to-nil (:host desired)) default-host)
      :port (or (parse-long-safe (:port desired)) (default-port profile))}))
 
+(defn runtime-slot-key
+  "Stable directory-safe key for one project/profile launcher slot.
+
+  Workspace identity is preferred so two checkouts of the same repository keep
+  independent local runtimes."
+  [desired]
+  (let [desired* (normalize-desired-runtime desired)]
+    (str (or (:workspace_key desired*)
+             (:repo_key desired*)
+             "unknown-workspace")
+         "-"
+         (:profile desired*))))
+
 (defn normalize-runtime-state
   [state]
   (when state
@@ -119,7 +132,10 @@
                :started_at (trim-to-nil (present-field state :started_at))
                :last_health_at (trim-to-nil (present-field state :last_health_at))}
         (present-field state :auth_token_ref)
-        (assoc :auth_token_ref (trim-to-nil (present-field state :auth_token_ref)))))))
+        (assoc :auth_token_ref (trim-to-nil (present-field state :auth_token_ref)))
+
+        (not= missing (field state :owned))
+        (assoc :owned (boolean (present-field state :owned)))))))
 
 (defn healthy-observation?
   [health]

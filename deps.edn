@@ -22,6 +22,8 @@
   {:main-opts ["-m" "semidx.mcp.http-server"]}
   :runtime-http
   {:main-opts ["-m" "semidx.runtime.http"]}
+  :launcher
+  {:main-opts ["-m" "semidx.runtime.launcher-cli"]}
   :runtime-grpc
   {:extra-paths ["target/classes"]
    :main-opts ["-m" "semidx.runtime.grpc-launcher"]}

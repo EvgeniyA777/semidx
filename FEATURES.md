@@ -62,7 +62,7 @@ execution in `plans/`, and historical context in `notes/` or `reports/`.
 | P0 | Retrieval value benchmark harness | in_progress | `plans/020` | Finish calibration, harness, aggregator, and first real-repo run. |
 | P1 | Semantic provider authority migration | planned | `plans/018`, ADR-046, ADR-047 | Approve fact identity and provider arbitration before source rollout. |
 | P1 | One-shot context delivery | planned | `plans/019` | Ship additive MCP slice only after budget/accounting invariants hold. |
-| P1 | Persistent JVM runtime reuse | in_progress | `plans/021`, runtime docs | Ship runtime-http request reuse over the pure launcher decision kernel. |
+| P1 | Persistent JVM runtime reuse | in_progress | `plans/021`, runtime docs | Runtime-http reuse ships in Stage 2; MCP HTTP profile and hardening remain. |
 | P2 | Agent workflow context surfaces | concept | `ideas/011`, `ideas/008`, `ideas/009` | Pick one workflow surface after prioritization. |
 | P2 | Documentation graph | concept | `SPEC.md` Phase 2, `ideas/013` | Start only through provider catalog and lifecycle-aware authority. |
 | P3 | Code-documentation linkage | concept | `SPEC.md` Phase 3, `ideas/011` | Require deterministic anchors and false-positive evaluation. |
@@ -280,12 +280,17 @@ Current implementation state:
   started.
 - The one-shot runtime CLI starts a JVM, creates or loads context, writes the
   response, and exits.
-- The repository does not yet ship a daemon or launcher that discovers an
-  already-running local JVM runtime and routes short-lived invocations to it.
 - The execution plan is
   [`plans/021_persistent_jvm_runtime_reuse_plan.md`](plans/021_persistent_jvm_runtime_reuse_plan.md).
 - Stage 0 selected `runtime-http` as the first reuse profile.
 - Stage 1 delivered the pure launcher decision kernel and focused unit tests.
+- Stage 2 shipped the runnable `runtime-http` reuse slice behind the `:launcher`
+  alias: `status`, `start`, `stop`, and `request`, with a per-slot state file
+  and start lock outside the repository, health-based reuse, adoption of an
+  already-running local runtime, stale-state cleanup, and request forwarding to
+  the existing runtime HTTP endpoints.
+- Stage 3 (MCP HTTP profile and client config docs) and Stage 4 (hardening and
+  benchmark gate) are still open.
 
 Possible capabilities:
 

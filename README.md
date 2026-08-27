@@ -111,7 +111,8 @@ Canonical retrieval flow is compact-first staged retrieval:
 - MCP HTTP server defaults to `127.0.0.1` and supports `--transport-mode dual|streamable|sse`; Streamable HTTP uses `POST /mcp` with `Mcp-Session-Id`, while legacy SSE uses `GET /mcp/sse` plus `POST /mcp/messages`
 - Run minimal HTTP edge: `clojure -M:runtime-http --host 127.0.0.1 --port 8787`
 - Run minimal gRPC edge: `clojure -M:runtime-grpc --host 127.0.0.1 --port 8789`
-- Runtime process model: `clojure -M:runtime` is a one-shot command and starts a JVM per invocation; MCP stdio, MCP HTTP, runtime HTTP, and runtime gRPC are long-lived once started. The missing launcher/reuse path is planned in [plans/021_persistent_jvm_runtime_reuse_plan.md](plans/021_persistent_jvm_runtime_reuse_plan.md).
+- Runtime process model: `clojure -M:runtime` is a one-shot command and starts a JVM per invocation; MCP stdio, MCP HTTP, runtime HTTP, and runtime gRPC are long-lived once started. MCP stdio reuse is bounded by the MCP host process lifetime.
+- Reuse a local runtime instead of paying JVM startup per request: `clojure -M:launcher status|start|stop --root .` and `clojure -M:launcher request --root . --query <query.json> [--out <out.json>]`. The launcher reuses a healthy runtime HTTP server, starts one under an exclusive lock when needed, and forwards to the existing runtime HTTP endpoints. See [docs/runtime-api.md](docs/runtime-api.md) and [plans/021_persistent_jvm_runtime_reuse_plan.md](plans/021_persistent_jvm_runtime_reuse_plan.md).
 - Optional service auth boundary flags: `--api-key <token> --require-tenant` (or env `SCI_RUNTIME_API_KEY`, `SCI_RUNTIME_REQUIRE_TENANT=true`)
 - Optional host-integrated authz policy file: `--authz-policy-file /path/to/authz-policy.edn` (or env `SCI_RUNTIME_AUTHZ_POLICY_FILE`)
 - Optional runtime policy registry file for HTTP/gRPC: `--policy-registry-file /path/to/policy-registry.edn` (or env `SCI_RUNTIME_POLICY_REGISTRY_FILE`)
