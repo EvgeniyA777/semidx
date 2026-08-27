@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-03"
+updated: "2026-08-27"
 ---
 
 # Progress Log: Retrieval Value Benchmark Harness
@@ -18,7 +18,7 @@ Companion log for
 | --- | --- |
 | 0 — Pre-register arms/run identity/metric, pilot-then-lock threshold | pre-registration sub-gate completed (see `reports/023_retrieval_value_benchmark_preregistration.md`); calibration pilot and final-lock pending |
 | 1 — Fidelity fix (`returned_tokens`) | completed |
-| 2 — Task suite + four-arm harness | not started |
+| 2 — Task suite + four-arm harness | corpus and harness delivered (2026-08-27); live evaluated-model runner binding still pending, see the Stage 2 section |
 | 3 — Aggregator command | not started |
 | 4 — First real-repo run + evidence write-back | not started |
 
@@ -221,5 +221,169 @@ model_availability_checked_at: >
   Antigravity cannot be confirmed by checking ai.google.dev pricing.
   Actual availability will be confirmed at Stage 2 admission by the
   executor. If unavailable, defer to Gemini 3.5 Flash as fallback.
+confidence: high (for the routing recommendation itself)
+```
+
+## Stage 2 — Task suite + four-arm harness (2026-08-27)
+
+Status: harness and corpus delivered. A live evaluated-model runner binding is
+explicitly **not** part of this stage; see "Known gaps" below.
+
+### Delivered
+
+| Artifact | Role |
+| --- | --- |
+| `fixtures/benchmark/task_suite_v1.edn` | frozen v1 corpus: 9 tasks, 9 task types, 2 repositories |
+| `src/semidx/runtime/benchmark_suite.clj` | suite loading plus corpus invariants |
+| `src/semidx/runtime/benchmark_usage.clj` | usage adapters, price schedule, matrix rows, attempt aggregation |
+| `src/semidx/runtime/benchmark_harness.clj` | run/attempt identity, arm policies and audit, budget, workspace isolation, scoring, feedback write-back |
+| `test/semidx/runtime/benchmark_{suite,usage,harness}_test.clj` | 55 tests, 180 assertions covering the above |
+
+The corpus includes the external repository `aegis-zig`
+(`/Users/ae/workspaces/Zig/aegis`, overridable via `SEMIDX_BENCH_AEGIS_PATH`),
+so the suite is not measured only on semidx itself. All four required
+negative-utility calibration cases from `reports/023` section 2.5 are present,
+and their ground truth was read out of the actual Zig sources rather than
+assumed (`Config` fields in `src/engine/actor.zig`, `ControlledRuntime`
+definition and references across `src/control/` and `src/app/process.zig`).
+
+### Decisions taken in this stage
+
+- **Repository revisions are resolved at run time**, not pinned in the fixture.
+  `new-benchmark-run` reads `git rev-parse HEAD` plus dirty state of the
+  checkout and records them in the `BenchmarkRun`, so a run always reports the
+  revision that was actually measured.
+- **Attempt tagging** uses the existing usage-metrics context: `session_id` is
+  the `benchmark_run_id` and `task_id` is the `task_attempt_id` on every semidx
+  event of an attempt. This keys `semantic_usage_events` to the attempt that
+  produced them without a many-to-many `task_id` join.
+- **`attempt-trace` deliberately omits `agent_id`.** The retrieval query
+  contract's `trace` (`semidx.contracts.schemas/trace-ref`) is a closed map, so
+  an `agent_id` key would make every Arm A query fail validation instead of
+  being measured. The agent is carried as `actor_id`. A regression test
+  validates the emitted trace against `trace-ref` directly.
+- **Scoring lives in the harness, never in a runner.** All arms are scored
+  against the same task ground truth, so an arm cannot win by answering a
+  different question. A runner may only report `error` or `not_applicable`
+  (the latter requires its reason, matching the Arm C rule).
+- **Audit and budget outcomes override a self-reported success.** A forbidden
+  tool or a denylisted Arm D command sets the attempt to `error` with the
+  preregistered reason `arm_d_forbidden_tool_violation`; other arms use
+  `arm_tool_policy_violation`. Budget breaches use `execution_budget_exceeded`.
+- **Excess context cost does not fail a correct answer**; it is recorded as
+  `excess_context_cost` so the cost metric, not the success metric, carries it.
+  **Stale snapshot reuse does fail the attempt** but is recorded separately
+  (`stale_snapshot_reuse`) from ranking quality, as the plan requires.
+- **Cost eligibility is enforced, not assumed.** A run started on or after the
+  price schedule's eligible-until date is refused; a cache write under
+  `implicit_cache_observed_v1` is `unresolved`; a historical-only model is
+  `historical_only`; and one unresolved turn excludes the whole attempt from the
+  cost verdict while preserving the reason.
+- **One `BenchmarkRun` per repository**, because the preregistered schema binds
+  a run to one repository revision. No field was added to the frozen schema;
+  cross-repository pooling keys on suite version, arm-policy bundle, cache
+  protocol, and price schedule.
+- **Workspace isolation is mandatory for mutating tasks.** A task declaring a
+  `workspace_mutation` refuses to run without isolation rather than silently
+  degrading the freshness case into an ordinary retrieval case.
+
+### Arm runner contract
+
+One attempt is executed by an `ArmRunner`. `process-arm-runner` is the binding
+point for a real evaluated model: the attempt context is written to the agent
+process stdin as JSON and the result is read back from stdout as JSON.
+
+Context (harness to agent): `benchmark_run_id`, `task_attempt_id`, `arm`,
+`arm_policy_id`, `allowed_tools`, `command_denylist`, `prompt`,
+`workspace_path`, `execution_budget`, `cache_protocol_id`, `usage_context`,
+`trace`, plus the task and attempt identity blocks.
+
+Result (agent to harness):
+
+```json
+{"outcome": "success | failure | error | not_applicable",
+ "not_applicable_reason": "required when outcome is not_applicable",
+ "wall_clock_ms": 1234,
+ "tool_calls": [{"tool_id": "bash", "command": "rg Foo src"}],
+ "turns": [{"turn_index": 0, "adapter_id": "gemini-generate-content",
+            "raw_usage": {"promptTokenCount": 900, "candidatesTokenCount": 120},
+            "response_meta": {"stop_reason": "stop"},
+            "tool_charges_usd": 0}],
+ "answer": {"paths": [], "symbols": [], "facts": [], "answer_text": "",
+            "snapshot_id": "", "context_tokens": 0, "confidence_level": "high"}}
+```
+
+### Known gaps (not delivered by Stage 2)
+
+- **No live evaluated-model runner.** The repository ships `scripted-arm-runner`
+  (tests and dry runs, never contacts a provider) and `process-arm-runner` (the
+  JSON bridge above). A concrete agent process implementing each arm policy must
+  be delivered before any Stage 4 scoring run. Scoring also remains gated on the
+  Stage 0 calibration pilot and final threshold lock.
+- **No aggregator command.** Attempt-level aggregation exists
+  (`aggregate-attempt-usage`); the roll-up to `(benchmark_run_id, task_id, arm)`
+  and the stop-rule evaluation are Stage 3.
+- **Zig calibration cases are defined but not yet measured.**
+  `notes/2026-08-27-zig-negative-utility-triage.md` stays open; the harness now
+  makes those failures recordable, it has not recorded them.
+- **PostgreSQL payload round-trip unexercised.** The in-memory sink path is
+  verified; Stage 3 must confirm the benchmark payload survives the `jsonb`
+  round-trip, since one attempt payload carries its whole usage matrix.
+
+### Stage 2 verification
+
+- `clojure -M:test`: 387 tests, 2365 assertions, 0 failures, 0 errors.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+- Compile probes after every source edit: passed.
+- End-to-end tagging probe against a temporary fixture repository using the real
+  `create_index` / `resolve_context` / `expand_context` path: every recorded
+  event carried `surface=benchmark`, `session_id=<benchmark_run_id>`, and
+  `task_id=<task_attempt_id>`. This probe is what surfaced the closed-`trace`
+  finding above.
+- `git diff --check`: passed.
+- English-only scan over the new sources, fixture, and this log: passed.
+- CCC artifacts were not refreshed; `RULES.md` forbids routine per-task
+  refreshes and no compression output is required by this stage.
+
+### NextStageRoutingRecommendation
+
+```text
+completed_stage: Stage 2 — Task suite + four-arm harness
+recommended_next_stage: Stage 3 — Aggregator command
+recommended_executor: Antigravity
+recommended_model: Gemini 3.1 Pro
+effort: high
+effort_justification: >
+  The aggregator decides the Phase 1 verdict. It must aggregate on
+  task_attempt_id before joining feedback outcomes, must read
+  estimated_tokens for the selection stage and returned_tokens for
+  expand/detail (Stage 1 semantics), must aggregate on cost_usd rather
+  than grand_total, and must drop attempts whose pricing_status is
+  unresolved or historical_only instead of pricing them at zero. Each of
+  those is a silent-wrong-number risk rather than a crash risk, so a
+  cheaper pass would not be detectably wrong.
+rationale: >
+  Matches the plans/020 routing table for Stage 3. Stage 2 delivered the
+  attempt-level aggregation and the feedback payload shape the aggregator
+  consumes, so the remaining work is the roll-up, the in-memory sink path,
+  and the Stage 0 stop rule.
+prerequisites_or_blockers: >
+  None for Stage 3 itself. Stage 4 scoring stays blocked on two separate
+  gates: the Stage 0 calibration pilot plus final threshold lock, and a
+  live evaluated-model runner implementing the arm runner contract above.
+  The price schedule expires 2026-10-16; the harness now refuses to start
+  a run on or after that date.
+file_ownership_and_conflict_risk: >
+  Stage 3 owns a new command in src/semidx/runtime/evaluation.clj and
+  reads src/semidx/runtime/benchmark_usage.clj and usage_metrics.clj. The
+  Stage 2 benchmark namespaces should not need edits; if the aggregator
+  needs a new field, it must be added to the payload rather than to the
+  frozen BenchmarkRun/TaskAttempt schemas.
+fallback_executor_or_model: Gemini 3.5 Flash for mechanical parts only; the
+  join and cost semantics should not be delegated to a fallback model.
+model_availability_checked_at: >
+  not checked in this session — executor/model availability inside
+  Antigravity cannot be verified from this repository. Confirm at Stage 3
+  admission.
 confidence: high (for the routing recommendation itself)
 ```
