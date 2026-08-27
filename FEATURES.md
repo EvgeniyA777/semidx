@@ -62,7 +62,7 @@ execution in `plans/`, and historical context in `notes/` or `reports/`.
 | P0 | Retrieval value benchmark harness | in_progress | `plans/020` | Finish calibration, harness, aggregator, and first real-repo run. |
 | P1 | Semantic provider authority migration | planned | `plans/018`, ADR-046, ADR-047 | Approve fact identity and provider arbitration before source rollout. |
 | P1 | One-shot context delivery | planned | `plans/019` | Ship additive MCP slice only after budget/accounting invariants hold. |
-| P1 | Persistent JVM runtime reuse | planned | `plans/021`, runtime docs | Confirm client launch model, then add a launcher or client path that reuses a live JVM server before starting one. |
+| P1 | Persistent JVM runtime reuse | in_progress | `plans/021`, runtime docs | Ship runtime-http request reuse over the pure launcher decision kernel. |
 | P2 | Agent workflow context surfaces | concept | `ideas/011`, `ideas/008`, `ideas/009` | Pick one workflow surface after prioritization. |
 | P2 | Documentation graph | concept | `SPEC.md` Phase 2, `ideas/013` | Start only through provider catalog and lifecycle-aware authority. |
 | P3 | Code-documentation linkage | concept | `SPEC.md` Phase 3, `ideas/011` | Require deterministic anchors and false-positive evaluation. |
@@ -267,7 +267,7 @@ Current implementation state:
 
 ### Persistent JVM Runtime Reuse
 
-Status: `planned`.
+Status: `in_progress`.
 
 Purpose: avoid paying Clojure JVM startup cost for every client request when the
 caller uses a short-lived command path or restarts the runtime per invocation.
@@ -284,6 +284,8 @@ Current implementation state:
   already-running local JVM runtime and routes short-lived invocations to it.
 - The execution plan is
   [`plans/021_persistent_jvm_runtime_reuse_plan.md`](plans/021_persistent_jvm_runtime_reuse_plan.md).
+- Stage 0 selected `runtime-http` as the first reuse profile.
+- Stage 1 delivered the pure launcher decision kernel and focused unit tests.
 
 Possible capabilities:
 

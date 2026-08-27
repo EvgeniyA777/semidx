@@ -2,7 +2,7 @@
 title: "Persistent JVM Runtime Reuse Plan"
 doc_type: "architecture_plan"
 lifecycle: "active"
-status: "planned"
+status: "in_progress"
 agent_action: "reference_for_context"
 updated: "2026-08-27"
 ---
@@ -243,11 +243,25 @@ Variation strategy: composition over a narrow request-client role.
 
 ### Stage 0: Confirm launch path and choose first profile
 
+Status: completed on 2026-08-27.
+
 - Measure or log the actual path that repeatedly starts the JVM.
 - Decide whether the first implementation targets runtime HTTP one-shot reuse,
   MCP HTTP reuse, or both profiles.
 - Record the chosen profile and acceptance metrics in this plan before source
   implementation.
+
+Stage 0 decision:
+
+- First profile: `runtime-http`.
+- Reason: runtime HTTP already exposes local health plus JSON request endpoints,
+  so it can replace repeated one-shot CLI invocations without adding MCP session
+  handling to the first slice.
+- Repeated-start scenario: short-lived `clojure -M:runtime` and wrappers around
+  it pay cold JVM startup per invocation. MCP stdio may also pay repeated
+  startup when the MCP host restarts the stdio process; that remains host
+  lifetime scoped until the MCP HTTP profile is implemented or documented for
+  that host.
 
 Acceptance:
 
@@ -256,10 +270,23 @@ Acceptance:
 
 ### Stage 1: Pure launcher decision kernel
 
+Status: completed on 2026-08-27.
+
 - Add pure project identity, state normalization, health observation, and reuse
   decision functions.
 - Add tests for missing state, healthy state, stale PID, stale port, root
   mismatch, and lock contention outcomes.
+
+Delivered:
+
+- `semidx.runtime.launcher/desired-runtime` builds a desired local runtime
+  identity from canonical repo identity.
+- `normalize-runtime-state`, `normalize-desired-runtime`, and
+  `decide-runtime-reuse` provide the pure state/health/process/lock decision
+  kernel.
+- `semidx.runtime.launcher-test` covers missing state, healthy reuse, explicit
+  root-confirmed health, root mismatch, profile mismatch, endpoint mismatch,
+  dead PID, closed port, failed health, and lock contention.
 
 Acceptance:
 
