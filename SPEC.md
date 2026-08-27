@@ -3,7 +3,7 @@ title: "semidx Direction Spec"
 doc_type: "spec"
 lifecycle: "active"
 agent_action: "reference_for_context"
-updated: "2026-08-02"
+updated: "2026-08-27"
 ---
 
 # semidx — Direction Spec
@@ -86,6 +86,8 @@ retrieval.
   [`plans/018_semantic_provider_authority_migration_plan.md`](plans/018_semantic_provider_authority_migration_plan.md). **[planned]**
 - One-shot context delivery on top of staging:
   [`plans/019_llm_one_shot_context_delivery_and_evaluation_plan.md`](plans/019_llm_one_shot_context_delivery_and_evaluation_plan.md). **[planned]**
+- Persistent local runtime reuse for short-lived invocations:
+  [`plans/021_persistent_jvm_runtime_reuse_plan.md`](plans/021_persistent_jvm_runtime_reuse_plan.md). **[planned]**
 - Comparative real-repository value evidence:
   [`plans/020_retrieval_value_benchmark_harness_plan.md`](plans/020_retrieval_value_benchmark_harness_plan.md). **[in-progress]**
 
@@ -252,6 +254,8 @@ Hard questions surfaced deliberately (PR/FAQ style):
   trustworthy rather than another synthetic fixture?
 - What is the fair `rg`/LSP baseline harness, so a win is not an artifact of a
   weak baseline?
+- Which local host or wrapper path actually pays repeated JVM startup, and is
+  runtime HTTP or MCP HTTP the right first reuse target?
 - For Phase 2, what is a documentation *fact*? Node granularity: whole file,
   heading section, or claim-level?
 - For Phase 3, how are doc↔code edges established without an LLM as source of
@@ -265,7 +269,9 @@ Hard questions surfaced deliberately (PR/FAQ style):
   typed-relation code graph with explicit provenance/confidence per fact.
 - **What it does not do yet**: index documentation, link docs to code, or
   guarantee compiler-grade correctness of every relation (it degrades explicitly
-  to structural, then heuristic, then fallback).
+  to structural, then heuristic, then fallback). It also does not yet provide a
+  local daemon or launcher that reuses an already-running JVM runtime for
+  short-lived invocations.
 - **What a caller may infer**: facts tagged `exact` reflect fresh
   compiler/LSP/SCIP evidence.
 - **What a caller must not infer**: that `heuristic`/`fallback` facts, the

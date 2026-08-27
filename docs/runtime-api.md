@@ -1225,6 +1225,13 @@ Smoke helper:
 ./scripts/run-mvp-smoke.sh . contracts/examples/queries/symbol-target.json "${TMPDIR:-.tmp}/sci-smoke.json"
 ```
 
+Process model: `clojure -M:runtime` is intentionally one-shot. It starts a JVM,
+handles the request, writes the result, and exits. Repeated short-lived
+invocations therefore pay repeated JVM startup until the planned local
+launcher/reuse path in
+[plans/021_persistent_jvm_runtime_reuse_plan.md](../plans/021_persistent_jvm_runtime_reuse_plan.md)
+is implemented.
+
 ## Minimal HTTP Edge
 
 Run a minimal production-boundary HTTP wrapper over the same library runtime:
@@ -1232,6 +1239,9 @@ Run a minimal production-boundary HTTP wrapper over the same library runtime:
 ```bash
 clojure -M:runtime-http --host 127.0.0.1 --port 8787
 ```
+
+This process is long-lived once started and is the preferred first reuse target
+for CLI-style repeated local requests.
 
 Optional auth boundary:
 
@@ -1293,6 +1303,10 @@ Run a minimal gRPC wrapper over the same library runtime semantics:
 ```bash
 clojure -M:runtime-grpc --host 127.0.0.1 --port 8789
 ```
+
+This process is long-lived once started. It remains the gRPC runtime surface;
+the planned launcher should reuse it only when gRPC is selected as the local
+runtime profile.
 
 Optional auth boundary:
 

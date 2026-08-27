@@ -28,6 +28,12 @@ The MCP server does not enforce a `root_path` allowlist. Any existing directory 
 
 The MCP server exposes only `tools` capability in v1 and keeps cached indexes in-process for the lifetime of the server/session.
 
+Process model:
+
+- `clojure -M:mcp` is long-lived for the lifetime of the MCP stdio process. If a host restarts that process per request or per short session, semidx cannot reuse the JVM across those restarts.
+- `clojure -M:mcp-http` is the reuse-friendly MCP transport for clients that can keep calling the same local Streamable HTTP endpoint.
+- The repository does not yet ship a daemon or launcher that discovers and reuses an existing local MCP/runtime server before starting a JVM. That work is planned in [plans/021_persistent_jvm_runtime_reuse_plan.md](../plans/021_persistent_jvm_runtime_reuse_plan.md).
+
 Client-facing MCP payloads do not expose internal root restriction state. In particular:
 
 - `health` does not return `allowed_roots`

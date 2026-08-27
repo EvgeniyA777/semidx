@@ -18,6 +18,7 @@ The project defines how a host system should request code context, how retrieval
 - provides a working in-memory MVP runtime for `create-index`, `update-index`, `repo-map`, `resolve-context`, `expand-context`, `fetch-context-detail`, `resolve-context-detail`, `impact-analysis`, `skeletons`
 - now also provides exact `literal-file-slice`, semantic `snapshot-diff`, and offline `semantic-quality-report` evaluation surfaces
 - provides a Clojure-first `Code Context Compressor` lane for bounded architecture summaries, dependency-graph export, committed repo context docs, and pre-push/CI drift checks
+- provides long-lived local server modes through MCP stdio, MCP HTTP, runtime HTTP, and runtime gRPC once those processes are started
 - includes parser adapters for `Clojure + Java + Elixir + Python + TypeScript + JavaScript + Lua + Zig + HTML + CSS` and emits diagnostics/guardrails outputs
 - supports versioned retrieval policy overrides plus emitted capability metadata for replayable ranking behavior
 - supports optional persistence adapters (`in-memory`, `PostgreSQL`) with snapshot + graph projection storage for PostgreSQL
@@ -29,9 +30,10 @@ The project defines how a host system should request code context, how retrieval
 
 - does not implement production-grade deep semantic parsing (full compiler-level resolution)
 - does not implement full compiler-grade interprocedural resolution across all languages
-- does not expose production API server endpoints yet
+- does not ship a managed production service or deployment package yet
+- does not yet ship a daemon or launcher that discovers and reuses an already-running local JVM runtime for short-lived invocations
 
-Current scope is contract architecture plus a working MVP runtime implementation.
+Current scope is contract architecture plus working local/runtime surfaces.
 
 ## Repository Layout
 
@@ -109,6 +111,7 @@ Canonical retrieval flow is compact-first staged retrieval:
 - MCP HTTP server defaults to `127.0.0.1` and supports `--transport-mode dual|streamable|sse`; Streamable HTTP uses `POST /mcp` with `Mcp-Session-Id`, while legacy SSE uses `GET /mcp/sse` plus `POST /mcp/messages`
 - Run minimal HTTP edge: `clojure -M:runtime-http --host 127.0.0.1 --port 8787`
 - Run minimal gRPC edge: `clojure -M:runtime-grpc --host 127.0.0.1 --port 8789`
+- Runtime process model: `clojure -M:runtime` is a one-shot command and starts a JVM per invocation; MCP stdio, MCP HTTP, runtime HTTP, and runtime gRPC are long-lived once started. The missing launcher/reuse path is planned in [plans/021_persistent_jvm_runtime_reuse_plan.md](plans/021_persistent_jvm_runtime_reuse_plan.md).
 - Optional service auth boundary flags: `--api-key <token> --require-tenant` (or env `SCI_RUNTIME_API_KEY`, `SCI_RUNTIME_REQUIRE_TENANT=true`)
 - Optional host-integrated authz policy file: `--authz-policy-file /path/to/authz-policy.edn` (or env `SCI_RUNTIME_AUTHZ_POLICY_FILE`)
 - Optional runtime policy registry file for HTTP/gRPC: `--policy-registry-file /path/to/policy-registry.edn` (or env `SCI_RUNTIME_POLICY_REGISTRY_FILE`)
@@ -124,6 +127,7 @@ Canonical retrieval flow is compact-first staged retrieval:
 - Agent MCP prompts: [docs/mcp-agent-prompts.md](docs/mcp-agent-prompts.md)
 - Project development strategy: [docs/development-strategy.md](docs/development-strategy.md)
 - Feature ledger: [FEATURES.md](FEATURES.md)
+- Persistent JVM runtime reuse plan: [plans/021_persistent_jvm_runtime_reuse_plan.md](plans/021_persistent_jvm_runtime_reuse_plan.md)
 - Roadmap status checklist: [docs/roadmap-status.md](docs/roadmap-status.md)
 - ADR for projection profiles and advisory semantic-quality gates: [adr/029-standardize-projection-profiles-and-advisory-semantic-quality-gates.md](adr/029-standardize-projection-profiles-and-advisory-semantic-quality-gates.md)
 - Compact-first staged retrieval execution plan: [plans/002_compact_first_staged_retrieval_plan.md](plans/002_compact_first_staged_retrieval_plan.md)

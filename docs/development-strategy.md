@@ -141,7 +141,8 @@ Exit decision:
 
 ## Stage 2.5: Remove Runtime Startup Friction
 
-Primary source: runtime process inspection and runtime API documentation.
+Primary source:
+[`plans/021_persistent_jvm_runtime_reuse_plan.md`](../plans/021_persistent_jvm_runtime_reuse_plan.md).
 
 Why here:
 
