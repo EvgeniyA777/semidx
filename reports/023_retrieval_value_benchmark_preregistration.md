@@ -4,7 +4,7 @@ doc_type: "report"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-03"
+updated: "2026-08-27"
 ---
 
 # Retrieval Value Benchmark Pre-registration (Stage 0)
@@ -92,6 +92,26 @@ attempt outcome to `error` with the reason `"arm_d_forbidden_tool_violation"`.
 - The harness preserves the cache-read observation per response and randomizes
   or counterbalances arm order. Implicit cache variation is therefore visible in
   the recorded cost rather than misrepresented as a cold-start invariant.
+
+## 2.5 Negative-Utility Calibration Cases
+
+The v1 suite must include cases that are expected to expose semidx losses as
+well as wins. These cases are diagnostic calibration inputs: they verify that
+the harness records false negatives, wrong context, and excess cost against a
+competent baseline instead of optimizing only for favorable examples.
+
+Required initial cases:
+
+| Case | Language | Primary failure mode | Comparator requirement | Scoring rule |
+| --- | --- | --- | --- | --- |
+| `zig_api_surface_signatures_v1` | Zig | `skeletons` returns more context than needed for public signatures | Arm B must use targeted `rg` patterns for public declarations, not whole-file reads | Arm A wins only if returned context is compact and sufficient; otherwise excess cost is recorded |
+| `zig_struct_config_fields_v1` | Zig | Missing container/config field facts | Arm B may combine targeted lexical search with bounded reads around the struct and init/start functions | Missing required fields is a false negative |
+| `zig_controlled_runtime_blast_radius_v1` | Zig | `impact_analysis` or staged selection seeds an unrelated module | Arm B must produce exact references or bounded source links for the named runtime symbol | Unrelated seed selection is a failure, even if impact output is non-empty |
+| `stale_snapshot_after_edit_v1` | Any supported language with a compact fixture | A pre-edit snapshot is reused after material file changes | Arm B reads the current working tree | Stale snapshot reuse is recorded separately from ranking quality |
+
+These cases do not promote Zig above its current low confidence ceiling. They
+exist to isolate missing facts, ranking defects, stale-snapshot behavior, and
+projection-size problems before any later Zig value-recovery work.
 
 ## 3. Schemas (Run and Attempt Identity)
 

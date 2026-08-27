@@ -140,9 +140,9 @@ value, latency, round trips, and output cost against staged and lexical
 baselines. ADR-024 remains current; one-shot does not become the documented
 canonical default without comparative evidence and a new decision.
 
-The independent `plans/021` runtime-reuse track is now planned as integration
-work, not semantic-core work: existing MCP stdio, MCP HTTP, runtime HTTP, and
-runtime gRPC modes are long-lived once started, while `clojure -M:runtime` is a
-one-shot CLI that exits after a request. The missing piece is a local
-daemon/launcher path that checks for a healthy project-scoped JVM runtime and
-reuses it before starting a new process.
+The independent `plans/021` runtime-reuse track is integration work, not
+semantic-core work: existing MCP stdio, MCP HTTP, runtime HTTP, and runtime gRPC
+modes are long-lived once started, while `clojure -M:runtime` is a one-shot CLI
+that exits after a request. Runtime HTTP launcher reuse now exists behind the
+`:launcher` alias; MCP HTTP profile guidance and launcher hardening/benchmark
+coverage remain open.

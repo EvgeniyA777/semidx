@@ -165,17 +165,20 @@ Current evidence:
   loop until stdin closes.
 - MCP HTTP, runtime HTTP, and runtime gRPC start server processes and block.
 - The runtime CLI calls the indexer and then exits with `System/exit`.
-- There is no repository-owned daemon or launcher that checks for an existing
-  local runtime before starting a new JVM.
+- Runtime HTTP launcher reuse exists behind the `:launcher` alias. It provides
+  `status`, `start`, `stop`, and `request`, uses a cache-directory state slot
+  and start lock, adopts healthy local runtimes, and forwards requests to the
+  existing runtime HTTP endpoints.
+- MCP HTTP profile guidance and hardening benchmarks are still open.
 
 Deliver next:
 
-- Confirm the exact host path that is causing repeated JVM startup.
-- Pick the reuse target: MCP HTTP, runtime HTTP, or runtime gRPC.
-- Add a small launcher/client that performs health-check, start-if-needed,
-  request forwarding, stale lock cleanup, and `status`/`stop` operations.
-- Document the distinction between stdio process-lifetime reuse and HTTP/gRPC
-  cross-invocation reuse.
+- Add or document launcher support for MCP HTTP when clients can use Streamable
+  HTTP.
+- Provide client configuration snippets for the reused local MCP HTTP endpoint.
+- Keep stdio documented as host-lifetime scoped.
+- Add startup, warm-request, stop, stale-state, killed-process, and occupied-port
+  benchmark/hardening coverage.
 
 Exit decision:
 

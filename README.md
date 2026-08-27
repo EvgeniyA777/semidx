@@ -31,7 +31,8 @@ The project defines how a host system should request code context, how retrieval
 - does not implement production-grade deep semantic parsing (full compiler-level resolution)
 - does not implement full compiler-grade interprocedural resolution across all languages
 - does not ship a managed production service or deployment package yet
-- does not yet ship a daemon or launcher that discovers and reuses an already-running local JVM runtime for short-lived invocations
+- does not yet ship MCP HTTP/gRPC launcher profiles or production supervision for
+  local runtime reuse; the shipped launcher currently targets runtime HTTP
 
 Current scope is contract architecture plus working local/runtime surfaces.
 
