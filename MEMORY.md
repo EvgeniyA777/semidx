@@ -231,6 +231,10 @@ after this memory file.
   root `FEATURES.md` plus
   `ideas/015_semidx_feature_inventory_for_prioritization.md` is the input for a
   future numbered plan after owner prioritization.
+- `docs/development-strategy.md` is the active project development strategy:
+  prove retrieval value first (`plans/020`), then raise provider authority
+  (`plans/018`), then add one-shot delivery (`plans/019`), then choose workflow
+  and documentation graph surfaces.
 
 ## Next Execution Priorities
 

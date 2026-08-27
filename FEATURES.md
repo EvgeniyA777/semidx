@@ -3,6 +3,9 @@
 This file is the root feature ledger for semidx. It tracks what exists, what is
 in an active plan, and what remains concept or research input.
 
+For recommended sequencing, see
+[`docs/development-strategy.md`](docs/development-strategy.md).
+
 It is intentionally a reference document:
 
 - not a changelog;

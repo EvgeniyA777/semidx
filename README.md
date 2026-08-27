@@ -122,6 +122,8 @@ Canonical retrieval flow is compact-first staged retrieval:
 - Runtime API docs: [docs/runtime-api.md](docs/runtime-api.md)
 - MCP docs: [docs/mcp-api.md](docs/mcp-api.md)
 - Agent MCP prompts: [docs/mcp-agent-prompts.md](docs/mcp-agent-prompts.md)
+- Project development strategy: [docs/development-strategy.md](docs/development-strategy.md)
+- Feature ledger: [FEATURES.md](FEATURES.md)
 - Roadmap status checklist: [docs/roadmap-status.md](docs/roadmap-status.md)
 - ADR for projection profiles and advisory semantic-quality gates: [adr/029-standardize-projection-profiles-and-advisory-semantic-quality-gates.md](adr/029-standardize-projection-profiles-and-advisory-semantic-quality-gates.md)
 - Compact-first staged retrieval execution plan: [plans/002_compact_first_staged_retrieval_plan.md](plans/002_compact_first_staged_retrieval_plan.md)
