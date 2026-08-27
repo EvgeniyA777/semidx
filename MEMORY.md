@@ -228,6 +228,7 @@ after this memory file.
 - `plans/007` is now archived as a historical architecture bridge. It must not
   be used as an active execution queue; current continuation ownership lives in
   `plans/018`, `plans/019`, and `plans/020`. The feature inventory in
+  root `FEATURES.md` plus
   `ideas/015_semidx_feature_inventory_for_prioritization.md` is the input for a
   future numbered plan after owner prioritization.
 
