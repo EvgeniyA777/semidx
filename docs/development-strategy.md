@@ -176,7 +176,8 @@ Current evidence:
 - Hardening landed in Stage 4: every command reports timings, stale-state
   recovery is tested against a real killed process and a real occupied port, and
   `./scripts/run-launcher-benchmark.sh` measures the reuse win (cold CLI 11.6s
-  versus 1.5s warm through the CLI client and 59ms over direct HTTP).
+  versus 1.7s warm through the CLI client and 47ms over direct HTTP, all three
+  paths doing the same resolve + fetch-detail work).
 
 Deliver next:
 

@@ -253,19 +253,35 @@ Summary:
 
 ### Measured latency (2026-08-28, this repository, 189 files, 3 runs each)
 
+> **Corrected 2026-08-28 after review.** The first published table measured the
+> direct-HTTP path with `resolve-context` only, while the cold CLI and the
+> launcher `request` both perform resolve **and** fetch-detail. That compared a
+> compact selection against a full detail payload, so the direct-HTTP figure was
+> not comparable to the other two and should not have carried a speedup claim.
+> The script now runs the same two stages on all three paths and the table below
+> is the re-measured result. The conclusion did not change — the detail stage is
+> cheap against a warm index — but the earlier number was measuring the wrong
+> thing.
+
 | Path | Median | Note |
 | --- | --- | --- |
-| `clojure -M:runtime` (cold CLI) | 11560 ms | JVM start plus a full index build every run |
-| `clojure -M:launcher request` (warm, JVM client) | 1468 ms | 7.9x faster than cold |
-| direct HTTP POST to the runtime (no JVM client) | 59 ms | 195.6x faster than cold |
-| `launcher start` to healthy | 1945 ms | `spawn_ms` 2, `health_wait_ms` 1943, 8 health attempts |
-| first `request` after a start | 11298 ms | pays the index build once |
-| `launcher stop` | 1152 ms | |
+| `clojure -M:runtime` (cold CLI) | 11643 ms | JVM start plus a full index build every run |
+| `clojure -M:launcher request` (warm, JVM client) | 1730 ms | 6.7x faster than cold |
+| direct HTTP to the runtime (no JVM client) | 47 ms | 247x faster than cold |
+| `launcher start` to healthy | 1901 ms | `spawn_ms` 2, `health_wait_ms` 1899, 8 health attempts |
+| first `request` after a start | 11674 ms | pays the index build once |
+| `launcher stop` | 1303 ms | |
+
+All three paths run resolve + fetch-detail. These are single-session
+observations on one machine, not a deterministic gate: across two runs of the
+script the warm client moved between 1.5 s and 1.8 s and the direct HTTP path
+between 47 ms and 59 ms. Quote them as an order of magnitude, not as a
+constant.
 
 Two honest readings of those numbers:
 
 - **The launcher removes the repeated index build, not the client's JVM start.**
-  A launcher `request` still pays ~1.4 s of its own JVM startup, which is the
+  A launcher `request` still pays ~1.5-1.8 s of its own JVM startup, which is the
   floor for any `clojure -M:` client. The direct HTTP measurement shows what the
   warm path actually costs once the client is not a JVM, and that is where the
   two-orders-of-magnitude difference lives.
@@ -288,7 +304,8 @@ Verification:
 
 - `clojure -M:test`: 447 tests, 2579 assertions, 0 failures, 0 errors
   (Stage 3 baseline was 442 / 2556).
-- `./scripts/run-launcher-benchmark.sh --root . --runs 3`: the table above.
+- `./scripts/run-launcher-benchmark.sh --root . --runs 3`: the corrected table
+  above (re-measured after the review finding).
 - `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
 - `bash -n scripts/run-launcher-benchmark.sh`, compile probes after every source
   edit, and `git diff --check`: passed.

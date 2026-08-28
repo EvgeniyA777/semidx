@@ -141,6 +141,26 @@
    :evidence_location (:evidence_location ev)
    :native_symbol (blank->nil (:native_symbol ev))})
 
+(def source-identity-anchors
+  "Fields that can tie evidence to the content it describes (ADR-046).
+
+  A per-document content digest, an LSP document version, or a revision-bound
+  artifact. Provider health, and a provider's own claim that it is fresh, are
+  not anchors."
+  [:content_digest :document_version :revision])
+
+(defn anchored-source-identity?
+  "True when source identity carries at least one anchor tying it to content."
+  [source-identity]
+  (boolean
+   (some (fn [field]
+           (let [value (get source-identity field)]
+             (cond
+               (string? value) (some? (blank->nil value))
+               (number? value) true
+               :else false)))
+         source-identity-anchors)))
+
 (defn fact-evidence-errors
   "Structured validation errors for a normalized FactEvidence record. Empty
   vector means valid."
@@ -162,7 +182,18 @@
     (and (= "exact" (:authority ev))
          (contains? #{"stale" "unknown"} (:freshness ev)))
     (conj {:code :exact-without-fresh-identity :field :freshness
-           :message "Exact authority requires fresh source identity (freshness must be exact)."})))
+           :message "Exact authority requires fresh source identity (freshness must be exact)."})
+
+    ;; ADR-046: "a provider whose source identity cannot be tied to the current
+    ;; content is stale and is excluded from exact authority". Declaring
+    ;; freshness is the provider's claim; the anchor is what makes it checkable,
+    ;; so an unanchored fact cannot hold exact authority however fresh it says
+    ;; it is.
+    (and (= "exact" (:authority ev))
+         (not (anchored-source-identity? (:source_identity ev))))
+    (conj {:code :exact-without-source-identity :field :source_identity
+           :message (str "Exact authority requires source identity tied to the current content: "
+                         "content_digest, document_version, or revision.")})))
 
 ;; --- Arbitration ---
 

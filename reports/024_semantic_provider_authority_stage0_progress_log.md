@@ -522,3 +522,37 @@ fallback_executor_or_model: Sonnet 5 for the orchestrator and adapters; not for
 model_availability_checked_at: not checked in this session.
 confidence: high
 ```
+
+## Review Repair (2026-08-28)
+
+External review of the Stage 1 completion found one High finding, reproduced and
+fixed here before Stage 2 begins.
+
+**High — exact authority could be claimed without source identity.**
+`fact-evidence-errors` checked only that `freshness` said `exact`, so
+`{:provider_id "scip" :authority "exact" :freshness "exact"}` validated with no
+errors. ADR-046 is explicit that this is not enough: "a provider whose source
+identity cannot be tied to the current content is stale and is excluded from
+exact authority", and it names the acceptable evidence as a per-document content
+digest, a matching LSP document version, or a revision-bound artifact, adding
+that provider health alone is not acceptable. Freshness is the provider's own
+claim; the anchor is what makes the claim checkable. Left unfixed, the Stage 2
+provider seam could have admitted unanchored SCIP or LSP facts at exact
+authority.
+
+Fix: `anchored-source-identity?` plus a new `:exact-without-source-identity`
+error. Exact authority now requires `source_identity` to carry
+`content_digest`, `document_version`, or `revision`; lower authorities are
+unaffected. The two requirements are reported independently, so a stale and
+unanchored fact names both failures.
+
+Test data was corrected in the same pass rather than worked around: the inline
+exact-authority fixtures and the fixture-driven goldens now carry an anchor,
+because unanchored exact evidence is not something a provider may legitimately
+produce and test data should not model it. New coverage asserts each anchor
+ADR-046 names is accepted, that a provider's freshness claim alone is rejected,
+that `{:provider_healthy true}` is rejected, and that lower authority still needs
+no anchor.
+
+Verification: `clojure -M:test` — 456 tests, 2642 assertions, 0 failures
+(the arbitration namespace went from 107 to 113 assertions).

@@ -5,7 +5,8 @@
 # start, which pays the runtime's index build and is reported separately:
 #   cold_cli     `clojure -M:runtime`  - JVM start plus a full index build per run
 #   warm_client  `clojure -M:launcher request` - JVM start plus a call to a warm runtime
-#   warm_http    direct HTTP POST to the running runtime - no JVM in the client at all
+#   warm_http    direct HTTP to the running runtime (resolve + fetch detail, the
+#                same two stages as the other two paths) - no JVM in the client
 #
 # The three are reported separately on purpose: the launcher removes the repeated
 # index build, not the client's own JVM start, and only `warm_http` shows what the
@@ -104,14 +105,27 @@ warm_client = warm_client[1:]
 
 with open(query_path) as f:
     query = json.load(f)
-body = json.dumps({"root_path": os.path.abspath(root), "query": query}).encode()
+root_abs = os.path.abspath(root)
+
+def post(path, payload):
+    request = urllib.request.Request(
+        f"http://{host}:{port}{path}",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=120) as response:
+        return json.loads(response.read())
 
 def http_call():
-    request = urllib.request.Request(
-        f"http://{host}:{port}/v1/retrieval/resolve-context",
-        data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=120) as response:
-        return response.read()
+    """Same two stages the CLI and the launcher perform: resolve, then detail.
+
+    Timing only the resolve stage would compare a compact selection against a
+    full detail payload and overstate the warm path."""
+    selection = post("/v1/retrieval/resolve-context",
+                     {"root_path": root_abs, "query": query})
+    return post("/v1/retrieval/fetch-context-detail",
+                {"root_path": root_abs,
+                 "selection_id": selection["selection_id"],
+                 "snapshot_id": selection["snapshot_id"]})
 
 warm_http = []
 for _ in range(runs):

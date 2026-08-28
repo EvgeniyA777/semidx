@@ -315,8 +315,9 @@ Current implementation state:
   the existing runtime HTTP endpoints.
 - Stage 4 closed the track with command latency reporting, stale-state recovery
   tested against a real killed process and a real occupied port, and
-  `./scripts/run-launcher-benchmark.sh`: cold CLI 11.6s versus 1.5s for a warm
-  launcher request and 59ms for a direct HTTP call on this repository.
+  `./scripts/run-launcher-benchmark.sh`: cold CLI 11.6s versus 1.7s for a warm
+  launcher request and 47ms for a direct HTTP call on this repository, with all
+  three paths performing the same resolve + fetch-detail work.
 - Stage 3 added the `mcp-http` profile end to end: the launcher starts, adopts,
   reuses, and stops a local MCP Streamable HTTP endpoint, refuses to adopt a
   server whose reported health `service` belongs to the other profile, refuses

@@ -29,19 +29,23 @@
 
 (def scip-handle1
   {:key (unit-key {:arity 1 :signature_precision "typed" :signature_key "java.lang.String"})
-   :evidence [{:provider_id "scip-java" :authority "exact" :freshness "exact"}]})
+   :evidence [{:provider_id "scip-java" :authority "exact" :freshness "exact"
+               :source_identity {:content_digest "sha256:orderservice"}}]})
 
 (def lsp-handle1
   {:key (unit-key {:arity 1 :signature_precision "typed" :signature_key "java.lang.String"})
-   :evidence [{:provider_id "java-lsp" :authority "exact" :freshness "exact"}]})
+   :evidence [{:provider_id "java-lsp" :authority "exact" :freshness "exact"
+               :source_identity {:document_version 42}}]})
 
 (def scip-handle2
   {:key (unit-key {:arity 2 :signature_precision "typed" :signature_key "java.lang.String,int"})
-   :evidence [{:provider_id "scip-java" :authority "exact" :freshness "exact"}]})
+   :evidence [{:provider_id "scip-java" :authority "exact" :freshness "exact"
+               :source_identity {:content_digest "sha256:orderservice"}}]})
 
 (def scip-handle1-int
   {:key (unit-key {:arity 1 :signature_precision "typed" :signature_key "int"})
-   :evidence [{:provider_id "scip-java" :authority "exact" :freshness "exact"}]})
+   :evidence [{:provider_id "scip-java" :authority "exact" :freshness "exact"
+               :source_identity {:content_digest "sha256:orderservice"}}]})
 
 ;; --- CanonicalFactKey identity ---
 
@@ -125,13 +129,41 @@
 
 (deftest exact-authority-requires-fresh-identity
   (testing "exact + stale/unknown freshness is rejected"
-    (is (= [:exact-without-fresh-identity]
+    (doseq [freshness ["stale" "unknown"]]
+      (is (some #{:exact-without-fresh-identity}
+                (map :code (fa/fact-evidence-errors
+                            (fa/normalize-fact-evidence
+                             {:provider_id "scip" :authority "exact" :freshness freshness
+                              :source_identity {:content_digest "sha256:abc"}})))))))
+
+  (testing "ADR-046: exact authority needs source identity tied to the content"
+    (is (= [:exact-without-source-identity]
            (map :code (fa/fact-evidence-errors
                        (fa/normalize-fact-evidence
-                        {:provider_id "scip" :authority "exact" :freshness "stale"})))))
+                        {:provider_id "scip" :authority "exact" :freshness "exact"}))))
+        "a provider's own freshness claim is not an anchor")
+    (is (= [:exact-without-source-identity]
+           (map :code (fa/fact-evidence-errors
+                       (fa/normalize-fact-evidence
+                        {:provider_id "scip" :authority "exact" :freshness "exact"
+                         :source_identity {:provider_healthy true}}))))
+        "provider health is explicitly not acceptable freshness evidence"))
+
+  (testing "each anchor ADR-046 names is accepted"
+    (doseq [source-identity [{:content_digest "sha256:abc"}
+                             {:document_version 42}
+                             {:revision "9f2c1a"}]]
+      (is (empty? (fa/fact-evidence-errors
+                   (fa/normalize-fact-evidence
+                    {:provider_id "scip" :authority "exact" :freshness "exact"
+                     :source_identity source-identity})))
+          (str "anchor rejected: " (pr-str source-identity)))))
+
+  (testing "lower authority does not need an anchor"
     (is (empty? (fa/fact-evidence-errors
                  (fa/normalize-fact-evidence
-                  {:provider_id "scip" :authority "exact" :freshness "exact"}))))))
+                  {:provider_id "java-tree-sitter" :authority "structural"
+                   :freshness "unknown"}))))))
 
 (deftest heuristic-evidence-is-valid-without-fresh-identity
   (is (empty? (fa/fact-evidence-errors
@@ -153,7 +185,8 @@
                  :target_key {:language "java" :symbol "example.Validator#validate"}
                  :flow_identity {:arg_index 0}}
         a (fa/arbitrate-facts [{:key rel-key
-                                :evidence [{:provider_id "scip-java" :authority "exact" :freshness "exact"}]}
+                                :evidence [{:provider_id "scip-java" :authority "exact" :freshness "exact"
+               :source_identity {:content_digest "sha256:orderservice"}}]}
                                {:key rel-key
                                 :evidence [{:provider_id "java-regex" :authority "heuristic" :freshness "unknown"}]}])]
     (is (= 1 (count (:facts a))) "same relation identity from two providers merges to one fact")
@@ -191,11 +224,15 @@
   exact authority to carry fresh source identity, while the fixture describes
   identity spellings, not run freshness."
   [spelling]
-  {:provider_id (:provider_id spelling)
-   :authority (:authority spelling)
-   :freshness (if (= "exact" (:authority spelling)) "exact" "unknown")
-   :native_symbol (or (:native_symbol spelling)
-                      (:native_exported_symbol spelling))})
+  (cond-> {:provider_id (:provider_id spelling)
+           :authority (:authority spelling)
+           :freshness (if (= "exact" (:authority spelling)) "exact" "unknown")
+           :native_symbol (or (:native_symbol spelling)
+                              (:native_exported_symbol spelling))}
+    ;; ADR-046 requires exact authority to be anchored to content; the fixture
+    ;; describes spellings, so the anchor is supplied here.
+    (= "exact" (:authority spelling))
+    (assoc :source_identity {:content_digest "sha256:fixture-corpus"})))
 
 (deftest java-overload-identity-fixture-parity-test
   (let [fixture (read-identity-fixture "java-overload-canonical-key.json")
@@ -332,7 +369,9 @@
                          :evidence [{:authority "exact"}]}]})
         errors (fa/fact-batch-errors batch)]
     (testing "a stale batch cannot lend exact authority to its facts"
-      (is (= [:exact-without-fresh-identity] (mapv :code errors)))
+      (is (= [:exact-without-fresh-identity :exact-without-source-identity]
+             (mapv :code errors))
+          "a stale, unanchored exact fact fails both ADR-046 requirements")
       (is (= 0 (:fact_index (first errors))))
       (is (= 0 (:evidence_index (first errors))))
       (is (= "scip-java" (:provider_id (first errors))))))
@@ -373,7 +412,8 @@
                            :evidence [{:authority "exact"}]}]}])]
     (is (empty? (:facts result))
         "an invalid batch must not reach arbitration")
-    (is (= [:exact-without-fresh-identity] (mapv :code (:errors result)))
+    (is (= [:exact-without-fresh-identity :exact-without-source-identity]
+           (mapv :code (:errors result)))
         "and its rejection must be reported, not swallowed")
     (is (= 1 (count (:batches result)))
         "while the provider itself stays visible")))
