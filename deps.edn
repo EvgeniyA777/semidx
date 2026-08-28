@@ -39,6 +39,9 @@
    :main-opts ["-m" "nrepl.cmdline"
                "--bind" "127.0.0.1"
                "--port" "0"]}
+  :test-direct
+  {:extra-paths ["test" "target/classes"]
+   :extra-deps {org.clojure/tools.namespace {:mvn/version "1.5.0"}}}
   :test
   {:extra-paths ["test" "target/classes"]
    :extra-deps {org.clojure/tools.namespace {:mvn/version "1.5.0"}}
