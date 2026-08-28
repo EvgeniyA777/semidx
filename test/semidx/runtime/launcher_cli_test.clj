@@ -4,6 +4,8 @@
             [clojure.test :refer [deftest is testing]]
             [semidx.runtime.http :as runtime-http]
             [semidx.runtime.launcher-cli :as launcher-cli]
+            [semidx.runtime.launcher-http :as launcher-http]
+            [semidx.runtime.launcher-process :as launcher-process]
             [semidx.runtime.launcher-state :as launcher-state])
   (:import [java.net ServerSocket]
            [java.nio.file Files]
@@ -366,3 +368,92 @@
     (testing "nothing is started or forwarded for a profile that cannot serve it"
       (is (empty? @(:starts deps)))
       (is (nil? (:response result))))))
+
+;; --------------------------------------------------------------------------
+;; Hardening: real processes, real ports, measured latency (plans/021 Stage 4)
+;; --------------------------------------------------------------------------
+
+(deftest command-reports-carry-timings-test
+  (let [clock (atom 0)
+        deps (assoc (fake-deps {:state owned-state :running true})
+                    :now-ms (fn [] (swap! clock + 5)))
+        result (launcher-cli/status deps base-opts)]
+    (is (number? (get-in result [:timings :total_ms])))
+    (is (pos? (get-in result [:timings :total_ms])))))
+
+(deftest start-reports-spawn-and-health-wait-separately-test
+  (let [clock (atom 0)
+        deps (assoc (fake-deps {}) :now-ms (fn [] (swap! clock + 10)))
+        result (launcher-cli/start! deps base-opts)
+        timings (:timings result)]
+    (is (= :started (:decision result)))
+    (testing "startup is broken into spawn and health wait, not one opaque number"
+      (is (pos? (:spawn_ms timings)))
+      (is (number? (:health_wait_ms timings)))
+      (is (pos? (:health_attempts timings)))
+      (is (= (:startup_ms timings) (+ (:spawn_ms timings) (:health_wait_ms timings))))
+      (is (>= (:total_ms timings) (:startup_ms timings))))))
+
+(deftest request-reports-forwarded-call-latency-test
+  (let [clock (atom 0)
+        deps (assoc (fake-deps {:state owned-state :running true})
+                    :now-ms (fn [] (swap! clock + 7)))
+        result (launcher-cli/request! deps (assoc base-opts :query {:intent "x"}))]
+    (is (true? (:ok result)))
+    (is (pos? (get-in result [:timings :request_ms])))
+    (is (>= (get-in result [:timings :total_ms])
+            (get-in result [:timings :request_ms])))))
+
+(deftest killed-process-is-detected-and-replaced-test
+  (let [process (.start (ProcessBuilder. ["sleep" "30"]))
+        pid (.pid process)]
+    (try
+      (is (true? (launcher-process/pid-alive? pid))
+          "a live OS process must be observed as alive")
+      (.destroyForcibly process)
+      (.waitFor process)
+      (is (false? (launcher-process/pid-alive? pid))
+          "a killed process must be observed as dead")
+      (let [deps (assoc (fake-deps {:state (assoc owned-state :pid pid) :running false})
+                        :pid-alive? launcher-process/pid-alive?)
+            result (launcher-cli/start! deps base-opts)]
+        (testing "state pointing at a killed process is cleaned and replaced"
+          (is (= :stale-cleaned (:decision result)))
+          (is (= :pid_not_alive (:reason result)))
+          (is (= 1 (count @(:starts deps))))))
+      (finally
+        (.destroyForcibly process)))))
+
+(deftest occupied-port-without-a-healthy-runtime-does-not-start-a-second-one-test
+  (with-open [socket (ServerSocket. 0)]
+    (let [port (.getLocalPort socket)
+          starts (atom [])
+          stops (atom [])
+          deps (assoc (fake-deps {})
+                      ;; real health client and real port probe against a socket
+                      ;; that accepts connections but never speaks HTTP
+                      :check-health (fn [runtime opts]
+                                      (launcher-http/check-health runtime opts))
+                      :port-open? launcher-process/port-open?
+                      :start-process! (fn [runtime opts]
+                                        (swap! starts conj {:runtime runtime :opts opts})
+                                        {:pid 4321 :command ["fake"]})
+                      :stop-process! (fn [pid _]
+                                       (swap! stops conj pid)
+                                       {:stopped true :reason :terminated}))
+          result (launcher-cli/start! deps (assoc base-opts
+                                                  :port port
+                                                  :start_timeout_ms 300
+                                                  :start_poll_interval_ms 50))]
+      (testing "an occupied but unhealthy port fails loudly instead of reporting reuse"
+        (is (= :blocked (:decision result)))
+        (is (= :runtime_start_unhealthy (:reason result)))
+        (is (false? (get-in result [:health :healthy]))))
+
+      (testing "the process started into a taken port is cleaned up, not left behind"
+        (is (= 1 (count @starts)))
+        (is (= [4321] @stops))
+        (is (nil? @(:state-atom deps))))
+
+      (testing "the failed attempt still reports how long it waited"
+        (is (number? (get-in result [:timings :health_wait_ms])))))))

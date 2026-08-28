@@ -192,7 +192,7 @@ row below carries a required safety step. The safety step is not optional.
   - `./scripts/run-semantic-quality-report.sh`
   - `clojure -M:ccc check --root .`
 - For language-lane work, use `./scripts/validate-language-onboarding.sh <language>` and include `--skip-gates` only when a fast structural check is sufficient.
-- For benchmarks, use `./scripts/run-benchmarks.sh`.
+- For benchmarks, use `./scripts/run-benchmarks.sh`, and `./scripts/run-launcher-benchmark.sh` for local runtime-reuse latency.
 - For clojure-mcp REPL smoke, use `clojure -M:nrepl`, then `list_nrepl_ports`, then a small `clojure_eval` such as `(+ 1 2)` on the discovered port.
 - For MCP runtime smoke, use `clojure -M:mcp` or `clojure -M:mcp-http --host 127.0.0.1 --port 8791` as appropriate.
 - For HTTP/gRPC runtime edges, use `clojure -M:runtime-http` or `clojure -M:runtime-grpc` as appropriate.

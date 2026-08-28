@@ -1,9 +1,9 @@
 ---
 title: "Persistent JVM Runtime Reuse Progress Log"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-08-28"
 ---
 
@@ -230,10 +230,80 @@ Known gaps carried into Stage 4:
 - `lsp`-style readiness of the MCP endpoint is assumed from `/health`; a slow
   first index build is still charged to the first client request.
 
+## Stage 4: Hardening And Benchmark Gate
+
+Status: completed on 2026-08-28.
+
+Summary:
+
+- Every launcher command now reports `timings`. `start` separates `spawn_ms`
+  from `health_wait_ms` and `health_attempts`, `request` adds `request_ms`, and
+  all commands carry `total_ms`. The clock is an injectable `:now-ms` role, so
+  timing is asserted in tests without sleeping.
+- `request` prints its measurement to stderr and keeps stdout exactly the
+  runtime payload, so the reuse claim is checkable without breaking pipes.
+- Stale-state recovery is now tested against real OS resources rather than only
+  mocked ones: a real spawned process is killed and its dead PID drives the
+  cleanup-and-replace path, and a real occupied port with the real health client
+  produces `runtime_start_unhealthy`, cleans up the process it started, and
+  leaves no state behind.
+- Added `scripts/run-launcher-benchmark.sh`, which times three paths for one
+  query and reports them separately instead of collapsing them into a single
+  speedup claim.
+
+### Measured latency (2026-08-28, this repository, 189 files, 3 runs each)
+
+| Path | Median | Note |
+| --- | --- | --- |
+| `clojure -M:runtime` (cold CLI) | 11560 ms | JVM start plus a full index build every run |
+| `clojure -M:launcher request` (warm, JVM client) | 1468 ms | 7.9x faster than cold |
+| direct HTTP POST to the runtime (no JVM client) | 59 ms | 195.6x faster than cold |
+| `launcher start` to healthy | 1945 ms | `spawn_ms` 2, `health_wait_ms` 1943, 8 health attempts |
+| first `request` after a start | 11298 ms | pays the index build once |
+| `launcher stop` | 1152 ms | |
+
+Two honest readings of those numbers:
+
+- **The launcher removes the repeated index build, not the client's JVM start.**
+  A launcher `request` still pays ~1.4 s of its own JVM startup, which is the
+  floor for any `clojure -M:` client. The direct HTTP measurement shows what the
+  warm path actually costs once the client is not a JVM, and that is where the
+  two-orders-of-magnitude difference lives.
+- **The win begins at the second request.** The first request after a start
+  costs about as much as a cold run, because the runtime builds its index then.
+  Reuse pays off across a session, not within a single invocation.
+
+Changed files:
+
+- `src/semidx/runtime/launcher_cli.clj` — injectable `:now-ms`, timings on every
+  command, request measurement on stderr, `stop` body extracted so the timing
+  wrapper stays one concept.
+- `test/semidx/runtime/launcher_cli_test.clj` — timing assertions, killed-process
+  recovery against a real process, occupied-port failure against a real socket.
+- `scripts/run-launcher-benchmark.sh` — the benchmark.
+- `docs/runtime-api.md`, `README.md`, `RULES.md` — timings and benchmark entry
+  points.
+
+Verification:
+
+- `clojure -M:test`: 447 tests, 2579 assertions, 0 failures, 0 errors
+  (Stage 3 baseline was 442 / 2556).
+- `./scripts/run-launcher-benchmark.sh --root . --runs 3`: the table above.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+- `bash -n scripts/run-launcher-benchmark.sh`, compile probes after every source
+  edit, and `git diff --check`: passed.
+
+### Exit decision (plan's own gate)
+
+The plan says to keep the launcher path only if it measurably removes cold-start
+latency without adding ambiguous runtime ownership or stale-server failure modes.
+Both halves are now evidenced: a 7.9x measured win for the CLI client and 195x
+for a non-JVM client, with ownership recorded per slot (`owned true/false`,
+`stop` refusing runtimes it did not start) and stale servers handled by the
+recovery paths tested above. The track can close.
+
 ## Next Stage
 
-Stage 4 should harden the launcher and close the benchmark gate:
-
-- startup, warm request, and stop latency measurements;
-- stale state recovery tests around killed processes and occupied ports;
-- a small benchmark comparing one-shot CLI cold start against launcher reuse.
+None. `plans/021` is complete through Stage 4. Remaining launcher work is
+optional and not planned here: a gRPC profile, supervision/restart policy, and
+readiness that waits for the first index build rather than for the HTTP port.

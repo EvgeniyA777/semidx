@@ -173,12 +173,16 @@ Current evidence:
   endpoint's process lifetime while the MCP client owns the protocol, health is
   matched by reported service so profiles cannot adopt each other, and `request`
   is refused for it. MCP stdio stays host-lifetime scoped by construction.
-- Hardening benchmarks are still open.
+- Hardening landed in Stage 4: every command reports timings, stale-state
+  recovery is tested against a real killed process and a real occupied port, and
+  `./scripts/run-launcher-benchmark.sh` measures the reuse win (cold CLI 11.6s
+  versus 1.5s warm through the CLI client and 59ms over direct HTTP).
 
 Deliver next:
 
-- Add startup, warm-request, stop, stale-state, killed-process, and occupied-port
-  benchmark/hardening coverage.
+- Nothing planned. Optional follow-ups are a gRPC profile, supervision/restart
+  policy, and readiness that waits for the first index build instead of the HTTP
+  port.
 
 Exit decision:
 

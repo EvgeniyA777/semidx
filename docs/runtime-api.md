@@ -1385,6 +1385,18 @@ Behavior:
   one asked for. Finding the other profile's server on the requested port is
   reported as `health_service_mismatch` instead of being adopted.
 
+Every command reports `timings`. `status` and `stop` carry `total_ms`; `start`
+also separates `spawn_ms` from `health_wait_ms` so a slow start is attributable;
+`request` adds `request_ms` for the forwarded call, printed to stderr so stdout
+stays exactly the runtime payload.
+
+Measure the reuse win with `./scripts/run-launcher-benchmark.sh [--root .]
+[--runs 3] [--port 8799] [--out report.json]`. It times three paths for one
+query — the one-shot CLI, a launcher `request` (a JVM client against a warm
+runtime), and a direct HTTP call (no JVM in the client) — and reports the first
+request after a start separately, because that one pays the runtime's index
+build.
+
 State layout: one slot per workspace and profile, keyed by workspace identity,
 under `~/.cache/semidx/runtime/<workspace_key>-<profile>/`. It holds
 `state.edn`, `start.lock`, and `runtime.log`. State never lives inside the

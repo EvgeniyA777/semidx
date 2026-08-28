@@ -79,6 +79,7 @@ Canonical retrieval flow is compact-first staged retrieval:
 - Setup tree-sitter grammars (optional; Clojure/Elixir/Java/TypeScript): `./scripts/setup-tree-sitter-grammars.sh`
 - Scaffold new language adapter onboarding: `./scripts/new-language-adapter.sh <language> --ext .ext1,.ext2`
 - Validate language onboarding checklist and gates: `./scripts/validate-language-onboarding.sh <language>` (`--skip-gates` for fast checks)
+- Launcher reuse benchmark (cold CLI vs warm launcher vs direct HTTP): `./scripts/run-launcher-benchmark.sh --root . --runs 3`
 - Retrieval benchmarks: `./scripts/run-benchmarks.sh` (`--fixture-prefix retrieval_elixir_ --elixir-engine regex` for the Elixir regex baseline subset)
 - Offline replay evaluation: `clojure -M:eval --root . --dataset path/to/dataset.json --out "${TMPDIR:-.tmp}/sci-eval.json"`
 - Score a policy over a replay dataset: `clojure -M:eval score-policy --root . --dataset path/to/dataset.json --policy-file path/to/policy.edn --out "${TMPDIR:-.tmp}/sci-score.json"`

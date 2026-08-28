@@ -41,6 +41,7 @@
    :start-process! launcher-process/start-runtime!
    :stop-process! launcher-process/stop-runtime!
    :now (fn [] (str (Instant/now)))
+   :now-ms (fn [] (System/currentTimeMillis))
    :sleep (fn [ms] (Thread/sleep (long ms)))})
 
 (defn- client-opts
@@ -119,16 +120,28 @@
           :process (:process assessment)}
          extra))
 
+(defn- now-ms
+  [deps]
+  ((or (:now-ms deps) (fn [] (System/currentTimeMillis)))))
+
 (defn- await-health
+  "Poll until the runtime reports healthy, the deadline passes, or the caller's
+  timeout is reached. Returns the health observation with the waited time, so a
+  slow start is visible as a number rather than as a feeling."
   [deps desired opts]
   (let [timeout-ms (or (:start_timeout_ms opts) default-start-timeout-ms)
         interval-ms (or (:start_poll_interval_ms opts) default-start-poll-interval-ms)
-        deadline (+ (System/currentTimeMillis) (long timeout-ms))]
+        started-ms (now-ms deps)
+        deadline (+ started-ms (long timeout-ms))]
     (loop [attempt 0]
-      (let [health ((:check-health deps) desired (client-opts opts))]
+      (let [health ((:check-health deps) desired (client-opts opts))
+            elapsed (- (now-ms deps) started-ms)]
         (cond
-          (:healthy health) health
-          (>= (System/currentTimeMillis) deadline) (assoc health :timed_out true)
+          (:healthy health) (assoc health :waited_ms elapsed :health_attempts (inc attempt))
+          (>= (now-ms deps) deadline) (assoc health
+                                             :timed_out true
+                                             :waited_ms elapsed
+                                             :health_attempts (inc attempt))
           :else (do ((:sleep deps) interval-ms)
                     (recur (inc attempt))))))))
 
@@ -136,6 +149,7 @@
   [deps desired opts assessment]
   (let [home (:home deps)
         log-file ((:log-file deps) home desired)
+        spawn-started-ms (now-ms deps)
         started ((:start-process! deps)
                  desired
                  {:log_file log-file
@@ -143,7 +157,12 @@
                   :clojure_bin (:clojure_bin opts)
                   :env (when (some-> (:api_key opts) str str/trim not-empty)
                          {:SEMIDX_RUNTIME_API_KEY (:api_key opts)})})
-        health (await-health deps desired opts)]
+        spawn-ms (- (now-ms deps) spawn-started-ms)
+        health (await-health deps desired opts)
+        timings {:spawn_ms spawn-ms
+                 :health_wait_ms (:waited_ms health)
+                 :health_attempts (:health_attempts health)
+                 :startup_ms (+ spawn-ms (long (or (:waited_ms health) 0)))}]
     (if (:healthy health)
       (let [now ((:now deps))
             state (assoc (select-keys desired [:schema_version :root_path :repo_key
@@ -156,7 +175,8 @@
         (report "start" desired (assoc assessment :state state :health health)
                 {:started true
                  :pid (:pid started)
-                 :log_path (str log-file)}))
+                 :log_path (str log-file)
+                 :timings timings}))
       (do
         (when (:pid started)
           ((:stop-process! deps) (:pid started) {}))
@@ -167,7 +187,8 @@
          :runtime (runtime-summary desired)
          :health (safe-health health)
          :pid (:pid started)
-         :log_path (str log-file)}))))
+         :log_path (str log-file)
+         :timings timings}))))
 
 (defn- persist-adoption!
   "Record an adopted runtime so later `status` and `stop` calls know this
@@ -206,54 +227,72 @@
                                          :stale_cleaned true)))
              :started (start-runtime! deps desired opts locked))))))))
 
+(defn- timed
+  "Run a command and record how long it took.
+
+  Every command reports `timings.total_ms`, so the reuse claim can be read off
+  the command output instead of being taken on trust."
+  [deps f]
+  (let [started-ms (now-ms deps)
+        result (f)]
+    (assoc result :timings (assoc (:timings result)
+                                  :total_ms (- (now-ms deps) started-ms)))))
+
 (defn status
   "Report whether a project-scoped runtime is currently reusable."
   ([opts] (status (default-deps) opts))
   ([deps opts]
-   (let [desired (launcher/desired-runtime (:root opts) opts)
-         assessment (assess deps desired opts nil)]
-     (report "status" desired assessment
-             {:running (= :reused (get-in assessment [:decision :decision]))
-              :state_path (str ((:state-file deps) (:home deps) desired))}))))
+   (timed deps
+          (fn []
+            (let [desired (launcher/desired-runtime (:root opts) opts)
+                  assessment (assess deps desired opts nil)]
+              (report "status" desired assessment
+                      {:running (= :reused (get-in assessment [:decision :decision]))
+                       :state_path (str ((:state-file deps) (:home deps) desired))}))))))
 
 (defn start!
   "Start a project-scoped runtime unless a healthy one can be reused."
   ([opts] (start! (default-deps) opts))
   ([deps opts]
-   (let [desired (launcher/desired-runtime (:root opts) opts)]
-     (assoc (ensure-runtime! deps desired opts) :command "start"))))
+   (timed deps
+          (fn []
+            (let [desired (launcher/desired-runtime (:root opts) opts)]
+              (assoc (ensure-runtime! deps desired opts) :command "start"))))))
+
+(defn- stop-runtime!
+  [deps opts]
+  (let [home (:home deps)
+        desired (launcher/desired-runtime (:root opts) opts)
+        state ((:read-state deps) home desired)
+        base {:command "stop" :runtime (runtime-summary desired)}]
+    (cond
+      (nil? state)
+      (assoc base :decision :noop :reason :no_state)
+
+      (false? (:owned state))
+      (assoc base
+             :decision :blocked
+             :reason :not_launcher_owned
+             :state (safe-state state))
+
+      (nil? (:pid state))
+      (do
+        ((:clear-state! deps) home desired)
+        (assoc base :decision :stale-cleaned :reason :no_pid_recorded))
+
+      :else
+      (let [result ((:stop-process! deps) (:pid state) (select-keys opts [:timeout_ms]))]
+        ((:clear-state! deps) home desired)
+        (assoc base
+               :decision :stopped
+               :reason (:reason result)
+               :pid (:pid state)
+               :forced (boolean (:forced result)))))))
 
 (defn stop!
   "Stop the launcher-owned runtime for this project slot."
   ([opts] (stop! (default-deps) opts))
-  ([deps opts]
-   (let [home (:home deps)
-         desired (launcher/desired-runtime (:root opts) opts)
-         state ((:read-state deps) home desired)
-         base {:command "stop" :runtime (runtime-summary desired)}]
-     (cond
-       (nil? state)
-       (assoc base :decision :noop :reason :no_state)
-
-       (false? (:owned state))
-       (assoc base
-              :decision :blocked
-              :reason :not_launcher_owned
-              :state (safe-state state))
-
-       (nil? (:pid state))
-       (do
-         ((:clear-state! deps) home desired)
-         (assoc base :decision :stale-cleaned :reason :no_pid_recorded))
-
-       :else
-       (let [result ((:stop-process! deps) (:pid state) (select-keys opts [:timeout_ms]))]
-         ((:clear-state! deps) home desired)
-         (assoc base
-                :decision :stopped
-                :reason (:reason result)
-                :pid (:pid state)
-                :forced (boolean (:forced result))))))))
+  ([deps opts] (timed deps (fn [] (stop-runtime! deps opts)))))
 
 (defn- read-query
   [path]
@@ -265,40 +304,50 @@
   (with-open [w (io/writer path)]
     (json/write data w :indent true)))
 
+(defn- run-request-command
+  [deps opts]
+  (let [desired (launcher/desired-runtime (:root opts) opts)]
+    (if-not (= "runtime-http" (:profile desired))
+      {:command "request"
+       :ok false
+       :decision :blocked
+       :reason :request_unsupported_for_profile
+       :runtime (runtime-summary desired)
+       :hint (str "the " (:profile desired) " profile is driven by an MCP client, "
+                  "not by launcher request; use `status`/`start` and point the "
+                  "client at the endpoint")}
+      (let [ensured (ensure-runtime! deps desired opts)]
+        (if-not (contains? ok-decisions (:decision ensured))
+          (assoc ensured :command "request" :ok false)
+          (let [query (or (:query opts) (read-query (:query_path opts)))
+                request-started-ms (now-ms deps)
+                response ((:send-request deps)
+                          desired
+                          {:root_path (:root_path desired)
+                           :query query
+                           :paths (:paths opts)}
+                          (client-opts opts))
+                request-ms (- (now-ms deps) request-started-ms)]
+            (assoc (dissoc ensured :state :health :process)
+                   :command "request"
+                   :ok (boolean (:ok? response))
+                   :reused (= :reused (:decision ensured))
+                   :timings (assoc (:timings ensured) :request_ms request-ms)
+                   :response response)))))))
+
 (defn request!
   "Run one retrieval request against a reused or freshly started runtime.
 
   Only the `runtime-http` profile serves this request path. An MCP HTTP runtime
   speaks JSON-RPC over its own session-bearing endpoint, so the request is
   refused here instead of being forwarded to a path that server does not have,
-  and no process is started for it."
+  and no process is started for it.
+
+  The report carries `timings.request_ms` for the forwarded call and
+  `timings.total_ms` for the whole command, so a warm reuse can be compared
+  against a cold start without external instrumentation."
   ([opts] (request! (default-deps) opts))
-  ([deps opts]
-   (let [desired (launcher/desired-runtime (:root opts) opts)]
-     (if-not (= "runtime-http" (:profile desired))
-       {:command "request"
-        :ok false
-        :decision :blocked
-        :reason :request_unsupported_for_profile
-        :runtime (runtime-summary desired)
-        :hint (str "the " (:profile desired) " profile is driven by an MCP client, "
-                   "not by launcher request; use `status`/`start` and point the "
-                   "client at the endpoint")}
-       (let [ensured (ensure-runtime! deps desired opts)]
-         (if-not (contains? ok-decisions (:decision ensured))
-           (assoc ensured :command "request" :ok false)
-           (let [query (or (:query opts) (read-query (:query_path opts)))
-                 response ((:send-request deps)
-                           desired
-                           {:root_path (:root_path desired)
-                            :query query
-                            :paths (:paths opts)}
-                           (client-opts opts))]
-             (assoc (dissoc ensured :state :health :process)
-                    :command "request"
-                    :ok (boolean (:ok? response))
-                    :reused (= :reused (:decision ensured))
-                    :response response))))))))
+  ([deps opts] (timed deps (fn [] (run-request-command deps opts)))))
 
 (defn- parse-args
   [args]
@@ -341,6 +390,11 @@
     (if-not (:ok result)
       (do (print-report! result) 1)
       (let [payload (get-in result [:response :result])]
+        ;; The measurement goes to stderr so stdout stays exactly the runtime
+        ;; payload that callers pipe, while the reuse claim stays checkable.
+        (binding [*out* *err*]
+          (println (json/write-str (select-keys result [:command :decision :reused :timings])
+                                   :escape-slash false)))
         (if-let [out-path (:out_path opts)]
           (do (write-json! out-path payload)
               (println (str "wrote " out-path)))

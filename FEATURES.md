@@ -63,7 +63,7 @@ execution in `plans/`, and historical context in `notes/` or `reports/`.
 | P0 | Negative-utility retrieval corpus | in_progress | `plans/020`, `notes/2026-08-27-zig-negative-utility-triage.md` | Prove the harness catches losses, not only wins, starting with Zig failures. |
 | P1 | Semantic provider authority migration | planned | `plans/018`, ADR-046, ADR-047 | Approve fact identity and provider arbitration before source rollout. |
 | P1 | One-shot context delivery | planned | `plans/019` | Ship additive MCP slice only after budget/accounting invariants hold. |
-| P1 | Persistent JVM runtime reuse | in_progress | `plans/021`, runtime docs | Runtime-http reuse shipped in Stage 2 and the MCP HTTP profile in Stage 3; hardening benchmarks (Stage 4) remain. |
+| P1 | Persistent JVM runtime reuse | done | `plans/021`, runtime docs | Runtime-http (Stage 2), MCP HTTP profile (Stage 3), and hardening plus the measured reuse benchmark (Stage 4) are shipped. |
 | P2 | Agent workflow context surfaces | concept | `ideas/011`, `ideas/008`, `ideas/009` | Pick one workflow surface after prioritization. |
 | P2 | Documentation graph | concept | `SPEC.md` Phase 2, `ideas/013` | Start only through provider catalog and lifecycle-aware authority. |
 | P3 | Code-documentation linkage | concept | `SPEC.md` Phase 3, `ideas/011` | Require deterministic anchors and false-positive evaluation. |
@@ -313,6 +313,10 @@ Current implementation state:
   and start lock outside the repository, health-based reuse, adoption of an
   already-running local runtime, stale-state cleanup, and request forwarding to
   the existing runtime HTTP endpoints.
+- Stage 4 closed the track with command latency reporting, stale-state recovery
+  tested against a real killed process and a real occupied port, and
+  `./scripts/run-launcher-benchmark.sh`: cold CLI 11.6s versus 1.5s for a warm
+  launcher request and 59ms for a direct HTTP call on this repository.
 - Stage 3 added the `mcp-http` profile end to end: the launcher starts, adopts,
   reuses, and stops a local MCP Streamable HTTP endpoint, refuses to adopt a
   server whose reported health `service` belongs to the other profile, refuses

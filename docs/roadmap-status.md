@@ -143,6 +143,6 @@ canonical default without comparative evidence and a new decision.
 The independent `plans/021` runtime-reuse track is integration work, not
 semantic-core work: existing MCP stdio, MCP HTTP, runtime HTTP, and runtime gRPC
 modes are long-lived once started, while `clojure -M:runtime` is a one-shot CLI
-that exits after a request. Runtime HTTP and MCP HTTP launcher reuse now
-exist behind the `:launcher` alias; launcher hardening and benchmark coverage
-(Stage 4) remain open.
+that exits after a request. Runtime HTTP and MCP HTTP launcher reuse both
+ship behind the `:launcher` alias, and `plans/021` is completed: hardening,
+command latency reporting, and the cold-versus-warm benchmark landed in Stage 4.
