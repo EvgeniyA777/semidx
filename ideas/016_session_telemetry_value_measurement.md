@@ -189,27 +189,53 @@ anything:
   of the event stream, not reconstructed afterwards, or the sample selects
   itself — the hard tasks quietly end up in the arm somebody thought needed the
   index.
-- **Tasks are not repeated across arms.** The same task cannot honestly be run
-  twice: after the first run the work is done, the repository has changed, and
-  the second run already knows the answer. So this is a between-tasks
-  randomised comparison of distributions, not a paired A/B of one task.
-  Repeating one task under two arms is exactly the isolated-clone design of the
-  paused `plans/020`, with the corpus and second agent it required.
-- **Difficulty is the confounder.** Spend varies more between tasks than
-  between arms, so the comparison needs either enough tasks for the difference
-  to clear that noise, or stratification by a coarse task class. Stating the
-  needed volume up front is part of the design, not an afterthought.
+- **Each arm gets its own clone of the repository.** Two checkouts of the same
+  revision, the same task, the same wording. The working tree of one arm is
+  never what the other arm sees, so the same task genuinely can be run twice and
+  the comparison becomes **paired**. Pairing is what removes the dominant
+  confounder: spend varies far more between tasks than between arms, and a
+  paired difference cancels the task out instead of having to out-sample it.
+  The isolation machinery for this already exists —
+  `harness/prepare-attempt-workspace!` clones a repository at a revision into a
+  fresh temporary workspace per attempt.
+- **Contamination moves from the tree into the operator.** With clones the files
+  are clean, but knowledge is not: whoever runs the second arm may already know
+  the answer. For an LLM agent a fresh session is a real reset, with three
+  exceptions that must be closed explicitly — the auto-memory directory, the
+  repository's own `MEMORY.md` and rule files, and any handoff document written
+  during the first arm. Arm order must also be randomised, because the second
+  arm is the contaminated one whichever arm it is.
+- **The model is not deterministic**, so one run per arm measures noise as much
+  as arms. Repeats per arm with recorded seeds are part of the design; the
+  paused harness already carries `seed` and `sequence_index` for exactly this.
 - **There is no blinding.** The operator knows which arm is running and may
   work a no-index task harder, or abandon it sooner. This cannot be removed
   from self-experimentation; it can only be recorded and kept in view.
 - **The no-index arm needs its own success signal.** The trace-based verdict
   above is semidx-centric and simply does not exist when semidx was not used, so
-  task success in that arm has to come from somewhere else — the outcome of the
-  work itself.
+  task success in that arm has to come from the outcome of the work itself. This
+  is where a ground truth per task becomes unavoidable: comparing two arms
+  requires the same acceptance check for both. That is a corpus by another name,
+  and it should be admitted rather than worked around.
+
+  The cheap way to build one without authoring puzzles is to take tasks from the
+  repository's **own history**: a real commit or pull request becomes the task,
+  its message or issue becomes the wording, the parent revision becomes the
+  starting clone, and the tests that commit added or changed become the
+  acceptance check. The tasks are then real work that actually happened, and the
+  success verdict is objective and arm-neutral.
 
 Withholding is cheap to implement: a task-level switch that makes the semidx
 tools unavailable for that task and records the assignment as an event. The
 expensive part is the discipline around it, not the code.
+
+What this design does **not** need is the part of `plans/020` that caused the
+pause: no purpose-built agent and no provider client inside semidx. The agent is
+whichever real agent the owner already works with, and its token spend is read
+afterwards from its own session transcript, which the probe above confirms is
+recorded and joinable. What the paused work does still contribute is workspace
+cloning, run and attempt identity, provider usage normalisation, and the
+aggregator.
 
 A weaker and free alternative is a **cutover comparison** — the same repository
 and task mix before and after a capability lands — which controls nothing but
