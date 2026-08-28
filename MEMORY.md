@@ -259,8 +259,11 @@ after this memory file.
    sessions — count tokens as the work happens, record whether semidx helped or
    not, aggregate by task and by process, analyse afterwards — instead of a
    synthetic A/B/C/D run with a purpose-built agent. What to build for that is
-   an open question the owner is thinking through; do not design or start it
-   unilaterally. Stages 1-3 and the live arm runner are delivered and committed
+   an open question the owner is thinking through; the rewritten core idea is
+   captured in `ideas/016_session_telemetry_value_measurement.md` (concept
+   only - do not implement it without the owner). Its two unresolved gaps are
+   who authors the worked/did-not-work verdict and how the host session's own
+   token spend is joined to semidx events. Stages 1-3 and the live arm runner are delivered and committed
    but inert; no benchmark run exists and no live provider call was ever made.
    `plans/020`, `reports/021`, and `reports/023` are marked
    `status: blocked` / `agent_action: do_not_use_for_current_work`.
