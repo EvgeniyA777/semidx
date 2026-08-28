@@ -40,7 +40,8 @@ and is appended by later stages.
 | --- | --- |
 | 0 — Independent review and compatibility baseline | **completed** |
 | 1 — Evidence model and arbitration kernel | **completed** 2026-08-28 — kernel, FactBatch, executable golden parity, and round-trip coverage all delivered |
-| 2–7 | not started |
+| 2 — Provider plan and legacy adapter shadow path | **completed** 2026-08-28 |
+| 3–7 | not started |
 
 ## Scope Executed (Stage 0)
 
@@ -556,3 +557,128 @@ no anchor.
 
 Verification: `clojure -M:test` — 456 tests, 2642 assertions, 0 failures
 (the arbitration namespace went from 107 to 113 assertions).
+
+---
+
+# Stage 2 — Provider Plan And Legacy Adapter Shadow Path (2026-08-28)
+
+## Scope
+
+Additive and default-off. The seam runs beside default extraction and writes
+nothing into a snapshot.
+
+## Delivered
+
+| Namespace | Role |
+| --- | --- |
+| `src/semidx/runtime/providers.clj` | data-first catalog: versioned descriptors, runtime status probes, source-identity digest, and the role functions that turn one provider's parse into facts |
+| `src/semidx/runtime/provider_selection.clj` | planning policy: deterministic, bounded `ProviderPlan` per file and operation, with every exclusion recorded |
+| `src/semidx/runtime/provider_execution.clj` | orchestrator: bounded concurrency, per-provider timeout, failure isolation, gap tracking, `FactBatch` emission, and the end-to-end shadow entry point |
+| `test/semidx/runtime/{providers,provider_selection,provider_execution}_test.clj` | 24 tests, 101 assertions |
+
+## Decisions
+
+- **Descriptors are data; roles are a separate map.** The plan asks the catalog
+  to own "status, freshness, and execution functions". Descriptors stay plain
+  serializable data so the catalog can be diffed and persisted, and executable
+  roles live beside them keyed by `provider_id`. A test asserts the descriptors
+  survive `read-string . pr-str`.
+- **Stage 2 claims `definitions` only.** The first draft of the catalog also
+  claimed `document_symbols` and `call_hierarchy`, which these adapters do not
+  produce: every run would have reported two permanent gaps for operations
+  nothing implements. Capability claims now match what the runner emits, and the
+  richer profile belongs to the providers that actually implement it.
+- **Variant C is produced, not restated.** The Java adapters emit
+  `signature_precision: arity_only` with a `nil` signature key, taking arity from
+  the parser's own `method_arity`; TypeScript units expose no arity and so carry
+  no overload identity. Both match the Stage 0 identity fixtures exactly, which
+  was verified against real parser output before the adapters were written rather
+  than assumed.
+- **Evidence is anchored.** Each provider run digests the content it parsed
+  (`sha256:...`) and attaches it as `source_identity`, so Stage 2 evidence
+  satisfies the ADR-046 anchor rule added in the review repair. Freshness is not
+  authority: these providers stay structural and heuristic regardless.
+- **Failure is a batch, not an exception.** A provider that throws or hangs
+  yields a batch with no facts, `coverage.complete false`, and a
+  `:provider_failed` / `:provider_timeout` diagnostic. Gap tracking then
+  distinguishes "no provider was admitted" from "providers ran and found
+  nothing", so an all-failed run cannot look like an empty file.
+
+## Deviation from the plan's wording (named, not glossed)
+
+The plan places the orchestrator "invoked from the file-indexing path that
+currently calls `adapters/parse-file` directly". **`index.clj` and
+`adapters.clj` were not modified.** The seam is a standalone entry point
+(`provider-execution/shadow-facts-for-file`).
+
+Reason: Stage 2's own exit criterion is that default output does not change, and
+shadow output must not affect the active snapshot. Editing the default indexing
+path to call a shadow pass adds risk to the path under protection while
+delivering nothing Stage 2 needs. Not touching it also makes the
+"default output unchanged" criterion provable rather than argued. The call-site
+wiring belongs with the stage that actually consumes provider facts (Stage 6's
+default switch, or earlier if a consumer needs shadow output in the snapshot).
+The compatibility deliverable is met in the same way: `adapters/parse-file`
+remains exactly as it was and continues to serve the default path.
+
+## Exit criteria check
+
+- **Existing default output remains unchanged** — asserted with a control: two
+  consecutive index builds differ only in `snapshot_id` and `indexed_at` (both
+  minted per build), and a build/shadow-run/build sequence produces exactly the
+  same difference set. Units, relations, files, diagnostics, and `parser_mode`
+  are identical. An earlier version of this test compared `snapshot_id` directly
+  and failed; the assertion was wrong, not the code, and was replaced with the
+  control formulation.
+- **Shadow provider output is deterministic** — two runs over the same content
+  produce equal facts, batches, and plans; only status observation timestamps
+  differ, which the test states explicitly.
+- **Tree-sitter unavailability routes to regex with an explicit degradation** —
+  covered twice: with injected statuses, and live on this machine, where
+  `java-tree-sitter` is genuinely unavailable
+  (`tree_sitter_grammar_missing`), regex is admitted, facts are produced, and no
+  gap is reported.
+- **Regex shadow facts carry heuristic authority and never exact** — asserted on
+  the emitted facts and, structurally, on every lexical descriptor's capability
+  claims.
+
+## Verification
+
+- `clojure -M:test`: **480 tests, 2743 assertions, 0 failures, 0 errors**
+  (was 456 / 2642 after the review repair).
+- REPL-first: the Java and TypeScript parser output shapes were inspected before
+  the adapters were designed, so arity handling follows real output rather than
+  an assumption.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+- Compile probes after every source edit; `git diff --check` clean; English-only
+  scan clean.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 2 — Provider Plan And Legacy Adapter Shadow Path
+recommended_next_stage: Stage 3 — TypeScript SCIP Vertical Slice
+recommended_executor: Claude Code team lead, no Fable, no Explore agent
+recommended_model: Claude Opus 4.8 Thinking for the identity/verification work,
+  Sonnet 5 for the toolchain plumbing
+effort: high
+effort_justification: Stage 3 introduces the first external provider and the
+  first evidence that may legitimately claim exact authority. It must verify
+  SCIP symbol spellings against real tool output (the Stage 0 fixtures mark
+  SCIP/LSP spellings as representative, not verified) and prove that a SCIP
+  moniker normalizes onto the same CanonicalFactKey the regex tier already
+  produces. Getting that wrong silently splits identities.
+prerequisites_or_blockers:
+  - scip-typescript must be installed and pinned; its absence must degrade
+    explicitly through the status probe rather than failing a run.
+  - The Stage 0 TypeScript fixture must be re-verified against real
+    scip-typescript output and its representative spellings replaced.
+  - Exact authority now requires an anchored source identity; the SCIP adapter
+    must carry a per-document digest or a verified revision-bound artifact.
+file_ownership_and_conflict_risk: LOW-MEDIUM. Stage 3 adds a descriptor and a
+  runner to providers.clj and a fixture update; the kernel and the orchestrator
+  should not need changes.
+fallback_executor_or_model: Sonnet 5 for the toolchain and packaging work only.
+model_availability_checked_at: not checked in this session.
+confidence: high
+```

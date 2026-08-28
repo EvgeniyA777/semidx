@@ -274,9 +274,18 @@ after this memory file.
    the Stage 0 identity fixtures are executed as goldens by the tests (they used
    to be hand-mirrored, so a fixture correction could not fail a test), and
    identity is proven to survive EDN, JSON, and PostgreSQL `jsonb` round trips.
-   Next is Stage 2: provider catalog, `ProviderPlan`, execution orchestrator, and
-   tree-sitter/regex adapters behind a default-off seam that must keep default
-   output byte-identical and never classify regex evidence as exact (ADR-046).
+   Stage 2 is also complete (2026-08-28): `semidx.runtime.providers` (data-first
+   catalog, status probes, content-digest anchoring, unit-to-fact roles),
+   `provider-selection` (deterministic bounded ProviderPlan that records every
+   exclusion), and `provider-execution` (bounded concurrency, timeouts, failure
+   isolation, gap tracking, FactBatch emission, shadow entry point). Regex stays
+   heuristic, tree-sitter structural. Deliberate deviation: `index.clj` and
+   `adapters.clj` were NOT wired to the seam — the shadow path is a standalone
+   entry point so "default output unchanged" stays provable; call-site wiring
+   belongs with the stage that consumes provider facts. Next is Stage 3, the
+   TypeScript SCIP slice, which brings the first provider that may claim exact
+   authority and must re-verify the Stage 0 SCIP spellings against real tool
+   output.
 3. Execute `plans/019` as an additive one-shot delivery track after its budget
    ledger and the `plans/020` run/strategy contracts are accepted. Its evaluation
    stage contributes adapters to `plans/020`; it does not own a second corpus,
