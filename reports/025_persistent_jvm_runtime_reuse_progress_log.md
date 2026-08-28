@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-27"
+updated: "2026-08-28"
 ---
 
 # Persistent JVM Runtime Reuse Progress Log
@@ -168,10 +168,72 @@ Known limitations:
 - The `mcp-http` profile is accepted by the kernel and by the process alias map,
   but it is untested end to end and is owned by Stage 3.
 
+## Stage 3: MCP HTTP Profile And Docs
+
+Status: completed on 2026-08-28.
+
+Summary:
+
+- The `mcp-http` profile now works end to end. Stage 2 left it accepted by the
+  kernel and the alias map but unexercised; `start`, `status`, and `stop` were
+  verified against a real MCP HTTP server, and the endpoint was driven with real
+  MCP traffic while the launcher managed it.
+- Added a profile/service guard to the pure kernel. Both local servers answer
+  `GET /health` with `status: "ok"`, so liveness alone could not tell them
+  apart and a launcher asking for one profile would have adopted the other one
+  listening on the requested port. `launcher/profile-services` maps each profile
+  to the `service` its server reports, and a mismatch is blocked with
+  `health_service_mismatch` instead of being adopted. An absent service is not a
+  mismatch, so a server that does not report one stays adoptable.
+- `request` is refused for `mcp-http` with `request_unsupported_for_profile`
+  and starts nothing. It forwards the runtime HTTP retrieval contract, which the
+  MCP server does not serve; without the refusal it would have posted to a
+  missing path and surfaced a 404 as a retrieval failure.
+- Documented which clients get which transport, with configuration snippets for
+  both, and stated why stdio cannot be launcher-managed: its lifetime belongs to
+  the host that spawned it, so there is no process to reuse.
+
+Changed files:
+
+- `src/semidx/runtime/launcher.clj` — `profile-services`, `health-service`,
+  the service-mismatch decision branch.
+- `src/semidx/runtime/launcher_cli.clj` — profile guard in `request!`, usage
+  text covering both profiles.
+- `test/semidx/runtime/launcher_test.clj` — kernel coverage for matching,
+  mismatching, raw-body, and absent service.
+- `test/semidx/runtime/launcher_cli_test.clj` — `mcp-http` start on its own
+  port, reuse, refusal to adopt a `runtime-http` server, and the `request`
+  refusal.
+- `docs/mcp-api.md` — "Launcher-managed MCP HTTP reuse" plus client config.
+- `docs/runtime-api.md`, `README.md`, `FEATURES.md`,
+  `docs/development-strategy.md`, `docs/roadmap-status.md` — status and
+  profile table.
+
+Verification:
+
+- `clojure -M:test`: 442 tests, 2556 assertions, 0 failures, 0 errors
+  (Stage 2 baseline was 437 / 2533).
+- Live smoke on port 8795: `start` reported `decision: started` with
+  `service: semidx-mcp-http`; `status` reported `reused`; `initialize` over
+  Streamable HTTP returned a session id and `serverInfo`; `tools/list` returned
+  12 tools; `stop` reported `stopped` and the port was closed afterwards.
+- Live cross-profile guard: asking for `runtime-http` on the port serving
+  `mcp-http` returned `blocked` / `health_service_mismatch`.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+- Compile probes after every source edit, and `git diff --check`: passed.
+
+Known gaps carried into Stage 4:
+
+- No latency measurement yet for cold CLI versus warm launcher reuse.
+- Stale-state recovery is covered by unit tests with injected roles but not by a
+  test that kills a real process or occupies a real port.
+- `lsp`-style readiness of the MCP endpoint is assumed from `/health`; a slow
+  first index build is still charged to the first client request.
+
 ## Next Stage
 
-Stage 3 should add the MCP HTTP profile and its documentation:
+Stage 4 should harden the launcher and close the benchmark gate:
 
-- launcher support or documented configuration for MCP HTTP reuse;
-- client config snippets pointing at the reused local MCP HTTP endpoint;
-- keep MCP stdio documented as host-lifetime scoped.
+- startup, warm request, and stop latency measurements;
+- stale state recovery tests around killed processes and occupied ports;
+- a small benchmark comparing one-shot CLI cold start against launcher reuse.

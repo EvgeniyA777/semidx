@@ -143,6 +143,6 @@ canonical default without comparative evidence and a new decision.
 The independent `plans/021` runtime-reuse track is integration work, not
 semantic-core work: existing MCP stdio, MCP HTTP, runtime HTTP, and runtime gRPC
 modes are long-lived once started, while `clojure -M:runtime` is a one-shot CLI
-that exits after a request. Runtime HTTP launcher reuse now exists behind the
-`:launcher` alias; MCP HTTP profile guidance and launcher hardening/benchmark
-coverage remain open.
+that exits after a request. Runtime HTTP and MCP HTTP launcher reuse now
+exist behind the `:launcher` alias; launcher hardening and benchmark coverage
+(Stage 4) remain open.

@@ -169,3 +169,38 @@
                         :state persisted-state
                         :health {:healthy true}
                         :lock :contended}))))))
+
+(deftest health-service-decides-which-profile-answered-test
+  (let [mcp-desired (assoc desired-runtime :profile "mcp-http" :port 8791)
+        mcp-state (assoc persisted-state :profile "mcp-http" :port 8791)]
+    (testing "a matching service is reused"
+      (is (= :reused
+             (:decision (launcher/decide-runtime-reuse
+                         {:desired mcp-desired
+                          :state mcp-state
+                          :health {:healthy true :service "semidx-mcp-http"}})))))
+
+    (testing "another profile's server on the requested port is not adopted"
+      (let [result (launcher/decide-runtime-reuse
+                    {:desired mcp-desired
+                     :state mcp-state
+                     :health {:healthy true :service "semidx-runtime-http"}})]
+        (is (= :blocked (:decision result)))
+        (is (= :health_service_mismatch (:reason result)))
+        (is (= "semidx-runtime-http" (:health_service result)))
+        (is (= "semidx-mcp-http" (:expected_service result)))))
+
+    (testing "the check reads the service out of a raw health body too"
+      (is (= :health_service_mismatch
+             (:reason (launcher/decide-runtime-reuse
+                       {:desired desired-runtime
+                        :state persisted-state
+                        :health {:status 200
+                                 :json {:status "ok" :service "semidx-mcp-http"}}})))))
+
+    (testing "a server that reports no service stays adoptable"
+      (is (= :reused
+             (:decision (launcher/decide-runtime-reuse
+                         {:desired mcp-desired
+                          :state mcp-state
+                          :health {:healthy true}})))))))

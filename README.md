@@ -31,8 +31,9 @@ The project defines how a host system should request code context, how retrieval
 - does not implement production-grade deep semantic parsing (full compiler-level resolution)
 - does not implement full compiler-grade interprocedural resolution across all languages
 - does not ship a managed production service or deployment package yet
-- does not yet ship MCP HTTP/gRPC launcher profiles or production supervision for
-  local runtime reuse; the shipped launcher currently targets runtime HTTP
+- does not yet ship a gRPC launcher profile or production supervision for local
+  runtime reuse; the shipped launcher covers the runtime HTTP and MCP HTTP
+  profiles
 
 Current scope is contract architecture plus working local/runtime surfaces.
 
@@ -115,7 +116,7 @@ Canonical retrieval flow is compact-first staged retrieval:
 - Run minimal HTTP edge: `clojure -M:runtime-http --host 127.0.0.1 --port 8787`
 - Run minimal gRPC edge: `clojure -M:runtime-grpc --host 127.0.0.1 --port 8789`
 - Runtime process model: `clojure -M:runtime` is a one-shot command and starts a JVM per invocation; MCP stdio, MCP HTTP, runtime HTTP, and runtime gRPC are long-lived once started. MCP stdio reuse is bounded by the MCP host process lifetime.
-- Reuse a local runtime instead of paying JVM startup per request: `clojure -M:launcher status|start|stop --root .` and `clojure -M:launcher request --root . --query <query.json> [--out <out.json>]`. The launcher reuses a healthy runtime HTTP server, starts one under an exclusive lock when needed, and forwards to the existing runtime HTTP endpoints. See [docs/runtime-api.md](docs/runtime-api.md) and [plans/021_persistent_jvm_runtime_reuse_plan.md](plans/021_persistent_jvm_runtime_reuse_plan.md).
+- Reuse a local runtime instead of paying JVM startup per request: `clojure -M:launcher status|start|stop --root .` and `clojure -M:launcher request --root . --query <query.json> [--out <out.json>]`. The launcher reuses a healthy runtime HTTP server, starts one under an exclusive lock when needed, and forwards to the existing runtime HTTP endpoints. The same command manages a reusable local MCP endpoint with `--profile mcp-http`, which clients that speak Streamable HTTP can point at instead of spawning an MCP stdio process per host restart. See [docs/runtime-api.md](docs/runtime-api.md), [docs/mcp-api.md](docs/mcp-api.md#launcher-managed-mcp-http-reuse), and [plans/021_persistent_jvm_runtime_reuse_plan.md](plans/021_persistent_jvm_runtime_reuse_plan.md).
 - Optional service auth boundary flags: `--api-key <token> --require-tenant` (or env `SCI_RUNTIME_API_KEY`, `SCI_RUNTIME_REQUIRE_TENANT=true`)
 - Optional host-integrated authz policy file: `--authz-policy-file /path/to/authz-policy.edn` (or env `SCI_RUNTIME_AUTHZ_POLICY_FILE`)
 - Optional runtime policy registry file for HTTP/gRPC: `--policy-registry-file /path/to/policy-registry.edn` (or env `SCI_RUNTIME_POLICY_REGISTRY_FILE`)

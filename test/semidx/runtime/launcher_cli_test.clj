@@ -314,3 +314,55 @@
           payload (get-in result [:response :result])]
       (is (map? payload))
       (is (string? (json/write-str payload))))))
+
+;; --------------------------------------------------------------------------
+;; MCP HTTP profile (plans/021 Stage 3)
+;; --------------------------------------------------------------------------
+
+(def ^:private mcp-opts
+  (assoc base-opts :profile "mcp-http"))
+
+(defn- mcp-deps
+  "Fake roles whose health answers as the MCP HTTP server."
+  [opts]
+  (let [deps (fake-deps opts)]
+    (assoc deps :check-health (fn [_ _]
+                                (if @(:running deps)
+                                  {:healthy true :status_code 200 :service "semidx-mcp-http"}
+                                  {:healthy false :error "connection refused"})))))
+
+(deftest mcp-http-profile-starts-on-its-own-port-test
+  (let [deps (mcp-deps {})
+        result (launcher-cli/start! deps mcp-opts)]
+    (is (= :started (:decision result)))
+    (is (= 1 (count @(:starts deps))))
+    (testing "the slot carries the mcp-http profile and its default port"
+      (let [runtime (:runtime (first @(:starts deps)))]
+        (is (= "mcp-http" (:profile runtime)))
+        (is (= 8791 (:port runtime))))
+      (is (= "mcp-http" (get-in result [:runtime :profile])))
+      (is (= 8791 (get-in result [:runtime :port]))))))
+
+(deftest mcp-http-runtime-is-reused-not-duplicated-test
+  (let [deps (mcp-deps {:running true})
+        result (launcher-cli/start! deps mcp-opts)]
+    (is (= :reused (:decision result)))
+    (is (empty? @(:starts deps)))))
+
+(deftest mcp-http-does-not-adopt-a-runtime-http-server-test
+  (let [deps (fake-deps {:running true})
+        result (launcher-cli/status deps mcp-opts)]
+    (testing "a runtime-http server listening on the requested port is refused"
+      (is (= :blocked (:decision result)))
+      (is (= :health_service_mismatch (:reason result))))
+    (is (empty? @(:starts deps)))))
+
+(deftest request-is-refused-for-the-mcp-http-profile-test
+  (let [deps (mcp-deps {:running true})
+        result (launcher-cli/request! deps (assoc mcp-opts :query {:intent "anything"}))]
+    (is (false? (:ok result)))
+    (is (= :request_unsupported_for_profile (:reason result)))
+    (is (re-find #"MCP client" (:hint result)))
+    (testing "nothing is started or forwarded for a profile that cannot serve it"
+      (is (empty? @(:starts deps)))
+      (is (nil? (:response result))))))

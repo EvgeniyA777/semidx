@@ -266,25 +266,39 @@
     (json/write data w :indent true)))
 
 (defn request!
-  "Run one retrieval request against a reused or freshly started runtime."
+  "Run one retrieval request against a reused or freshly started runtime.
+
+  Only the `runtime-http` profile serves this request path. An MCP HTTP runtime
+  speaks JSON-RPC over its own session-bearing endpoint, so the request is
+  refused here instead of being forwarded to a path that server does not have,
+  and no process is started for it."
   ([opts] (request! (default-deps) opts))
   ([deps opts]
-   (let [desired (launcher/desired-runtime (:root opts) opts)
-         ensured (ensure-runtime! deps desired opts)]
-     (if-not (contains? ok-decisions (:decision ensured))
-       (assoc ensured :command "request" :ok false)
-       (let [query (or (:query opts) (read-query (:query_path opts)))
-             response ((:send-request deps)
-                       desired
-                       {:root_path (:root_path desired)
-                        :query query
-                        :paths (:paths opts)}
-                       (client-opts opts))]
-         (assoc (dissoc ensured :state :health :process)
-                :command "request"
-                :ok (boolean (:ok? response))
-                :reused (= :reused (:decision ensured))
-                :response response))))))
+   (let [desired (launcher/desired-runtime (:root opts) opts)]
+     (if-not (= "runtime-http" (:profile desired))
+       {:command "request"
+        :ok false
+        :decision :blocked
+        :reason :request_unsupported_for_profile
+        :runtime (runtime-summary desired)
+        :hint (str "the " (:profile desired) " profile is driven by an MCP client, "
+                   "not by launcher request; use `status`/`start` and point the "
+                   "client at the endpoint")}
+       (let [ensured (ensure-runtime! deps desired opts)]
+         (if-not (contains? ok-decisions (:decision ensured))
+           (assoc ensured :command "request" :ok false)
+           (let [query (or (:query opts) (read-query (:query_path opts)))
+                 response ((:send-request deps)
+                           desired
+                           {:root_path (:root_path desired)
+                            :query query
+                            :paths (:paths opts)}
+                           (client-opts opts))]
+             (assoc (dissoc ensured :state :health :process)
+                    :command "request"
+                    :ok (boolean (:ok? response))
+                    :reused (= :reused (:decision ensured))
+                    :response response))))))))
 
 (defn- parse-args
   [args]
@@ -306,10 +320,16 @@
 
 (def ^:private usage
   (str "Usage:\n"
-       "  clojure -M:launcher status  --root <repo-root> [--profile runtime-http] [--host <host>] [--port <port>]\n"
-       "  clojure -M:launcher start   --root <repo-root> [--profile runtime-http] [--port <port>]\n"
-       "  clojure -M:launcher stop    --root <repo-root> [--profile runtime-http]\n"
-       "  clojure -M:launcher request --root <repo-root> --query <query.json> [--out <output.json>]\n"))
+       "  clojure -M:launcher status  --root <repo-root> [--profile runtime-http|mcp-http] [--host <host>] [--port <port>]\n"
+       "  clojure -M:launcher start   --root <repo-root> [--profile runtime-http|mcp-http] [--port <port>]\n"
+       "  clojure -M:launcher stop    --root <repo-root> [--profile runtime-http|mcp-http]\n"
+       "  clojure -M:launcher request --root <repo-root> --query <query.json> [--out <output.json>]\n"
+       "\n"
+       "Profiles:\n"
+       "  runtime-http (default, port 8787)  one-shot retrieval requests over the runtime HTTP contract;\n"
+       "                                     this is the only profile `request` can drive.\n"
+       "  mcp-http     (port 8791)           long-lived MCP endpoint for clients that speak Streamable HTTP;\n"
+       "                                     the launcher owns its process, the MCP client owns the protocol.\n"))
 
 (defn- print-report!
   [report]

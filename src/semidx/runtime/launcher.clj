@@ -137,6 +137,16 @@
         (not= missing (field state :owned))
         (assoc :owned (boolean (present-field state :owned)))))))
 
+(def profile-services
+  "The `service` identifier each profile's server reports on `/health`.
+
+  Both local servers answer `GET /health` with `status: \"ok\"`, so liveness
+  alone cannot tell them apart. Without this map a launcher asking for one
+  profile would happily adopt the other profile's server listening on the
+  requested port."
+  {"runtime-http" "semidx-runtime-http"
+   "mcp-http" "semidx-mcp-http"})
+
 (defn healthy-observation?
   [health]
   (boolean
@@ -193,6 +203,25 @@
          (seq (:repo_key desired))
          (some? observed-repo-key)
          (not (same-nonblank? (:repo_key desired) observed-repo-key)))))
+
+(defn health-service
+  "Service identifier reported by an observed health response, if any."
+  [health]
+  (or (:service health)
+      (get-in health [:json :service])))
+
+(defn- health-service-mismatch?
+  "True when the endpoint is healthy but is serving a different profile.
+
+  An unknown or absent service is not treated as a mismatch: an older server
+  that does not report one must stay adoptable."
+  [desired health]
+  (let [observed (trim-to-nil (health-service health))
+        expected (trim-to-nil (get profile-services (:profile desired)))]
+    (and (healthy-observation? health)
+         (some? observed)
+         (some? expected)
+         (not= observed expected))))
 
 (defn- contended-lock?
   [lock]
@@ -259,6 +288,11 @@
       (health-repo-key-mismatch? desired* health)
       (decision :blocked :health_repo_key_mismatch desired* state*
                 {:health_repo_key (health-repo-key health)})
+
+      (health-service-mismatch? desired* health)
+      (decision :blocked :health_service_mismatch desired* state*
+                {:health_service (health-service health)
+                 :expected_service (get profile-services (:profile desired*))})
 
       (and (health-matches-desired? desired* health)
            (not (state-profile-mismatch? desired* state*))
