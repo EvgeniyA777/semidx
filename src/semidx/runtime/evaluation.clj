@@ -5,7 +5,9 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [semidx.core :as sci]
+            [semidx.runtime.benchmark-report :as benchmark-report]
             [semidx.runtime.semantic-quality :as semantic-quality]
+            [semidx.runtime.usage-metrics :as usage]
             [semidx.runtime.retrieval-policy :as rp]))
 
 (def ^:private confidence-rank {"low" 0 "medium" 1 "high" 2})
@@ -1625,6 +1627,9 @@
           "--candidate-version" (recur (assoc m :candidate_version v) rest)
           "--usage-metrics-jdbc-url" (recur (assoc m :usage_metrics_jdbc_url v) rest)
           "--weekly-review" (recur (assoc m :weekly_review_path v) rest)
+          "--benchmark-records" (recur (assoc m :benchmark_records_path v) rest)
+          "--benchmark-run-id" (recur (update m :benchmark_run_ids (fnil conj []) v) rest)
+          "--external-repo-key" (recur (update m :external_repo_keys (fnil conj []) v) rest)
           "--surface" (recur (assoc m :surface v) rest)
           "--tenant-id" (recur (assoc m :tenant_id v) rest)
           "--since" (recur (assoc m :since v) rest)
@@ -1803,6 +1808,58 @@
                                              surface (assoc :surface surface)
                                              tenant_id (assoc :tenant_id tenant_id)
                                              since (assoc :since since)))]
+      (print-or-write! out_path result)
+      (System/exit 0))))
+
+(defn- load-benchmark-records
+  "Read exported benchmark records.
+
+   Accepts either `{\"feedback\": [...], \"events\": [...]}` or a bare array of
+   feedback records."
+  [path]
+  (let [data (read-json path)]
+    (if (map? data)
+      {:feedback (vec (:feedback data))
+       :events (vec (:events data))}
+      {:feedback (vec data)
+       :events []})))
+
+(defn- in-memory-benchmark-sink
+  "Load exported records into an in-memory sink.
+
+   The aggregator must not require PostgreSQL, so the offline path replays the
+   records through the same sink protocol the harness writes to."
+  [{:keys [feedback events]}]
+  (let [sink (usage/in-memory-usage-metrics)]
+    (doseq [event events]
+      (usage/record-event! sink event))
+    (doseq [record feedback]
+      (usage/record-feedback! sink record))
+    sink))
+
+(defn- run-benchmark-report-command
+  [{:keys [usage_metrics_jdbc_url benchmark_records_path tenant_id since
+           benchmark_run_ids external_repo_keys out_path]}]
+  (let [jdbc-url (or usage_metrics_jdbc_url (System/getenv "SEMIDX_USAGE_METRICS_JDBC_URL"))]
+    (when-not (or benchmark_records_path jdbc-url)
+      (println (str "Usage: clojure -M:eval benchmark-report "
+                    "(--benchmark-records <records.json> | --usage-metrics-jdbc-url <jdbc-url>) "
+                    "[--benchmark-run-id <id>]... [--external-repo-key <repo-key>]... "
+                    "[--tenant-id <tenant>] [--since <iso-timestamp>] [--out <output.json>]"))
+      (System/exit 1))
+    (let [sink (if benchmark_records_path
+                 (in-memory-benchmark-sink (load-benchmark-records benchmark_records_path))
+                 (sci/postgres-usage-metrics
+                  {:jdbc-url jdbc-url
+                   :user (System/getenv "SEMIDX_USAGE_METRICS_DB_USER")
+                   :password (System/getenv "SEMIDX_USAGE_METRICS_DB_PASSWORD")}))
+          result (benchmark-report/benchmark-report
+                  sink
+                  (cond-> {}
+                    tenant_id (assoc :tenant_id tenant_id)
+                    since (assoc :since since)
+                    (seq benchmark_run_ids) (assoc :benchmark_run_ids benchmark_run_ids)
+                    (seq external_repo_keys) (assoc :external_repo_keys external_repo_keys)))]
       (print-or-write! out_path result)
       (System/exit 0))))
 
@@ -1989,6 +2046,7 @@
       "harvest-replay-dataset" (run-harvest-replay-dataset-command (parse-args rest-args))
       "calibration-report" (run-calibration-report-command (parse-args rest-args))
       "weekly-review-report" (run-weekly-review-report-command (parse-args rest-args))
+      "benchmark-report" (run-benchmark-report-command (parse-args rest-args))
       "protected-replay-dataset" (run-protected-replay-dataset-command (parse-args rest-args))
       "semantic-quality-report" (run-semantic-quality-report-command (parse-args rest-args))
       "semantic-quality-runner" (run-semantic-quality-runner-command (parse-args rest-args))

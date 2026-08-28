@@ -528,7 +528,12 @@
                                                        (:ground_truth_paths row)))
                    :payload (parse-json (or (:semantic_usage_feedback/payload row) (:payload row)))}))))))
 
-(defn- sink-events [sink opts]
+(defn sink-events
+  "Read usage events from any sink implementation, filtered by `opts`.
+
+   Public so reporting namespaces can read a sink without depending on whether
+   it is backed by PostgreSQL or memory."
+  [sink opts]
   (let [opts* (normalize-filter-opts opts)]
     (cond
       (instance? InMemoryUsageMetrics sink)
@@ -541,7 +546,11 @@
 
       :else [])))
 
-(defn- sink-feedback [sink opts]
+(defn sink-feedback
+  "Read feedback records from any sink implementation, filtered by `opts`.
+
+   Public for the same reason as `sink-events`."
+  [sink opts]
   (let [opts* (normalize-filter-opts opts)]
     (cond
       (instance? InMemoryUsageMetrics sink)

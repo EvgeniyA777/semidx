@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-27"
+updated: "2026-08-28"
 ---
 
 # Progress Log: Retrieval Value Benchmark Harness
@@ -19,8 +19,8 @@ Companion log for
 | 0 — Pre-register arms/run identity/metric, pilot-then-lock threshold | pre-registration sub-gate completed (see `reports/023_retrieval_value_benchmark_preregistration.md`); calibration pilot and final-lock pending |
 | 1 — Fidelity fix (`returned_tokens`) | completed |
 | 2 — Task suite + four-arm harness | corpus and harness delivered (2026-08-27); live evaluated-model runner binding still pending, see the Stage 2 section |
-| 3 — Aggregator command | not started |
-| 4 — First real-repo run + evidence write-back | not started |
+| 3 — Aggregator command | completed (2026-08-28) |
+| 4 — First real-repo run + evidence write-back | blocked: Stage 0 threshold lock and a live evaluated-model runner |
 
 ## Stage Routing Amendment (2026-08-03)
 
@@ -385,5 +385,168 @@ model_availability_checked_at: >
   not checked in this session — executor/model availability inside
   Antigravity cannot be verified from this repository. Confirm at Stage 3
   admission.
+confidence: high (for the routing recommendation itself)
+```
+
+## Stage 3 — Aggregator command (2026-08-28)
+
+Status: delivered. The aggregator produces the per-arm success-per-cost report
+and applies the Stage 0 stop rule. It does **not** produce a Phase 1 verdict:
+the threshold lock is still a separate Stage 0 sub-gate.
+
+### Delivered
+
+| Artifact | Role |
+| --- | --- |
+| `src/semidx/runtime/benchmark_report.clj` | attempt-first aggregation, roll-up, per-arm success-per-cost, paired A/B comparison, pooling check, statistical floor, stop rule, semidx-internal token diagnostics |
+| `src/semidx/runtime/evaluation.clj` | `benchmark-report` CLI command plus its argument parsing and the offline in-memory record path |
+| `src/semidx/runtime/usage_metrics.clj` | `sink-events` / `sink-feedback` promoted to public readers |
+| `test/semidx/runtime/benchmark_report_test.clj` | 26 tests, 86 assertions (plus a PostgreSQL round-trip test gated on `SEMIDX_TEST_POSTGRES_URL`) |
+| `docs/runtime-api.md`, `README.md` | command documentation |
+
+CLI:
+
+```bash
+clojure -M:eval benchmark-report --benchmark-records <records.json> --out <report.json>
+clojure -M:eval benchmark-report --usage-metrics-jdbc-url <jdbc-url> --benchmark-run-id <id>
+```
+
+### Decisions taken in this stage
+
+- **Aggregation lives in its own namespace, not in `evaluation.clj`.** The
+  evaluation namespace is already ~2000 lines and owns policy governance;
+  Stage 3 gives it only the CLI command. The frozen Stage 2 benchmark
+  namespaces were not edited, as the Stage 2 handoff required.
+- **The sink readers were made public instead of duplicated.** `sink-events`
+  and `sink-feedback` already dispatch across the in-memory and PostgreSQL
+  backends; the aggregator reads through them, so PostgreSQL stays optional and
+  the in-memory path is first-class rather than a test-only shortcut.
+- **Cost is re-derived from the stored response/usage matrix**, never read from
+  the harness-recorded `usage_totals`. Raw usage plus versioned adapters and the
+  immutable price schedule are the source of truth, so a wrong recorded total
+  cannot silently become a verdict input. A disagreement is reported in
+  `inputs.usage_totals_mismatches` instead of being resolved silently.
+- **One recorded attempt is one observation.** Aggregation keys on
+  `task_attempt_id`; a repeated record for the same attempt collapses to the
+  latest occurrence and is counted, while a record with no `task_attempt_id` is
+  rejected rather than folded into an arbitrary attempt. Roll-up keeps
+  `benchmark_run_id` in the key so two runs of one task never merge.
+- **Unpriceable attempts are excluded, not zero-priced.** `unresolved` and
+  `historical_only` attempts leave the cost verdict with their reason retained,
+  and an arm with no eligible attempt reports `total_cost_usd: null` rather
+  than `0.0`. An attempt with no turns therefore cannot enter the cost verdict.
+- **`not_applicable` leaves the success denominator.** It is the preregistered
+  representation of an unavailable Arm C capability, so counting it as a loss
+  would fabricate a failure; it is reported separately with its reasons.
+- **Success-per-cost uses one attempt set for numerator and denominator.**
+  Successes are counted over the cost-eligible attempts that produced the cost,
+  so an arm cannot report successes that its denominator does not contain.
+- **The primary comparison is paired per task.** Only tasks where both A and B
+  produced a cost-eligible attempt enter it, and each task contributes the mean
+  of its own attempts, so unequal seed counts and arm-specific task coverage
+  cannot manufacture a cost win.
+- **Pooling identities are verified, not assumed.** Suite version, harness
+  version, prompt policy, arm-policy bundle, budget policy, cache protocol, and
+  price schedule must agree; a mismatch blocks the verdict instead of silently
+  pooling incomparable observations.
+- **A verdict is withheld until the threshold is locked.** Without a locked
+  threshold the report emits `verdict: "pending_threshold_lock"` plus a
+  `provisional_signal`, and it names the blockers. An unmet statistical floor or
+  a wall-clock breach yields `indeterminate`, never `failure`: SPEC 5.1 defines
+  the kill criterion on cost and success only, so a small suite must not trigger
+  it.
+- **The semidx-internal token diagnostic preserves Stage 1 semantics.** The
+  selection stage contributes `estimated_tokens` (it has no measured return) and
+  expand/detail contribute measured `returned_tokens`. It is a diagnostic for
+  where an arm's cost went; the scored denominator remains the agent's
+  `cost_usd`.
+
+### Known gaps (not delivered by Stage 3)
+
+- **Stage 4 remains blocked on two independent gates**: the Stage 0 calibration
+  pilot plus final threshold lock, and a live evaluated-model runner
+  implementing the Stage 2 arm-runner contract. The aggregator enforces the
+  first gate mechanically by refusing a verdict.
+- **The Zig negative-utility cases are still unmeasured.** The report now
+  surfaces `stale_snapshot_reuse` and `excess_context_cost` per arm, but no run
+  has recorded them; `notes/2026-08-27-zig-negative-utility-triage.md` stays
+  open.
+- **Pre-existing failure discovered, not fixed**: with PostgreSQL enabled,
+  `semidx.integration.runtime-test/postgres-storage-roundtrip-test` fails —
+  a reload with `:load_latest true` returns 0 units against 163 in the fresh
+  index (`test/semidx/integration/runtime_test.clj:2695`). It reproduces on a
+  clean worktree at `22263d2` with no Stage 3 changes present, so it is not
+  caused by this stage and was left alone as out of scope. It needs its own
+  investigation: either a real PostgreSQL reload defect or an environment
+  assumption the test does not state.
+
+### Stage 3 verification
+
+- `clojure -M:test`: 413 tests, 2451 assertions, 0 failures, 0 errors
+  (Stage 2 baseline was 387 / 2365).
+- `clojure -M:test` with `SEMIDX_TEST_POSTGRES_URL` pointed at a throwaway
+  PostgreSQL 17.7 cluster: 413 tests, 2464 assertions, 1 failure — the
+  pre-existing `postgres-storage-roundtrip-test` described above. The same
+  single failure reproduces at `22263d2` (387 tests, 2371 assertions), which is
+  how it was attributed. The benchmark payload round-trip test passed, closing
+  the Stage 2 `jsonb` round-trip gap: the usage matrix survives the round trip
+  and the PostgreSQL-backed report matches the in-memory report on
+  `cost_ratio` and `tasks_compared`.
+- REPL verification (`clojure -M:test:nrepl`, port 54669): inspected a full
+  report for an A/B pair — `cost_reduction_pct` 86.7, `cost_ratio` 7.5,
+  `success_delta_pp` 0.0, statistical floor failing at 2 of 30 tasks, and the
+  verdict correctly withheld.
+- CLI smoke: exported harness records through
+  `clojure -M:eval benchmark-report --benchmark-records ...`; the JSON report
+  rendered with the arm cost blocks, the paired comparison, and
+  `external_repository_source: "suite"` resolved from the frozen fixture.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+- Compile probes after every source edit: passed.
+- `git diff --check`: passed.
+- English-only scan over the new and changed sources and documents: passed.
+- CCC artifacts were not refreshed; `RULES.md` forbids routine per-task
+  refreshes and this stage requires no compression output.
+
+### NextStageRoutingRecommendation
+
+```text
+completed_stage: Stage 3 — Aggregator command
+recommended_next_stage: Stage 0 sub-gate 2 — calibration pilot and threshold
+  lock (Stage 4 cannot start before it), and in parallel the live
+  evaluated-model arm runner left open by Stage 2
+recommended_executor: Antigravity
+recommended_model: Gemini 3.1 Pro
+effort: high
+effort_justification: >
+  The remaining work is the irreversible half of the experiment. The
+  calibration pilot fixes the noise floor and the final threshold, and a
+  threshold chosen or adjusted after seeing scored results falsifies
+  nothing. The arm runner is equally load-bearing: an Arm B agent that is
+  not genuinely competent turns the entire cost result into an artifact,
+  which the plan names as the main threat to validity. Neither error would
+  crash anything, so a cheaper pass would not be detectably wrong.
+rationale: >
+  Stage 3 closed the measurement path end to end, so nothing further can be
+  learned from harness code alone. The aggregator already refuses a verdict
+  while the threshold is unlocked, which makes the Stage 0 sub-gate the
+  binding constraint rather than a formality.
+prerequisites_or_blockers: >
+  The price schedule 2026-08-03-eligible-v1 expires 2026-10-16 and the
+  harness refuses to start a run on or after that date; a pilot run must
+  either happen before it or preregister a new eligible schedule. The pilot
+  also needs the live runner, since the scripted runner never contacts a
+  provider and therefore cannot measure a baseline cost.
+file_ownership_and_conflict_risk: >
+  The pilot writes reports/023 (threshold lock section) and this log. The
+  runner is new code behind the existing ArmRunner protocol and should not
+  need edits to benchmark_harness.clj, benchmark_usage.clj, or
+  benchmark_report.clj. If the runner needs a new recorded field, it belongs
+  in the feedback payload, not in the frozen BenchmarkRun/TaskAttempt
+  schemas.
+fallback_executor_or_model: Gemini 3.5 Flash for mechanical runner plumbing
+  only; the threshold lock must not be delegated to a fallback model.
+model_availability_checked_at: >
+  not checked in this session — executor availability inside Antigravity
+  cannot be verified from this repository. Confirm at admission.
 confidence: high (for the routing recommendation itself)
 ```

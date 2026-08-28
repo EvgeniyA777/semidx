@@ -979,6 +979,53 @@ Current conversion behavior:
 - `expected.min_confidence_level` uses the strongest feedback confidence level when present, otherwise defaults to `"medium"`
 - `source_review` is retained on each query entry for auditability
 
+### Retrieval value benchmark report
+
+Aggregates recorded four-arm benchmark attempts (`plans/020`) into a per-arm
+success-per-cost report and applies the Stage 0 stop rule.
+
+Library API:
+
+```clojure
+(require '[semidx.runtime.benchmark-report :as benchmark-report])
+
+(benchmark-report/benchmark-report metrics)
+(benchmark-report/benchmark-report metrics {:benchmark_run_ids ["run-1"]
+                                            :external_repo_keys ["aegis-zig"]
+                                            :threshold {:locked true
+                                                        :threshold_id "pilot_locked_v1"}})
+```
+
+CLI (PostgreSQL is optional; exported records replay through the in-memory sink):
+
+```bash
+clojure -M:eval benchmark-report \
+  --benchmark-records "${TMPDIR:-.tmp}/benchmark-records.json" \
+  --out "${TMPDIR:-.tmp}/sci-benchmark-report.json"
+
+clojure -M:eval benchmark-report \
+  --usage-metrics-jdbc-url jdbc:postgresql://localhost:5432/semantic_index \
+  --benchmark-run-id run-1 \
+  --out "${TMPDIR:-.tmp}/sci-benchmark-report.json"
+```
+
+Aggregation behavior:
+
+- attempts are aggregated on `task_attempt_id` first, then rolled up by
+  `(benchmark_run_id, task_id, arm)`, so repeated runs never collapse
+- cost is re-derived from the stored response/usage matrix; a disagreement with
+  the harness-recorded totals is reported in `inputs.usage_totals_mismatches`
+- attempts with `pricing_status` `unresolved` or `historical_only` are excluded
+  from the cost verdict instead of being priced at zero
+- `not_applicable` attempts (the only representation of an unavailable Arm C
+  capability) leave the success denominator and are reported separately
+- the primary A-vs-B comparison is paired per task over cost-eligible attempts;
+  C and D are reported as controls and never replace comparator B
+- `diagnostics.semidx_internal_tokens` sums selection `estimated_tokens` and
+  expand/detail `returned_tokens` per arm, preserving the Stage 1 semantics
+- `stop_rule.verdict` stays `pending_threshold_lock` until a locked threshold is
+  supplied and the pooling identities agree
+
 ### Batch policy review pipeline
 
 You can also run the current Phase 5 operational loop as one batch artifact.
