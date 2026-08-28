@@ -205,6 +205,80 @@
      :authority authority
      :evidence evidences}))
 
+;; --- FactBatch ---
+
+(def batch-schema-version "1")
+
+(defn normalize-fact-batch
+  "Normalize one provider's batch of facts.
+
+  A batch is the provenance envelope around everything a single provider
+  produced in one run: who produced it, against which source identity, what it
+  claims to have covered, and what went wrong while producing it. Coverage and
+  diagnostics are what make a provider's silence readable: a provider that
+  returned nothing because it failed must not be indistinguishable from one that
+  found nothing.
+
+  A fact's own `provider_id` and `freshness` win over the batch defaults. The
+  batch fills them in only when the fact left them unset, so an envelope can
+  never restate a fact's provenance as something else."
+  [batch]
+  (let [provider-id (blank->nil (:provider_id batch))
+        provider-version (blank->nil (:provider_version batch))
+        freshness (or (blank->nil (:freshness batch)) "unknown")
+        source-identity (or (:source_identity batch) {})
+        stamp (fn [fact]
+                (update fact :evidence
+                        (fn [evidences]
+                          (mapv (fn [ev]
+                                  (normalize-fact-evidence
+                                   (cond-> ev
+                                     (not (blank->nil (:provider_id ev)))
+                                     (assoc :provider_id provider-id)
+
+                                     (not (blank->nil (:provider_version ev)))
+                                     (assoc :provider_version provider-version)
+
+                                     (not (blank->nil (:freshness ev)))
+                                     (assoc :freshness freshness)
+
+                                     (empty? (:source_identity ev))
+                                     (assoc :source_identity source-identity))))
+                                evidences))))]
+    {:batch_schema_version batch-schema-version
+     :provider_id provider-id
+     :provider_version provider-version
+     :operation (blank->nil (:operation batch))
+     :freshness freshness
+     :source_identity source-identity
+     :coverage {:paths (vec (:paths (:coverage batch)))
+                :fact_kinds (vec (:fact_kinds (:coverage batch)))
+                :complete (boolean (get-in batch [:coverage :complete]))}
+     :diagnostics (vec (:diagnostics batch))
+     :facts (mapv stamp (:facts batch))}))
+
+(defn fact-batch-errors
+  "Structured validation errors for a normalized batch. Empty vector means
+  valid. Evidence errors are reported per fact so one bad record does not
+  invalidate a whole provider run silently."
+  [batch]
+  (let [base (cond-> []
+               (not (blank->nil (:provider_id batch)))
+               (conj {:code :missing-provider-id :field :provider_id
+                      :message "FactBatch is missing provider_id."})
+
+               (not (contains? freshness-values (:freshness batch)))
+               (conj {:code :invalid-freshness :field :freshness
+                      :message (str "Unknown freshness: " (pr-str (:freshness batch)) ".")}))]
+    (into base
+          (for [[fact-index fact] (map-indexed vector (:facts batch))
+                [evidence-index ev] (map-indexed vector (:evidence fact))
+                error (fact-evidence-errors ev)]
+            (assoc error
+                   :fact_index fact-index
+                   :evidence_index evidence-index
+                   :provider_id (:provider_id ev))))))
+
 (defn arbitrate-facts
   "Deterministically merge a collection of provider facts into canonical facts.
 
@@ -262,3 +336,29 @@
                  (sort-by :fact_identity)
                  vec)
      :diagnostics (vec (:diagnostics result))}))
+
+(defn arbitrate-batches
+  "Normalize provider batches and arbitrate every fact they carry.
+
+  This is the entry point a provider orchestrator uses: it keeps each provider's
+  envelope visible next to the merged result, so an empty or failed provider run
+  stays readable instead of disappearing into an absence of facts. Batch-level
+  validation errors are returned, never thrown and never silently dropped;
+  invalid batches do not contribute facts."
+  [batches]
+  (let [normalized (mapv normalize-fact-batch batches)
+        checked (mapv (fn [batch] [batch (fact-batch-errors batch)]) normalized)
+        valid (->> checked (remove (fn [[_ errors]] (seq errors))) (mapv first))
+        errors (vec (for [[batch batch-errors] checked
+                          error batch-errors]
+                      (assoc error :provider_id (or (:provider_id error)
+                                                    (:provider_id batch)))))
+        arbitrated (arbitrate-facts (mapcat :facts valid))]
+    (assoc arbitrated
+           :batches (mapv (fn [batch]
+                            (-> (select-keys batch [:provider_id :provider_version :operation
+                                                    :freshness :source_identity :coverage
+                                                    :diagnostics])
+                                (assoc :fact_count (count (:facts batch)))))
+                          normalized)
+           :errors errors)))

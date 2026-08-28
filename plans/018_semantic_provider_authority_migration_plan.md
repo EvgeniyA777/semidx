@@ -2,9 +2,9 @@
 title: "Semantic Provider Authority Migration Plan"
 doc_type: "architecture_plan"
 lifecycle: "active"
-status: "planned"
+status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-03"
+updated: "2026-08-28"
 ---
 
 # Architecture Plan: Semantic Provider Authority Migration

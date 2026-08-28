@@ -267,11 +267,16 @@ after this memory file.
    but inert; no benchmark run exists and no live provider call was ever made.
    `plans/020`, `reports/021`, and `reports/023` are marked
    `status: blocked` / `agent_action: do_not_use_for_current_work`.
-2. Complete `plans/018` admission work: approve `CanonicalFactKey`, add
-   cross-provider Java overload and TypeScript re-export identity fixtures, and
-   confirm TypeScript as the first SCIP slice unless toolchain evidence justifies
-   reversing it. Then implement provider evidence/arbitration and shadow planning
-   before any default authority switch.
+2. `plans/018` Stages 0 and 1 are complete (2026-08-28). The admission
+   decisions are settled: Variant C `CanonicalFactKey`, TypeScript-first, and the
+   identity fixtures approved. `semidx.runtime.fact-arbitration` now carries the
+   pure kernel plus `FactBatch` normalization/validation and `arbitrate-batches`,
+   the Stage 0 identity fixtures are executed as goldens by the tests (they used
+   to be hand-mirrored, so a fixture correction could not fail a test), and
+   identity is proven to survive EDN, JSON, and PostgreSQL `jsonb` round trips.
+   Next is Stage 2: provider catalog, `ProviderPlan`, execution orchestrator, and
+   tree-sitter/regex adapters behind a default-off seam that must keep default
+   output byte-identical and never classify regex evidence as exact (ADR-046).
 3. Execute `plans/019` as an additive one-shot delivery track after its budget
    ledger and the `plans/020` run/strategy contracts are accepted. Its evaluation
    stage contributes adapters to `plans/020`; it does not own a second corpus,

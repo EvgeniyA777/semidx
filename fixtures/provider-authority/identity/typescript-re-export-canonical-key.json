@@ -2,14 +2,20 @@
   "fixture_id": "provider_authority_typescript_re_export_canonical_key_001",
   "category": "cross_provider_identity",
   "purpose": "Prove that regex, tree-sitter, SCIP, and LSP spellings of the SAME TypeScript re-export resolve to one provider-neutral CanonicalFactKey for the origin definition, while an alias rename (normalize -> canonicalize) keeps a distinct exported-symbol identity.",
-  "plan_refs": ["plans/018"],
-  "adr_refs": ["ADR-039", "ADR-046"],
+  "plan_refs": [
+    "plans/018"
+  ],
+  "adr_refs": [
+    "ADR-039",
+    "ADR-046"
+  ],
   "corpus_ref": "fixtures/provider-authority/corpus/typescript/src/index.ts",
-  "status": "specification_for_stage_1",
+  "status": "golden_executed_by_stage_1_tests",
   "notes": [
     "regex and tree-sitter spellings are GROUND TRUTH from semidx.runtime.languages.typescript/parse-file. Both paths run re-export-defs; the tree-sitter path adds regex re-exports as supplemental defs, so the two agree.",
     "SCIP and LSP spellings are REPRESENTATIVE provider-native forms, not verified tool output; Stage 3/5 must re-verify.",
-    "Module prefixes are expressed relative to a conceptual module root `src`. Concrete dotted module prefixes emitted by semidx depend on the index root path (ts-module-name derives the module from the file path)."
+    "Module prefixes are expressed relative to a conceptual module root `src`. Concrete dotted module prefixes emitted by semidx depend on the index root path (ts-module-name derives the module from the file path).",
+    "2026-08-28 (Stage 1): each distinct_facts_must_not_merge entry gained a structured expected_canonical_key so the fixture can be executed as a golden test; no claim was changed."
   ],
   "re_export_edge_must_resolve_to_origin": {
     "fact": "src/index.ts re-exports normalize from ./orders as canonicalize",
@@ -83,6 +89,13 @@
       "regex_ground_truth": {
         "alias_symbol": "src/canonicalize",
         "origin_symbol": "src.orders/normalize"
+      },
+      "expected_canonical_key": {
+        "language": "typescript",
+        "fact_kind": "unit",
+        "path": "src/index.ts",
+        "owner": "src.index",
+        "symbol": "src/canonicalize"
       }
     },
     {
@@ -91,6 +104,13 @@
       "regex_ground_truth": {
         "alias_symbol": "src/createOrder",
         "re_export_target": "src.orders/createOrder"
+      },
+      "expected_canonical_key": {
+        "language": "typescript",
+        "fact_kind": "unit",
+        "path": "src/index.ts",
+        "owner": "src.index",
+        "symbol": "src/createOrder"
       }
     }
   ]

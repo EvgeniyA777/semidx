@@ -2,14 +2,20 @@
   "fixture_id": "provider_authority_java_overload_canonical_key_001",
   "category": "cross_provider_identity",
   "purpose": "Prove that regex, tree-sitter, SCIP, and LSP spellings of the SAME Java method overload normalize to one provider-neutral CanonicalFactKey, while distinct overloads of the same method name remain distinct keys.",
-  "plan_refs": ["plans/018"],
-  "adr_refs": ["ADR-039", "ADR-046"],
+  "plan_refs": [
+    "plans/018"
+  ],
+  "adr_refs": [
+    "ADR-039",
+    "ADR-046"
+  ],
   "corpus_ref": "fixtures/provider-authority/corpus/java/src/example/OrderService.java",
-  "status": "specification_for_stage_1",
+  "status": "golden_executed_by_stage_1_tests",
   "notes": [
     "regex and tree-sitter spellings are GROUND TRUTH captured from the current semidx extractor (semidx.runtime.languages.java/parse-file with default opts).",
     "SCIP and LSP spellings are REPRESENTATIVE provider-native forms, not verified tool output. Stage 3 (SCIP) and Stage 5 (LSP) must re-verify against real provider payloads before relying on them.",
-    "F1 RESOLVED (owner decision 2026-08-03): Variant C, precision-aware overload_identity. The heuristic tier commits arity only (signature_precision=arity_only, signature_key=null); the exact tier adds the typed signature. Stable unit identity anchors on the core key, not the typed hash. See reports/024, section 'F1 Resolution — Variant C'. Same-arity disambiguation (F1a) is an open Stage 1 arbitration rule."
+    "F1 RESOLVED (owner decision 2026-08-03): Variant C, precision-aware overload_identity. The heuristic tier commits arity only (signature_precision=arity_only, signature_key=null); the exact tier adds the typed signature. Stable unit identity anchors on the core key, not the typed hash. See reports/024, section 'F1 Resolution \u2014 Variant C'. Same-arity disambiguation (F1a) is an open Stage 1 arbitration rule.",
+    "2026-08-28 (Stage 1): each distinct_facts_must_not_merge entry gained a structured expected_canonical_key. This restates the claim the prose already made so the fixture can be executed as a golden test instead of read by hand; no claim was changed."
   ],
   "same_fact_must_merge": {
     "fact": "example.OrderService#handle(String)",
@@ -23,7 +29,10 @@
         "type_names": "simple",
         "includes_param_names": true,
         "ground_truth": true,
-        "variant_c_contribution": {"signature_precision": "arity_only", "signature_key": null}
+        "variant_c_contribution": {
+          "signature_precision": "arity_only",
+          "signature_key": null
+        }
       },
       {
         "provider_id": "java-tree-sitter",
@@ -34,7 +43,10 @@
         "type_names": "simple",
         "includes_param_names": true,
         "ground_truth": true,
-        "variant_c_contribution": {"signature_precision": "arity_only", "signature_key": null}
+        "variant_c_contribution": {
+          "signature_precision": "arity_only",
+          "signature_key": null
+        }
       },
       {
         "provider_id": "scip-java",
@@ -44,7 +56,10 @@
         "type_names": "fully_qualified",
         "includes_param_names": false,
         "ground_truth": false,
-        "variant_c_contribution": {"signature_precision": "typed", "signature_key": "java.lang.String"}
+        "variant_c_contribution": {
+          "signature_precision": "typed",
+          "signature_key": "java.lang.String"
+        }
       },
       {
         "provider_id": "java-lsp",
@@ -54,7 +69,10 @@
         "type_names": "fully_qualified",
         "includes_param_names": false,
         "ground_truth": false,
-        "variant_c_contribution": {"signature_precision": "typed", "signature_key": "java.lang.String"}
+        "variant_c_contribution": {
+          "signature_precision": "typed",
+          "signature_key": "java.lang.String"
+        }
       }
     ],
     "expected_canonical_key": {
@@ -64,7 +82,14 @@
       "fact_kind": "unit",
       "owner": "example.OrderService",
       "symbol": "example.OrderService#handle",
-      "core_key": ["java", "src/example/OrderService.java", "unit", "example.OrderService", "example.OrderService#handle", 1],
+      "core_key": [
+        "java",
+        "src/example/OrderService.java",
+        "unit",
+        "example.OrderService",
+        "example.OrderService#handle",
+        1
+      ],
       "overload_identity": {
         "arity": 1,
         "signature_precision": "typed",
@@ -94,6 +119,14 @@
         "signature_precision": "typed",
         "signature_key": "java.lang.String,int",
         "note": "Distinct core_key from arity 1; heuristic tier separates it by arity alone, no ambiguity."
+      },
+      "expected_canonical_key": {
+        "language": "java",
+        "fact_kind": "unit",
+        "path": "src/example/OrderService.java",
+        "owner": "example.OrderService",
+        "symbol": "example.OrderService#handle",
+        "arity": 2
       }
     },
     {
@@ -103,6 +136,14 @@
         "native_symbol": "example.OrderService#handleAll",
         "native_signature_key": "List<String>orders",
         "native_unit_id_suffix": "$arity1$sigdc13f0cf"
+      },
+      "expected_canonical_key": {
+        "language": "java",
+        "fact_kind": "unit",
+        "path": "src/example/OrderService.java",
+        "owner": "example.OrderService",
+        "symbol": "example.OrderService#handleAll",
+        "arity": 1
       }
     },
     {
@@ -112,6 +153,14 @@
         "native_symbol": "example.Validator#validate",
         "native_signature_key": "Stringorder",
         "native_unit_id_suffix": "$arity1$sig5e75e42b"
+      },
+      "expected_canonical_key": {
+        "language": "java",
+        "fact_kind": "unit",
+        "path": "src/example/Validator.java",
+        "owner": "example.Validator",
+        "symbol": "example.Validator#validate",
+        "arity": 1
       }
     }
   ]

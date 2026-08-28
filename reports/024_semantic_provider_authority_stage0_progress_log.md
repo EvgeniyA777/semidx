@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-03"
+updated: "2026-08-28"
 ---
 
 # Progress Log: Semantic Provider Authority Migration (plans/018)
@@ -39,7 +39,7 @@ and is appended by later stages.
 | Stage | Status |
 | --- | --- |
 | 0 — Independent review and compatibility baseline | **completed** |
-| 1 — Evidence model and arbitration kernel | **in progress** — pure kernel + tests delivered (owner admitted 2026-08-03: TypeScript-first + Variant C); FactEvidence→snapshot persistence deferred to Stage 2 |
+| 1 — Evidence model and arbitration kernel | **completed** 2026-08-28 — kernel, FactBatch, executable golden parity, and round-trip coverage all delivered |
 | 2–7 | not started |
 
 ## Scope Executed (Stage 0)
@@ -399,4 +399,126 @@ fallback_executor_or_model: Claude Opus 4.8 for the persistence/identity
   round-trip sub-task; Sonnet 5 for the bounded orchestrator/adapters.
 model_availability_checked_at: 2026-08-03
 confidence: high (kernel is solid; Stage 2 is a bounded seam over it)
+```
+
+---
+
+# Stage 1 Completion (2026-08-28)
+
+## Why this section exists
+
+Stage 1 was recorded as delivered on 2026-08-03, but three of the plan's own
+Stage 1 deliverables were not met. This session closed them rather than carrying
+them into Stage 2 as the earlier handoff proposed.
+
+| Plan deliverable | State on 2026-08-03 | Now |
+| --- | --- | --- |
+| "Additive FactEvidence and **FactBatch** normalization" | FactEvidence only; FactBatch deferred to Stage 2 | delivered |
+| "**In-memory and PostgreSQL round-trip coverage**" | deferred to Stage 2 | delivered |
+| Exit criterion: cross-provider golden parity for Java overloads and TypeScript re-exports | fixtures existed but no test read them; the test data was a hand copy | fixtures are executed as goldens |
+| "Property-style tests proving registration and completion order do not change merged output" | delivered (`arbitration-is-order-independent`) | unchanged |
+| "Additive multi-source relation evidence compatible with ADR-039" | delivered | extended with the fixture's re-export relation |
+
+The parity gap was the sharpest of the three: `fact_arbitration_test.clj`
+mirrored the Stage 0 identity fixtures as inline literals, so a correction to a
+fixture could not fail a test. Parity that cannot be executed is not parity, and
+the plan gates the first external provider slice on it.
+
+## Delivered
+
+- **FactBatch** in `src/semidx/runtime/fact_arbitration.clj`:
+  `normalize-fact-batch`, `fact-batch-errors`, and `arbitrate-batches`. A batch
+  is the provenance envelope around one provider run — provider identity, source
+  identity, freshness, coverage, diagnostics — and fills in a fact's provenance
+  only where the fact left it unset, so an envelope can never restate a fact's
+  authority. Batch errors name the offending fact and evidence index; an invalid
+  batch contributes no facts but stays visible in the result, so a provider that
+  failed is distinguishable from one that legitimately found nothing.
+- **Executable golden parity**: the tests now read
+  `fixtures/provider-authority/identity/*.json` and assert the kernel against
+  them — one merged fact per provider set, core key equal field by field, the
+  exact tier's typed refinement winning without changing identity, every
+  provider's evidence retained, and each fixture's distinct facts keeping
+  distinct keys. The TypeScript fixture is checked in its own shape: every
+  provider's native re-export moniker resolves to the one origin key, the
+  re-export relation keys on ADR-039 identity, and an alias export never
+  collapses into the origin unit.
+- **Round-trip coverage**: EDN round trip of the arbitration output, a JSON round
+  trip proving serialization does not change what facts identify, and a
+  PostgreSQL `jsonb` round trip gated on `SEMIDX_TEST_POSTGRES_URL`.
+
+## Fixture change (additive, claims unchanged)
+
+The `distinct_facts_must_not_merge` entries in both identity fixtures carried
+their claim in prose only (`fact`, `reason`), with no structured owner, symbol,
+or path, so they could not be executed. Each entry gained an
+`expected_canonical_key` that restates the same claim in machine-readable form,
+and both fixtures record the change in their `notes`. No claim was altered and
+no expectation was weakened. Their `status` moved from
+`specification_for_stage_1` to `golden_executed_by_stage_1_tests`.
+
+## Verification
+
+- `clojure -M:test`: **456 tests, 2636 assertions, 0 failures, 0 errors**
+  (was 447 / 2579 before this session's Stage 1 work; the arbitration namespace
+  went from 15 to 22 tests).
+- `clojure -M:test` with `SEMIDX_TEST_POSTGRES_URL` against a throwaway
+  PostgreSQL 17.7 cluster: 456 tests, 2652 assertions, 1 failure — the
+  pre-existing `semidx.integration.runtime-test/postgres-storage-roundtrip-test`
+  documented in `reports/021`, which reproduces on a clean tree and is unrelated
+  to this work. The new fact round-trip test passed: identities, authorities,
+  and evidence counts survive `jsonb` unchanged.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+- Both identity fixtures re-validated as JSON. `git diff --check`: clean.
+  English-only scan: no Cyrillic.
+
+## Exit criteria check (plan Stage 1)
+
+- Same semantic fact from multiple providers produces one canonical key and one
+  identity; provider-native ids remain evidence — **checked against the
+  fixtures**, not only against inline test data.
+- Java overloads, TypeScript re-exports, and dispatch-sensitive identities have
+  cross-provider golden parity before any external provider slice — **met**.
+- Lower authority cannot overwrite higher authority — covered.
+- Equal-authority contradictions are observable — covered by the F1a
+  `:arity_ambiguous_heuristic` diagnostic.
+- Existing snapshots remain readable — no storage schema changed; the full suite
+  including the storage tests is green.
+
+Commit boundary respected: evidence contracts and pure arbitration only. No
+default extraction, storage schema, or transport changed.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 1 — Evidence Model And Arbitration Kernel (now complete against
+  the plan's own deliverables, including FactBatch and round-trip coverage)
+recommended_next_stage: Stage 2 — Provider Plan And Legacy Adapter Shadow Path
+recommended_executor: Claude Code team lead, no Fable, no Explore agent
+recommended_model: Claude Sonnet 5, escalating to Opus 4.8 for the snapshot
+  persistence sub-task if identity parity proves tricky
+effort: medium
+effort_justification: Stage 2 is bounded implementation behind a default-off
+  seam (data-first catalog, ProviderPlan, execution orchestrator, tree-sitter and
+  regex adapters wrapping the existing parse-file facade). It consumes the Stage 1
+  kernel instead of designing new identity contracts. The care is in keeping
+  default output byte-identical and classifying regex evidence as heuristic.
+rationale: The identity contract is now proven against the committed goldens and
+  survives serialization, so the seam can be wired without the risk that
+  persistence or provider spelling changes what a fact identifies.
+prerequisites_or_blockers:
+  - Stage 2 must keep default output byte-identical (shadow only) and never
+    classify regex evidence as exact (ADR-046).
+  - The FactEvidence-in-snapshot-payload wiring is now unblocked: the kernel's
+    output is proven round-trippable through jsonb, so the remaining work is the
+    payload shape, not the identity question.
+  - Stage 2 owns FactBatch production; the normalization and validation it must
+    satisfy already exist here.
+file_ownership_and_conflict_risk: MEDIUM. Stage 2 touches the provider seam and
+  the file-indexing path (index.clj / adapters.clj). No overlap with the paused
+  plans/020 files.
+fallback_executor_or_model: Sonnet 5 for the orchestrator and adapters; not for
+  the shadow-parity gate.
+model_availability_checked_at: not checked in this session.
+confidence: high
 ```
