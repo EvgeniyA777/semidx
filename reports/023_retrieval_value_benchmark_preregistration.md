@@ -2,12 +2,17 @@
 title: "Retrieval Value Benchmark Pre-registration (Stage 0)"
 doc_type: "report"
 lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
-updated: "2026-08-27"
+status: "blocked"
+agent_action: "do_not_use_for_current_work"
+updated: "2026-08-28"
 ---
 
 # Retrieval Value Benchmark Pre-registration (Stage 0)
+
+> **Paused by the owner on 2026-08-28** together with the whole `plans/020`
+> track. The calibration pilot and the final threshold lock were never run and
+> no live provider call was ever made. Nothing recorded here has been used to
+> score anything. See `reports/021` for the pause reason and the state at pause.
 
 This document satisfies the pre-registration sub-gate of Stage 0 for
 `plans/020_retrieval_value_benchmark_harness_plan.md`. It formally freezes the

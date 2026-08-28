@@ -253,14 +253,17 @@ after this memory file.
 
 ## Next Execution Priorities
 
-1. `plans/020` is blocked on a human decision, not on code: the Stage 0
-   calibration pilot (5-10 tasks, Arm B cost and success noise floor) needs an
-   evaluated-provider API key (`GEMINI_API_KEY`) and approval to spend on real
-   provider calls. Lock the final threshold immediately after the pilot and
-   before any scoring; a threshold adjusted after scoring falsifies nothing.
-   The eligible price schedule `2026-08-03-eligible-v1` expires 2026-10-16 and
-   the harness refuses runs on or after that date. Arm C stays `not_applicable`
-   until `SEMIDX_BENCH_LSP_COMMAND` is configured.
+1. `plans/020` is PAUSED by the owner (2026-08-28) and must not be resumed
+   without them. The staged four-arm experiment is not the measurement approach
+   the owner currently wants: the intent is passive telemetry of real working
+   sessions — count tokens as the work happens, record whether semidx helped or
+   not, aggregate by task and by process, analyse afterwards — instead of a
+   synthetic A/B/C/D run with a purpose-built agent. What to build for that is
+   an open question the owner is thinking through; do not design or start it
+   unilaterally. Stages 1-3 and the live arm runner are delivered and committed
+   but inert; no benchmark run exists and no live provider call was ever made.
+   `plans/020`, `reports/021`, and `reports/023` are marked
+   `status: blocked` / `agent_action: do_not_use_for_current_work`.
 2. Complete `plans/018` admission work: approve `CanonicalFactKey`, add
    cross-provider Java overload and TypeScript re-export identity fixtures, and
    confirm TypeScript as the first SCIP slice unless toolchain evidence justifies

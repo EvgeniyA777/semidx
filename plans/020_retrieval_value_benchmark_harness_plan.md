@@ -2,12 +2,21 @@
 title: "Retrieval Value Benchmark Harness Plan"
 doc_type: "architecture_plan"
 lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
-updated: "2026-08-27"
+status: "blocked"
+agent_action: "do_not_use_for_current_work"
+updated: "2026-08-28"
 ---
 
 # Architecture Plan: Retrieval Value Benchmark Harness
+
+> **Paused by the owner on 2026-08-28.** Do not start a stage from this plan.
+> The staged four-arm experiment is not the measurement approach the owner
+> currently wants: the intent is passive telemetry of real working sessions
+> (count tokens as work happens, record whether semidx helped or not, aggregate
+> by task and process, analyse afterwards) rather than a synthetic A/B/C/D run
+> with a purpose-built agent. What to build instead is an open question the
+> owner is thinking through. Stages 1-3 and the arm runner are delivered and
+> committed; see `reports/021` for their state.
 
 This plan operationalizes the falsifiable value hypothesis in
 [`SPEC.md`](../SPEC.md) §5.1: turn one-off token measurements into a

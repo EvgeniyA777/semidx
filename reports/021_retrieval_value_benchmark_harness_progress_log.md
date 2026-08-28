@@ -2,8 +2,8 @@
 title: "Retrieval Value Benchmark Harness Progress Log"
 doc_type: "progress_log"
 lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+status: "blocked"
+agent_action: "do_not_use_for_current_work"
 updated: "2026-08-28"
 ---
 
@@ -756,3 +756,31 @@ model_availability_checked_at: >
   not checked in this session.
 confidence: high (for the routing recommendation itself)
 ```
+
+## Track Paused (2026-08-28)
+
+The owner paused the whole `plans/020` track after the arm runner landed.
+
+Reason, in the owner's terms: the value question should be answered by counting
+tokens during real working sessions — semidx helped or it did not, count the
+tokens either way, aggregate by task and by process, and analyse the data
+afterwards — rather than by a staged four-arm experiment driven by a
+purpose-built agent. The staged design answers a comparative question under
+controlled conditions; the owner wants observational evidence from actual work.
+Which of those the project should invest in is an open question the owner is
+thinking through, so no successor stage is recommended here.
+
+State at pause:
+
+- Stages 1, 2, and 3 are delivered and committed (`22263d2`, `1cda47b`,
+  `cabf19e`, `2a946bd`); the full suite is green at 437 tests / 2533 assertions.
+- Stage 0's calibration pilot and threshold lock were never run, and no live
+  provider call has ever been made.
+- No benchmark run, scored or unscored, exists. Nothing has been written back
+  into `SPEC.md` 5.1, and the Phase 1 verdict remains unproven.
+- The delivered code is inert unless a runner is invoked deliberately; it is
+  left in place rather than reverted.
+
+Do not resume from the stage table above without the owner. The
+`NextStageRoutingRecommendation` blocks recorded earlier describe what the
+paused plan would have done next; they are not an instruction to continue.
