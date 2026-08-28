@@ -18,9 +18,9 @@ Companion log for
 | --- | --- |
 | 0 — Pre-register arms/run identity/metric, pilot-then-lock threshold | pre-registration sub-gate completed (see `reports/023_retrieval_value_benchmark_preregistration.md`); calibration pilot and final-lock pending |
 | 1 — Fidelity fix (`returned_tokens`) | completed |
-| 2 — Task suite + four-arm harness | corpus and harness delivered (2026-08-27); live evaluated-model runner binding still pending, see the Stage 2 section |
+| 2 — Task suite + four-arm harness | completed: corpus and harness delivered (2026-08-27), live evaluated-model runner delivered (2026-08-28) |
 | 3 — Aggregator command | completed (2026-08-28) |
-| 4 — First real-repo run + evidence write-back | blocked: Stage 0 threshold lock and a live evaluated-model runner |
+| 4 — First real-repo run + evidence write-back | blocked: Stage 0 calibration pilot and threshold lock (needs an evaluated-provider API key and budget approval) |
 
 ## Stage Routing Amendment (2026-08-03)
 
@@ -625,3 +625,134 @@ in the artifact.
 - `git diff --check`: passed.
 - CCC artifacts were not refreshed; `RULES.md` forbids routine per-task
   refreshes.
+
+## Stage 2 completion — live evaluated-model arm runner (2026-08-28)
+
+Status: delivered. This closes the last Stage 2 gap and removes one of the two
+gates in front of Stage 4. The remaining gate is the Stage 0 calibration pilot
+and threshold lock, which needs an evaluated-provider API key and spend
+approval and is therefore a decision, not a code task.
+
+### Delivered
+
+| Artifact | Role |
+| --- | --- |
+| `src/semidx/runtime/benchmark_agent.clj` | live agent: arm-scoped tool declarations, tool execution, budgeted model loop, provider usage capture, answer parsing, `ArmRunner` record, stdin/stdout process entry point |
+| `deps.edn` | `:benchmark-agent` alias for the out-of-process contract |
+| `test/semidx/runtime/benchmark_agent_test.clj` | 16 tests, 47 assertions, all driven by a stub provider that never reaches the network |
+| `docs/runtime-api.md`, `README.md` | runner documentation and environment contract |
+
+### Decisions taken
+
+- **The agent owns answering, nothing else.** Identity, policy audit, scoring,
+  budget enforcement, and cost normalization stay in the harness, so replacing
+  the agent cannot change how an arm is judged.
+- **Arms differ only by declared tools.** The model is offered exactly the tool
+  declarations of its arm, so a breach needs a hallucinated function name rather
+  than an available one. If it happens anyway the call is refused, still
+  reported, and the harness audit fails the attempt. The runner never absorbs a
+  policy breach.
+- **An arm that cannot be run competently is refused before any provider call**:
+  a lexical arm without `rg` (a strawman baseline is the plan's main validity
+  threat), Arm C without `SEMIDX_BENCH_LSP_COMMAND` (the preregistered
+  `not_applicable` case), and an attempt with no `evaluated_model_revision`
+  (cost could not be priced). None of these spend tokens.
+- **Cost-bearing facts are observed, not self-reported.** The answer's
+  `snapshot_id` is the snapshot the runner actually retrieved and
+  `context_tokens` is what the runner actually consumed; values the model puts
+  in its JSON for those two fields are discarded. Raw `usageMetadata` is
+  recorded per turn for the price schedule.
+- **Tool output is bounded and workspace-contained.** Every path is resolved
+  against the attempt workspace and a path that escapes it is refused, so one
+  arm cannot read another attempt's tree.
+- **Budget stops the loop rather than overrunning it.** At the tool-call or
+  wall-clock limit the next request withdraws the tools so the model must
+  answer; failing to answer is recorded as
+  `execution_budget_exhausted_without_answer`.
+
+### Known gaps
+
+- **No live provider run has happened.** Every test drives a stub; the code has
+  never contacted Gemini. The first real call is part of the calibration pilot
+  and needs `GEMINI_API_KEY` plus explicit spend approval.
+- **Arm C is effectively unavailable** until a language server command is
+  configured. Until then Arm C attempts are `not_applicable` by design, which is
+  preregistered but leaves the diagnostic control empty.
+- **Index build cost is inside Arm A's wall clock.** The runner builds the index
+  lazily on the first `resolve_context` call of an attempt, so a cold build is
+  charged to the arm. In production use that cost is amortized across many
+  queries. This must be stated when the wall-clock guardrail is read, and it is a
+  candidate control for the pilot.
+- **`lsp_definition` / `lsp_references` return an unavailable-capability result**
+  rather than driving `semidx.runtime.lsp-client`; wiring them is only worth
+  doing once a language server is actually configured for the corpus.
+
+### Correction to the 2026-08-28 review fix
+
+The first fix for review finding 1 required `snapshot_id` evidence from every
+arm on a freshness task. That was wrong: Arms B, C, and D read the working tree
+and have no snapshot to report, so the frozen `stale_snapshot_after_edit_v1`
+task would have failed all three automatically while the corpus expects Arm B to
+solve it by reading the current tree.
+
+Corrected rule, now in `score-answer`:
+
+- snapshot evidence is required only from snapshot-bearing arms (those whose
+  policy includes `resolve_context` / `expand_context` / `fetch_context_detail`),
+  and an unknown arm fails closed;
+- a volunteered snapshot is checked against the current one for **every** arm, so
+  an arm that reports a stale snapshot still fails;
+- the refusal for a missing `current_snapshot_id` now fires only when scoring a
+  snapshot-bearing arm.
+
+`run-attempt!` passes the attempt's arm into scoring. Regression coverage:
+`freshness-evidence-is-required-only-from-snapshot-bearing-arms-test`.
+
+### Verification
+
+- `clojure -M:test`: 437 tests, 2533 assertions, 0 failures, 0 errors
+  (previous baseline 420 / 2474).
+- Process-contract smoke: an Arm C attempt context piped into
+  `clojure -M:benchmark-agent` returned
+  `{"outcome":"not_applicable","not_applicable_reason":"no language server configured for arm C..."}`
+  on stdout, with no provider call.
+- Harness integration test: `live-arm-runner` driven by a stub provider through
+  `harness/run-attempt!` produced a scored `success`, a two-row usage matrix
+  priced as `resolved` with a positive `cost_usd`, and a feedback record keyed to
+  the attempt.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+- Compile probes after every source edit: passed. `git diff --check`: passed.
+- English-only scan over new sources and documents: passed.
+
+### NextStageRoutingRecommendation
+
+```text
+completed_stage: Stage 2 residual — live evaluated-model arm runner
+recommended_next_stage: Stage 0 sub-gate 2 — calibration pilot (5-10 tasks,
+  Arm B cost and success noise floor) followed by the final threshold lock
+recommended_executor: human decision first, then Antigravity
+recommended_model: Gemini 3.1 Pro
+effort: high
+effort_justification: >
+  The pilot fixes the noise floor and the threshold that decide the Phase 1
+  verdict, and a threshold adjusted after scoring falsifies nothing. The
+  first live run is also the first time the arm policies meet a real model,
+  so the failure modes that matter (Arm B competence, tool-call loops,
+  answer format compliance) surface here rather than in scoring.
+prerequisites_or_blockers: >
+  Blocked on a human decision, not on code: an evaluated-provider API key
+  (GEMINI_API_KEY) and approval to spend on real provider calls. The price
+  schedule 2026-08-03-eligible-v1 expires 2026-10-16 and the harness refuses
+  runs on or after that date. Arm C stays not_applicable until
+  SEMIDX_BENCH_LSP_COMMAND is configured.
+file_ownership_and_conflict_risk: >
+  The pilot writes reports/023 (threshold lock section) and this log, and may
+  tune prompt or budget constants in benchmark_agent.clj. Prompt or budget
+  changes made after the pilot must be treated as a new arm-policy bundle
+  version, not as a silent edit.
+fallback_executor_or_model: none for the threshold lock; it must not be
+  delegated to a fallback model.
+model_availability_checked_at: >
+  not checked in this session.
+confidence: high (for the routing recommendation itself)
+```

@@ -364,7 +364,8 @@
 
 (deftest freshness-task-without-answer-snapshot-fails-test
   (let [task (assoc sample-task :freshness_check {:require_post_mutation_snapshot true})
-        scoring (harness/score-answer task good-answer {:current_snapshot_id "new-snapshot"})]
+        scoring (harness/score-answer task good-answer {:current_snapshot_id "new-snapshot"
+                                                        :arm "A"})]
     (is (= "failure" (:outcome scoring))
         "a freshness task must not pass without snapshot evidence")
     (is (true? (:missing_snapshot_evidence scoring)))
@@ -375,13 +376,32 @@
 (deftest freshness-task-refuses-to-score-without-a-current-snapshot-test
   (let [task (assoc sample-task :freshness_check {:require_post_mutation_snapshot true})]
     (is (thrown? clojure.lang.ExceptionInfo
-                 (harness/score-answer task (assoc good-answer :snapshot_id "s1") {}))
+                 (harness/score-answer task (assoc good-answer :snapshot_id "s1") {:arm "A"}))
         "a run that cannot supply the current snapshot must refuse, not degrade")))
+
+(deftest freshness-evidence-is-required-only-from-snapshot-bearing-arms-test
+  (let [task (assoc sample-task :freshness_check {:require_post_mutation_snapshot true})]
+    (testing "a lexical or native arm reads the working tree and has no snapshot"
+      (doseq [arm ["B" "C" "D"]]
+        (let [scoring (harness/score-answer task good-answer {:arm arm})]
+          (is (= "success" (:outcome scoring))
+              (str "arm " arm " must not be failed for lacking a snapshot it cannot have"))
+          (is (false? (:snapshot_evidence_required scoring)))
+          (is (false? (:missing_snapshot_evidence scoring))))))
+    (testing "a volunteered stale snapshot still fails any arm"
+      (let [scoring (harness/score-answer task (assoc good-answer :snapshot_id "old-snapshot")
+                                          {:arm "B" :current_snapshot_id "new-snapshot"})]
+        (is (= "failure" (:outcome scoring)))
+        (is (true? (:stale_snapshot_reuse scoring)))))
+    (testing "an unknown arm fails closed"
+      (is (true? (:missing_snapshot_evidence
+                  (harness/score-answer task good-answer {:arm "Z"
+                                                          :current_snapshot_id "new-snapshot"})))))))
 
 (deftest freshness-task-passes-on-the-current-snapshot-test
   (let [task (assoc sample-task :freshness_check {:require_post_mutation_snapshot true})
         scoring (harness/score-answer task (assoc good-answer :snapshot_id "new-snapshot")
-                                      {:current_snapshot_id "new-snapshot"})]
+                                      {:current_snapshot_id "new-snapshot" :arm "A"})]
     (is (= "success" (:outcome scoring)))
     (is (false? (:missing_snapshot_evidence scoring)))
     (is (false? (:stale_snapshot_reuse scoring)))))

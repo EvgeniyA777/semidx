@@ -31,6 +31,8 @@
   {:main-opts ["-m" "semidx.runtime.evaluation"]}
   :bench
   {:main-opts ["-m" "semidx.runtime.benchmarks"]}
+  :benchmark-agent
+  {:main-opts ["-m" "semidx.runtime.benchmark-agent"]}
   :build
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.14"}}
    :ns-default build}

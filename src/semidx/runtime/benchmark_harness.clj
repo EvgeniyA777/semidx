@@ -312,6 +312,20 @@
                  (and (seq text)
                       (re-find (word-boundary-pattern required) text))))))
 
+(defn snapshot-bearing-arm?
+  "True when an arm answers from a snapshot-bound index.
+
+   Only these arms can prove freshness with a `snapshot_id`. A lexical or
+   native arm reads the working tree directly and has no snapshot to report, so
+   demanding one from it would fail a freshness task that it actually solved.
+   An unknown arm is treated as snapshot-bearing, so a missing arm identity
+   fails closed rather than skipping the check."
+  [arm]
+  (let [policy (get arm-policies arm)]
+    (or (nil? policy)
+        (boolean (some (:allowed_tools policy)
+                       ["resolve_context" "expand_context" "fetch_context_detail"])))))
+
 (defn score-answer
   "Score one arm answer against the task ground truth.
 
@@ -320,18 +334,22 @@
    answering a different question. Excess context cost and stale-snapshot reuse
    are recorded as separate signals rather than folded into ranking quality.
 
-   A freshness task is only passed on evidence. An answer that reports no
-   snapshot id fails with `missing_snapshot_evidence` instead of passing on a
-   correct-looking path, and a run that cannot supply the current snapshot id at
-   all is refused rather than silently degraded into an ordinary retrieval
-   case."
-  [task answer {:keys [current_snapshot_id]}]
+   A freshness task is passed on evidence, but only where evidence exists. A
+   snapshot-bearing arm that reports no `snapshot_id` fails with
+   `missing_snapshot_evidence` instead of passing on a correct-looking path, and
+   a run that cannot supply the current snapshot id for such an arm is refused
+   rather than silently degraded into an ordinary retrieval case. A lexical or
+   native arm reads the working tree and is scored on ground truth alone."
+  [task answer {:keys [current_snapshot_id arm]}]
   (let [gt (:ground_truth task)
         freshness-required? (get-in task [:freshness_check :require_post_mutation_snapshot])
-        _ (when (and freshness-required? (str/blank? (str current_snapshot_id)))
+        snapshot-evidence-required? (boolean (and freshness-required?
+                                                  (snapshot-bearing-arm? arm)))
+        _ (when (and snapshot-evidence-required? (str/blank? (str current_snapshot_id)))
             (throw (ex-info "Freshness task scored without a current snapshot id"
                             {:error_code "benchmark_missing_current_snapshot_for_freshness_task"
-                             :task_id (:task_id task)})))
+                             :task_id (:task_id task)
+                             :arm arm})))
         answer-paths (or (:paths answer) [])
         missing-paths (vec (remove (partial path-covered? answer-paths)
                                    (:required_paths gt)))
@@ -348,10 +366,13 @@
         context-tokens (:context_tokens answer)
         excess-context? (boolean (and ceiling context-tokens (> context-tokens ceiling)))
         answer-snapshot (:snapshot_id answer)
-        missing-snapshot? (boolean (and freshness-required?
+        missing-snapshot? (boolean (and snapshot-evidence-required?
                                         (str/blank? (str answer-snapshot))))
+        ;; A reported snapshot is checked for every arm: an arm that volunteers a
+        ;; stale snapshot id is reusing stale context whatever its policy is.
         stale-snapshot? (boolean (and freshness-required?
-                                      (not missing-snapshot?)
+                                      (seq (str answer-snapshot))
+                                      (seq (str current_snapshot_id))
                                       (not= current_snapshot_id answer-snapshot)))
         false-negative? (boolean (or (seq missing-paths)
                                      (seq missing-symbols)
@@ -370,6 +391,7 @@
                :facts missing-facts}
      :forbidden_paths_hit forbidden-hits
      :false_negative false-negative?
+     :snapshot_evidence_required snapshot-evidence-required?
      :missing_snapshot_evidence missing-snapshot?
      :stale_snapshot_reuse stale-snapshot?
      :excess_context_cost excess-context?
@@ -635,7 +657,8 @@
                                          :tool_calls tool-calls}))
         scoring (when (contains? #{"success" "failure" nil} (:outcome result))
                   (score-answer task (or (:answer result) {})
-                                {:current_snapshot_id current_snapshot_id}))
+                                {:current_snapshot_id current_snapshot_id
+                                 :arm (:arm attempt)}))
         {:keys [outcome feedback_reason not_applicable_reason]}
         (outcome-from-result task result scoring violation)
         matrix-rows (mapv (fn [turn]

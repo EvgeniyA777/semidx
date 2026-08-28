@@ -1030,6 +1030,59 @@ Aggregation behavior:
 - `stop_rule.verdict` stays `pending_threshold_lock` until a locked threshold is
   supplied and the pooling identities agree
 
+### Live benchmark arm runner
+
+The evaluated-model agent that executes one benchmark attempt under one arm
+policy (`plans/020`). The harness keeps identity, policy audit, scoring, and
+cost accounting; this runner only produces the answer.
+
+Library API:
+
+```clojure
+(require '[semidx.runtime.benchmark-agent :as benchmark-agent]
+         '[semidx.runtime.benchmark-harness :as harness])
+
+(harness/run-suite!
+ {:runner (benchmark-agent/live-arm-runner {:usage_metrics metrics})
+  :sink metrics
+  :evaluated {:evaluated_provider "google"
+              :evaluated_api_surface "generate-content"
+              :evaluated_model "gemini-2.5-flash"
+              :evaluated_model_revision "gemini-2.5-flash"
+              :evaluated_service_tier "on-demand"}
+  :agent {:agent_id benchmark-agent/agent-id
+          :agent_build_id benchmark-agent/agent-build-id}
+  :isolate_workspace true})
+```
+
+Out of process, matching the harness `process-arm-runner` contract (attempt
+context as JSON on stdin, attempt result as JSON on stdout):
+
+```bash
+clojure -M:benchmark-agent < attempt-context.json
+```
+
+Environment:
+
+- `GEMINI_API_KEY` — evaluated provider key; the runner refuses to invent one.
+- `SEMIDX_BENCH_LSP_COMMAND` — language server for Arm C; without it Arm C
+  reports the preregistered `not_applicable` outcome before spending tokens.
+- `SEMIDX_USAGE_METRICS_JDBC_URL` — optional, out-of-process only, so Arm A's
+  semidx calls stay tagged to the attempt.
+
+Behavior that protects the measurement:
+
+- the model is offered exactly the tool declarations its arm allows; a call
+  outside the allowlist is refused and still reported, so the harness audit
+  fails the attempt instead of the runner absorbing the breach;
+- an arm that cannot be run competently is refused before any provider call: a
+  lexical arm without `rg`, an Arm C without a language server, or an attempt
+  with no `evaluated_model_revision` to price;
+- `snapshot_id` and `context_tokens` in the answer are what the runner observed,
+  never what the model reports about itself;
+- raw provider `usageMetadata` is recorded per turn for the price schedule, and
+  the execution budget stops the loop rather than overrunning it.
+
 ### Batch policy review pipeline
 
 You can also run the current Phase 5 operational loop as one batch artifact.
