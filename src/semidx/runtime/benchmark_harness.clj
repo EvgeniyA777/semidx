@@ -294,12 +294,23 @@
                            (str/ends-with? candidate (str "/" required)))))
                    answer-paths))))
 
+(defn- word-boundary-pattern
+  "Match `required` only as a whole token.
+
+   A bare substring test lets an unrelated word satisfy a short required fact
+   (`ids` inside `forbids`), which would score a false negative as a success."
+  [required]
+  (re-pattern (str "(?<![\\p{L}\\p{N}_])"
+                   (java.util.regex.Pattern/quote (str required))
+                   "(?![\\p{L}\\p{N}_])")))
+
 (defn- token-covered? [answer required]
   (let [tokens (set (concat (map str (:symbols answer))
                             (map str (:facts answer))))
         text (str (:answer_text answer))]
     (boolean (or (contains? tokens (str required))
-                 (and (seq text) (str/includes? text (str required)))))))
+                 (and (seq text)
+                      (re-find (word-boundary-pattern required) text))))))
 
 (defn score-answer
   "Score one arm answer against the task ground truth.
@@ -307,9 +318,20 @@
    Scoring is uniform across arms: the same required paths, symbols, and facts
    decide success for semidx and for every baseline, so an arm cannot win by
    answering a different question. Excess context cost and stale-snapshot reuse
-   are recorded as separate signals rather than folded into ranking quality."
+   are recorded as separate signals rather than folded into ranking quality.
+
+   A freshness task is only passed on evidence. An answer that reports no
+   snapshot id fails with `missing_snapshot_evidence` instead of passing on a
+   correct-looking path, and a run that cannot supply the current snapshot id at
+   all is refused rather than silently degraded into an ordinary retrieval
+   case."
   [task answer {:keys [current_snapshot_id]}]
   (let [gt (:ground_truth task)
+        freshness-required? (get-in task [:freshness_check :require_post_mutation_snapshot])
+        _ (when (and freshness-required? (str/blank? (str current_snapshot_id)))
+            (throw (ex-info "Freshness task scored without a current snapshot id"
+                            {:error_code "benchmark_missing_current_snapshot_for_freshness_task"
+                             :task_id (:task_id task)})))
         answer-paths (or (:paths answer) [])
         missing-paths (vec (remove (partial path-covered? answer-paths)
                                    (:required_paths gt)))
@@ -325,11 +347,11 @@
         ceiling (get-in task [:cost_ceiling :max_returned_tokens])
         context-tokens (:context_tokens answer)
         excess-context? (boolean (and ceiling context-tokens (> context-tokens ceiling)))
-        freshness-required? (get-in task [:freshness_check :require_post_mutation_snapshot])
         answer-snapshot (:snapshot_id answer)
+        missing-snapshot? (boolean (and freshness-required?
+                                        (str/blank? (str answer-snapshot))))
         stale-snapshot? (boolean (and freshness-required?
-                                      current_snapshot_id
-                                      answer-snapshot
+                                      (not missing-snapshot?)
                                       (not= current_snapshot_id answer-snapshot)))
         false-negative? (boolean (or (seq missing-paths)
                                      (seq missing-symbols)
@@ -337,9 +359,10 @@
         issue-codes (cond-> []
                       false-negative? (conj "missing_required_fact")
                       (seq forbidden-hits) (conj "unrelated_seed_selection")
+                      missing-snapshot? (conj "missing_snapshot_evidence")
                       stale-snapshot? (conj "stale_snapshot_reuse")
                       excess-context? (conj "excess_context_cost"))]
-    {:outcome (if (or false-negative? (seq forbidden-hits) stale-snapshot?)
+    {:outcome (if (or false-negative? (seq forbidden-hits) missing-snapshot? stale-snapshot?)
                 "failure"
                 "success")
      :missing {:paths missing-paths
@@ -347,6 +370,7 @@
                :facts missing-facts}
      :forbidden_paths_hit forbidden-hits
      :false_negative false-negative?
+     :missing_snapshot_evidence missing-snapshot?
      :stale_snapshot_reuse stale-snapshot?
      :excess_context_cost excess-context?
      :context_tokens context-tokens
@@ -651,6 +675,7 @@
                  :policy_violation violation
                  :scoring scoring
                  :stale_snapshot_reuse (boolean (:stale_snapshot_reuse scoring))
+                 :missing_snapshot_evidence (boolean (:missing_snapshot_evidence scoring))
                  :excess_context_cost (boolean (:excess_context_cost scoring))
                  :wall_clock_ms wall-clock-ms
                  :measured_wall_clock_ms measured-ms

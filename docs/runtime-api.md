@@ -1021,6 +1021,10 @@ Aggregation behavior:
   capability) leave the success denominator and are reported separately
 - the primary A-vs-B comparison is paired per task over cost-eligible attempts;
   C and D are reported as controls and never replace comparator B
+- cost and success are weighted the same way: `success_rate` and
+  `success_delta_pp` average the per-task rates so a task run with more seeds
+  cannot outweigh one run with fewer, while `attempt_success_rate` keeps the
+  unweighted attempt view and carries the confidence interval
 - `diagnostics.semidx_internal_tokens` sums selection `estimated_tokens` and
   expand/detail `returned_tokens` per arm, preserving the Stage 1 semantics
 - `stop_rule.verdict` stays `pending_threshold_lock` until a locked threshold is

@@ -357,3 +357,56 @@
     (is (contains? #{true false} (:dirty_state run)))
     (is (= harness/harness-version (:harness_version run)))
     (is (= "implicit_cache_observed_v1" (:cache_protocol_id run)))))
+
+;; --------------------------------------------------------------------------
+;; Freshness and fact-matching regressions (review findings, 2026-08-28)
+;; --------------------------------------------------------------------------
+
+(deftest freshness-task-without-answer-snapshot-fails-test
+  (let [task (assoc sample-task :freshness_check {:require_post_mutation_snapshot true})
+        scoring (harness/score-answer task good-answer {:current_snapshot_id "new-snapshot"})]
+    (is (= "failure" (:outcome scoring))
+        "a freshness task must not pass without snapshot evidence")
+    (is (true? (:missing_snapshot_evidence scoring)))
+    (is (false? (:stale_snapshot_reuse scoring))
+        "an absent snapshot is not reuse of a stale one")
+    (is (some #{"missing_snapshot_evidence"} (:retrieval_issue_codes scoring)))))
+
+(deftest freshness-task-refuses-to-score-without-a-current-snapshot-test
+  (let [task (assoc sample-task :freshness_check {:require_post_mutation_snapshot true})]
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (harness/score-answer task (assoc good-answer :snapshot_id "s1") {}))
+        "a run that cannot supply the current snapshot must refuse, not degrade")))
+
+(deftest freshness-task-passes-on-the-current-snapshot-test
+  (let [task (assoc sample-task :freshness_check {:require_post_mutation_snapshot true})
+        scoring (harness/score-answer task (assoc good-answer :snapshot_id "new-snapshot")
+                                      {:current_snapshot_id "new-snapshot"})]
+    (is (= "success" (:outcome scoring)))
+    (is (false? (:missing_snapshot_evidence scoring)))
+    (is (false? (:stale_snapshot_reuse scoring)))))
+
+(deftest required-facts-are-matched-on-token-boundaries-test
+  (let [task (assoc sample-task
+                    :ground_truth {:required_facts ["ids"]})]
+    (is (= "failure"
+           (:outcome (harness/score-answer
+                      task {:answer_text "This merely forbids unsafe operations."} {})))
+        "a short required fact must not be satisfied by an unrelated substring")
+    (is (= "success"
+           (:outcome (harness/score-answer
+                      task {:answer_text "The config carries ids and clock."} {}))))
+    (is (= "success"
+           (:outcome (harness/score-answer task {:facts ["ids"]} {})))
+        "an explicit fact entry still counts")))
+
+(deftest qualified-required-facts-still-match-in-text-test
+  (let [task (assoc sample-task
+                    :ground_truth {:required_facts ["ActorEngine.init"]})]
+    (is (= "success"
+           (:outcome (harness/score-answer
+                      task {:answer_text "Consumed by ActorEngine.init at startup."} {}))))
+    (is (= "failure"
+           (:outcome (harness/score-answer
+                      task {:answer_text "Consumed by ActorEngine.initialize only."} {})))
+        "a longer identifier must not satisfy a shorter required fact")))

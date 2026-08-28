@@ -137,12 +137,12 @@
   [recorded derived]
   (when (map? recorded)
     (let [differing (vec (for [field compared-usage-fields
-                              :let [a (get recorded field)
-                                    b (get derived field)]
-                              :when (if (and (number? a) (number? b))
-                                      (> (Math/abs (- (double a) (double b))) 1e-9)
-                                      (not= a b))]
-                          field))]
+                               :let [a (get recorded field)
+                                     b (get derived field)]
+                               :when (if (and (number? a) (number? b))
+                                       (> (Math/abs (- (double a) (double b))) 1e-9)
+                                       (not= a b))]
+                           field))]
       (when (seq differing) differing))))
 
 (defn attempt-record->attempt
@@ -173,6 +173,7 @@
      :retrieval_issue_codes (vec (:retrieval_issue_codes record))
      :policy_violation_reason (get-in payload [:policy_violation :reason])
      :stale_snapshot_reuse (boolean (:stale_snapshot_reuse payload))
+     :missing_snapshot_evidence (boolean (:missing_snapshot_evidence payload))
      :excess_context_cost (boolean (:excess_context_cost payload))
      :wall_clock_ms (:wall_clock_ms payload)
      :turn_count (:turn_count derived)
@@ -324,6 +325,7 @@
               :output_total (reduce + 0 (keep :output_total_tokens scored))
               :input_cache_read (reduce + 0 (keep :input_cache_read_tokens scored))}
      :signals {:stale_snapshot_reuse (count (filter :stale_snapshot_reuse attempts))
+               :missing_snapshot_evidence (count (filter :missing_snapshot_evidence attempts))
                :excess_context_cost (count (filter :excess_context_cost attempts))
                :policy_violations (count (keep :policy_violation_reason attempts))
                :retrieval_issue_codes (->> attempts
@@ -340,6 +342,7 @@
     (when (seq eligible)
       {:attempts (count eligible)
        :successes (success-count eligible)
+       :success_rate (ratio-or-nil (success-count eligible) (count eligible))
        :mean_cost_usd (mean (map :cost_usd eligible))
        :mean_wall_clock_ms (mean (keep :wall_clock_ms eligible))})))
 
@@ -348,7 +351,13 @@
 
    Only tasks where both arms produced at least one cost-eligible attempt enter
    the comparison, and each task contributes the mean of its own attempts, so
-   unequal seed counts do not weight one task more than another."
+   unequal seed counts do not weight one task more than another.
+
+   Cost and success are weighted the same way. `success_rate` is the mean of the
+   per-task success rates and is what `success_delta_pp` compares, because a
+   task with ten seeds must not outweigh a task with one. `attempt_success_rate`
+   keeps the unweighted attempt view and carries the confidence interval, whose
+   trial count is the attempt count."
   [attempts candidate comparator]
   (let [by-task (group-by (juxt :benchmark_run_id :task_id) attempts)
         pairs (keep (fn [[[run-id task-id] group]]
@@ -363,42 +372,41 @@
                            :comparator comp})))
                     by-task)
         pairs (vec (sort-by (juxt :benchmark_run_id :task_id) pairs))
-        cand-cost (reduce + 0.0 (map #(get-in % [:candidate :mean_cost_usd]) pairs))
-        comp-cost (reduce + 0.0 (map #(get-in % [:comparator :mean_cost_usd]) pairs))
-        cand-attempts (reduce + 0 (map #(get-in % [:candidate :attempts]) pairs))
-        comp-attempts (reduce + 0 (map #(get-in % [:comparator :attempts]) pairs))
-        cand-successes (reduce + 0 (map #(get-in % [:candidate :successes]) pairs))
-        comp-successes (reduce + 0 (map #(get-in % [:comparator :successes]) pairs))
-        cand-wall (mean (keep #(get-in % [:candidate :mean_wall_clock_ms]) pairs))
-        comp-wall (mean (keep #(get-in % [:comparator :mean_wall_clock_ms]) pairs))
-        cand-rate (ratio-or-nil cand-successes cand-attempts)
-        comp-rate (ratio-or-nil comp-successes comp-attempts)
-        cand-ci (wilson-interval cand-successes cand-attempts)
-        comp-ci (wilson-interval comp-successes comp-attempts)]
+        arm-view (fn [role]
+                   (let [attempt-count (reduce + 0 (map #(get-in % [role :attempts]) pairs))
+                         successes (reduce + 0 (map #(get-in % [role :successes]) pairs))]
+                     {:attempts attempt-count
+                      :successes successes
+                      :tasks (count pairs)
+                      :success_rate (mean (keep #(get-in % [role :success_rate]) pairs))
+                      :attempt_success_rate (ratio-or-nil successes attempt-count)
+                      :confidence_interval (wilson-interval successes attempt-count)
+                      :total_cost_usd (reduce + 0.0 (map #(get-in % [role :mean_cost_usd]) pairs))
+                      :mean_wall_clock_ms (mean (keep #(get-in % [role :mean_wall_clock_ms])
+                                                      pairs))}))
+        cand-view (arm-view :candidate)
+        comp-view (arm-view :comparator)
+        cand-cost (:total_cost_usd cand-view)
+        comp-cost (:total_cost_usd comp-view)
+        cand-rate (:success_rate cand-view)
+        comp-rate (:success_rate comp-view)]
     {:candidate_arm candidate
      :comparator_arm comparator
      :comparable (boolean (seq pairs))
      :tasks_compared (count pairs)
      :repositories_compared (vec (sort (distinct (keep :repo_key pairs))))
-     :candidate {:attempts cand-attempts
-                 :successes cand-successes
-                 :success_rate cand-rate
-                 :confidence_interval cand-ci
-                 :total_cost_usd cand-cost
-                 :mean_wall_clock_ms cand-wall}
-     :comparator {:attempts comp-attempts
-                  :successes comp-successes
-                  :success_rate comp-rate
-                  :confidence_interval comp-ci
-                  :total_cost_usd comp-cost
-                  :mean_wall_clock_ms comp-wall}
+     :success_weighting "task_mean"
+     :candidate cand-view
+     :comparator comp-view
      :cost_reduction_pct (when (pos? comp-cost)
                            (* 100.0 (/ (- comp-cost cand-cost) comp-cost)))
      :cost_ratio (ratio-or-nil comp-cost cand-cost)
      :success_delta_pp (when (and cand-rate comp-rate)
                          (* 100.0 (- cand-rate comp-rate)))
-     :success_interval_overlap (intervals-overlap? cand-ci comp-ci)
-     :wall_clock_ratio (ratio-or-nil cand-wall comp-wall)
+     :success_interval_overlap (intervals-overlap? (:confidence_interval cand-view)
+                                                   (:confidence_interval comp-view))
+     :wall_clock_ratio (ratio-or-nil (:mean_wall_clock_ms cand-view)
+                                     (:mean_wall_clock_ms comp-view))
      :pairs pairs}))
 
 ;; ---------------------------------------------------------------------------

@@ -550,3 +550,78 @@ model_availability_checked_at: >
   cannot be verified from this repository. Confirm at admission.
 confidence: high (for the routing recommendation itself)
 ```
+
+## Stage 3 Review Findings (2026-08-28)
+
+External review of `22263d2` (Stage 2) and `1cda47b` (Stage 3). All three
+findings were reproduced in the REPL before any change was made, and all three
+are accepted and fixed.
+
+| # | Severity | Finding | Disposition |
+| --- | --- | --- | --- |
+| 1 | high | a freshness-required task could pass without proving a fresh snapshot | accepted, fixed |
+| 2 | high | required facts could be satisfied by an arbitrary substring | accepted, fixed |
+| 3 | medium | the paired comparison weighted success by attempt count while weighting cost by task | accepted, fixed |
+
+### Finding 1 — freshness passed without evidence
+
+Reproduced: a freshness-required task with a correct path and symbol but no
+`answer.snapshot_id` scored `outcome "success"` with
+`stale_snapshot_reuse false`. The same held when the harness supplied no
+`current_snapshot_id`. `score-answer` only flagged reuse when both ids were
+present and unequal, so the absence of evidence read as evidence of freshness.
+
+Fix (`src/semidx/runtime/benchmark_harness.clj`):
+
+- an answer that reports no `snapshot_id` on a freshness-required task now fails
+  with the distinct issue code `missing_snapshot_evidence`, kept separate from
+  `stale_snapshot_reuse` because an absent snapshot is not reuse of a stale one;
+- a run that cannot supply `current_snapshot_id` for such a task is refused with
+  `benchmark_missing_current_snapshot_for_freshness_task` rather than scored.
+  This follows the existing rule that a freshness case must not silently degrade
+  into an ordinary retrieval case, and it blames the run configuration instead of
+  the arm;
+- `missing_snapshot_evidence` is recorded in the attempt payload and surfaced per
+  arm in the Stage 3 report signals.
+
+### Finding 2 — substring fact matching
+
+Reproduced: required fact `ids` (a real entry of
+`fixtures/benchmark/task_suite_v1.edn`) was satisfied by the answer text
+"This merely forbids unsafe operations."
+
+Fix (`src/semidx/runtime/benchmark_harness.clj`): `token-covered?` now matches
+answer text on token boundaries instead of a bare substring. An explicit
+`:symbols` / `:facts` entry still counts as an exact token. Qualified facts such
+as `ActorEngine.init` still match in prose but are no longer satisfied by
+`ActorEngine.initialize`. Prose answers stay viable for the lexical arms, which
+matters because scoring must be uniform across arms.
+
+### Finding 3 — success weighted by attempts, cost weighted by tasks
+
+Reproduced: ten successful A attempts on one task and one failed A attempt on
+another reported an A success rate of 0.909 where task-paired averaging gives
+0.5, so the docstring's claim that unequal seed counts cannot weight one task
+more held for cost but not for success.
+
+Fix (`src/semidx/runtime/benchmark_report.clj`): `per-task-arm-stats` now carries
+a per-task `success_rate`, and the paired comparison reports `success_rate` as
+the mean of the per-task rates. `success_delta_pp` uses that task-weighted rate,
+matching the cost weighting; `attempt_success_rate` retains the unweighted view
+and carries the Wilson interval, whose trial count is the attempt count. The
+comparison records `success_weighting: "task_mean"` so the weighting is explicit
+in the artifact.
+
+### Review-fix verification
+
+- `clojure -M:test`: 420 tests, 2474 assertions, 0 failures, 0 errors
+  (Stage 3 pre-fix baseline was 413 / 2451).
+- New regression tests: 5 in `benchmark_harness_test.clj` (missing snapshot
+  evidence, refusal without a current snapshot, the passing freshness case, token
+  boundary matching for short and qualified facts) and 2 in
+  `benchmark_report_test.clj` (task-weighted success with unequal seeds, and the
+  per-arm `missing_snapshot_evidence` signal).
+- Compile probes after every source edit: passed.
+- `git diff --check`: passed.
+- CCC artifacts were not refreshed; `RULES.md` forbids routine per-task
+  refreshes.

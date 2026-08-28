@@ -487,3 +487,41 @@
         (is (= (get-in in-memory [:comparison :primary :tasks_compared])
                (get-in round-tripped [:comparison :primary :tasks_compared])))))
     (is true "SEMIDX_TEST_POSTGRES_URL is not set; skipping postgres benchmark payload round-trip test.")))
+
+;; --------------------------------------------------------------------------
+;; Success weighting regression (review finding, 2026-08-28)
+;; --------------------------------------------------------------------------
+
+(deftest paired-success-is-weighted-by-task-not-by-attempt-count-test
+  (let [records (concat
+                 ;; task_1: ten A attempts, all successful; one B attempt.
+                 (for [seed (range 10)]
+                   (feedback-fixture {:task "task_1" :arm "A" :seed seed :turns [800]
+                                      :outcome "success"}))
+                 [(feedback-fixture {:task "task_1" :arm "B" :seed 0 :turns [6000]
+                                     :outcome "success"})]
+                 ;; task_2: one failed A attempt against a successful B attempt.
+                 [(feedback-fixture {:task "task_2" :arm "A" :seed 0 :turns [800]
+                                     :outcome "failure"})
+                  (feedback-fixture {:task "task_2" :arm "B" :seed 0 :turns [6000]
+                                     :outcome "success"})])
+        primary (get-in (report-for records) [:comparison :primary])]
+    (is (= 2 (:tasks_compared primary)))
+    (is (= "task_mean" (:success_weighting primary)))
+    (is (= 0.5 (get-in primary [:candidate :success_rate]))
+        "a ten-seed task must not outweigh a one-seed task")
+    (is (= 1.0 (get-in primary [:comparator :success_rate])))
+    (is (= -50.0 (:success_delta_pp primary))
+        "success must be weighted like cost, per task")
+    (testing "the unweighted attempt view stays available"
+      (is (< (Math/abs (- (get-in primary [:candidate :attempt_success_rate]) (/ 10.0 11.0)))
+             1e-9))
+      (is (= 11 (get-in primary [:candidate :attempts])))
+      (is (some? (get-in primary [:candidate :confidence_interval]))))))
+
+(deftest missing-snapshot-evidence-is-reported-per-arm-test
+  (let [record (assoc-in (feedback-fixture {:task "task_1" :arm "A" :outcome "failure"})
+                         [:payload :missing_snapshot_evidence] true)
+        arm-a (arm-entry (report-for [record]) "A")]
+    (is (= 1 (get-in arm-a [:signals :missing_snapshot_evidence])))
+    (is (zero? (get-in arm-a [:signals :stale_snapshot_reuse])))))
