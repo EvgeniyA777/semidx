@@ -200,11 +200,9 @@ anything:
   fresh temporary workspace per attempt.
 - **Contamination moves from the tree into the operator.** With clones the files
   are clean, but knowledge is not: whoever runs the second arm may already know
-  the answer. For an LLM agent a fresh session is a real reset, with three
-  exceptions that must be closed explicitly — the auto-memory directory, the
-  repository's own `MEMORY.md` and rule files, and any handoff document written
-  during the first arm. Arm order must also be randomised, because the second
-  arm is the contaminated one whichever arm it is.
+  the answer. For an LLM agent this is cheaper to close than it looks (see
+  "Isolating agent memory" below); for a human operator it cannot be closed at
+  all, only diluted by randomising arm order and by running enough tasks.
 - **The model is not deterministic**, so one run per arm measures noise as much
   as arms. Repeats per arm with recorded seeds are part of the design; the
   paused harness already carries `seed` and `sequence_index` for exactly this.
@@ -224,6 +222,30 @@ anything:
   starting clone, and the tests that commit added or changed become the
   acceptance check. The tasks are then real work that actually happened, and the
   success verdict is objective and arm-neutral.
+
+### Isolating agent memory
+
+Cloning to two distinct paths does most of this work by itself, because the
+agent's persistent state is namespaced by working directory. Claude Code keys
+both its auto-memory directory and its session transcripts by the project path
+with separators replaced by dashes — `~/.claude/projects/-Users-ae-workspaces-semidx/`
+for this repository, one directory per project (16 of them on this machine at
+the time of writing). Two clones at different paths therefore get separate
+memory and separate transcripts without any extra setup.
+
+The rest follows from the clones:
+
+- `MEMORY.md`, the rule files, and any handoff document live inside the clone,
+  so one arm's writes are invisible to the other. Both arms start from identical
+  copies, and identical is a constant, not a contamination.
+- The user-level global instruction file is shared by both arms, which likewise
+  makes it a constant that cannot favour one arm.
+- If stricter isolation is wanted, the agent's config directory can be pointed
+  somewhere per-arm for the duration of a run. That is a belt-and-braces
+  measure, not a prerequisite.
+
+No second machine is required. What a second machine would isolate — the human
+running both arms — is exactly the channel it cannot fix.
 
 Withholding is cheap to implement: a task-level switch that makes the semidx
 tools unavailable for that task and records the assignment as an event. The
