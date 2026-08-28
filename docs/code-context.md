@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: 9a06abb3528dd925f4c556fce88e4f5eb5319604
+- fingerprint: 6fcaffdb9c8e79af0f98391330ed522d3b19d291
 
 ## Tree
 ```text
@@ -53,7 +53,7 @@ semidx
 - semidx.integration.lua-onboarding-test
 - semidx.integration.policy-governance-test
 - semidx.integration.runtime-test
-- ... +28 more
+- ... +32 more
 ### other
 - semidx.contracts.cli
 - semidx.contracts.schemas
@@ -63,9 +63,10 @@ semidx
 - semidx.mcp.session-registry
 - semidx.runtime.adapters
 - semidx.runtime.authz
-- ... +56 more
+- ... +60 more
 
 ## Domain Model
+- ArmRunner [protocol]
 - IndexStorage [protocol]
 - UsageMetricsSink [protocol]
 - InMemoryStorage [record]
@@ -73,6 +74,8 @@ semidx
 - NoOpUsageMetrics [record]
 - PostgresStorage [record]
 - PostgresUsageMetrics [record]
+- ProcessArmRunner [record]
+- ScriptedArmRunner [record]
 
 ## Dependency Graph
 - semidx.contracts.cli -> semidx.contracts.validator
@@ -95,7 +98,7 @@ semidx
 - semidx.core -> semidx.runtime.usage-metrics
 - semidx.integration.css-onboarding-test -> clojure.java.io
 - semidx.integration.css-onboarding-test -> clojure.test
-- ... +399 more
+- ... +434 more
 
 ## Namespaces
 ### semidx.contracts.cli
@@ -221,24 +224,29 @@ semidx
 - normalize-path-prefix [function]
 - path-allowed? [function]
 - tenant-rules [function]
-### semidx.runtime.benchmarks
-- path: src/semidx/runtime/benchmarks.clj
-- requires: clojure.data.json, clojure.java.io, clojure.string, semidx.core
-- aliases: checkout -> my.app.checkout, fulfillment -> my.app.fulfillment, io -> clojure.java.io, json -> clojure.data.json, order -> my.app.order, payments -> my.app.payments, sci -> semidx.core, str -> clojure.string
+### semidx.runtime.benchmark-harness
+- path: src/semidx/runtime/benchmark_harness.clj
+- requires: clojure.data.json, clojure.java.io, clojure.java.shell, clojure.string, semidx.runtime.benchmark-suite, semidx.runtime.benchmark-usage, semidx.runtime.usage-metrics
+- aliases: bu -> semidx.runtime.benchmark-usage, io -> clojure.java.io, json -> clojure.data.json, shell -> clojure.java.shell, str -> clojure.string, suite -> semidx.runtime.benchmark-suite, usage -> semidx.runtime.usage-metrics
 - symbols:
-- read-json [function]
-- write-file! [function]
-- build-benchmark-repo! [function]
-- parse-engine [function]
-- parse-args [function]
-- parser-opts-for [function]
-- confidence-rank [section]
-- raw-rank [section]
-### semidx.runtime.capabilities
-- path: src/semidx/runtime/capabilities.clj
-- requires: semidx.runtime.language-registry
-- aliases: registry -> semidx.runtime.language-registry
+- harness-version [section]
+- task-prompt-policy-id [section]
+- arm-policy-bundle-id [section]
+- execution-budget-policy-id [section]
+- cache-protocol-id [section]
+- feedback-surface [section]
+- feedback-operation [section]
+- task-prompt-preamble [section]
+### semidx.runtime.benchmark-report
+- path: src/semidx/runtime/benchmark_report.clj
+- requires: clojure.string, semidx.runtime.benchmark-suite, semidx.runtime.benchmark-usage, semidx.runtime.usage-metrics
+- aliases: bu -> semidx.runtime.benchmark-usage, str -> clojure.string, suite -> semidx.runtime.benchmark-suite, usage -> semidx.runtime.usage-metrics
 - symbols:
-- current-capability-version [section]
-- confidence-ceiling [function]
-- capabilities-payload [function]
+- report-schema-version [section]
+- attempt-surface [section]
+- attempt-operation [section]
+- candidate-arm [section]
+- comparator-arm [section]
+- control-arms [section]
+- arm-verdict-roles [section]
+- provisional-threshold [section]
