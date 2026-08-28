@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: c8c4aa16f0d24c8ae304de2b768f4c0dc517096f
+- fingerprint: c6843bbe79f32961e909ea100643d24379368e09
 
 ## Tree
 ```text
@@ -53,7 +53,7 @@ semidx
 - semidx.integration.lua-onboarding-test
 - semidx.integration.policy-governance-test
 - semidx.integration.runtime-test
-- ... +32 more
+- ... +33 more
 ### other
 - semidx.contracts.cli
 - semidx.contracts.schemas
@@ -63,7 +63,7 @@ semidx
 - semidx.mcp.session-registry
 - semidx.runtime.adapters
 - semidx.runtime.authz
-- ... +60 more
+- ... +61 more
 
 ## Domain Model
 - ArmRunner [protocol]
@@ -71,6 +71,7 @@ semidx
 - UsageMetricsSink [protocol]
 - InMemoryStorage [record]
 - InMemoryUsageMetrics [record]
+- LiveArmRunner [record]
 - NoOpUsageMetrics [record]
 - PostgresStorage [record]
 - PostgresUsageMetrics [record]
@@ -98,7 +99,7 @@ semidx
 - semidx.core -> semidx.runtime.usage-metrics
 - semidx.integration.css-onboarding-test -> clojure.java.io
 - semidx.integration.css-onboarding-test -> clojure.test
-- ... +434 more
+- ... +446 more
 
 ## Namespaces
 ### semidx.contracts.cli
@@ -224,6 +225,19 @@ semidx
 - normalize-path-prefix [function]
 - path-allowed? [function]
 - tenant-rules [function]
+### semidx.runtime.benchmark-agent
+- path: src/semidx/runtime/benchmark_agent.clj
+- requires: clojure.data.json, clojure.java.io, clojure.java.shell, clojure.string, semidx.core, semidx.runtime.benchmark-harness
+- aliases: harness -> semidx.runtime.benchmark-harness, io -> clojure.java.io, json -> clojure.data.json, sci -> semidx.core, shell -> clojure.java.shell, str -> clojure.string
+- symbols:
+- agent-id [section]
+- agent-build-id [section]
+- adapter-id [section]
+- api-base [section]
+- limits [section]
+- semidx-tools [section]
+- lsp-tools [section]
+- tool-declarations [section]
 ### semidx.runtime.benchmark-harness
 - path: src/semidx/runtime/benchmark_harness.clj
 - requires: clojure.data.json, clojure.java.io, clojure.java.shell, clojure.string, semidx.runtime.benchmark-suite, semidx.runtime.benchmark-usage, semidx.runtime.usage-metrics
@@ -237,16 +251,3 @@ semidx
 - feedback-surface [section]
 - feedback-operation [section]
 - task-prompt-preamble [section]
-### semidx.runtime.benchmark-report
-- path: src/semidx/runtime/benchmark_report.clj
-- requires: clojure.string, semidx.runtime.benchmark-suite, semidx.runtime.benchmark-usage, semidx.runtime.usage-metrics
-- aliases: bu -> semidx.runtime.benchmark-usage, str -> clojure.string, suite -> semidx.runtime.benchmark-suite, usage -> semidx.runtime.usage-metrics
-- symbols:
-- report-schema-version [section]
-- attempt-surface [section]
-- attempt-operation [section]
-- candidate-arm [section]
-- comparator-arm [section]
-- control-arms [section]
-- arm-verdict-roles [section]
-- provisional-threshold [section]
