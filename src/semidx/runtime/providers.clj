@@ -21,7 +21,8 @@
             [clojure.string :as str]
             [semidx.runtime.languages.java :as java-language]
             [semidx.runtime.languages.shared :as shared]
-            [semidx.runtime.languages.typescript :as ts-language])
+            [semidx.runtime.languages.typescript :as ts-language]
+            [semidx.runtime.workspace-state :as workspace-state])
   (:import [java.security MessageDigest]
            [java.time Instant]))
 
@@ -134,18 +135,46 @@
 ;; Source identity
 ;; ---------------------------------------------------------------------------
 
-(defn content-digest
-  "SHA-256 digest of the content a provider actually parsed.
+(def file-digest-basis
+  "Byte-level digest of the file on disk. Same basis as
+  `semidx.runtime.workspace-state/sha256-file`, so provider evidence and
+  workspace freshness are comparable."
+  "file_bytes_sha256")
 
-  ADR-046 requires evidence to be tied to the content it describes; this is the
-  anchor Stage 2 providers can honestly produce."
+(def lines-digest-basis
+  "Digest of the newline-joined lines a provider was handed. Not comparable to
+  a byte digest: joining normalizes line endings and drops a trailing newline."
+  "joined_lines_sha256")
+
+(defn lines-digest
+  "SHA-256 of the newline-joined lines. Used only when no file is available."
   [lines]
   (let [digest (MessageDigest/getInstance "SHA-256")
         bytes (.digest digest (.getBytes (str/join "\n" lines) "UTF-8"))]
     (str "sha256:" (apply str (map #(format "%02x" %) bytes)))))
 
-(defn source-identity [lines]
-  {:content_digest (content-digest lines)})
+(defn file-digest
+  "SHA-256 of the file's bytes, or nil when it cannot be read."
+  [file]
+  (let [file (io/file file)]
+    (when (.isFile file)
+      (str "sha256:" (workspace-state/sha256-file file)))))
+
+(defn source-identity
+  "Source identity for evidence produced from `path`, with its digest basis
+  named.
+
+  ADR-046 requires evidence to be tied to the content it describes. The file's
+  bytes are the basis wherever the file can be read, matching how workspace
+  freshness is computed; the joined-lines digest is a fallback for callers that
+  only have lines. The basis is recorded because the two are not interchangeable
+  and must never be compared to each other."
+  [{:keys [root_path path lines]}]
+  (or (when (and root_path path)
+        (when-let [digest (file-digest (io/file (str root_path) (str path)))]
+          {:content_digest digest :digest_basis file-digest-basis}))
+      {:content_digest (lines-digest (or lines []))
+       :digest_basis lines-digest-basis}))
 
 ;; ---------------------------------------------------------------------------
 ;; Role functions: parsed units -> facts
@@ -209,6 +238,36 @@
                        :language language
                        :provider_id (:provider_id descriptor)})))))
 
+(defn tree-sitter-fallback-diagnostic
+  "The diagnostic showing a tree-sitter parse silently degraded to the lexical
+  parser, if there is one.
+
+  Any `tree_sitter_*` diagnostic other than the positive CLI probe means the
+  structural parse did not happen: unknown future codes fail closed rather than
+  passing as structural."
+  [parsed]
+  (first (filter (fn [d]
+                   (let [code (str (:code d))]
+                     (and (str/starts-with? code "tree_sitter_")
+                          (not= "tree_sitter_probe" code))))
+                 (:diagnostics parsed))))
+
+(defn- refuse-silent-fallback!
+  "A tree-sitter provider must not emit lexical facts under a structural label.
+
+  `parse-file` falls back to regex when tree-sitter is unavailable or fails, and
+  the fallback result is indistinguishable from a regex parse apart from a
+  diagnostic. Inheriting the descriptor's structural authority there would
+  launder heuristic evidence, so the run fails instead; the regex provider is
+  admitted separately and contributes the same facts as heuristic."
+  [descriptor parsed]
+  (when (= :tree-sitter (:engine descriptor))
+    (when-let [fallback (tree-sitter-fallback-diagnostic parsed)]
+      (throw (ex-info "Tree-sitter provider fell back to the lexical parser"
+                      {:error_code :tree_sitter_fallback_refused
+                       :provider_id (:provider_id descriptor)
+                       :diagnostic fallback})))))
+
 (defn run-provider
   "Execute one provider against one file and return its facts and diagnostics.
 
@@ -223,7 +282,9 @@
         language (first (:languages descriptor))
         authority (get-in descriptor [:operation_capabilities :definitions])
         parsed (parse-with-engine descriptor request)
-        identity* (or (:source_identity request) (source-identity lines))
+        _ (refuse-silent-fallback! descriptor parsed)
+        identity* (or (:source_identity request)
+                      (source-identity (select-keys request [:root_path :path :lines])))
         context {:provider_id provider-id
                  :provider_version (:provider_version descriptor)
                  :authority authority

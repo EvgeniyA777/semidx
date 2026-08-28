@@ -59,12 +59,23 @@
         (reduce (fn [acc candidate]
                   (let [status (get statuses (:provider_id candidate))
                         denied? (contains? (set denied_providers) (:provider_id candidate))
-                        unavailable? (and (not= "forced" mode)
+                        forced? (= "forced" mode)
+                        ;; An unobserved provider is not a working one. Admitting
+                        ;; it on a default of "ready" would let an external tool
+                        ;; that was never probed into the plan.
+                        unknown? (and (not forced?) (nil? status))
+                        unavailable? (and (not forced?)
                                           (= "unavailable" (:state status)))]
                     (cond
                       denied?
                       (update acc :excluded conj
                               (excluded-entry candidate status "denied_by_override"))
+
+                      unknown?
+                      (update acc :excluded conj
+                              (excluded-entry candidate
+                                              {:state "unknown" :reason_codes ["status_not_observed"]}
+                                              "provider_status_unknown"))
 
                       unavailable?
                       (update acc :excluded conj
@@ -76,7 +87,7 @@
 
                       :else
                       (update acc :admitted conj
-                              (assoc candidate :state (:state status "ready"))))))
+                              (assoc candidate :state (:state status "forced"))))))
                 {:admitted [] :excluded []}
                 candidates)]
     {:providers admitted
@@ -126,3 +137,16 @@
        (map :provider_id)
        distinct
        vec))
+
+(defn planned-tasks
+  "One task per (operation, provider) the plan admits, in stable order.
+
+  Execution is per operation, not per provider: the same provider may be
+  admitted for several operations with different claims, and collapsing them
+  would make a batch unable to say which operation it answered."
+  [plan]
+  (vec (for [[operation {:keys [providers]}] (:operations plan)
+             provider providers]
+         {:operation operation
+          :provider_id (:provider_id provider)
+          :authority (:authority provider)})))

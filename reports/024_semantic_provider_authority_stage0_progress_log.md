@@ -682,3 +682,69 @@ fallback_executor_or_model: Sonnet 5 for the toolchain and packaging work only.
 model_availability_checked_at: not checked in this session.
 confidence: high
 ```
+
+## Stage 2 Review Hardening (2026-08-28)
+
+External review of Stage 2 accepted the seam as shadow-only and raised four
+findings. All four are fixed here as a pre-flight before Stage 3, since each of
+them would become load-bearing the moment an external provider can claim exact
+authority.
+
+**High — a tree-sitter provider could emit regex facts as structural.**
+`parse-file` falls back to the lexical parser when tree-sitter is unavailable or
+fails, and the fallback is indistinguishable from a regex parse: verified in the
+REPL that asking for tree-sitter with no grammar returns `parser_mode "full"`
+with units byte-identical to the regex parse, the only signal being a
+`tree_sitter_missing_grammar` diagnostic. `run-provider` assigned authority from
+the descriptor, so those lexical facts would have carried the structural claim —
+laundering heuristic evidence.
+
+Fixed by strict execution: a tree-sitter provider run is refused when the parse
+carries any `tree_sitter_*` diagnostic other than the positive CLI probe, which
+fails closed for unknown future codes. The refusal surfaces through the
+orchestrator as a `:provider_failed` batch with no facts, and the separately
+admitted regex provider contributes the same facts as heuristic — the shape the
+review asked for. Covered deterministically for two independent degradations (no
+grammar configured, unusable grammar path) rather than relying on this machine's
+toolchain state.
+
+**Medium — the source-identity digest used a different basis from workspace
+freshness.** Provider evidence hashed newline-joined lines while
+`workspace-state/sha256-file` hashes file bytes, so line-ending normalization and
+a missing trailing newline made the two incomparable. Since Stage 3 gates exact
+authority on source identity, comparing them later would have silently
+mis-judged freshness.
+
+Fixed: `source-identity` now digests the file's bytes wherever the file can be
+read, reusing `workspace-state/sha256-file` so the basis is identical, and names
+the basis in the record (`digest_basis: file_bytes_sha256`). A lines-only caller
+gets `joined_lines_sha256` and is thereby marked as not comparable. A test
+asserts the file digest equals the workspace-state digest for the same file.
+
+**Medium — execution was not operation-aware.** Providers were deduplicated
+across operations and every batch hard-coded `definitions`. Invisible while the
+catalog claims one operation, wrong as soon as Stage 3 adds references,
+implementations, and calls. Fixed: `planned-tasks` emits one task per
+(operation, provider), each batch names the operation it answered, and gap
+tracking is computed per operation from those batches.
+
+**Low/Medium — an unobserved provider was treated as ready.** A partial status
+map admitted providers on a `"ready"` default, which for an external SCIP or LSP
+tool means admitting something that was never probed. Fixed: a provider with no
+observed status is excluded with `provider_status_unknown` /
+`status_not_observed` outside forced mode; forced mode still admits it and
+records the state as `forced` rather than pretending it was observed.
+
+### Verification
+
+- `clojure -M:test`: **483 tests, 2770 assertions, 0 failures, 0 errors**
+  (was 480 / 2743).
+- Live re-check of the seam after the fixes: source identity reports
+  `digest_basis file_bytes_sha256`, the batch is `["java-regex" "definitions"]`,
+  facts stay heuristic, and no gap is reported.
+- `./scripts/validate-contracts.sh`: ok, 72 JSON files. `git diff --check`:
+  clean. English-only scan: clean.
+
+Stage 3 admission is unchanged by this work: it still needs `scip-typescript`
+pinned, the Stage 0 SCIP spellings re-verified against real tool output, and
+exact facts gated by anchored source identity.

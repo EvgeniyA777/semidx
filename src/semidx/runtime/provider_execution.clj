@@ -18,10 +18,10 @@
            [java.util.concurrent TimeUnit TimeoutException]))
 
 (defn- failure-batch
-  [provider-id source-identity diagnostic]
+  [provider-id operation source-identity diagnostic]
   {:provider_id provider-id
    :provider_version (:provider_version (providers/descriptor provider-id))
-   :operation "definitions"
+   :operation (name operation)
    :freshness "unknown"
    :source_identity source-identity
    :coverage {:paths [] :fact_kinds [] :complete false}
@@ -34,11 +34,15 @@
   A provider that throws or hangs must not take the run down with it, and must
   not disappear either: the batch it produces records the failure and reports
   incomplete coverage."
-  [provider-id {:keys [path source_identity timeout_ms run-provider] :as request}]
-  (let [runner (or run-provider providers/run-provider)
+  [{:keys [provider_id operation]} {:keys [path source_identity timeout_ms run-provider]
+                                    :as request}]
+  (let [provider-id provider_id
+        runner (or run-provider providers/run-provider)
         task (future
                (try
-                 {:ok (runner provider-id (dissoc request :run-provider))}
+                 {:ok (runner provider-id (-> request
+                                              (dissoc :run-provider)
+                                              (assoc :operation operation)))}
                  (catch Throwable t
                    {:error (or (.getMessage t) (str (class t)))
                     :error_class (.getName (class t))})))
@@ -46,14 +50,14 @@
     (cond
       (= ::timeout outcome)
       (do (future-cancel task)
-          (failure-batch provider-id source_identity
+          (failure-batch provider-id operation source_identity
                          {:code :provider_timeout
                           :provider_id provider-id
                           :timeout_ms timeout_ms
                           :message (str provider-id " exceeded " timeout_ms "ms on " path)}))
 
       (:error outcome)
-      (failure-batch provider-id source_identity
+      (failure-batch provider-id operation source_identity
                      {:code :provider_failed
                       :provider_id provider-id
                       :error_class (:error_class outcome)
@@ -63,7 +67,7 @@
       (let [{:keys [facts diagnostics parser_mode]} (:ok outcome)]
         {:provider_id provider-id
          :provider_version (:provider_version (providers/descriptor provider-id))
-         :operation "definitions"
+         :operation (name operation)
          :freshness "exact"
          :source_identity source_identity
          :coverage {:paths [path] :fact_kinds ["unit"] :complete true}
@@ -75,13 +79,12 @@
          :facts (vec facts)}))))
 
 (defn- run-bounded
-  "Run providers with at most `concurrency` in flight at a time."
-  [provider-ids request concurrency]
-  (->> (partition-all (max 1 (long concurrency)) provider-ids)
+  "Run planned tasks with at most `concurrency` in flight at a time."
+  [tasks request concurrency]
+  (->> (partition-all (max 1 (long concurrency)) tasks)
        (mapcat (fn [chunk]
                  (->> chunk
-                      (mapv (fn [provider-id]
-                              (future (run-one provider-id request))))
+                      (mapv (fn [task] (future (run-one task request))))
                       (mapv deref))))
        vec))
 
@@ -91,11 +94,10 @@
   A gap is the difference between what the catalog claims and what actually
   produced facts; without it, a run where every provider failed looks the same
   as a file with nothing in it."
-  [plan batches-by-provider]
+  [plan batches]
   (vec (for [[operation {:keys [providers excluded]}] (:operations plan)
-             :let [produced (->> providers
-                                 (map :provider_id)
-                                 (keep batches-by-provider)
+             :let [produced (->> batches
+                                 (filter #(= (name operation) (:operation %)))
                                  (filter #(seq (:facts %))))]
              :when (empty? produced)]
          {:operation operation
@@ -112,7 +114,7 @@
   parsers."
   [plan {:keys [root_path lines parser_opts run-provider] :as opts}]
   (let [policy (:execution_policy plan)
-        provider-ids (provider-selection/planned-provider-ids plan)
+        tasks (provider-selection/planned-tasks plan)
         request {:root_path root_path
                  :path (:path plan)
                  :lines lines
@@ -120,13 +122,12 @@
                  :source_identity (:source_identity plan)
                  :timeout_ms (:timeout_ms policy)
                  :run-provider run-provider}
-        batches (run-bounded provider-ids request (:max_concurrency policy))
-        by-provider (into {} (map (juxt :provider_id identity)) batches)]
+        batches (run-bounded tasks request (:max_concurrency policy))]
     {:path (:path plan)
      :mode (:mode plan)
      :source_identity (:source_identity plan)
      :batches batches
-     :gaps (operation-gaps plan by-provider)
+     :gaps (operation-gaps plan batches)
      :diagnostics (vec (mapcat :diagnostics batches))}))
 
 (defn shadow-facts-for-file
@@ -138,7 +139,9 @@
            run-provider]
     :or {mode "shadow"}}]
   (let [lines (or lines (shared/slurp-lines (File. (str root_path) (str path))))
-        source-identity (providers/source-identity lines)
+        source-identity (providers/source-identity {:root_path root_path
+                                                    :path path
+                                                    :lines lines})
         plan (provider-selection/provider-plan
               {:path path
                :source_identity source-identity

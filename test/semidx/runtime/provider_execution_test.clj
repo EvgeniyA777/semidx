@@ -114,7 +114,11 @@
       (is (= #{"heuristic"} (set (map :authority (:facts result))))))
     (is (empty? (:errors result))
         "every emitted batch must satisfy the Stage 1 evidence contract")
+    (testing "batches name the operation they answered"
+      (is (= [["java-regex" "definitions"]]
+             (mapv (juxt :provider_id :operation) (:batches result)))))
     (testing "the plan that produced them is retained with the result"
+      (is (= "file_bytes_sha256" (get-in result [:plan :source_identity :digest_basis])))
       (is (= "sha256" (subs (get-in result [:plan :source_identity :content_digest]) 0 6)))
       (is (seq (get-in result [:plan :operations :definitions :providers]))))))
 

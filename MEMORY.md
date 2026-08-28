@@ -279,7 +279,15 @@ after this memory file.
    `provider-selection` (deterministic bounded ProviderPlan that records every
    exclusion), and `provider-execution` (bounded concurrency, timeouts, failure
    isolation, gap tracking, FactBatch emission, shadow entry point). Regex stays
-   heuristic, tree-sitter structural. Deliberate deviation: `index.clj` and
+   heuristic, tree-sitter structural — and strictly so: a tree-sitter provider
+   whose parse silently fell back to regex is refused
+   (`tree_sitter_fallback_refused`) instead of emitting lexical facts under the
+   structural claim. Provider `source_identity` digests file bytes on the same
+   basis as `workspace-state/sha256-file` and names its `digest_basis`, so
+   provider evidence and workspace freshness are comparable; a lines-only digest
+   is tagged and must never be compared to it. Execution runs one task per
+   (operation, provider), and a provider with no observed status is excluded
+   rather than assumed ready. Deliberate deviation: `index.clj` and
    `adapters.clj` were NOT wired to the seam — the shadow path is a standalone
    entry point so "default output unchanged" stays provable; call-site wiring
    belongs with the stage that consumes provider facts. Next is Stage 3, the

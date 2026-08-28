@@ -5,7 +5,10 @@
             [clojure.test :refer [deftest testing is]]
             [semidx.runtime.fact-arbitration :as fa]
             [semidx.runtime.languages.shared :as shared]
-            [semidx.runtime.providers :as providers]))
+            [semidx.runtime.providers :as providers]
+            [semidx.runtime.provider-execution :as execution]
+            [semidx.runtime.provider-selection :as selection]
+            [semidx.runtime.workspace-state :as workspace-state]))
 
 (def ^:private java-root "fixtures/provider-authority/corpus/java")
 (def ^:private java-path "src/example/OrderService.java")
@@ -99,6 +102,74 @@
               ev (:evidence fact)]
         (is (empty? (fa/fact-evidence-errors (fa/normalize-fact-evidence ev))))))))
 
-(deftest content-digest-tracks-content-test
-  (is (= (providers/content-digest ["a" "b"]) (providers/content-digest ["a" "b"])))
-  (is (not= (providers/content-digest ["a" "b"]) (providers/content-digest ["a" "c"]))))
+(deftest source-identity-names-its-digest-basis-test
+  (testing "a readable file is digested by bytes, the same basis as workspace state"
+    (let [identity* (providers/source-identity {:root_path java-root :path java-path})]
+      (is (= providers/file-digest-basis (:digest_basis identity*)))
+      (is (= (str "sha256:" (workspace-state/sha256-file (io/file java-root java-path)))
+             (:content_digest identity*))
+          "provider evidence must be comparable to workspace freshness")))
+
+  (testing "lines-only callers get a digest that says it is not the file basis"
+    (let [identity* (providers/source-identity {:lines ["a" "b"]})]
+      (is (= providers/lines-digest-basis (:digest_basis identity*)))
+      (is (not= (:content_digest identity*)
+                (:content_digest (providers/source-identity {:root_path java-root
+                                                             :path java-path}))))))
+
+  (testing "the joined-lines digest still tracks its own content"
+    (is (= (providers/lines-digest ["a" "b"]) (providers/lines-digest ["a" "b"])))
+    (is (not= (providers/lines-digest ["a" "b"]) (providers/lines-digest ["a" "c"])))))
+
+(deftest tree-sitter-provider-refuses-a-silent-regex-fallback-test
+  (testing "the fallback signal is recognised"
+    (is (some? (providers/tree-sitter-fallback-diagnostic
+                {:diagnostics [{:code "tree_sitter_missing_grammar"}]})))
+    (is (some? (providers/tree-sitter-fallback-diagnostic
+                {:diagnostics [{:code "tree_sitter_unavailable"}]})))
+    (is (nil? (providers/tree-sitter-fallback-diagnostic
+               {:diagnostics [{:code "tree_sitter_probe"}]}))
+        "the positive CLI probe is not a fallback")
+    (is (some? (providers/tree-sitter-fallback-diagnostic
+                {:diagnostics [{:code "tree_sitter_some_future_failure"}]}))
+        "an unknown tree_sitter_* code must fail closed, not pass as structural"))
+
+  (testing "a tree-sitter provider fails rather than labelling regex facts structural"
+    ;; Both cases degrade on any machine: with no grammar configured, and with a
+    ;; grammar path that cannot parse. Either way parse-file silently returns
+    ;; regex units, which must not be emitted under the structural claim.
+    (doseq [[case-name parser-opts] [["no grammar configured" {:tree_sitter_grammars {}}]
+                                     ["unusable grammar path"
+                                      {:tree_sitter_grammars {:java "/nonexistent/grammar"}}]]]
+      (let [ex (try
+                 (providers/run-provider "java-tree-sitter"
+                                         {:root_path java-root
+                                          :path java-path
+                                          :lines (lines-for java-root java-path)
+                                          :parser_opts parser-opts})
+                 nil
+                 (catch clojure.lang.ExceptionInfo e e))]
+        (is (some? ex) (str "expected a refusal for: " case-name))
+        (is (= :tree_sitter_fallback_refused (:error_code (ex-data ex))))
+        (is (= "java-tree-sitter" (:provider_id (ex-data ex))))
+        (is (seq (get-in (ex-data ex) [:diagnostic :code]))))))
+
+  (testing "the refusal reaches the orchestrator as a failed batch, not a crash"
+    (let [result (execution/execute-plan
+                  (selection/provider-plan
+                   {:path java-path
+                    :source_identity {:content_digest "sha256:test"}
+                    :mode "forced"
+                    :parser_opts {:tree_sitter_grammars {}}})
+                  {:root_path java-root
+                   :lines (lines-for java-root java-path)
+                   :parser_opts {:tree_sitter_grammars {}}})
+          by-provider (into {} (map (juxt :provider_id identity)) (:batches result))]
+      (is (= [:provider_failed]
+             (mapv :code (:diagnostics (get by-provider "java-tree-sitter")))))
+      (is (empty? (:facts (get by-provider "java-tree-sitter"))))
+      (testing "and the regex provider supplies the same facts as heuristic"
+        (let [regex-batch (get by-provider "java-regex")]
+          (is (= 4 (count (:facts regex-batch))))
+          (is (= #{"heuristic"}
+                 (set (map #(get-in % [:evidence 0 :authority]) (:facts regex-batch))))))))))

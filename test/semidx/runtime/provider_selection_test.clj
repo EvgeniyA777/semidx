@@ -75,3 +75,28 @@
     (is (= [:definitions] (vec (keys (:operations p))))
         "a caller cannot silently plan fewer operations than the catalog claims")
     (is (= ["java-tree-sitter" "java-regex"] (selection/planned-provider-ids p)))))
+
+(deftest an-unobserved-provider-is-not-assumed-ready-test
+  (testing "a provider with no status is excluded, not admitted on a default"
+    (let [definitions (get-in (plan {"java-regex" (status "ready")})
+                              [:operations :definitions])]
+      (is (= ["java-regex"] (mapv :provider_id (:providers definitions))))
+      (is (= [{:provider_id "java-tree-sitter"
+               :authority "structural"
+               :reason "provider_status_unknown"
+               :state "unknown"
+               :reason_codes ["status_not_observed"]}]
+             (:excluded definitions)))))
+
+  (testing "forced mode still admits it, and says the state was not observed"
+    (let [definitions (get-in (plan {"java-regex" (status "ready")} :mode "forced")
+                              [:operations :definitions])]
+      (is (= ["java-tree-sitter" "java-regex"] (mapv :provider_id (:providers definitions))))
+      (is (= "forced" (:state (first (:providers definitions))))))))
+
+(deftest planned-tasks-are-per-operation-test
+  (let [p (plan all-ready)]
+    (is (= [{:operation :definitions :provider_id "java-tree-sitter" :authority "structural"}
+            {:operation :definitions :provider_id "java-regex" :authority "heuristic"}]
+           (selection/planned-tasks p))
+        "one task per (operation, provider), so a batch can name the operation it answered")))
