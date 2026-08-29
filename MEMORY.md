@@ -290,10 +290,28 @@ after this memory file.
    rather than assumed ready. Deliberate deviation: `index.clj` and
    `adapters.clj` were NOT wired to the seam — the shadow path is a standalone
    entry point so "default output unchanged" stays provable; call-site wiring
-   belongs with the stage that consumes provider facts. Next is Stage 3, the
-   TypeScript SCIP slice, which brings the first provider that may claim exact
-   authority and must re-verify the Stage 0 SCIP spellings against real tool
-   output.
+   belongs with the stage that consumes provider facts. Stage 3 (TypeScript SCIP
+   slice) is started: the toolchain preflight is done. `scip-typescript` is
+   pinned at `@sourcegraph/scip-typescript@0.4.0` through the repo-managed
+   `scripts/setup-scip-typescript.sh` (mirrors the tree-sitter ADR-047 pattern:
+   `.scip-toolchain/` install, `SEMIDX_SCIP_TYPESCRIPT_CLI_PATH` override,
+   gitignored). The Stage 0 TypeScript corpus gained a committed `tsconfig.json`
+   so SCIP output is deterministic, and `scripts/scip-typescript-corpus-snapshot.sh`
+   writes the decoded real output to
+   `fixtures/provider-authority/scip/typescript-corpus.observed.json`. Verified
+   fact that Stage 3 adapter design must honour: `scip-typescript@0.4.0` emits
+   **no** alias symbol and **no** SCIP `Relationship` for a re-export
+   (`export { normalize as canonicalize }`); both tokens are non-definition
+   occurrences resolving to the origin symbol. The re-export edge is recoverable
+   only from occurrence resolution on the export statement, so the SCIP tier
+   contributes no re-export unit/relation fact — the heuristic/structural tier
+   supplies the distinct exported-symbol unit and SCIP corroborates the origin
+   resolution. The `typescript-re-export-canonical-key.json` identity fixture was
+   corrected to this verified behaviour (the seeded "representative" SCIP form
+   claimed an alias symbol + relationship that do not exist); the "alias
+   canonicalizes to one origin key" claim is unchanged. Java SCIP and all LSP
+   spellings remain representative pending Stages 4/5. The shadow/default-off
+   SCIP provider adapter itself is not yet built.
 3. Execute `plans/019` as an additive one-shot delivery track after its budget
    ledger and the `plans/020` run/strategy contracts are accepted. Its evaluation
    stage contributes adapters to `plans/020`; it does not own a second corpus,

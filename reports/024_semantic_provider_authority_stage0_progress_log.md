@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-28"
+updated: "2026-08-29"
 ---
 
 # Progress Log: Semantic Provider Authority Migration (plans/018)
@@ -41,7 +41,8 @@ and is appended by later stages.
 | 0 — Independent review and compatibility baseline | **completed** |
 | 1 — Evidence model and arbitration kernel | **completed** 2026-08-28 — kernel, FactBatch, executable golden parity, and round-trip coverage all delivered |
 | 2 — Provider plan and legacy adapter shadow path | **completed** 2026-08-28 |
-| 3–7 | not started |
+| 3 — TypeScript SCIP vertical slice | **in progress** 2026-08-29 — toolchain preflight done (scip-typescript pinned, real SCIP re-verified, identity fixture corrected); adapter not yet built |
+| 4–7 | not started |
 
 ## Scope Executed (Stage 0)
 
@@ -748,3 +749,117 @@ records the state as `forced` rather than pretending it was observed.
 Stage 3 admission is unchanged by this work: it still needs `scip-typescript`
 pinned, the Stage 0 SCIP spellings re-verified against real tool output, and
 exact facts gated by anchored source identity.
+
+---
+
+# Stage 3 — TypeScript SCIP Vertical Slice (2026-08-29)
+
+## Scope of this session
+
+Toolchain / admission preflight only. **No provider adapter was built and no
+production source changed.** This closes two of the three Stage 3 admission
+items ("`scip-typescript` pinned", "Stage 0 SCIP spellings re-verified"); the
+adapter and its exact-authority gating are deferred to the next session by the
+owner ("стоп после сверки фикстуры").
+
+## Delivered
+
+| Artifact | Purpose |
+| --- | --- |
+| `scripts/setup-scip-typescript.sh` | repo-managed, pinned `@sourcegraph/scip-typescript@0.4.0` install into gitignored `.scip-toolchain/`, mirroring the tree-sitter ADR-047 resolution pattern (explicit option → `SEMIDX_SCIP_TYPESCRIPT_CLI_PATH` → repo-managed bin → ambient PATH) |
+| `scripts/scip-typescript-corpus-snapshot.sh` + `scripts/lib/decode-scip.js` | regenerate the decoded real-SCIP reference over the Stage 0 corpus; the decoder reuses scip-typescript's own bundled protobuf module, so the preflight needs no separate protobuf toolchain |
+| `fixtures/provider-authority/corpus/typescript/tsconfig.json` | committed so SCIP output over the protected corpus is deterministic (verified: byte-identical decoded output with explicit vs inferred tsconfig) |
+| `fixtures/provider-authority/scip/typescript-corpus.observed.json` + `README.md` | decoded real output of `scip-typescript@0.4.0` (TypeScript 5.9.3) over the corpus, `metadata.project_root` host-stripped |
+| `.gitignore` | `.scip-toolchain/`, `.scip.env` |
+
+## Verified SCIP behaviour vs the seeded "representative" fixture
+
+The Stage 0 `identity/typescript-re-export-canonical-key.json` seeded the
+`scip-typescript` spelling as *representative*. Real output disagrees on two
+points, both now corrected in the fixture (no claim weakened; the central
+"alias canonicalizes to one origin `CanonicalFactKey`" claim is confirmed):
+
+1. **No alias symbol.** `export { normalize as canonicalize } from './orders'`
+   produces **no** `canonicalize` symbol. `src/index.ts` emits only the module
+   symbol. The seeded form claimed
+   `scip-typescript npm . . src/index.ts/canonicalize.`.
+2. **No `Relationship`.** scip-typescript emits no SCIP `Relationship` for the
+   re-export. Both the `normalize` and the `canonicalize` tokens are
+   non-definition occurrences resolving to the origin symbol
+   `scip-typescript npm . . src/`orders.ts`/normalize().`.
+
+Consequence recorded for the adapter: the SCIP tier contributes **no**
+re-export unit or relation fact. The distinct exported-symbol unit
+(`src/canonicalize`) rests on the heuristic/structural tier; SCIP only
+corroborates that the alias token resolves to the origin. The re-export edge is
+recoverable from occurrence resolution on the export statement, added to the
+fixture's `normalization_obligations` and `edge_source: occurrence_resolution` /
+`relationship_emitted: false` on the spelling.
+
+Other verified grammar details (see `scip/README.md`): file components are
+backtick-wrapped (`src/`orders.ts`/`), params carry their own symbol
+(`normalize().(value)`), constructors are `OrderService#`<constructor>`().`,
+fields `OrderService#validator.`, `external_symbols` is empty (stdlib refs are
+inline occurrences).
+
+Java SCIP and all LSP spellings stay representative (Stages 4/5 re-verify).
+
+## Test impact
+
+`test/semidx/runtime/fact_arbitration_test.clj` — the re-export relation
+sub-test built a hypothetical relation fact for every provider spelling. It now
+excludes spellings with `relationship_emitted: false` and asserts
+`scip-typescript` is excluded from the edge providers, so the golden no longer
+implies a SCIP relationship that the tool does not emit. The origin-resolution
+sub-test still runs all four spellings (SCIP does resolve the alias token to the
+origin).
+
+## Verification
+
+- `clojure -M:test`: **483 tests, 2771 assertions, 0 failures, 0 errors**
+  (unchanged count from the Stage 2 review hardening; the arbitration namespace
+  went 113 → 114 assertions).
+- `clojure -M:test-direct` targeted `semidx.runtime.fact-arbitration-test`:
+  22 tests, 114 assertions, 0 failures.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+- `./scripts/setup-scip-typescript.sh` → `scip_typescript_status=managed`,
+  version `0.4.0`. `./scripts/scip-typescript-corpus-snapshot.sh` regenerates
+  the observed artifact; re-run is byte-stable.
+- Both touched JSON fixtures re-validated. `git diff --check` clean.
+  English-only scan of new files: clean.
+- **Not run**: full migration gate (semantic-quality report, protected retrieval
+  replay, snapshot-diff parity, PG round trips) — those gate stages that change
+  extraction; this session changes none.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 3 (preflight only — toolchain pinned, SCIP spellings re-verified,
+  fixture corrected; adapter NOT built)
+recommended_next_stage: Stage 3 continued — SCIP artifact reader + shadow/default-off
+  TypeScript SCIP provider adapter
+recommended_executor: Claude Code team lead, no Fable, no Explore agent
+recommended_model: Claude Opus 4.8 Thinking for the identity/normalization work
+  (SCIP moniker → CanonicalFactKey, occurrence-resolution re-export edge),
+  Sonnet 5 for the protobuf-reader plumbing
+effort: high
+effort_justification: the adapter introduces the first evidence that may claim
+  exact authority. Mapping a SCIP moniker onto the same CanonicalFactKey the
+  regex tier already produces, and deriving the re-export edge from occurrence
+  resolution rather than a (non-existent) relationship, are identity-critical;
+  getting either wrong silently splits or collapses identities.
+prerequisites_or_blockers:
+  - SCIP reader in the JVM: vendor a pinned scip.proto + generate stubs via the
+    ADR-042 repo-managed protoc toolchain, OR read the bundled proto shape. Not
+    yet decided.
+  - exact facts must be gated by anchored source identity (per-document digest or
+    verified revision) — the ADR-046 rule added in the Stage 1 review repair.
+  - absence of a SCIP artifact must degrade to tree-sitter/regex without index
+    failure.
+file_ownership_and_conflict_risk: LOW-MEDIUM. Adds a descriptor + runner to
+  providers.clj, a new src ns for the SCIP reader, and fixture/test updates. The
+  kernel and orchestrator should not need changes.
+fallback_executor_or_model: Sonnet 5 for the toolchain/reader plumbing only.
+model_availability_checked_at: not checked this session.
+confidence: high (preflight is deterministic; the adapter is a bounded shadow seam)
+```

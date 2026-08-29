@@ -307,15 +307,22 @@
       (is (= 1 (count (distinct (map :canonical_fact_key_id facts))))))
 
     (testing "the re-export relation keys on ADR-039 identity across providers"
+      ;; A provider that does not emit the re-export as a fact of its own
+      ;; (scip-typescript@0.4.0: relationship_emitted false) contributes no
+      ;; relation fact; the fixture records that and the test must not fabricate
+      ;; one on its behalf.
       (let [relation (:expected_re_export_relation edge)
+            edge-spellings (remove (comp false? :relationship_emitted) spellings)
             relation-facts (mapv (fn [spelling]
                                    {:key {:fact_kind "relation"
                                           :relation_type (:relation_type relation)
                                           :source_unit_key {:symbol (:source_symbol relation)}
                                           :target_key (:target_key relation)}
                                     :evidence [(evidence-for spelling)]})
-                                 spellings)
+                                 edge-spellings)
             merged-relation (first (:facts (fa/arbitrate-facts relation-facts)))]
+        (is (not (contains? (set (map :provider_id edge-spellings)) "scip-typescript"))
+            "scip-typescript emits no re-export relationship; excluded from the edge providers")
         (is (= 1 (count (:facts (fa/arbitrate-facts relation-facts)))))
         (is (= "relation" (get-in merged-relation [:core_key :fact_kind])))
         (is (= (:relation_type relation) (get-in merged-relation [:core_key :relation_type])))))

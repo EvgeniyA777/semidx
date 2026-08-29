@@ -26,6 +26,8 @@ target/classes/*
 tmp/
 .tree-sitter-grammars/
 .tree-sitter.env
+.scip-toolchain/
+.scip.env
 
 # Python bytecode
 __pycache__/
