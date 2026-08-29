@@ -28,6 +28,7 @@ tmp/
 .tree-sitter.env
 .scip-toolchain/
 .scip.env
+scripts/scip-toolchain/node_modules/
 
 # Python bytecode
 __pycache__/

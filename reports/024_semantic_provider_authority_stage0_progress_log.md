@@ -766,11 +766,12 @@ owner ("стоп после сверки фикстуры").
 
 | Artifact | Purpose |
 | --- | --- |
-| `scripts/setup-scip-typescript.sh` | repo-managed, pinned `@sourcegraph/scip-typescript@0.4.0` install into gitignored `.scip-toolchain/`, mirroring the tree-sitter ADR-047 resolution pattern (explicit option → `SEMIDX_SCIP_TYPESCRIPT_CLI_PATH` → repo-managed bin → ambient PATH) |
-| `scripts/scip-typescript-corpus-snapshot.sh` + `scripts/lib/decode-scip.js` | regenerate the decoded real-SCIP reference over the Stage 0 corpus; the decoder reuses scip-typescript's own bundled protobuf module, so the preflight needs no separate protobuf toolchain |
+| `scripts/scip-toolchain/{package.json,package-lock.json}` | committed pin. `npm ci` against this lock fixes `scip-typescript` (0.4.0) **and** its transitive `typescript` (5.9.3) — scip-typescript depends on `typescript: ^5.6.2`, which would otherwise drift and change SCIP output while a golden still claims a version |
+| `scripts/setup-scip-typescript.sh` | `npm ci` from the committed lock into gitignored `.scip-toolchain/`, mirroring the tree-sitter ADR-047 resolution pattern (explicit option → `SEMIDX_SCIP_TYPESCRIPT_CLI_PATH` → repo-managed bin → ambient PATH). Fails closed on version drift; reports the resolved scip-typescript and tsc versions |
+| `scripts/scip-typescript-corpus-snapshot.sh` + `scripts/lib/decode-scip.js` | regenerate the decoded real-SCIP reference over the Stage 0 corpus; the decoder reuses scip-typescript's own bundled protobuf module, so the preflight needs no separate protobuf toolchain. Also fails closed if the installed `typescript` drifted from the lock |
 | `fixtures/provider-authority/corpus/typescript/tsconfig.json` | committed so SCIP output over the protected corpus is deterministic (verified: byte-identical decoded output with explicit vs inferred tsconfig) |
 | `fixtures/provider-authority/scip/typescript-corpus.observed.json` + `README.md` | decoded real output of `scip-typescript@0.4.0` (TypeScript 5.9.3) over the corpus, `metadata.project_root` host-stripped |
-| `.gitignore` | `.scip-toolchain/`, `.scip.env` |
+| `.gitignore` | `.scip-toolchain/`, `.scip.env`, `scripts/scip-toolchain/node_modules/` |
 
 ## Verified SCIP behaviour vs the seeded "representative" fixture
 
@@ -781,12 +782,12 @@ points, both now corrected in the fixture (no claim weakened; the central
 
 1. **No alias symbol.** `export { normalize as canonicalize } from './orders'`
    produces **no** `canonicalize` symbol. `src/index.ts` emits only the module
-   symbol. The seeded form claimed
-   `scip-typescript npm . . src/index.ts/canonicalize.`.
-2. **No `Relationship`.** scip-typescript emits no SCIP `Relationship` for the
+   symbol. The seeded form claimed an
+   `... src/index.ts/canonicalize.` symbol that does not exist.
+2. **No Relationship.** scip-typescript emits no SCIP `Relationship` for the
    re-export. Both the `normalize` and the `canonicalize` tokens are
-   non-definition occurrences resolving to the origin symbol
-   `scip-typescript npm . . src/`orders.ts`/normalize().`.
+   non-definition occurrences resolving to the origin symbol (see the grammar
+   block below).
 
 Consequence recorded for the adapter: the SCIP tier contributes **no**
 re-export unit or relation fact. The distinct exported-symbol unit
@@ -796,11 +797,20 @@ recoverable from occurrence resolution on the export statement, added to the
 fixture's `normalization_obligations` and `edge_source: occurrence_resolution` /
 `relationship_emitted: false` on the spelling.
 
-Other verified grammar details (see `scip/README.md`): file components are
-backtick-wrapped (`src/`orders.ts`/`), params carry their own symbol
-(`normalize().(value)`), constructors are `OrderService#`<constructor>`().`,
-fields `OrderService#validator.`, `external_symbols` is empty (stdlib refs are
-inline occurrences).
+Other verified grammar details (see `scip/README.md`). File components are
+backtick-wrapped, params carry their own symbol, `external_symbols` is empty
+(stdlib refs are inline occurrences):
+
+```text
+module         scip-typescript npm . . src/`orders.ts`/
+function       scip-typescript npm . . src/`orders.ts`/normalize().
+param          scip-typescript npm . . src/`orders.ts`/normalize().(value)
+class          scip-typescript npm . . src/`orders.ts`/OrderService#
+field          scip-typescript npm . . src/`orders.ts`/OrderService#validator.
+constructor    scip-typescript npm . . src/`orders.ts`/OrderService#`<constructor>`().
+re-export tgt  scip-typescript npm . . src/`orders.ts`/normalize().   (both normalize and canonicalize tokens)
+stdlib ref     scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/String#trim().
+```
 
 Java SCIP and all LSP spellings stay representative (Stages 4/5 re-verify).
 
@@ -822,9 +832,12 @@ origin).
 - `clojure -M:test-direct` targeted `semidx.runtime.fact-arbitration-test`:
   22 tests, 114 assertions, 0 failures.
 - `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
-- `./scripts/setup-scip-typescript.sh` → `scip_typescript_status=managed`,
-  version `0.4.0`. `./scripts/scip-typescript-corpus-snapshot.sh` regenerates
-  the observed artifact; re-run is byte-stable.
+- `./scripts/setup-scip-typescript.sh` from a removed `.scip-toolchain/`
+  (clean-checkout simulation) → `scip_typescript_status=managed`,
+  `scip_typescript_version=0.4.0`, `scip_typescript_tsc_version=5.9.3` via
+  `npm ci` against the committed lock; idempotent on re-run.
+  `./scripts/scip-typescript-corpus-snapshot.sh` regenerates the observed
+  artifact with no git diff (byte-stable).
 - Both touched JSON fixtures re-validated. `git diff --check` clean.
   English-only scan of new files: clean.
 - **Not run**: full migration gate (semantic-quality report, protected retrieval

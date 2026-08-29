@@ -10,9 +10,13 @@ real tool output.
 ## Regenerating
 
 ```sh
-./scripts/setup-scip-typescript.sh          # repo-managed, pinned CLI
+./scripts/setup-scip-typescript.sh          # npm ci from scripts/scip-toolchain/package-lock.json
 ./scripts/scip-typescript-corpus-snapshot.sh # writes typescript-corpus.observed.json
 ```
+
+The pin is the committed lockfile `scripts/scip-toolchain/package-lock.json`, so
+both `scip-typescript` (0.4.0) and its transitive `typescript` (5.9.3) are fixed
+on a clean checkout. Both scripts fail closed on version drift.
 
 The decoder (`scripts/lib/decode-scip.js`) uses scip-typescript's own bundled
 protobuf module, so the preflight needs no separate protobuf toolchain. The

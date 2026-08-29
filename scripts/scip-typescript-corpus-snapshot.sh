@@ -24,6 +24,19 @@ if [[ ! -x "$CLI" ]]; then
   exit 1
 fi
 
+# Fail closed if the installed toolchain drifted from the committed lock: SCIP
+# output depends on the resolved `typescript` version, and the fixture records
+# it. setup-scip-typescript.sh already guards this, but a stale .scip-toolchain/
+# must not be able to produce a snapshot silently.
+LOCK="$ROOT_DIR/scripts/scip-toolchain/package-lock.json"
+LOCKED_TS="$(node -p "require('$LOCK').packages['node_modules/typescript'].version")"
+INSTALLED_TS="$(node -p "require('$TOOLCHAIN_DIR/node_modules/typescript/package.json').version")"
+if [[ "$LOCKED_TS" != "$INSTALLED_TS" ]]; then
+  echo "typescript version drift: locked $LOCKED_TS, installed $INSTALLED_TS" >&2
+  echo "re-run scripts/setup-scip-typescript.sh" >&2
+  exit 1
+fi
+
 TMP_SCIP="$(mktemp -t scip-typescript-corpus.XXXXXX.scip)"
 trap 'rm -f "$TMP_SCIP"' EXIT
 

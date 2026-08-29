@@ -56,6 +56,7 @@
           "tool": "@sourcegraph/scip-typescript",
           "version": "0.4.0",
           "typescript_version": "5.9.3",
+          "toolchain_pinned_by": "scripts/scip-toolchain/package-lock.json (npm ci)",
           "command": "scip-typescript index --no-progress-bar (cwd fixtures/provider-authority/corpus/typescript, committed tsconfig.json)",
           "observed_artifact": "fixtures/provider-authority/scip/typescript-corpus.observed.json",
           "verified_on": "2026-08-29"
