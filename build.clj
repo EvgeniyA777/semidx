@@ -9,8 +9,19 @@
            [java.nio.file Files]
            [java.security MessageDigest]))
 
-(def ^:private proto-file "proto/semidx/runtime/grpc/v1/runtime.proto")
 (def ^:private proto-root "proto")
+
+;; Every `.proto` compiled into `src-generated/java` by the repo-managed
+;; toolchain (ADR-042). `:file` is relative to `proto-root`. `:grpc?` runs the
+;; grpc-java plugin for protos that declare a service. `:expect` is a generated
+;; file that must exist afterwards, as a generation-completeness probe.
+(def ^:private proto-specs
+  [{:file "semidx/runtime/grpc/v1/runtime.proto"
+    :grpc? true
+    :expect "semidx/runtime/grpc/v1/RuntimeServiceGrpc.java"}
+   {:file "scip/scip.proto"
+    :grpc? false
+    :expect "scip/Scip.java"}])
 (def ^:private generated-src-dir "src-generated/java")
 (def ^:private class-dir "target/classes")
 (def ^:private cache-root ".cache/semidx/protobuf")
@@ -137,21 +148,25 @@
 
 (defn- generate-into! [output-dir]
   (let [{:keys [classifier protoc grpc-java]} (toolchain)
-        output-path (str (b/resolve-path output-dir))
-        service-stub (io/file output-path "semidx/runtime/grpc/v1/RuntimeServiceGrpc.java")]
+        output-path (str (b/resolve-path output-dir))]
     (b/delete {:path output-path})
     (.mkdirs (io/file output-path))
-    (run-command! [(.getAbsolutePath ^File protoc)
-                   (str "--proto_path=" (b/resolve-path proto-root))
-                   (str "--java_out=" output-path)
-                   (str "--plugin=protoc-gen-grpc-java=" (.getAbsolutePath ^File grpc-java))
-                   (str "--grpc-java_out=" output-path)
-                   (str (b/resolve-path proto-file))])
-    (when-not (.isFile service-stub)
-      (throw (ex-info "gRPC code generation did not produce RuntimeServiceGrpc.java"
-                      {:type :grpc_generation_incomplete
-                       :classifier classifier
-                       :expected_file (.getPath service-stub)})))
+    (doseq [{:keys [file grpc? expect]} proto-specs]
+      (let [command (concat [(.getAbsolutePath ^File protoc)
+                             (str "--proto_path=" (b/resolve-path proto-root))
+                             (str "--java_out=" output-path)]
+                            (when grpc?
+                              [(str "--plugin=protoc-gen-grpc-java=" (.getAbsolutePath ^File grpc-java))
+                               (str "--grpc-java_out=" output-path)])
+                            [(str (b/resolve-path (str proto-root "/" file)))])
+            expected (io/file output-path expect)]
+        (run-command! (vec command))
+        (when-not (.isFile expected)
+          (throw (ex-info "protobuf code generation did not produce the expected stub"
+                          {:type :proto_generation_incomplete
+                           :classifier classifier
+                           :proto file
+                           :expected_file (.getPath expected)})))))
     output-path))
 
 (defn- java-file-hashes [root-path]

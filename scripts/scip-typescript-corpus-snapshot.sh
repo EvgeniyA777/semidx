@@ -15,6 +15,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CORPUS_DIR="$ROOT_DIR/fixtures/provider-authority/corpus/typescript"
 OUT_JSON="$ROOT_DIR/fixtures/provider-authority/scip/typescript-corpus.observed.json"
+OUT_SCIP="$ROOT_DIR/fixtures/provider-authority/scip/typescript-corpus.scrubbed.scip"
 TOOLCHAIN_DIR="${SEMIDX_SCIP_TOOLCHAIN_DIR:-$ROOT_DIR/.scip-toolchain}"
 CLI="${SEMIDX_SCIP_TYPESCRIPT_CLI_PATH:-$TOOLCHAIN_DIR/node_modules/.bin/scip-typescript}"
 
@@ -43,5 +44,10 @@ trap 'rm -f "$TMP_SCIP"' EXIT
 (cd "$CORPUS_DIR" && "$CLI" index --no-progress-bar --output "$TMP_SCIP" >/dev/null)
 
 node "$ROOT_DIR/scripts/lib/decode-scip.js" "$TMP_SCIP" > "$OUT_JSON"
-
 echo "wrote $OUT_JSON"
+
+# Committed binary fixture for the JVM SCIP reader tests
+# (semidx.runtime.scip). `metadata.project_root` is scrubbed so the fixture
+# carries no absolute indexing-machine path.
+node "$ROOT_DIR/scripts/lib/scrub-scip.js" "$TMP_SCIP" "$OUT_SCIP"
+echo "wrote $OUT_SCIP"

@@ -1,27 +1,35 @@
 # Real SCIP reference artifacts (plans/018 Stage 3)
 
-`typescript-corpus.observed.json` is the decoded output of running
-`@sourcegraph/scip-typescript` over
-`fixtures/provider-authority/corpus/typescript/`. It replaces the
-*representative* SCIP spellings that the Stage 0 identity fixtures were seeded
-with (see `../identity/`), which the plan required Stage 3 to re-verify against
-real tool output.
+Two committed artifacts, both produced by the pinned `@sourcegraph/scip-typescript`
+over `fixtures/provider-authority/corpus/typescript/`:
+
+- `typescript-corpus.observed.json` — the decoded index as reviewable JSON. It
+  replaces the *representative* SCIP spellings the Stage 0 identity fixtures were
+  seeded with (see `../identity/`), which the plan required Stage 3 to re-verify
+  against real tool output.
+- `typescript-corpus.scrubbed.scip` — the raw protobuf index, with
+  `metadata.project_root` cleared. This is the binary fixture the JVM SCIP
+  reader tests (`semidx.runtime.scip-test`) read. `project_root` is an absolute
+  `file://` path on the indexing machine, so it must not be committed verbatim;
+  everything else (documents, symbols, occurrences) is byte-preserved.
 
 ## Regenerating
 
 ```sh
-./scripts/setup-scip-typescript.sh          # npm ci from scripts/scip-toolchain/package-lock.json
-./scripts/scip-typescript-corpus-snapshot.sh # writes typescript-corpus.observed.json
+./scripts/setup-scip-typescript.sh           # npm ci from scripts/scip-toolchain/package-lock.json
+./scripts/scip-typescript-corpus-snapshot.sh # writes both typescript-corpus.observed.json and .scrubbed.scip
 ```
 
 The pin is the committed lockfile `scripts/scip-toolchain/package-lock.json`, so
 both `scip-typescript` (0.4.0) and its transitive `typescript` (5.9.3) are fixed
 on a clean checkout. Both scripts fail closed on version drift.
 
-The decoder (`scripts/lib/decode-scip.js`) uses scip-typescript's own bundled
-protobuf module, so the preflight needs no separate protobuf toolchain. The
-Stage 3 provider adapter reads SCIP in the JVM and does not depend on these
-scripts.
+The decoder (`scripts/lib/decode-scip.js`) and the scrubber
+(`scripts/lib/scrub-scip.js`) use scip-typescript's own bundled protobuf module,
+so regenerating these artifacts needs no separate protobuf toolchain. The JVM
+SCIP reader (`semidx.runtime.scip`) instead parses `.scip` with Java stubs
+generated from `proto/scip/scip.proto` by the repo-managed protoc toolchain
+(ADR-042); it does not depend on these scripts or on the bundled JS module.
 
 ## What real scip-typescript@0.4.0 does with the corpus
 
