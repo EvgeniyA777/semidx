@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: c56f6338900796ff05c4a8d74459ac77d5f28c46
+- fingerprint: 8cfcc765ac6e97b9521c4a727012ed143dad9971
 
 ## Tree
 ```text
@@ -53,7 +53,7 @@ semidx
 - semidx.integration.lua-onboarding-test
 - semidx.integration.policy-governance-test
 - semidx.integration.runtime-test
-- ... +36 more
+- ... +37 more
 ### other
 - semidx.contracts.cli
 - semidx.contracts.schemas
@@ -63,7 +63,7 @@ semidx
 - semidx.mcp.session-registry
 - semidx.runtime.adapters
 - semidx.runtime.authz
-- ... +64 more
+- ... +65 more
 
 ## Domain Model
 - ArmRunner [protocol]
@@ -99,7 +99,7 @@ semidx
 - semidx.core -> semidx.runtime.usage-metrics
 - semidx.integration.css-onboarding-test -> clojure.java.io
 - semidx.integration.css-onboarding-test -> clojure.test
-- ... +479 more
+- ... +485 more
 
 ## Namespaces
 ### semidx.contracts.cli
