@@ -322,9 +322,11 @@ after this memory file.
    (`proto-specs` list; `src-generated/java/scip/Scip.java` committed; picked up
    by the existing `grpc-prep/ensure-grpc-classes!` javac step), and
    `semidx.runtime.scip/read-index` parses a `.scip` payload into plain Clojure
-   data (metadata, documents with symbols + occurrences, external symbols; enums
-   as lower-kebab keywords; `symbol_roles` exposed both raw and as a decoded set
-   via `decode-symbol-roles`). It is a transport-level reader only: no Semantic
+   data (metadata, documents with symbols + occurrences, external symbols,
+   including `signature_documentation`; enums as lower-kebab keywords;
+   `symbol_roles` exposed both raw and as a decoded set via
+   `decode-symbol-roles`). `build.clj` strips protoc's trailing whitespace from
+   every generated `.java` so the committed stubs pass `git diff --check`. It is a transport-level reader only: no Semantic
    IR / CanonicalFactKey normalization, no source-identity or freshness
    validation, and not wired into any provider yet. Tests read the committed
    `fixtures/provider-authority/scip/typescript-corpus.scrubbed.scip` (real

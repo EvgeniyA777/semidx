@@ -991,3 +991,24 @@ model_availability_checked_at: not checked this session.
 confidence: high (the reader is deterministic and isolated; the next slice is
   bounded but identity-critical)
 ```
+
+## Review Repair (2026-08-30)
+
+External review of the JVM SCIP reader raised one Medium and two Low findings;
+all three are fixed here.
+
+| ID | Severity | Finding | Resolution |
+| --- | --- | --- | --- |
+| R1 | Medium | `read-symbol-information` dropped `SymbolInformation.signature_documentation`. The vendored proto keeps this field specifically (`Document signature_documentation = 7`), so the reader was not transport-complete and the normalization slice could silently lose signature payloads from a SCIP producer that emits them. | **Fixed.** `read-symbol-information` now returns `:signature-documentation` — `nil` when `hasSignatureDocumentation` is false, otherwise the full `read-document` map (the two functions are mutually recursive via a `declare`; a signature `Document` does not nest further signatures). The generated-builder round-trip test now sets a signature document and asserts it. `scip-typescript@0.4.0` does not emit this field for the protected corpus (it uses markdown code fences in `documentation` — 16 symbols), so the builder test is the coverage. |
+| R2 | Low | `git diff --check` failed on ~250 trailing-whitespace lines in `src-generated/java/scip/Scip.java`; protoc emits trailing spaces. The committed gRPC stubs had the same latent issue. | **Fixed.** `build.clj` `generate-into!` now runs `strip-trailing-whitespace!` over every generated `.java` before the completeness probe and the copy/verify. `grpc-verify-generated` hashes the same normalized output, so committed sources and a fresh generation still match. Both generated trees were regenerated; `git diff --check` is clean over `b117442..HEAD`. |
+| R3 | Low | `scip-typescript-corpus-snapshot.sh` honoured `SEMIDX_SCIP_TYPESCRIPT_CLI_PATH` but its drift check only validated the repo-managed `.scip-toolchain/node_modules/typescript`. An override pointing elsewhere could generate with an unpinned toolchain while the script still reported success. | **Fixed.** The drift check now resolves the CLI's own `node_modules` (`dirname "$CLI"/..`), validates **both** `@sourcegraph/scip-typescript` and `typescript` against the committed lock, and fails closed with a clear message when those sibling packages are absent (e.g. an ambient-PATH CLI). |
+
+Verification after the repair:
+
+- `clojure -M:test`: **487 tests, 2806 assertions, 0 failures, 0 errors**.
+- `clojure -T:build grpc-generate` + `grpc-verify-generated` + `compile-java`:
+  35 sources generated, verified (no drift), compiled.
+- `git diff --check`: clean, working tree and over `b117442..HEAD`.
+- `./scripts/scip-typescript-corpus-snapshot.sh`: regenerates both fixtures
+  byte-stable; the tightened drift check passes against the repo-managed CLI.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.

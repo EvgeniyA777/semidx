@@ -56,6 +56,13 @@
   [^Iterable ints]
   (mapv int ints))
 
+;; `read-symbol-information` and `read-document` are mutually recursive:
+;; a `SymbolInformation` may carry a `signature_documentation` `Document`, and a
+;; `Document` carries `SymbolInformation`s. Recursion terminates because a
+;; signature `Document` has no further nested signatures in practice and the
+;; protobuf payload is finite.
+(declare read-document)
+
 (defn- read-relationship [^Scip$Relationship r]
   {:symbol (.getSymbol r)
    :is-reference (.getIsReference r)
@@ -69,6 +76,8 @@
    :display-name (.getDisplayName s)
    :documentation (vec (.getDocumentationList s))
    :enclosing-symbol (.getEnclosingSymbol s)
+   :signature-documentation (when (.hasSignatureDocumentation s)
+                              (read-document (.getSignatureDocumentation s)))
    :relationships (mapv read-relationship (.getRelationshipsList s))})
 
 (defn- read-diagnostic [^Scip$Diagnostic d]
@@ -140,6 +149,7 @@
                 :text \"\"
                 :symbols [{:symbol \"...\" :kind :unspecified-kind :display-name \"\"
                            :documentation [] :enclosing-symbol \"\"
+                           :signature-documentation nil ; a nested document map when present
                            :relationships [{:symbol \"...\" :is-reference false
                                             :is-implementation false
                                             :is-type-definition false

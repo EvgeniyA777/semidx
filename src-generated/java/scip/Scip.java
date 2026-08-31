@@ -1380,7 +1380,7 @@ public final class Scip {
     private static final SyntaxKind[] VALUES = getStaticValuesArray();
     private static SyntaxKind[] getStaticValuesArray() {
       return new SyntaxKind[] {
-      UnspecifiedSyntaxKind, Comment, PunctuationDelimiter, PunctuationBracket, Keyword, IdentifierKeyword, IdentifierOperator, Identifier, IdentifierBuiltin, IdentifierNull, IdentifierConstant, IdentifierMutableGlobal, IdentifierParameter, IdentifierLocal, IdentifierShadowed, IdentifierNamespace, IdentifierModule, IdentifierFunction, IdentifierFunctionDefinition, IdentifierMacro, IdentifierMacroDefinition, IdentifierType, IdentifierBuiltinType, IdentifierAttribute, RegexEscape, RegexRepeated, RegexWildcard, RegexDelimiter, RegexJoin, StringLiteral, StringLiteralEscape, StringLiteralSpecial, StringLiteralKey, CharacterLiteral, NumericLiteral, BooleanLiteral, Tag, TagAttribute, TagDelimiter, 
+      UnspecifiedSyntaxKind, Comment, PunctuationDelimiter, PunctuationBracket, Keyword, IdentifierKeyword, IdentifierOperator, Identifier, IdentifierBuiltin, IdentifierNull, IdentifierConstant, IdentifierMutableGlobal, IdentifierParameter, IdentifierLocal, IdentifierShadowed, IdentifierNamespace, IdentifierModule, IdentifierFunction, IdentifierFunctionDefinition, IdentifierMacro, IdentifierMacroDefinition, IdentifierType, IdentifierBuiltinType, IdentifierAttribute, RegexEscape, RegexRepeated, RegexWildcard, RegexDelimiter, RegexJoin, StringLiteral, StringLiteralEscape, StringLiteralSpecial, StringLiteralKey, CharacterLiteral, NumericLiteral, BooleanLiteral, Tag, TagAttribute, TagDelimiter,
       };
     }
     public static SyntaxKind valueOf(
@@ -2837,7 +2837,7 @@ public final class Scip {
      *
      * <code>repeated .scip.Document documents = 2;</code>
      */
-    java.util.List<scip.Scip.Document> 
+    java.util.List<scip.Scip.Document>
         getDocumentsList();
     /**
      * <pre>
@@ -2862,7 +2862,7 @@ public final class Scip {
      *
      * <code>repeated .scip.Document documents = 2;</code>
      */
-    java.util.List<? extends scip.Scip.DocumentOrBuilder> 
+    java.util.List<? extends scip.Scip.DocumentOrBuilder>
         getDocumentsOrBuilderList();
     /**
      * <pre>
@@ -2885,7 +2885,7 @@ public final class Scip {
      *
      * <code>repeated .scip.SymbolInformation external_symbols = 3;</code>
      */
-    java.util.List<scip.Scip.SymbolInformation> 
+    java.util.List<scip.Scip.SymbolInformation>
         getExternalSymbolsList();
     /**
      * <pre>
@@ -2922,7 +2922,7 @@ public final class Scip {
      *
      * <code>repeated .scip.SymbolInformation external_symbols = 3;</code>
      */
-    java.util.List<? extends scip.Scip.SymbolInformationOrBuilder> 
+    java.util.List<? extends scip.Scip.SymbolInformationOrBuilder>
         getExternalSymbolsOrBuilderList();
     /**
      * <pre>
@@ -3045,7 +3045,7 @@ public final class Scip {
      * <code>repeated .scip.Document documents = 2;</code>
      */
     @java.lang.Override
-    public java.util.List<? extends scip.Scip.DocumentOrBuilder> 
+    public java.util.List<? extends scip.Scip.DocumentOrBuilder>
         getDocumentsOrBuilderList() {
       return documents_;
     }
@@ -3114,7 +3114,7 @@ public final class Scip {
      * <code>repeated .scip.SymbolInformation external_symbols = 3;</code>
      */
     @java.lang.Override
-    public java.util.List<? extends scip.Scip.SymbolInformationOrBuilder> 
+    public java.util.List<? extends scip.Scip.SymbolInformationOrBuilder>
         getExternalSymbolsOrBuilderList() {
       return externalSymbols_;
     }
@@ -3553,7 +3553,7 @@ public final class Scip {
               documentsBuilder_ = null;
               documents_ = other.documents_;
               bitField0_ = (bitField0_ & ~0x00000002);
-              documentsBuilder_ = 
+              documentsBuilder_ =
                 com.google.protobuf.GeneratedMessageV3.alwaysUseFieldBuilders ?
                    getDocumentsFieldBuilder() : null;
             } else {
@@ -3579,7 +3579,7 @@ public final class Scip {
               externalSymbolsBuilder_ = null;
               externalSymbols_ = other.externalSymbols_;
               bitField0_ = (bitField0_ & ~0x00000004);
-              externalSymbolsBuilder_ = 
+              externalSymbolsBuilder_ =
                 com.google.protobuf.GeneratedMessageV3.alwaysUseFieldBuilders ?
                    getExternalSymbolsFieldBuilder() : null;
             } else {
@@ -3807,7 +3807,7 @@ public final class Scip {
        * <code>.scip.Metadata metadata = 1;</code>
        */
       private com.google.protobuf.SingleFieldBuilderV3<
-          scip.Scip.Metadata, scip.Scip.Metadata.Builder, scip.Scip.MetadataOrBuilder> 
+          scip.Scip.Metadata, scip.Scip.Metadata.Builder, scip.Scip.MetadataOrBuilder>
           getMetadataFieldBuilder() {
         if (metadataBuilder_ == null) {
           metadataBuilder_ = new com.google.protobuf.SingleFieldBuilderV3<
@@ -4075,7 +4075,7 @@ public final class Scip {
        *
        * <code>repeated .scip.Document documents = 2;</code>
        */
-      public java.util.List<? extends scip.Scip.DocumentOrBuilder> 
+      public java.util.List<? extends scip.Scip.DocumentOrBuilder>
            getDocumentsOrBuilderList() {
         if (documentsBuilder_ != null) {
           return documentsBuilder_.getMessageOrBuilderList();
@@ -4113,12 +4113,12 @@ public final class Scip {
        *
        * <code>repeated .scip.Document documents = 2;</code>
        */
-      public java.util.List<scip.Scip.Document.Builder> 
+      public java.util.List<scip.Scip.Document.Builder>
            getDocumentsBuilderList() {
         return getDocumentsFieldBuilder().getBuilderList();
       }
       private com.google.protobuf.RepeatedFieldBuilderV3<
-          scip.Scip.Document, scip.Scip.Document.Builder, scip.Scip.DocumentOrBuilder> 
+          scip.Scip.Document, scip.Scip.Document.Builder, scip.Scip.DocumentOrBuilder>
           getDocumentsFieldBuilder() {
         if (documentsBuilder_ == null) {
           documentsBuilder_ = new com.google.protobuf.RepeatedFieldBuilderV3<
@@ -4447,7 +4447,7 @@ public final class Scip {
        *
        * <code>repeated .scip.SymbolInformation external_symbols = 3;</code>
        */
-      public java.util.List<? extends scip.Scip.SymbolInformationOrBuilder> 
+      public java.util.List<? extends scip.Scip.SymbolInformationOrBuilder>
            getExternalSymbolsOrBuilderList() {
         if (externalSymbolsBuilder_ != null) {
           return externalSymbolsBuilder_.getMessageOrBuilderList();
@@ -4497,12 +4497,12 @@ public final class Scip {
        *
        * <code>repeated .scip.SymbolInformation external_symbols = 3;</code>
        */
-      public java.util.List<scip.Scip.SymbolInformation.Builder> 
+      public java.util.List<scip.Scip.SymbolInformation.Builder>
            getExternalSymbolsBuilderList() {
         return getExternalSymbolsFieldBuilder().getBuilderList();
       }
       private com.google.protobuf.RepeatedFieldBuilderV3<
-          scip.Scip.SymbolInformation, scip.Scip.SymbolInformation.Builder, scip.Scip.SymbolInformationOrBuilder> 
+          scip.Scip.SymbolInformation, scip.Scip.SymbolInformation.Builder, scip.Scip.SymbolInformationOrBuilder>
           getExternalSymbolsFieldBuilder() {
         if (externalSymbolsBuilder_ == null) {
           externalSymbolsBuilder_ = new com.google.protobuf.RepeatedFieldBuilderV3<
@@ -4798,7 +4798,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         projectRoot_ = s;
@@ -4820,7 +4820,7 @@ public final class Scip {
         getProjectRootBytes() {
       java.lang.Object ref = projectRoot_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         projectRoot_ = b;
@@ -5492,7 +5492,7 @@ public final class Scip {
        * <code>.scip.ToolInfo tool_info = 2;</code>
        */
       private com.google.protobuf.SingleFieldBuilderV3<
-          scip.Scip.ToolInfo, scip.Scip.ToolInfo.Builder, scip.Scip.ToolInfoOrBuilder> 
+          scip.Scip.ToolInfo, scip.Scip.ToolInfo.Builder, scip.Scip.ToolInfoOrBuilder>
           getToolInfoFieldBuilder() {
         if (toolInfoBuilder_ == null) {
           toolInfoBuilder_ = new com.google.protobuf.SingleFieldBuilderV3<
@@ -5542,7 +5542,7 @@ public final class Scip {
           getProjectRootBytes() {
         java.lang.Object ref = projectRoot_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           projectRoot_ = b;
@@ -5894,7 +5894,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         name_ = s;
@@ -5914,7 +5914,7 @@ public final class Scip {
         getNameBytes() {
       java.lang.Object ref = name_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         name_ = b;
@@ -5941,7 +5941,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         version_ = s;
@@ -5961,7 +5961,7 @@ public final class Scip {
         getVersionBytes() {
       java.lang.Object ref = version_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         version_ = b;
@@ -6446,7 +6446,7 @@ public final class Scip {
           getNameBytes() {
         java.lang.Object ref = name_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           name_ = b;
@@ -6538,7 +6538,7 @@ public final class Scip {
           getVersionBytes() {
         java.lang.Object ref = version_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           version_ = b;
@@ -6880,7 +6880,7 @@ public final class Scip {
      *
      * <code>repeated .scip.Occurrence occurrences = 2;</code>
      */
-    java.util.List<scip.Scip.Occurrence> 
+    java.util.List<scip.Scip.Occurrence>
         getOccurrencesList();
     /**
      * <pre>
@@ -6905,7 +6905,7 @@ public final class Scip {
      *
      * <code>repeated .scip.Occurrence occurrences = 2;</code>
      */
-    java.util.List<? extends scip.Scip.OccurrenceOrBuilder> 
+    java.util.List<? extends scip.Scip.OccurrenceOrBuilder>
         getOccurrencesOrBuilderList();
     /**
      * <pre>
@@ -6928,7 +6928,7 @@ public final class Scip {
      *
      * <code>repeated .scip.SymbolInformation symbols = 3;</code>
      */
-    java.util.List<scip.Scip.SymbolInformation> 
+    java.util.List<scip.Scip.SymbolInformation>
         getSymbolsList();
     /**
      * <pre>
@@ -6965,7 +6965,7 @@ public final class Scip {
      *
      * <code>repeated .scip.SymbolInformation symbols = 3;</code>
      */
-    java.util.List<? extends scip.Scip.SymbolInformationOrBuilder> 
+    java.util.List<? extends scip.Scip.SymbolInformationOrBuilder>
         getSymbolsOrBuilderList();
     /**
      * <pre>
@@ -7115,7 +7115,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         language_ = s;
@@ -7138,7 +7138,7 @@ public final class Scip {
         getLanguageBytes() {
       java.lang.Object ref = language_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         language_ = b;
@@ -7173,7 +7173,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         relativePath_ = s;
@@ -7201,7 +7201,7 @@ public final class Scip {
         getRelativePathBytes() {
       java.lang.Object ref = relativePath_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         relativePath_ = b;
@@ -7233,7 +7233,7 @@ public final class Scip {
      * <code>repeated .scip.Occurrence occurrences = 2;</code>
      */
     @java.lang.Override
-    public java.util.List<? extends scip.Scip.OccurrenceOrBuilder> 
+    public java.util.List<? extends scip.Scip.OccurrenceOrBuilder>
         getOccurrencesOrBuilderList() {
       return occurrences_;
     }
@@ -7302,7 +7302,7 @@ public final class Scip {
      * <code>repeated .scip.SymbolInformation symbols = 3;</code>
      */
     @java.lang.Override
-    public java.util.List<? extends scip.Scip.SymbolInformationOrBuilder> 
+    public java.util.List<? extends scip.Scip.SymbolInformationOrBuilder>
         getSymbolsOrBuilderList() {
       return symbols_;
     }
@@ -7376,7 +7376,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         text_ = s;
@@ -7402,7 +7402,7 @@ public final class Scip {
         getTextBytes() {
       java.lang.Object ref = text_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         text_ = b;
@@ -7865,7 +7865,7 @@ public final class Scip {
               occurrencesBuilder_ = null;
               occurrences_ = other.occurrences_;
               bitField0_ = (bitField0_ & ~0x00000004);
-              occurrencesBuilder_ = 
+              occurrencesBuilder_ =
                 com.google.protobuf.GeneratedMessageV3.alwaysUseFieldBuilders ?
                    getOccurrencesFieldBuilder() : null;
             } else {
@@ -7891,7 +7891,7 @@ public final class Scip {
               symbolsBuilder_ = null;
               symbols_ = other.symbols_;
               bitField0_ = (bitField0_ & ~0x00000008);
-              symbolsBuilder_ = 
+              symbolsBuilder_ =
                 com.google.protobuf.GeneratedMessageV3.alwaysUseFieldBuilders ?
                    getSymbolsFieldBuilder() : null;
             } else {
@@ -8035,7 +8035,7 @@ public final class Scip {
           getLanguageBytes() {
         java.lang.Object ref = language_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           language_ = b;
@@ -8152,7 +8152,7 @@ public final class Scip {
           getRelativePathBytes() {
         java.lang.Object ref = relativePath_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           relativePath_ = b;
@@ -8490,7 +8490,7 @@ public final class Scip {
        *
        * <code>repeated .scip.Occurrence occurrences = 2;</code>
        */
-      public java.util.List<? extends scip.Scip.OccurrenceOrBuilder> 
+      public java.util.List<? extends scip.Scip.OccurrenceOrBuilder>
            getOccurrencesOrBuilderList() {
         if (occurrencesBuilder_ != null) {
           return occurrencesBuilder_.getMessageOrBuilderList();
@@ -8528,12 +8528,12 @@ public final class Scip {
        *
        * <code>repeated .scip.Occurrence occurrences = 2;</code>
        */
-      public java.util.List<scip.Scip.Occurrence.Builder> 
+      public java.util.List<scip.Scip.Occurrence.Builder>
            getOccurrencesBuilderList() {
         return getOccurrencesFieldBuilder().getBuilderList();
       }
       private com.google.protobuf.RepeatedFieldBuilderV3<
-          scip.Scip.Occurrence, scip.Scip.Occurrence.Builder, scip.Scip.OccurrenceOrBuilder> 
+          scip.Scip.Occurrence, scip.Scip.Occurrence.Builder, scip.Scip.OccurrenceOrBuilder>
           getOccurrencesFieldBuilder() {
         if (occurrencesBuilder_ == null) {
           occurrencesBuilder_ = new com.google.protobuf.RepeatedFieldBuilderV3<
@@ -8862,7 +8862,7 @@ public final class Scip {
        *
        * <code>repeated .scip.SymbolInformation symbols = 3;</code>
        */
-      public java.util.List<? extends scip.Scip.SymbolInformationOrBuilder> 
+      public java.util.List<? extends scip.Scip.SymbolInformationOrBuilder>
            getSymbolsOrBuilderList() {
         if (symbolsBuilder_ != null) {
           return symbolsBuilder_.getMessageOrBuilderList();
@@ -8912,12 +8912,12 @@ public final class Scip {
        *
        * <code>repeated .scip.SymbolInformation symbols = 3;</code>
        */
-      public java.util.List<scip.Scip.SymbolInformation.Builder> 
+      public java.util.List<scip.Scip.SymbolInformation.Builder>
            getSymbolsBuilderList() {
         return getSymbolsFieldBuilder().getBuilderList();
       }
       private com.google.protobuf.RepeatedFieldBuilderV3<
-          scip.Scip.SymbolInformation, scip.Scip.SymbolInformation.Builder, scip.Scip.SymbolInformationOrBuilder> 
+          scip.Scip.SymbolInformation, scip.Scip.SymbolInformation.Builder, scip.Scip.SymbolInformationOrBuilder>
           getSymbolsFieldBuilder() {
         if (symbolsBuilder_ == null) {
           symbolsBuilder_ = new com.google.protobuf.RepeatedFieldBuilderV3<
@@ -8976,7 +8976,7 @@ public final class Scip {
           getTextBytes() {
         java.lang.Object ref = text_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           text_ = b;
@@ -9268,7 +9268,7 @@ public final class Scip {
     /**
      * <code>repeated .scip.Descriptor descriptors = 3;</code>
      */
-    java.util.List<scip.Scip.Descriptor> 
+    java.util.List<scip.Scip.Descriptor>
         getDescriptorsList();
     /**
      * <code>repeated .scip.Descriptor descriptors = 3;</code>
@@ -9281,7 +9281,7 @@ public final class Scip {
     /**
      * <code>repeated .scip.Descriptor descriptors = 3;</code>
      */
-    java.util.List<? extends scip.Scip.DescriptorOrBuilder> 
+    java.util.List<? extends scip.Scip.DescriptorOrBuilder>
         getDescriptorsOrBuilderList();
     /**
      * <code>repeated .scip.Descriptor descriptors = 3;</code>
@@ -9385,7 +9385,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         scheme_ = s;
@@ -9401,7 +9401,7 @@ public final class Scip {
         getSchemeBytes() {
       java.lang.Object ref = scheme_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         scheme_ = b;
@@ -9451,7 +9451,7 @@ public final class Scip {
      * <code>repeated .scip.Descriptor descriptors = 3;</code>
      */
     @java.lang.Override
-    public java.util.List<? extends scip.Scip.DescriptorOrBuilder> 
+    public java.util.List<? extends scip.Scip.DescriptorOrBuilder>
         getDescriptorsOrBuilderList() {
       return descriptors_;
     }
@@ -9891,7 +9891,7 @@ public final class Scip {
               descriptorsBuilder_ = null;
               descriptors_ = other.descriptors_;
               bitField0_ = (bitField0_ & ~0x00000004);
-              descriptorsBuilder_ = 
+              descriptorsBuilder_ =
                 com.google.protobuf.GeneratedMessageV3.alwaysUseFieldBuilders ?
                    getDescriptorsFieldBuilder() : null;
             } else {
@@ -9992,7 +9992,7 @@ public final class Scip {
           getSchemeBytes() {
         java.lang.Object ref = scheme_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           scheme_ = b;
@@ -10147,7 +10147,7 @@ public final class Scip {
        * <code>.scip.Package package = 2;</code>
        */
       private com.google.protobuf.SingleFieldBuilderV3<
-          scip.Scip.Package, scip.Scip.Package.Builder, scip.Scip.PackageOrBuilder> 
+          scip.Scip.Package, scip.Scip.Package.Builder, scip.Scip.PackageOrBuilder>
           getPackageFieldBuilder() {
         if (packageBuilder_ == null) {
           packageBuilder_ = new com.google.protobuf.SingleFieldBuilderV3<
@@ -10355,7 +10355,7 @@ public final class Scip {
       /**
        * <code>repeated .scip.Descriptor descriptors = 3;</code>
        */
-      public java.util.List<? extends scip.Scip.DescriptorOrBuilder> 
+      public java.util.List<? extends scip.Scip.DescriptorOrBuilder>
            getDescriptorsOrBuilderList() {
         if (descriptorsBuilder_ != null) {
           return descriptorsBuilder_.getMessageOrBuilderList();
@@ -10381,12 +10381,12 @@ public final class Scip {
       /**
        * <code>repeated .scip.Descriptor descriptors = 3;</code>
        */
-      public java.util.List<scip.Scip.Descriptor.Builder> 
+      public java.util.List<scip.Scip.Descriptor.Builder>
            getDescriptorsBuilderList() {
         return getDescriptorsFieldBuilder().getBuilderList();
       }
       private com.google.protobuf.RepeatedFieldBuilderV3<
-          scip.Scip.Descriptor, scip.Scip.Descriptor.Builder, scip.Scip.DescriptorOrBuilder> 
+          scip.Scip.Descriptor, scip.Scip.Descriptor.Builder, scip.Scip.DescriptorOrBuilder>
           getDescriptorsFieldBuilder() {
         if (descriptorsBuilder_ == null) {
           descriptorsBuilder_ = new com.google.protobuf.RepeatedFieldBuilderV3<
@@ -10560,7 +10560,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         manager_ = s;
@@ -10576,7 +10576,7 @@ public final class Scip {
         getManagerBytes() {
       java.lang.Object ref = manager_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         manager_ = b;
@@ -10599,7 +10599,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         name_ = s;
@@ -10615,7 +10615,7 @@ public final class Scip {
         getNameBytes() {
       java.lang.Object ref = name_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         name_ = b;
@@ -10638,7 +10638,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         version_ = s;
@@ -10654,7 +10654,7 @@ public final class Scip {
         getVersionBytes() {
       java.lang.Object ref = version_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         version_ = b;
@@ -11069,7 +11069,7 @@ public final class Scip {
           getManagerBytes() {
         java.lang.Object ref = manager_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           manager_ = b;
@@ -11141,7 +11141,7 @@ public final class Scip {
           getNameBytes() {
         java.lang.Object ref = name_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           name_ = b;
@@ -11213,7 +11213,7 @@ public final class Scip {
           getVersionBytes() {
         java.lang.Object ref = version_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           version_ = b;
@@ -11606,7 +11606,7 @@ public final class Scip {
       private static final Suffix[] VALUES = getStaticValuesArray();
       private static Suffix[] getStaticValuesArray() {
         return new Suffix[] {
-        UnspecifiedSuffix, Namespace, Package, Type, Term, Method, TypeParameter, Parameter, Meta, Local, Macro, 
+        UnspecifiedSuffix, Namespace, Package, Type, Term, Method, TypeParameter, Parameter, Meta, Local, Macro,
         };
       }
       public static Suffix valueOf(
@@ -11645,7 +11645,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         name_ = s;
@@ -11661,7 +11661,7 @@ public final class Scip {
         getNameBytes() {
       java.lang.Object ref = name_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         name_ = b;
@@ -11684,7 +11684,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         disambiguator_ = s;
@@ -11700,7 +11700,7 @@ public final class Scip {
         getDisambiguatorBytes() {
       java.lang.Object ref = disambiguator_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         disambiguator_ = b;
@@ -12135,7 +12135,7 @@ public final class Scip {
           getNameBytes() {
         java.lang.Object ref = name_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           name_ = b;
@@ -12207,7 +12207,7 @@ public final class Scip {
           getDisambiguatorBytes() {
         java.lang.Object ref = disambiguator_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           disambiguator_ = b;
@@ -12489,7 +12489,7 @@ public final class Scip {
      *
      * <code>repeated .scip.Relationship relationships = 4;</code>
      */
-    java.util.List<scip.Scip.Relationship> 
+    java.util.List<scip.Scip.Relationship>
         getRelationshipsList();
     /**
      * <pre>
@@ -12514,7 +12514,7 @@ public final class Scip {
      *
      * <code>repeated .scip.Relationship relationships = 4;</code>
      */
-    java.util.List<? extends scip.Scip.RelationshipOrBuilder> 
+    java.util.List<? extends scip.Scip.RelationshipOrBuilder>
         getRelationshipsOrBuilderList();
     /**
      * <pre>
@@ -14050,7 +14050,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         symbol_ = s;
@@ -14071,7 +14071,7 @@ public final class Scip {
         getSymbolBytes() {
       java.lang.Object ref = symbol_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         symbol_ = b;
@@ -14176,7 +14176,7 @@ public final class Scip {
      * <code>repeated .scip.Relationship relationships = 4;</code>
      */
     @java.lang.Override
-    public java.util.List<? extends scip.Scip.RelationshipOrBuilder> 
+    public java.util.List<? extends scip.Scip.RelationshipOrBuilder>
         getRelationshipsOrBuilderList() {
       return relationships_;
     }
@@ -14270,7 +14270,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         displayName_ = s;
@@ -14298,7 +14298,7 @@ public final class Scip {
         getDisplayNameBytes() {
       java.lang.Object ref = displayName_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         displayName_ = b;
@@ -14394,7 +14394,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         enclosingSymbol_ = s;
@@ -14430,7 +14430,7 @@ public final class Scip {
         getEnclosingSymbolBytes() {
       java.lang.Object ref = enclosingSymbol_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         enclosingSymbol_ = b;
@@ -14885,7 +14885,7 @@ public final class Scip {
               relationshipsBuilder_ = null;
               relationships_ = other.relationships_;
               bitField0_ = (bitField0_ & ~0x00000004);
-              relationshipsBuilder_ = 
+              relationshipsBuilder_ =
                 com.google.protobuf.GeneratedMessageV3.alwaysUseFieldBuilders ?
                    getRelationshipsFieldBuilder() : null;
             } else {
@@ -15033,7 +15033,7 @@ public final class Scip {
           getSymbolBytes() {
         java.lang.Object ref = symbol_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           symbol_ = b;
@@ -15542,7 +15542,7 @@ public final class Scip {
        *
        * <code>repeated .scip.Relationship relationships = 4;</code>
        */
-      public java.util.List<? extends scip.Scip.RelationshipOrBuilder> 
+      public java.util.List<? extends scip.Scip.RelationshipOrBuilder>
            getRelationshipsOrBuilderList() {
         if (relationshipsBuilder_ != null) {
           return relationshipsBuilder_.getMessageOrBuilderList();
@@ -15580,12 +15580,12 @@ public final class Scip {
        *
        * <code>repeated .scip.Relationship relationships = 4;</code>
        */
-      public java.util.List<scip.Scip.Relationship.Builder> 
+      public java.util.List<scip.Scip.Relationship.Builder>
            getRelationshipsBuilderList() {
         return getRelationshipsFieldBuilder().getBuilderList();
       }
       private com.google.protobuf.RepeatedFieldBuilderV3<
-          scip.Scip.Relationship, scip.Scip.Relationship.Builder, scip.Scip.RelationshipOrBuilder> 
+          scip.Scip.Relationship, scip.Scip.Relationship.Builder, scip.Scip.RelationshipOrBuilder>
           getRelationshipsFieldBuilder() {
         if (relationshipsBuilder_ == null) {
           relationshipsBuilder_ = new com.google.protobuf.RepeatedFieldBuilderV3<
@@ -15731,7 +15731,7 @@ public final class Scip {
           getDisplayNameBytes() {
         java.lang.Object ref = displayName_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           displayName_ = b;
@@ -16003,7 +16003,7 @@ public final class Scip {
        * <code>.scip.Document signature_documentation = 7;</code>
        */
       private com.google.protobuf.SingleFieldBuilderV3<
-          scip.Scip.Document, scip.Scip.Document.Builder, scip.Scip.DocumentOrBuilder> 
+          scip.Scip.Document, scip.Scip.Document.Builder, scip.Scip.DocumentOrBuilder>
           getSignatureDocumentationFieldBuilder() {
         if (signatureDocumentationBuilder_ == null) {
           signatureDocumentationBuilder_ = new com.google.protobuf.SingleFieldBuilderV3<
@@ -16081,7 +16081,7 @@ public final class Scip {
           getEnclosingSymbolBytes() {
         java.lang.Object ref = enclosingSymbol_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           enclosingSymbol_ = b;
@@ -16401,7 +16401,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         symbol_ = s;
@@ -16417,7 +16417,7 @@ public final class Scip {
         getSymbolBytes() {
       java.lang.Object ref = symbol_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         symbol_ = b;
@@ -16979,7 +16979,7 @@ public final class Scip {
           getSymbolBytes() {
         java.lang.Object ref = symbol_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           symbol_ = b;
@@ -17627,7 +17627,7 @@ public final class Scip {
      *
      * <code>repeated .scip.Diagnostic diagnostics = 6;</code>
      */
-    java.util.List<scip.Scip.Diagnostic> 
+    java.util.List<scip.Scip.Diagnostic>
         getDiagnosticsList();
     /**
      * <pre>
@@ -17652,7 +17652,7 @@ public final class Scip {
      *
      * <code>repeated .scip.Diagnostic diagnostics = 6;</code>
      */
-    java.util.List<? extends scip.Scip.DiagnosticOrBuilder> 
+    java.util.List<? extends scip.Scip.DiagnosticOrBuilder>
         getDiagnosticsOrBuilderList();
     /**
      * <pre>
@@ -18022,7 +18022,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         symbol_ = s;
@@ -18043,7 +18043,7 @@ public final class Scip {
         getSymbolBytes() {
       java.lang.Object ref = symbol_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         symbol_ = b;
@@ -18198,7 +18198,7 @@ public final class Scip {
      * <code>repeated .scip.Diagnostic diagnostics = 6;</code>
      */
     @java.lang.Override
-    public java.util.List<? extends scip.Scip.DiagnosticOrBuilder> 
+    public java.util.List<? extends scip.Scip.DiagnosticOrBuilder>
         getDiagnosticsOrBuilderList() {
       return diagnostics_;
     }
@@ -18913,7 +18913,7 @@ public final class Scip {
               diagnosticsBuilder_ = null;
               diagnostics_ = other.diagnostics_;
               bitField0_ = (bitField0_ & ~0x00000020);
-              diagnosticsBuilder_ = 
+              diagnosticsBuilder_ =
                 com.google.protobuf.GeneratedMessageV3.alwaysUseFieldBuilders ?
                    getDiagnosticsFieldBuilder() : null;
             } else {
@@ -19342,7 +19342,7 @@ public final class Scip {
           getSymbolBytes() {
         java.lang.Object ref = symbol_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           symbol_ = b;
@@ -19989,7 +19989,7 @@ public final class Scip {
        *
        * <code>repeated .scip.Diagnostic diagnostics = 6;</code>
        */
-      public java.util.List<? extends scip.Scip.DiagnosticOrBuilder> 
+      public java.util.List<? extends scip.Scip.DiagnosticOrBuilder>
            getDiagnosticsOrBuilderList() {
         if (diagnosticsBuilder_ != null) {
           return diagnosticsBuilder_.getMessageOrBuilderList();
@@ -20027,12 +20027,12 @@ public final class Scip {
        *
        * <code>repeated .scip.Diagnostic diagnostics = 6;</code>
        */
-      public java.util.List<scip.Scip.Diagnostic.Builder> 
+      public java.util.List<scip.Scip.Diagnostic.Builder>
            getDiagnosticsBuilderList() {
         return getDiagnosticsFieldBuilder().getBuilderList();
       }
       private com.google.protobuf.RepeatedFieldBuilderV3<
-          scip.Scip.Diagnostic, scip.Scip.Diagnostic.Builder, scip.Scip.DiagnosticOrBuilder> 
+          scip.Scip.Diagnostic, scip.Scip.Diagnostic.Builder, scip.Scip.DiagnosticOrBuilder>
           getDiagnosticsFieldBuilder() {
         if (diagnosticsBuilder_ == null) {
           diagnosticsBuilder_ = new com.google.protobuf.RepeatedFieldBuilderV3<
@@ -20780,7 +20780,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         code_ = s;
@@ -20800,7 +20800,7 @@ public final class Scip {
         getCodeBytes() {
       java.lang.Object ref = code_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         code_ = b;
@@ -20827,7 +20827,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         message_ = s;
@@ -20847,7 +20847,7 @@ public final class Scip {
         getMessageBytes() {
       java.lang.Object ref = message_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         message_ = b;
@@ -20875,7 +20875,7 @@ public final class Scip {
       if (ref instanceof java.lang.String) {
         return (java.lang.String) ref;
       } else {
-        com.google.protobuf.ByteString bs = 
+        com.google.protobuf.ByteString bs =
             (com.google.protobuf.ByteString) ref;
         java.lang.String s = bs.toStringUtf8();
         source_ = s;
@@ -20896,7 +20896,7 @@ public final class Scip {
         getSourceBytes() {
       java.lang.Object ref = source_;
       if (ref instanceof java.lang.String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         source_ = b;
@@ -21534,7 +21534,7 @@ public final class Scip {
           getCodeBytes() {
         java.lang.Object ref = code_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           code_ = b;
@@ -21626,7 +21626,7 @@ public final class Scip {
           getMessageBytes() {
         java.lang.Object ref = message_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           message_ = b;
@@ -21720,7 +21720,7 @@ public final class Scip {
           getSourceBytes() {
         java.lang.Object ref = source_;
         if (ref instanceof String) {
-          com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString b =
               com.google.protobuf.ByteString.copyFromUtf8(
                   (java.lang.String) ref);
           source_ = b;
@@ -21987,57 +21987,57 @@ public final class Scip {
 
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_scip_Index_descriptor;
-  private static final 
+  private static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_scip_Index_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_scip_Metadata_descriptor;
-  private static final 
+  private static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_scip_Metadata_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_scip_ToolInfo_descriptor;
-  private static final 
+  private static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_scip_ToolInfo_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_scip_Document_descriptor;
-  private static final 
+  private static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_scip_Document_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_scip_Symbol_descriptor;
-  private static final 
+  private static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_scip_Symbol_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_scip_Package_descriptor;
-  private static final 
+  private static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_scip_Package_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_scip_Descriptor_descriptor;
-  private static final 
+  private static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_scip_Descriptor_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_scip_SymbolInformation_descriptor;
-  private static final 
+  private static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_scip_SymbolInformation_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_scip_Relationship_descriptor;
-  private static final 
+  private static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_scip_Relationship_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_scip_Occurrence_descriptor;
-  private static final 
+  private static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_scip_Occurrence_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_scip_Diagnostic_descriptor;
-  private static final 
+  private static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_scip_Diagnostic_fieldAccessorTable;
 

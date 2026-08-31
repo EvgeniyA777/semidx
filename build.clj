@@ -146,6 +146,19 @@
                        :command (mapv str command)
                        :exit_code exit-code})))))
 
+(defn- strip-trailing-whitespace!
+  "protoc emits lines with trailing spaces in the generated Java. Normalize them
+  so ordinary whitespace gates stay green. `grpc-verify-generated` hashes this
+  same normalized output, so the committed sources and a fresh generation still
+  match byte for byte."
+  [output-path]
+  (doseq [^File file (file-seq (io/file output-path))
+          :when (and (.isFile file) (str/ends-with? (.getName file) ".java"))]
+    (let [original (slurp file)
+          cleaned (str/replace original #"(?m)[ \t]+$" "")]
+      (when-not (= original cleaned)
+        (spit file cleaned)))))
+
 (defn- generate-into! [output-dir]
   (let [{:keys [classifier protoc grpc-java]} (toolchain)
         output-path (str (b/resolve-path output-dir))]
@@ -167,6 +180,7 @@
                            :classifier classifier
                            :proto file
                            :expected_file (.getPath expected)})))))
+    (strip-trailing-whitespace! output-path)
     output-path))
 
 (defn- java-file-hashes [root-path]

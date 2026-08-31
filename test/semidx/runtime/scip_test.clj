@@ -59,6 +59,10 @@
                             (.setDisplayName "AClass")
                             (.setKind Scip$SymbolInformation$Kind/Class)
                             (.addDocumentation "doc line")
+                            (.setSignatureDocumentation
+                             (-> (Scip$Document/newBuilder)
+                                 (.setLanguage "typescript")
+                                 (.setText "class AClass")))
                             (.addRelationships
                              (-> (Scip$Relationship/newBuilder)
                                  (.setSymbol "sym-iface")
@@ -97,6 +101,12 @@
                :display-name "AClass"
                :documentation ["doc line"]
                :enclosing-symbol ""
+               :signature-documentation {:relative-path ""
+                                         :language "typescript"
+                                         :position-encoding :unspecified-position-encoding
+                                         :text "class AClass"
+                                         :symbols []
+                                         :occurrences []}
                :relationships [{:symbol "sym-iface"
                                 :is-reference false
                                 :is-implementation true
@@ -128,6 +138,7 @@
              :display-name ""
              :documentation []
              :enclosing-symbol ""
+             :signature-documentation nil
              :relationships []}]
            (:external-symbols idx)))))
 

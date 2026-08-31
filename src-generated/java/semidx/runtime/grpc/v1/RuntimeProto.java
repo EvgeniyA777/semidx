@@ -17,82 +17,82 @@ public final class RuntimeProto {
   }
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_HealthRequest_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_HealthRequest_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_HealthResponse_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_HealthResponse_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_CreateIndexRequest_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_CreateIndexRequest_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_CreateIndexResponse_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_CreateIndexResponse_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_ResolveContextRequest_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_ResolveContextRequest_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_ResolveContextResponse_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_ResolveContextResponse_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_ExpandContextRequest_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_ExpandContextRequest_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_ExpandContextResponse_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_ExpandContextResponse_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_FetchContextDetailRequest_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_FetchContextDetailRequest_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_FetchContextDetailResponse_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_FetchContextDetailResponse_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_LiteralFileSliceRequest_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_LiteralFileSliceRequest_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_LiteralFileSliceResponse_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_LiteralFileSliceResponse_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_SnapshotDiffRequest_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_SnapshotDiffRequest_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_SnapshotDiffResponse_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_SnapshotDiffResponse_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_TraverseRelationsRequest_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_TraverseRelationsRequest_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
     internal_static_semidx_runtime_grpc_v1_TraverseRelationsResponse_descriptor;
-  static final 
+  static final
     com.google.protobuf.GeneratedMessageV3.FieldAccessorTable
       internal_static_semidx_runtime_grpc_v1_TraverseRelationsResponse_fieldAccessorTable;
 

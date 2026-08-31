@@ -53,7 +53,7 @@ private static final long serialVersionUID = 0L;
     if (ref instanceof java.lang.String) {
       return (java.lang.String) ref;
     } else {
-      com.google.protobuf.ByteString bs = 
+      com.google.protobuf.ByteString bs =
           (com.google.protobuf.ByteString) ref;
       java.lang.String s = bs.toStringUtf8();
       snapshotDiffResultJson_ = s;
@@ -69,7 +69,7 @@ private static final long serialVersionUID = 0L;
       getSnapshotDiffResultJsonBytes() {
     java.lang.Object ref = snapshotDiffResultJson_;
     if (ref instanceof java.lang.String) {
-      com.google.protobuf.ByteString b = 
+      com.google.protobuf.ByteString b =
           com.google.protobuf.ByteString.copyFromUtf8(
               (java.lang.String) ref);
       snapshotDiffResultJson_ = b;
@@ -430,7 +430,7 @@ private static final long serialVersionUID = 0L;
         getSnapshotDiffResultJsonBytes() {
       java.lang.Object ref = snapshotDiffResultJson_;
       if (ref instanceof String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         snapshotDiffResultJson_ = b;

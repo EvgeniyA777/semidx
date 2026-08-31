@@ -56,7 +56,7 @@ private static final long serialVersionUID = 0L;
     if (ref instanceof java.lang.String) {
       return (java.lang.String) ref;
     } else {
-      com.google.protobuf.ByteString bs = 
+      com.google.protobuf.ByteString bs =
           (com.google.protobuf.ByteString) ref;
       java.lang.String s = bs.toStringUtf8();
       snapshotId_ = s;
@@ -72,7 +72,7 @@ private static final long serialVersionUID = 0L;
       getSnapshotIdBytes() {
     java.lang.Object ref = snapshotId_;
     if (ref instanceof java.lang.String) {
-      com.google.protobuf.ByteString b = 
+      com.google.protobuf.ByteString b =
           com.google.protobuf.ByteString.copyFromUtf8(
               (java.lang.String) ref);
       snapshotId_ = b;
@@ -95,7 +95,7 @@ private static final long serialVersionUID = 0L;
     if (ref instanceof java.lang.String) {
       return (java.lang.String) ref;
     } else {
-      com.google.protobuf.ByteString bs = 
+      com.google.protobuf.ByteString bs =
           (com.google.protobuf.ByteString) ref;
       java.lang.String s = bs.toStringUtf8();
       indexedAt_ = s;
@@ -111,7 +111,7 @@ private static final long serialVersionUID = 0L;
       getIndexedAtBytes() {
     java.lang.Object ref = indexedAt_;
     if (ref instanceof java.lang.String) {
-      com.google.protobuf.ByteString b = 
+      com.google.protobuf.ByteString b =
           com.google.protobuf.ByteString.copyFromUtf8(
               (java.lang.String) ref);
       indexedAt_ = b;
@@ -156,7 +156,7 @@ private static final long serialVersionUID = 0L;
     if (ref instanceof java.lang.String) {
       return (java.lang.String) ref;
     } else {
-      com.google.protobuf.ByteString bs = 
+      com.google.protobuf.ByteString bs =
           (com.google.protobuf.ByteString) ref;
       java.lang.String s = bs.toStringUtf8();
       repoMapJson_ = s;
@@ -172,7 +172,7 @@ private static final long serialVersionUID = 0L;
       getRepoMapJsonBytes() {
     java.lang.Object ref = repoMapJson_;
     if (ref instanceof java.lang.String) {
-      com.google.protobuf.ByteString b = 
+      com.google.protobuf.ByteString b =
           com.google.protobuf.ByteString.copyFromUtf8(
               (java.lang.String) ref);
       repoMapJson_ = b;
@@ -195,7 +195,7 @@ private static final long serialVersionUID = 0L;
     if (ref instanceof java.lang.String) {
       return (java.lang.String) ref;
     } else {
-      com.google.protobuf.ByteString bs = 
+      com.google.protobuf.ByteString bs =
           (com.google.protobuf.ByteString) ref;
       java.lang.String s = bs.toStringUtf8();
       indexLifecycleJson_ = s;
@@ -211,7 +211,7 @@ private static final long serialVersionUID = 0L;
       getIndexLifecycleJsonBytes() {
     java.lang.Object ref = indexLifecycleJson_;
     if (ref instanceof java.lang.String) {
-      com.google.protobuf.ByteString b = 
+      com.google.protobuf.ByteString b =
           com.google.protobuf.ByteString.copyFromUtf8(
               (java.lang.String) ref);
       indexLifecycleJson_ = b;
@@ -690,7 +690,7 @@ private static final long serialVersionUID = 0L;
         getSnapshotIdBytes() {
       java.lang.Object ref = snapshotId_;
       if (ref instanceof String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         snapshotId_ = b;
@@ -762,7 +762,7 @@ private static final long serialVersionUID = 0L;
         getIndexedAtBytes() {
       java.lang.Object ref = indexedAt_;
       if (ref instanceof String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         indexedAt_ = b;
@@ -898,7 +898,7 @@ private static final long serialVersionUID = 0L;
         getRepoMapJsonBytes() {
       java.lang.Object ref = repoMapJson_;
       if (ref instanceof String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         repoMapJson_ = b;
@@ -970,7 +970,7 @@ private static final long serialVersionUID = 0L;
         getIndexLifecycleJsonBytes() {
       java.lang.Object ref = indexLifecycleJson_;
       if (ref instanceof String) {
-        com.google.protobuf.ByteString b = 
+        com.google.protobuf.ByteString b =
             com.google.protobuf.ByteString.copyFromUtf8(
                 (java.lang.String) ref);
         indexLifecycleJson_ = b;
