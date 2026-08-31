@@ -1012,3 +1012,136 @@ Verification after the repair:
 - `./scripts/scip-typescript-corpus-snapshot.sh`: regenerates both fixtures
   byte-stable; the tightened drift check passes against the repo-managed CLI.
 - `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+
+---
+
+# Stage 3 continued — SCIP -> CanonicalFactKey Normalization (2026-08-30)
+
+## Scope of this session
+
+The normalization slice: turn `semidx.runtime.scip/read-index` data into
+provider-neutral facts for `semidx.runtime.fact-arbitration`. Additive, pure,
+shadow. **Not touched:** `fact_arbitration`, `providers`, `provider_selection`,
+`provider_execution`, and the default extraction path. The normalizer is not
+wired into any provider yet.
+
+Owner-confirmed decisions (this session):
+
+- **Unit coverage** — emit facts only for the definition kinds semidx already
+  models: top-level functions/vars and class methods. Classes, fields,
+  constructors, parameters, and external/stdlib symbols are recorded as
+  `:unmapped` with a reason and become no fact. Promoting SCIP-only kinds is a
+  later decision.
+- **Naming bridge** — make `semidx.runtime.languages.typescript/ts-module-name`
+  public and reuse it, rather than forking a new naming primitive. One source of
+  truth for how a path becomes an owner.
+
+## Delivered
+
+| Artifact | Role |
+| --- | --- |
+| `src/semidx/runtime/providers/scip_normalize.clj` | `parse-scip-symbol` (SCIP symbol grammar -> scheme/package/typed descriptors, backtick-escape aware), `scip-symbol->unit` (moniker -> semidx `{:owner :symbol :kind :path}` or `{:unmapped <reason>}`), `normalize-index` (SCIP index data -> `{:facts [...] :unmapped [...]}`). |
+| `src/semidx/runtime/languages/typescript.clj` | `ts-module-name` is now public (`defn`), with a docstring naming its cross-provider role. No behaviour change; all TS-lane tests still green. |
+| `test/semidx/runtime/providers/scip_normalize_test.clj` | 6 tests, 47 assertions. |
+
+## How the bridge works
+
+A SCIP moniker like
+`scip-typescript npm . . src/`orders.ts`/normalize().` parses to package fields
+plus descriptors `[ns "src", ns "orders.ts", method "normalize"]`. The leading
+namespace descriptors up to and including the one with an ecmascript source
+extension reconstruct the **path** (`src/orders.ts`); `ts-module-name` turns that
+into the **owner** (`src.orders`); the descriptors after the file namespace name
+the **symbol** — `<module>/<name>` for a bare method/term, `<module>.<Class>#<method>`
+when a type descriptor precedes it. Identity therefore comes entirely from the
+moniker, so a cross-file reference in `index.ts` to `src/`orders.ts`/normalize().`
+still keys on `src.orders/normalize` while its evidence location records
+`src/index.ts`.
+
+`scip-symbol->unit` returns `:unmapped` for: `:external-symbol` (package name is
+not the local-project `.`), `:local-symbol`, `:module-symbol` (the file itself),
+`:type-symbol` (a bare class), `:field-symbol`, `:constructor-symbol`,
+`:non-unit-descriptor` (parameter / type-parameter / meta / macro), and parse
+errors.
+
+## Facts and authority
+
+Each occurrence of a mapped symbol becomes one fact keyed on that symbol's
+canonical identity, with one `FactEvidence`: `authority "exact"`,
+`operation "definitions"` when the occurrence carries the `:definition` role else
+`"references"`, `freshness "exact"`. Arbitration then folds the definition and
+every reference for one symbol into a single canonical fact.
+
+`source-identity` is **injected** by the caller (one map, or a function of the
+document's `relative-path`). ADR-046 requires an anchor for `exact` authority;
+`normalize-index` does not compute a digest or run the stale-artifact gate —
+that is the provider adapter's job. Passing an unanchored identity is a caller
+error that `fact-arbitration/fact-evidence-errors` rejects
+(`:exact-without-source-identity`), verified by a test.
+
+Deferred (named): call-hierarchy facts (no `call/*` relation type in
+`relations/relation-types`; the identity fixtures do not require one — the
+re-export edge is covered by reference facts resolving to the origin),
+implementations from SCIP `Relationship` (code path present, none in the
+corpus), and the digest/freshness gate.
+
+## Verification
+
+- `clojure -M:test`: **493 tests, 2853 assertions, 0 failures, 0 errors**
+  (was 487 / 2806; +6 in `semidx.runtime.providers.scip-normalize-test`).
+- Against the committed `typescript-corpus.scrubbed.scip`: `normalize-index`
+  emits 9 facts over exactly the four modelled symbols
+  (`src.orders/normalize`, `src.orders/createOrder`,
+  `src.orders.OrderService#handle`, `src.validator.Validator#validate`); the
+  `normalize` fact carries a definition in `orders.ts` and references from both
+  `orders.ts` and `index.ts` (the `canonicalize`/`normalize` re-export tokens
+  corroborating the origin).
+- Cross-provider parity: the SCIP-derived key for `src.orders/normalize` has the
+  same `canonical-fact-key-id` as the regex-tier key, and arbitrating the SCIP
+  facts with a synthetic regex heuristic fact yields one `exact` canonical fact
+  that retains both providers' evidence and keeps the regex-only `fact_identity`
+  (Variant C invariant).
+- Identity-fixture parity: `scip-symbol->unit` on the fixture's verified
+  `native_re_export_target` moniker resolves field for field to
+  `expected_canonical_key_of_origin`, and stays distinct from the alias
+  `distinct_facts_must_not_merge` keys.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+  `git diff --check`: clean. English-only: no Cyrillic.
+- REPL-first via `clojure -M:test-direct:nrepl` + clojure-mcp throughout.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 3 continued — SCIP -> CanonicalFactKey normalization (pure;
+  no provider wiring, no digest/freshness gate)
+recommended_next_stage: Stage 3 continued — TypeScript SCIP provider adapter
+  (descriptor + runner in providers.clj, shadow/default-off), with anchored
+  source identity and the stale-artifact gate
+recommended_executor: Claude Code team lead, no Fable, no Explore agent
+recommended_model: Claude Sonnet 5 for the adapter/runner plumbing; escalate the
+  source-identity + stale-artifact gate to Opus if the freshness scoping (F2)
+  proves subtle
+effort: medium
+effort_justification: the identity-critical mapping is now built and tested; the
+  adapter is bounded plumbing over it — invoke scip-typescript (repo-managed
+  CLI, ADR-047-style resolution), read the .scip via semidx.runtime.scip,
+  normalize via scip-normalize, attach a real per-document digest, emit a
+  FactBatch. The one careful part is F2: whether a stale document invalidates
+  its whole exact contribution or only affected ranges.
+prerequisites_or_blockers:
+  - a descriptor for scip-typescript in providers.clj with capability claims
+    matching what the adapter emits (definitions + references; not call
+    hierarchy).
+  - real per-document source identity: digest the workspace file the SCIP
+    document covers, compare to the SCIP artifact's coverage; stale or missing
+    => no exact facts (Stage 3 exit criterion).
+  - absence of a .scip artifact must degrade to tree-sitter/regex without index
+    failure.
+  - still shadow/default-off; no default-path wiring until Stage 6.
+file_ownership_and_conflict_risk: LOW-MEDIUM. The adapter adds a descriptor +
+  runner to providers.clj and a status probe; scip.clj, scip-normalize.clj, the
+  kernel, and the orchestrator should not need changes.
+fallback_executor_or_model: Opus 4.8 for the freshness-scoping decision only.
+model_availability_checked_at: not checked this session.
+confidence: high (mapping proven against the goldens; the adapter is bounded)
+```
