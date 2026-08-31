@@ -343,9 +343,14 @@ after this memory file.
    comes entirely from the moniker: leading namespace descriptors up to the file
    extension rebuild the path, `ts-module-name` (now public) gives the owner,
    trailing descriptors give the symbol; a SCIP key matches the regex-tier
-   `canonical-fact-key-id` for the same definition. Emits facts only for kinds
-   semidx models (top-level fns, class methods); classes/fields/constructors/
-   params/externals are `:unmapped`. `source-identity` is injected by the caller
+   `canonical-fact-key-id` for the same definition. Emits unit facts for
+   `function`/method descriptors (`:kind "function"`) and every top-level
+   `const`/`let` term (`:kind "term"` — scip-typescript spells arrow-function
+   and value bindings identically, so arrow consts merge onto the regex-tier
+   unit and a plain value const is an honestly-labelled exact-only term unit for
+   the Stage 6 review); classes/fields/constructors/params/externals and
+   unparseable symbols are `:unmapped` with a reason, and one bad occurrence
+   never aborts the index. `source-identity` is injected by the caller
    (anchor required for the `exact` authority these facts carry); the real
    digest + stale-artifact gate + call-hierarchy facts are the still-unbuilt
    provider-adapter slice. Nothing wired into any provider yet.

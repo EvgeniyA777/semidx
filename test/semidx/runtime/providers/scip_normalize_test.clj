@@ -65,7 +65,13 @@
     (is (= {:scheme "local" :local-id "0" :descriptors []}
            (sn/parse-scip-symbol "local 0")))
     (is (= {:error :empty-symbol} (sn/parse-scip-symbol "")))
-    (is (= :malformed-symbol (:error (sn/parse-scip-symbol "not a scip symbol"))))))
+    (is (= :malformed-symbol (:error (sn/parse-scip-symbol "not a scip symbol")))))
+
+  (testing "a descriptor sequence the reader rejects is an :error, never a throw"
+    (doseq [bad ["scip-typescript npm . . src/`orders.ts"          ; unterminated backtick
+                 "scip-typescript npm . . src/`orders.ts`/normalize("]] ; malformed method
+      (is (= :unparseable-descriptors (:error (sn/parse-scip-symbol bad))) bad)
+      (is (string? (:message (sn/parse-scip-symbol bad))) bad))))
 
 ;; --- scip-symbol->unit -------------------------------------------------
 
@@ -87,7 +93,28 @@
            (unit-of "scip-typescript npm . . src/`orders.ts`/OrderService#handle().")))
     (is (= {:owner "src.validator.Validator" :symbol "src.validator.Validator#validate"
             :kind "function" :path "src/validator.ts"}
-           (unit-of "scip-typescript npm . . src/`validator.ts`/Validator#validate().")))))
+           (unit-of "scip-typescript npm . . src/`validator.ts`/Validator#validate()."))))
+
+  (testing "a top-level term (const/let) maps as a :kind \"term\" unit"
+    ;; scip-typescript spells every top-level binding as a term descriptor,
+    ;; whether it holds an arrow function or a plain value.
+    (is (= {:owner "src.config" :symbol "src.config/normalize" :kind "term"
+            :path "src/config.ts"}
+           (unit-of "scip-typescript npm . . src/`config.ts`/normalize."))
+        "an arrow-function const still keys on <module>/<name>")
+    (is (= {:owner "src.config" :symbol "src.config/VERSION" :kind "term"
+            :path "src/config.ts"}
+           (unit-of "scip-typescript npm . . src/`config.ts`/VERSION."))
+        "a plain value const is an exact-only term unit"))
+
+  (testing "an arrow-function term shares its canonical key with the regex tier"
+    (let [u (unit-of "scip-typescript npm . . src/`config.ts`/normalize.")]
+      (is (= (fa/canonical-fact-key-id {:fact_kind "unit" :language "typescript"
+                                        :path "src/config.ts" :owner "src.config"
+                                        :symbol "src.config/normalize" :overload_identity nil})
+             (fa/canonical-fact-key-id {:fact_kind "unit" :language "typescript"
+                                        :path (:path u) :owner (:owner u)
+                                        :symbol (:symbol u) :overload_identity nil}))))))
 
 (deftest records-kinds-semidx-does-not-model-as-unmapped
   (doseq [[reason sym]
@@ -149,6 +176,20 @@
     (testing "unmapped symbols carry a reason"
       (is (every? :reason unmapped))
       (is (contains? (set (map :reason unmapped)) :external-symbol)))))
+
+(deftest one-malformed-occurrence-does-not-abort-the-index
+  (let [{:keys [facts unmapped]}
+        (sn/normalize-index
+         {:documents [{:relative-path "src/x.ts"
+                       :occurrences [{:symbol "scip-typescript npm . . src/`x.ts`/foo()."
+                                      :roles #{:definition} :range [1 0 3]}
+                                     {:symbol "scip-typescript npm . . src/`x.ts`/bar("
+                                      :roles #{} :range [2 0 3]}]}]}
+         {:source-identity anchored-identity})]
+    (is (= ["src.x/foo"] (map #(get-in % [:key :symbol]) facts))
+        "the good occurrence still produces its fact")
+    (is (= [:unparseable-descriptors] (map :reason unmapped))
+        "the malformed occurrence becomes unmapped, not an exception")))
 
 (deftest scip-and-regex-evidence-merge-into-one-exact-fact
   (let [{:keys [facts]} (sn/normalize-index (scip/read-index fixture-scip)

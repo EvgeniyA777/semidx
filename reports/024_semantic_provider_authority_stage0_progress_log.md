@@ -1145,3 +1145,19 @@ fallback_executor_or_model: Opus 4.8 for the freshness-scoping decision only.
 model_availability_checked_at: not checked this session.
 confidence: high (mapping proven against the goldens; the adapter is bounded)
 ```
+
+## Review Repair (2026-08-30, normalization slice)
+
+External review of `scip-normalize` raised two Medium findings; both fixed here.
+
+| ID | Severity | Finding | Resolution |
+| --- | --- | --- | --- |
+| N1 | Medium | `read-name` / `read-descriptor` throw on an unterminated backtick or a malformed method descriptor, and `parse-scip-symbol` did not catch them. One bad SCIP occurrence could abort `normalize-index` instead of becoming `:unmapped`. | **Fixed.** `parse-scip-symbol` wraps the descriptor loop in a `catch clojure.lang.ExceptionInfo` and returns `{:error :unparseable-descriptors :raw sym :message ...}`; the message is surfaced, not swallowed. `scip-symbol->unit` already routes `:error` to `:unmapped`, so a malformed occurrence is now recorded with a reason and the rest of the index still normalizes. Covered by a parser test and a `normalize-index` test with a mixed good/bad document. |
+| N2 | Medium | Every top-level `:term` descriptor was mapped to a `:kind "function"` unit, so an exact fact could be minted for a non-callable const (`export const VERSION = "1.0"`). | **Fixed, with a verified basis.** Probed real `scip-typescript@0.4.0`: it spells **every** top-level `const`/`let` — arrow functions, function expressions, and plain values alike — as a term descriptor (`name.`); only `function foo()` declarations and class methods get `().`. So the term path cannot be dropped (that would lose the arrow/function consts semidx's regex lane *does* model) and callability cannot be read off the symbol. A top-level term now maps to a unit with `:kind "term"` (not `"function"`): the arrow/function consts merge onto the regex-tier unit by canonical key (test asserts the key parity), and a plain value const becomes an honestly-labelled exact-only `term` unit for the Stage 6 authority review to accept or gate. Class-body `:term` (a field) stays `:unmapped :field-symbol`. |
+
+Verification after the repair:
+
+- `clojure -M:test`: **494 tests, 2862 assertions, 0 failures, 0 errors**
+  (was 493 / 2853; +1 test, +9 assertions in `scip-normalize-test`).
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+  `git diff --check`: clean. English-only: no Cyrillic.

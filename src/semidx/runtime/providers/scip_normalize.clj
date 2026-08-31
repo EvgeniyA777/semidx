@@ -98,8 +98,11 @@
 (defn parse-scip-symbol
   "Parse a SCIP symbol string. Returns
   `{:scheme :manager :package-name :version :descriptors [...]}` for a global
-  symbol, `{:scheme \"local\" :local-id ...}` for a local one, or `{:error ...}`
-  when the string is empty or does not have the five space-separated fields."
+  symbol, `{:scheme \"local\" :local-id ...}` for a local one, or
+  `{:error <keyword> ...}` when the string is empty, lacks the five
+  space-separated fields, or carries a descriptor sequence the grammar reader
+  rejects. This never throws: one malformed occurrence must become `:unmapped`,
+  not abort a whole index."
   [sym]
   (cond
     (str/blank? sym)
@@ -113,15 +116,20 @@
       (if (< (count parts) 5)
         {:error :malformed-symbol :raw sym}
         (let [[scheme manager package-name version descriptor-str] parts]
-          {:scheme scheme
-           :manager manager
-           :package-name package-name
-           :version version
-           :descriptors (loop [chars (seq descriptor-str) acc []]
-                          (if (empty? chars)
-                            acc
-                            (let [[descriptor remaining] (read-descriptor chars)]
-                              (recur remaining (conj acc descriptor)))))})))))
+          (try
+            {:scheme scheme
+             :manager manager
+             :package-name package-name
+             :version version
+             :descriptors (loop [chars (seq descriptor-str) acc []]
+                            (if (empty? chars)
+                              acc
+                              (let [[descriptor remaining] (read-descriptor chars)]
+                                (recur remaining (conj acc descriptor)))))}
+            (catch clojure.lang.ExceptionInfo e
+              {:error :unparseable-descriptors
+               :raw sym
+               :message (ex-message e)})))))))
 
 ;; --- SCIP symbol -> semidx conceptual spelling ---------------------------
 
@@ -157,7 +165,17 @@
 (defn- descriptors->owner+symbol
   "Map the symbol-naming descriptors (everything after the file namespace) onto
   semidx's TypeScript spelling, given the file's `module` name. Returns a unit
-  map or `{:unmapped <reason>}`."
+  map or `{:unmapped <reason>}`.
+
+  scip-typescript spells a `function foo()` declaration and a class method as a
+  method descriptor (`foo().`), but every top-level `const`/`let` binding — arrow
+  functions and function expressions included — as a term descriptor (`foo.`).
+  So a top-level term cannot be filtered out (that would lose the arrow/function
+  consts semidx does model) and cannot be proven callable from the symbol alone.
+  It is emitted as a unit with `:kind \"term\"`: an exact-tier symbol semidx's
+  regex lane only partly models. The arrow/function consts merge onto the
+  regex-tier unit by canonical key; a plain value const becomes an exact-only
+  `term` unit, which the Stage 6 authority review is the place to accept or gate."
   [descriptors module]
   (let [kinds (map :kind descriptors)]
     (cond
@@ -168,10 +186,16 @@
       {:unmapped :non-unit-descriptor}
 
       (and (= 1 (count descriptors))
-           (#{:method :term} (:kind (first descriptors))))
+           (= :method (:kind (first descriptors))))
       {:owner module
        :symbol (str module "/" (:name (first descriptors)))
        :kind "function"}
+
+      (and (= 1 (count descriptors))
+           (= :term (:kind (first descriptors))))
+      {:owner module
+       :symbol (str module "/" (:name (first descriptors)))
+       :kind "term"}
 
       (and (= 1 (count descriptors))
            (= :type (:kind (first descriptors))))
