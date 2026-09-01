@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-30"
+updated: "2026-09-01"
 ---
 
 # Progress Log: Semantic Provider Authority Migration (plans/018)
@@ -1161,3 +1161,182 @@ Verification after the repair:
   (was 493 / 2853; +1 test, +9 assertions in `scip-normalize-test`).
 - `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
   `git diff --check`: clean. English-only: no Cyrillic.
+
+---
+
+# Stage 3 continued — TypeScript SCIP Provider Adapter (2026-09-01)
+
+## Scope of this session
+
+The adapter slice: wire `semidx.runtime.scip` +
+`semidx.runtime.providers.scip-normalize` behind a provider that runs the
+repo-managed `scip-typescript` CLI, anchors each fact to real workspace content,
+and gates stale documents out of exact authority. Additive, shadow,
+default-off. **Not touched:** `fact_arbitration`, `providers`,
+`provider_selection`, `provider_execution`, `scip`, `scip_normalize`, and the
+default extraction path.
+
+Owner-confirmed decisions (this session):
+
+- **Source mode** — production is CLI-generated `.scip` only, resolved through
+  the ADR-047 chain. An internal helper may accept an already-read SCIP index
+  for tests/fixtures, but that is not a production source mode.
+- **Missing CLI** — not an index-run error: an `:unavailable` provider result
+  with diagnostics, and the caller degrades to tree-sitter/regex.
+- **Stale gate granularity (reports/024 F2)** — document-level, not range-level,
+  for this first slice. `Document.relative_path` -> workspace file sha256; a
+  missing file or a digest mismatch drops the whole document's contribution from
+  the exact `FactBatch`; regex/tree-sitter stay as fallback. Range-level
+  invalidation is too fine for the initial guarantee; document-level is simpler
+  and defensible.
+
+## Delivered
+
+| Artifact | Role |
+| --- | --- |
+| `src/semidx/runtime/providers/scip_typescript.clj` | the adapter. `resolve-cli` (ADR-047 chain: `:scip_typescript_cli_path` -> `SEMIDX_SCIP_TYPESCRIPT_CLI_PATH` -> `.scip-toolchain/node_modules/.bin/scip-typescript` -> ambient `PATH`), `provider-status` (`ready` / `unavailable` + `scip_cli_missing`, never runs the indexer), `cli-version`. `shadow-facts-for-project` — production: resolve CLI, run `scip-typescript index` once over the project into a temp `.scip` (always deleted), `scip/read-index`, then `facts-from-index`. `facts-from-index` — test/fixture seam: takes an already-read index + `:project-root`, runs the stale gate, normalizes the fresh documents via `scip-normalize/normalize-index`, groups facts into one `FactBatch` per operation, and returns `fact-arbitration/arbitrate-batches` output plus coverage/diagnostics. `descriptor` (tagged `:scope :project`, `:classification "semantic"`, `:operation_capabilities {:definitions "exact" :references "exact"}`) lives here, not in the `providers.clj` catalog. |
+| `test/semidx/runtime/providers/scip_typescript_test.clj` | 9 tests, 38 assertions. Deterministic assertions run `facts-from-index` over the committed `typescript-corpus.scrubbed.scip` with the committed corpus as project root (no toolchain needed); one end-to-end test runs the real CLI and is skipped when `resolve-cli` returns nil. |
+
+## How the stale gate works
+
+`document-freshness` resolves each SCIP document's `relative-path` under the
+project root and digests it with the same basis as
+`workspace-state/sha256-file`. Three outcomes:
+
+- **fresh** — file present; its `sha256:...` digest becomes the `content_digest`
+  anchor on every `FactEvidence` from that document (so the exact-authority ADR-046
+  anchor rule is satisfied with real content, not a placeholder);
+- **missing** — no workspace file: the document contributes no facts,
+  `:scip_document_source_missing` diagnostic, `coverage.complete false`;
+- **mismatch** — a caller supplied `:expected-document-digests` (e.g. from a
+  workspace-state snapshot taken before indexing) and it disagrees: same drop,
+  `:scip_document_stale` diagnostic naming expected and actual.
+
+Only fresh documents are passed to `normalize-index`. A cross-file reference
+from a fresh document to a symbol defined in a stale one **survives** — it is
+genuinely anchored to the fresh file where the reference occurs; the stale
+document's own occurrences (including the definition) are gone. Verified against
+the corpus: marking `src/orders.ts` stale drops
+`src.orders.OrderService#handle` entirely and reduces `src.orders/normalize` to
+its `index.ts` references only.
+
+## Deviation from the plan's wording (named, not glossed)
+
+The Stage 3 routing handoff said "descriptor + runner in `providers.clj` ...
+emit a `FactBatch` through the orchestrator". **`providers.clj`,
+`provider_selection.clj`, and `provider_execution.clj` were not modified.**
+
+Reason: those three are a **per-file** seam — `provider-execution` calls
+`run-provider` once per file, `provider-selection` builds a per-file
+ProviderPlan. SCIP is a **project-level batch index**: one `scip-typescript
+index` run covers the whole project. Adding the descriptor to the
+`providers.clj` catalog would make per-file planning emit a task for it, and
+`run-provider` would misroute `:scip` at the TypeScript regex/tree-sitter
+parser. Running the CLI once per file instead would be absurd. So the adapter is
+a standalone entry point, exactly as Stage 2 made `shadow-facts-for-file`
+standalone rather than editing `index.clj`. Reconciling a project-scoped
+provider with the per-file planning model (a project pre-pass that runs SCIP
+once and feeds per-file lookups, or a `:scope`-aware planner) is its own slice;
+the descriptor is kept in the adapter ns tagged `:scope :project` so that slice
+has one source of truth.
+
+## Exit criteria check (plan Stage 3)
+
+- **Stale or mismatched SCIP artifacts never produce exact facts** — met: the
+  document-level gate drops missing/mismatched documents before normalization;
+  a fresh document's real digest is the anchor. Tested for both the missing-file
+  and the digest-mismatch path.
+- **SCIP facts merge with tree-sitter structure without duplicate semantic
+  identities** — the SCIP-derived `canonical_fact_key_id` equals the regex-tier
+  key for the same symbol (tested); `arbitrate-batches` folds definition +
+  references into one canonical fact. Full parity against Stage 2 tree-sitter
+  shadow output over the corpus is **not yet wired** (see below).
+- **Absence of a SCIP artifact degrades to tree-sitter/regex without index
+  failure** — met: `shadow-facts-for-project` returns `:result "unavailable"` /
+  `"failed"` with diagnostics and no facts, never throws.
+- **Protected TypeScript retrieval cases do not regress** — not applicable this
+  session: the adapter is shadow-only and changes no extraction. The protected
+  retrieval replay gates the stage that consumes SCIP facts.
+
+## Deferred (named honestly)
+
+- **Shadow comparison harness** — a side-by-side diff of SCIP facts vs the Stage 2
+  tree-sitter/regex shadow facts over the protected corpus, with the approved
+  improvements/differences recorded. Key parity is tested per symbol; the
+  whole-corpus comparison is not built.
+- **Implementations + call-hierarchy facts** — SCIP `Relationship` (none in the
+  corpus; code path absent) and `call/*` relations (no such relation type in
+  `relations/relation-types`). Both were already deferred by the normalization
+  slice.
+- **Latency and storage metrics** — the plan lists "provider coverage, conflict,
+  stale-artifact, latency, and storage metrics". Coverage, conflict (via
+  arbitration), and stale-artifact are covered; latency and snapshot-size
+  measurement for a SCIP run are not.
+- **Catalog / planner integration** — see the deviation above.
+
+## Verification
+
+- `clojure -M:test`: **503 tests, 2900 assertions, 0 failures, 0 errors**
+  (was 494 / 2862; +9 tests in `semidx.runtime.providers.scip-typescript-test`).
+- REPL-first via `clojure -M:test-direct:nrepl` + clojure-mcp: the full flow
+  (real `scip-typescript@0.4.0` CLI over the corpus -> `read-index` ->
+  per-document digest -> `normalize-index` -> `arbitrate-batches`) was exercised
+  in the REPL before the adapter and tests were written; the end-to-end test
+  produces the same four modelled symbols as the committed fixture path.
+- Stale gate exercised live: wrong project root -> all three documents dropped
+  with `:scip_document_source_missing`; a planted `sha256:0000` expected digest
+  for `src/orders.ts` -> only that document dropped, its definition gone,
+  `index.ts` references retained.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files
+  (no contract touched).
+- `git diff --check`: clean. English-only scan of the two new files: no Cyrillic.
+- Compile probe: the namespace and its test load clean under the `:test-direct`
+  classpath (compiled `scip.Scip` stubs present).
+- **Not run** (gate later stages that change extraction): full migration gate —
+  semantic-quality report, protected retrieval replay, snapshot-diff parity,
+  PostgreSQL round trips. This slice changes no extraction and persists nothing.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 3 continued — TypeScript SCIP provider adapter (shadow /
+  default-off; CLI-resolved, per-document stale gate, arbitrated FactBatches)
+recommended_next_stage: Stage 3 close-out — shadow comparison harness (SCIP vs
+  Stage 2 tree-sitter/regex over the protected corpus) + coverage/latency/storage
+  metrics; THEN Stage 4 (Java SCIP). The owner may also choose to move straight
+  to Stage 4 and fold the shadow harness in there.
+recommended_executor: Claude Code team lead, no Fable, no Explore agent
+recommended_model: Claude Sonnet 5 for the shadow-comparison harness and metrics
+  (bounded, reuses the built adapter + Stage 2 seam); escalate to Opus 4.8 for
+  Stage 4's Java overload/constructor/import/relation identity parity
+effort: medium (close-out) / high (Stage 4)
+effort_justification: the close-out is a bounded diff harness over two existing
+  shadow producers plus timing/size instrumentation — no new identity contract.
+  Stage 4 is high because Java overload, constructor, static-import, and
+  field-write relation identities need cross-provider parity that the shared SCIP
+  boundary must not special-case for TypeScript.
+rationale: the identity-critical mapping (moniker -> CanonicalFactKey) and the
+  exact-authority anchor gate are built and tested. What is left for Stage 3 is
+  observational (the shadow diff proving no duplicate identities at corpus scale)
+  and metric collection, both lower risk than the mapping itself.
+prerequisites_or_blockers:
+  - the shadow-comparison harness needs the Stage 2 seam
+    (`provider-execution/shadow-facts-for-file`) and this adapter to run over the
+    same corpus and be diffed by canonical key; approved differences recorded.
+  - Stage 4 must reuse `scip-normalize` / `scip-typescript` without adding a
+    TypeScript-specific branch to the shared boundary; a Java SCIP indexer
+    (scip-java) toolchain pin mirroring `scripts/setup-scip-typescript.sh` is a
+    prerequisite and is not yet built.
+  - catalog/planner integration of a `:scope :project` provider remains an open
+    design slice; it is not a Stage 4 blocker but should be scheduled.
+  - still shadow/default-off; no default-path wiring until Stage 6.
+file_ownership_and_conflict_risk: LOW-MEDIUM. This session added one src ns and
+  one test ns; it touched neither the kernel, the Stage 2 seam, nor plans/020
+  files. The close-out harness would add a test/report ns and possibly a small
+  timing helper.
+fallback_executor_or_model: Sonnet 5 for the harness/metrics; not for the Java
+  identity decisions.
+model_availability_checked_at: not checked this session.
+confidence: high (the adapter is bounded and tested; the remaining Stage 3 work
+  is observational)
+```
