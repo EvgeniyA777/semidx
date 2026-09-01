@@ -41,8 +41,9 @@ and is appended by later stages.
 | 0 — Independent review and compatibility baseline | **completed** |
 | 1 — Evidence model and arbitration kernel | **completed** 2026-08-28 — kernel, FactBatch, executable golden parity, and round-trip coverage all delivered |
 | 2 — Provider plan and legacy adapter shadow path | **completed** 2026-08-28 |
-| 3 — TypeScript SCIP vertical slice | **in progress** 2026-08-30 — preflight + JVM SCIP reader done (`scip.proto` vendored, Java stubs generated, `semidx.runtime.scip` reads `.scip` into Clojure data); SCIP→CanonicalFactKey normalization and the provider adapter not yet built |
-| 4–7 | not started |
+| 3 — TypeScript SCIP vertical slice | **completed** 2026-09-01 — preflight, JVM SCIP reader, SCIP→CanonicalFactKey normalization, the shadow/default-off provider adapter (`scip-typescript`) with per-document stale gate, and the SCIP-vs-Stage-2 shadow comparison harness (`scip-shadow-compare`) with latency/size metrics all delivered. Named deferrals: SCIP `Relationship`/implementations and `call/*` facts (none in corpus / no relation type), and catalog/planner integration of a project-scoped provider. |
+| 4 — Java SCIP vertical slice | not started |
+| 5–7 | not started |
 
 ## Scope Executed (Stage 0)
 
@@ -1339,4 +1340,146 @@ fallback_executor_or_model: Sonnet 5 for the harness/metrics; not for the Java
 model_availability_checked_at: not checked this session.
 confidence: high (the adapter is bounded and tested; the remaining Stage 3 work
   is observational)
+```
+
+---
+
+# Stage 3 close-out — Shadow Comparison Harness + Metrics (2026-09-01)
+
+Owner direction: build the shadow-comparison harness (SCIP vs Stage 2
+tree-sitter/regex over the corpus) plus latency/storage metrics, medium effort,
+Sonnet 5. This closes Stage 3.
+
+## Scope of this session
+
+Additive, read-only, shadow. **Not touched:** `fact_arbitration`, `providers`,
+`provider_selection`, `scip`, `scip_normalize`, and the default extraction path.
+Two small additive passthroughs (`:raw_facts` on the SCIP result, `:raw_batches`
+on `provider-execution/shadow-facts-for-file`) expose pre-arbitration facts so
+both tiers can be co-arbitrated in one pass; both are new map keys, verified not
+to change any existing assertion.
+
+## Delivered
+
+| Artifact | Role |
+| --- | --- |
+| `src/semidx/runtime/providers/scip_shadow_compare.clj` | `compare-fact-sets` (diff two arbitrated fact sets by `canonical_fact_key_id`: agreed / exact-only / legacy-only / authority-upgrade), `co-arbitrate` (feed raw SCIP + raw legacy facts through one `arbitrate-facts` and report the canonical-fact count and every multi-provider symbol), `fact-set-size` (fact / evidence / serialized-byte counts), `measure` (elapsed ms), `discover-ts-paths`, `compare-scip-run` (compare an already-computed SCIP result — the deterministic seam), and `shadow-report` (run the real CLI, compare, and time it). |
+| `test/semidx/runtime/providers/scip_shadow_compare_test.clj` | 7 tests, 34 assertions. Deterministic assertions drive `compare-scip-run` from the committed `.scip` fixture; one end-to-end test runs the real CLI and is skipped when it does not resolve. |
+| `src/semidx/runtime/providers/scip_typescript.clj` | `+ :raw_facts` on the `facts-from-index` / `shadow-facts-for-project` result. |
+| `src/semidx/runtime/provider_execution.clj` | `+ :raw_batches` on the `shadow-facts-for-file` result. |
+
+## Observed comparison over the protected corpus
+
+`compare-scip-run` on the committed `typescript-corpus.scrubbed.scip` against the
+Stage 2 seam over `src/index.ts`, `src/orders.ts`, `src/validator.ts` (this host
+has no tree-sitter grammar, so the legacy tier is regex only — the comparison
+shape is identical):
+
+| Field | Value |
+| --- | --- |
+| `agreed` (same `canonical_fact_key_id`) | `src.orders/normalize`, `src.orders/createOrder`, `src.orders.OrderService#handle`, `src.validator.Validator#validate` |
+| `exact_only` | *(none)* |
+| `legacy_only` | `src/canonicalize`, `src/createOrder` — the `index.ts` re-export aliases; SCIP mints no re-export unit (preflight finding), and these are genuinely distinct alias identities, not the origin |
+| `authority_upgrade` | all 4 agreed symbols `heuristic -> exact` |
+| `co_arbitration.canonical_fact_count` | **6** = 4 agreed + 2 legacy-only — the shared symbols collapse, they do not double |
+| `co_arbitration.diagnostic_count` | 0 |
+| `co_arbitration.multi_provider_symbols` | all 4 agreed symbols, one `exact` fact each, evidence from **both** `scip-typescript` and `typescript-regex` |
+| `size.scip` | 4 facts / 9 evidence / 5326 serialized bytes (~2.25 evidence per fact: definition + references) |
+| `size.legacy` | 6 facts / 6 evidence / 4968 serialized bytes (one evidence per fact) |
+| `latency.scip_run_ms` (CLI + read + normalize + gate + arbitrate, 3-file corpus) | ~0.5 s |
+
+This is the Stage 3 exit-criterion evidence: **SCIP exact facts merge with the
+legacy tier's facts under one identity** — the co-arbitration pass produces
+exactly one canonical fact per key with no ambiguity diagnostic, and every
+shared symbol keeps both providers' evidence at exact authority. The only
+divergence (`legacy_only`) is the two re-export aliases, which are expected and
+are not the origin identity.
+
+## Exit criteria check (plan Stage 3) — final
+
+- **Stale or mismatched SCIP artifacts never produce exact facts** — met (adapter
+  slice; document-level gate tested for missing and mismatch).
+- **SCIP facts merge with tree-sitter structure without duplicate semantic
+  identities** — met: `compare-fact-sets` shows shared symbols on one key,
+  `co-arbitrate` shows them collapsing to one canonical fact with 0 diagnostics.
+- **Protected TypeScript retrieval cases do not regress; approved improvements
+  recorded** — the provider is shadow-only and changes no extraction, so
+  retrieval is byte-identical by construction; the improvement (heuristic ->
+  exact for the 4 modelled symbols) is recorded above. Full protected retrieval
+  replay gates the stage that consumes SCIP facts (Stage 6).
+- **Absence of a SCIP artifact degrades to tree-sitter/regex without index
+  failure** — met (adapter slice; `:unavailable` / `:failed` results, no throw).
+
+## Deferred past Stage 3 (named, unchanged from the adapter slice)
+
+- SCIP `Relationship` / implementations facts and `call/*` relation facts — none
+  in the corpus; no `call/*` relation type exists. Revisit if a corpus needs them.
+- Catalog / planner integration of the `:scope :project` SCIP provider — the
+  adapter is a standalone entry point; reconciling a project-level provider with
+  the per-file ProviderPlan is its own slice.
+- Range-level (vs document-level) stale invalidation — reports/024 F2.
+
+## Verification
+
+- `clojure -M:test`: **510 tests, 2928 assertions, 0 failures, 0 errors**
+  (was 503 / 2900; +7 tests in `semidx.runtime.providers.scip-shadow-compare-test`).
+- Untouched Stage 2 suite (`semidx.runtime.provider-execution-test`) re-run
+  green after the `:raw_batches` passthrough.
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files.
+- `git diff --check`: clean. English-only scan of the new/edited files: no Cyrillic.
+- REPL-first via `clojure -M:test-direct:nrepl` + clojure-mcp: the full report
+  was produced against the real `scip-typescript@0.4.0` CLI and against the
+  committed fixture; both agree on the four modelled symbols.
+- **Not run** (gate later stages that change extraction): full migration gate —
+  semantic-quality report, protected retrieval replay, snapshot-diff parity,
+  PostgreSQL round trips.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 3 — TypeScript SCIP vertical slice (COMPLETE: preflight, JVM
+  reader, normalization, provider adapter + stale gate, shadow comparison harness
+  + metrics)
+recommended_next_stage: Stage 4 — Java SCIP vertical slice
+recommended_executor: Claude Code team lead, no Fable, no Explore agent
+recommended_model: Claude Opus 4.8 Thinking for the Java identity/parity work
+  (overloads, constructors, static imports, method references, entity/field-write
+  relations), Claude Sonnet 5 for the scip-java toolchain pin and adapter
+  plumbing
+effort: high
+effort_justification: Java re-introduces typed overload identity (Variant C
+  `signature_precision: typed` on the exact tier) that TypeScript never exercised,
+  plus constructor units, static-import ownership, method references, and the
+  plans/017 field-write relations. A SCIP moniker that maps to the wrong Java
+  overload key silently splits or collapses identities the Stage 0/1 Java
+  overload goldens are meant to catch. The shared SCIP boundary
+  (`scip-normalize`, `scip-typescript` adapter shape) must not gain a
+  TypeScript-specific branch.
+rationale: the SCIP seam is proven end to end for TypeScript — reader,
+  normalization, adapter, stale gate, and a co-arbitration comparison showing no
+  duplicate identity. Stage 4 reuses that seam for a harder language rather than
+  designing new machinery.
+prerequisites_or_blockers:
+  - a repo-managed scip-java (or scip-semanticdb) toolchain pin mirroring
+    `scripts/setup-scip-typescript.sh` + a committed Java corpus `.scip` fixture;
+    NOT yet built.
+  - the Java overload path must produce the Variant C typed signature on the
+    exact tier and match the Stage 0 `java-overload-canonical-key` identity
+    fixture; distinct overloads must stay distinct, same-arity overloads follow
+    the F1a rule already in the kernel.
+  - `scip-normalize` currently hard-codes `"typescript"` and the ecmascript path
+    reconstruction; Stage 4 must factor the language-specific bridge out without
+    a TypeScript regression (the identity fixtures and this session's comparison
+    harness are the guard).
+  - still shadow/default-off; no default-path wiring until Stage 6.
+file_ownership_and_conflict_risk: LOW-MEDIUM. Stage 4 adds a Java corpus fixture,
+  a scip-java setup script, a Java branch in the SCIP normalization boundary, a
+  Java SCIP adapter, and tests. It should not need to touch the kernel, the
+  Stage 2 seam, `scip.clj`, or the shadow-comparison harness (which is
+  language-neutral and will diff Java the same way).
+fallback_executor_or_model: Sonnet 5 for the toolchain/adapter plumbing; not for
+  the Java overload/relation identity decisions.
+model_availability_checked_at: not checked this session.
+confidence: high (the seam is proven for TypeScript; Stage 4 is a reuse with a
+  harder identity surface)
 ```

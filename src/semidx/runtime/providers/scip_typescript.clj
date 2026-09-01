@@ -287,6 +287,9 @@
      :provider_version provider-version
      :result "ready"
      :facts (:facts arbitrated)
+     ;; Pre-arbitration facts, one evidence record each, kept so a shadow
+     ;; comparison can co-arbitrate the SCIP and legacy fact sets in one pass.
+     :raw_facts (vec (:facts normalized))
      :batches (:batches arbitrated)
      :errors (:errors arbitrated)
      :diagnostics diagnostics

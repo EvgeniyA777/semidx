@@ -161,4 +161,7 @@
      :facts (:facts arbitrated)
      :diagnostics (:diagnostics arbitrated)
      :errors (:errors arbitrated)
-     :batches (:batches arbitrated)}))
+     :batches (:batches arbitrated)
+     ;; Pre-arbitration provider batches (facts included), kept so a shadow
+     ;; comparison can co-arbitrate these with another tier's facts in one pass.
+     :raw_batches (:batches execution)}))

@@ -145,7 +145,7 @@ after this memory file.
 - Compact-first staged retrieval is now fully aligned as the canonical public flow: `resolve_context` is compact-first, `expand_context` / `fetch_context_detail` are the explicit later stages, selection artifacts are snapshot-bound, and the implementation/docs/examples line is captured by `ADR-024` plus the completed `plans/002_compact_first_staged_retrieval_plan.md`.
 - `plans/019` is the planned LLM one-shot delivery track: add an external `get_context` facade over the same snapshot-bound staged state machine, retain ContextPacket as the structured source of truth, make Markdown an optional bounded projection, and contribute staged/one-shot strategy adapters to the benchmark substrate owned exclusively by `plans/020`. Its top-level response budget is authoritative, `structured`/`markdown`/diagnostic allocations are disjoint, and usage telemetry distinguishes aggregate from stage accounting. ADR-024 remains current; changing the documented canonical default requires comparative evidence and a new ADR.
 - `plans/020` is in progress and is the exclusive owner of the real-repository task corpus, immutable `BenchmarkRun`/`TaskAttempt` identities, A/B/C/D strategy harness, provider/API/model usage adapters, price schedules, and success-per-cost aggregation. Stage 1 (`returned_tokens` fidelity) is delivered. Stage 0 now separates harness executor models from `evaluated_*` attempt identities, uses `implicit_cache_observed_v1` (no explicit cache objects; implicit reads recorded), and gates the current Gemini 2.5 schedule at 2026-10-16; calibration/final lock remain pending, and Stage 2 has not started.
-- `plans/018` is in progress. Stages 0-2 are delivered and committed (see the numbered next-steps section below for the detail); Stage 3 (TypeScript SCIP) has the toolchain preflight, the JVM SCIP reader, the SCIP->CanonicalFactKey normalization slice, and the shadow/default-off SCIP provider adapter (`semidx.runtime.providers.scip-typescript`) done. The next step is Java SCIP (Stage 4) or reconciling the project-scoped SCIP provider with per-file ProviderPlan planning. All of it is additive and default-off: `adapters/parse-file` still owns default Java/TypeScript extraction, and the SCIP adapter is a standalone entry point not wired into `providers.clj` / `provider-selection` / `provider-execution`. Multi-provider evidence must normalize to a provider-neutral `CanonicalFactKey` before arbitration; provider ids, native symbols, source identity, and mutable evidence are not stable merge keys. Cross-provider Java overload and TypeScript re-export identity fixtures are Stage 0/1 admission gates (executed as goldens).
+- `plans/018` is in progress. Stages 0-3 are delivered and committed (see the numbered next-steps section below for the detail). Stage 3 (TypeScript SCIP) is complete: toolchain preflight, JVM SCIP reader, SCIP->CanonicalFactKey normalization, the shadow/default-off SCIP provider adapter (`semidx.runtime.providers.scip-typescript`) with a per-document stale gate, and the SCIP-vs-Stage-2 shadow comparison harness (`semidx.runtime.providers.scip-shadow-compare`) with latency/size metrics. The next step is Stage 4 (Java SCIP). All of it is additive and default-off: `adapters/parse-file` still owns default Java/TypeScript extraction, and the SCIP adapter is a standalone entry point not wired into `providers.clj` / `provider-selection` / `provider-execution` (project-level batch index vs per-file parse; catalog/planner integration is a scheduled open slice). Multi-provider evidence must normalize to a provider-neutral `CanonicalFactKey` before arbitration; provider ids, native symbols, source identity, and mutable evidence are not stable merge keys. Cross-provider Java overload and TypeScript re-export identity fixtures are Stage 0/1 admission gates (executed as goldens).
 - `plans/007` remains an active architecture reference, not an executable queue. It closes only after its continuation ownership, freshness/lifecycle, provider-catalog, relation-parity, public-boundary, and documentation-handoff gates have recorded evidence; a future successor must be self-contained rather than merely linked. On closure its frontmatter becomes `completed` / `historical_reference_only`, and active implementation must use the named successor plans and ADRs instead.
 - Stage execution routing is explicit in `plans/018`, `plans/019`, and `plans/020`: Claude Code owns the provider-authority track, while Antigravity owns the benchmark and one-shot delivery tracks. High effort is allowed when justified by contract irreversibility, identity/arbitration, freshness, benchmark verdicts, public defaults, conflicting evidence, or repeated verification failures, and a high-effort handoff must record its concrete justification. Every stage-closing model must read the candidate next stage, cross-plan gates, progress/MEMORY/SPEC state, completed diff and checks, file ownership, and current model/quota constraints, then record a `NextStageRoutingRecommendation`; it may recommend `stop` or `defer` and never auto-bypasses an admission gate.
 - Dedicated `impact_analysis` now computes impact hints directly from the resolved selection artifact instead of reading `expand_context`'s budget-gated `:impact_hints` field; it must return a non-null map with `:callers`, `:dependents`, `:related_tests`, and `:risky_neighbors` vectors even when `expand_context` omits impact hints for token-budget reasons.
@@ -294,7 +294,8 @@ after this memory file.
    `adapters.clj` were NOT wired to the seam — the shadow path is a standalone
    entry point so "default output unchanged" stays provable; call-site wiring
    belongs with the stage that consumes provider facts. Stage 3 (TypeScript SCIP
-   slice) is started: the toolchain preflight is done. `scip-typescript` is
+   slice) is COMPLETE (2026-09-01); the detail below is the build history. The
+   toolchain preflight: `scip-typescript` is
    pinned at `@sourcegraph/scip-typescript@0.4.0` through the repo-managed
    `scripts/setup-scip-typescript.sh` (mirrors the tree-sitter ADR-047 pattern:
    `.scip-toolchain/` install, `SEMIDX_SCIP_TYPESCRIPT_CLI_PATH` override,
@@ -379,9 +380,26 @@ after this memory file.
    (mirrors Stage 2): SCIP is a project-level batch index, not a per-file parse,
    so the adapter is a standalone entry point and is NOT added to the
    `providers.clj` per-file catalog or the ProviderPlan orchestrator; its
-   descriptor lives in the adapter ns tagged `:scope :project`. Verification:
-   `clojure -M:test` 503 tests / 2900 assertions / 0 failures; the end-to-end
-   test runs the real CLI and is skipped when it does not resolve.
+   descriptor lives in the adapter ns tagged `:scope :project`.
+   Stage 3 close-out (2026-09-01): `semidx.runtime.providers.scip-shadow-compare`
+   is the SCIP-vs-Stage-2 comparison harness. `compare-fact-sets` diffs two
+   arbitrated fact sets by `canonical_fact_key_id` (agreed / exact-only /
+   legacy-only / authority-upgrade); `co-arbitrate` feeds raw SCIP + raw legacy
+   facts through one `arbitrate-facts` and asserts shared symbols collapse to one
+   canonical fact retaining both providers' evidence — the "no duplicate semantic
+   identity" proof; `fact-set-size` / `measure` give the snapshot-size and
+   latency numbers the plan's [Medium] risks ask for. Observed on the protected
+   corpus: the 4 modelled symbols agree under one key and go heuristic->exact,
+   the 2 `index.ts` re-export aliases are legacy-only (SCIP mints no re-export
+   unit), co-arbitration yields 6 canonical facts / 0 diagnostics, SCIP carries
+   ~2.25 evidence per fact vs 1 for regex, a 3-file SCIP run is ~0.5 s. Two
+   additive passthroughs support it: `:raw_facts` on the SCIP result and
+   `:raw_batches` on `provider-execution/shadow-facts-for-file`. Stage 3 is
+   complete; next is Stage 4 (Java SCIP), which needs a scip-java toolchain pin
+   and must factor the TypeScript-specific bridge out of `scip-normalize` without
+   a TS regression (the identity fixtures + this harness are the guard).
+   Verification: `clojure -M:test` 510 tests / 2928 assertions / 0 failures; the
+   end-to-end tests run the real CLI and are skipped when it does not resolve.
 3. Execute `plans/019` as an additive one-shot delivery track after its budget
    ledger and the `plans/020` run/strategy contracts are accepted. Its evaluation
    stage contributes adapters to `plans/020`; it does not own a second corpus,
