@@ -27,6 +27,8 @@
 - `fixtures/` contains retrieval and semantic-quality fixtures.
 - `docs/agent-policy/` contains active cross-cutting engineering policies that
   are too detailed for this always-loaded rule file.
+- `.agents/skills/` contains repository-local task procedures that load only
+  when relevant.
 - `test/semidx/` contains the Clojure test suite run by `clojure -M:test`. Test namespaces mirror the code they cover: a unit test for `semidx.runtime.X` lives at `test/semidx/runtime/X_test.clj` (namespace `semidx.runtime.X-test`), MCP tests under `test/semidx/mcp/`, and cross-cutting/integration suites (language onboarding, end-to-end create-index/retrieval flows) under `test/semidx/integration/`.
 - `docs/code-context.md` and `.ccc/state.edn` are committed Code Context Compressor artifacts used for agent bootstrap.
 
@@ -65,6 +67,21 @@
   reviewing and execute the plan.
 - Give every rule or decision exactly one canonical owner and link to it instead
   of copying normative text across documents, skills, and reports.
+
+## Repository Skills
+
+Use repository-local skills from `.agents/skills/` when their descriptions match
+the task:
+
+| Task | Skill |
+| --- | --- |
+| Execute or prepare a staged implementation plan | `semidx-plan-delivery` |
+| Maintain a staged-plan progress log or handoff | `semidx-progress-log` |
+| Locate code, callers, tests, or blast radius | `semidx-code-exploration` |
+| Design risk-based verification coverage | `semidx-test-design` |
+| Review a diff, plan output, or verification coverage | `semidx-code-review` |
+| Commit, branch, push, or recover git state | `semidx-git-delivery` |
+| Add or reorganize standing agent rules | `semidx-rules-maintenance` |
 
 ## MCP-First Workflow
 
