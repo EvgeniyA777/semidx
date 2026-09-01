@@ -25,6 +25,8 @@
 - `src/semidx/contracts/` contains the Clojure validation layer for external contracts.
 - `contracts/schemas/` and `contracts/examples/` are external contract artifacts.
 - `fixtures/` contains retrieval and semantic-quality fixtures.
+- `docs/agent-policy/` contains active cross-cutting engineering policies that
+  are too detailed for this always-loaded rule file.
 - `test/semidx/` contains the Clojure test suite run by `clojure -M:test`. Test namespaces mirror the code they cover: a unit test for `semidx.runtime.X` lives at `test/semidx/runtime/X_test.clj` (namespace `semidx.runtime.X-test`), MCP tests under `test/semidx/mcp/`, and cross-cutting/integration suites (language onboarding, end-to-end create-index/retrieval flows) under `test/semidx/integration/`.
 - `docs/code-context.md` and `.ccc/state.edn` are committed Code Context Compressor artifacts used for agent bootstrap.
 
@@ -50,6 +52,19 @@
 - The versioned pre-push hook runs `scripts/check-memory-freshness.sh` and blocks pushes that change high-signal project files without a `MEMORY.md` update.
 - If a high-signal change is intentionally memory-neutral, bypass the hook only after checking the update rule: `SCI_SKIP_MEMORY_FRESHNESS=1 git push`.
 - Install versioned hooks with `./scripts/install-git-hooks.sh`; the tracked hook source lives under `scripts/git-hooks/`.
+
+## Agent Policy Documents
+
+- `docs/agent-policy/documentation.md` owns cross-cutting documentation policy,
+  canonical document ownership, lifecycle rules, and the Plan Readiness Gate.
+- `docs/agent-policy/testing.md` owns risk-based test and verification policy.
+- Before executing a staged implementation plan, apply the Plan Readiness Gate
+  from `docs/agent-policy/documentation.md`.
+- A hard fail in that gate blocks execution until the plan is corrected.
+- If only cosmetic wording or small defensive clarifications remain, stop
+  reviewing and execute the plan.
+- Give every rule or decision exactly one canonical owner and link to it instead
+  of copying normative text across documents, skills, and reports.
 
 ## MCP-First Workflow
 
@@ -184,6 +199,9 @@ row below carries a required safety step. The safety step is not optional.
 ## Testing And Verification
 
 - Verify changes with the narrowest meaningful command first.
+- For non-trivial staged plans, use the risk-based matrix in
+  `docs/agent-policy/testing.md` to map requirements and invariants to the
+  lowest sufficient verification level.
 - Tests are auto-discovered: `clojure -M:test` runs every `*-test` namespace found under `test/`, so a new test needs no manual registration. Keep tests order-independent — they must not rely on namespace run order or shared mutable state between namespaces.
 - Common local checks:
   - `clojure -M:test`
@@ -222,6 +240,8 @@ row below carries a required safety step. The safety step is not optional.
 - Keep repository documentation, project rule files, and agent instruction files in English.
 - Agents may answer the user in Russian by default when the user writes in Russian, but committed documentation remains English.
 - Keep root entrypoint docs limited to stable project onboarding and repo-wide controls.
+- Keep detailed cross-cutting engineering policies under `docs/agent-policy/`
+  and link to them from this file.
 - New or renamed non-system working documents under `ideas/`, `plans/`, `reports/`, `adr/`, `docs/adr/`, `docs/design/`, `docs/ideas/`, and `docs/plans/` must use a chronological filename prefix scoped to that directory: `NNN_slug.md`.
 - New or renamed non-system working documents under `notes/` must use a date prefix: `YYYY-MM-DD_slug.md`.
 - Number sequences restart per numbered-document directory. Choose the next number by scanning the target directory for the highest existing numeric prefix, then incrementing it.
@@ -230,7 +250,7 @@ row below carries a required safety step. The safety step is not optional.
 - If an unnumbered or differently prefixed working document is discovered later, treat it as legacy until a dedicated documentation migration renames it.
 - Do not opportunistically rename historical or legacy documents as part of unrelated feature work.
 - A documentation migration that renames legacy documents must update all Markdown links, `superseded_by` references, README indexes, and progress-log references in the same commit.
-- Non-system working documents under `ideas/`, `notes/`, `plans/`, `reports/`, `adr/`, `docs/adr/`, `docs/design/`, `docs/ideas/`, and `docs/plans/` must use YAML frontmatter when they are newly created, renamed, or materially revised.
+- Non-system working documents under `ideas/`, `notes/`, `plans/`, `reports/`, `adr/`, `docs/adr/`, `docs/agent-policy/`, `docs/design/`, `docs/ideas/`, and `docs/plans/` must use YAML frontmatter when they are newly created, renamed, or materially revised.
 - System, index, source-intake, generated, and sample files do not require frontmatter or numbered working-document filenames. Examples include root `README.md`, directory index files such as `plans/README.md` or `docs/README.md`, `RULES.md`, `AGENTS.md`, `CLAUDE.md`, `docs/code-context.md`, `.ccc/*`, `intake/*`, and sample `README.md` files.
 - Preferred frontmatter fields are `title`, `doc_type`, `lifecycle`, `status`, `agent_action`, and `updated`.
 - Use `agent_action` to make stale or completed documents unambiguous to future agents. Executed plans and progress logs must be marked as historical, not as active work queues.
