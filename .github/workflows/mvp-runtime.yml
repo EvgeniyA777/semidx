@@ -44,6 +44,12 @@ jobs:
         uses: DeLaGuardo/setup-clojure@13.2
         with:
           cli: "1.12.0.1530"
+          # The Clojure lane is clj-kondo-primary with a regex fallback. Without
+          # it every Clojure fixture degrades, which drops the confidence ceiling
+          # from "high" to "low" and fails the retrieval, governance, and
+          # semantic-quality assertions wholesale. Pinned rather than "latest" so
+          # CI parses the same way a developer machine does.
+          clj-kondo: "2026.01.19"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -80,6 +86,12 @@ jobs:
         uses: DeLaGuardo/setup-clojure@13.2
         with:
           cli: "1.12.0.1530"
+          # The Clojure lane is clj-kondo-primary with a regex fallback. Without
+          # it every Clojure fixture degrades, which drops the confidence ceiling
+          # from "high" to "low" and fails the retrieval, governance, and
+          # semantic-quality assertions wholesale. Pinned rather than "latest" so
+          # CI parses the same way a developer machine does.
+          clj-kondo: "2026.01.19"
 
       - name: Run advisory semantic quality report
         run: ./scripts/run-semantic-quality-report.sh fixtures/semantic-quality/report-dataset.json .tmp/semantic-quality-report.json .tmp/semantic-quality-report-summary.md
@@ -130,6 +142,29 @@ jobs:
         uses: DeLaGuardo/setup-clojure@13.2
         with:
           cli: "1.12.0.1530"
+          # The Clojure lane is clj-kondo-primary with a regex fallback. Without
+          # it every Clojure fixture degrades, which drops the confidence ceiling
+          # from "high" to "low" and fails the retrieval, governance, and
+          # semantic-quality assertions wholesale. Pinned rather than "latest" so
+          # CI parses the same way a developer machine does.
+          clj-kondo: "2026.01.19"
+
+      # This job runs the same suite as runtime-gates, so it needs the same
+      # toolchain. It previously ran without Node, the tree-sitter CLI, or the
+      # grammars, which meant it was testing a degraded runtime and failing for
+      # reasons that had nothing to do with PostgreSQL.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install tree-sitter CLI
+        run: npm install -g tree-sitter-cli
+
+      - name: Setup tree-sitter grammars
+        run: |
+          ./scripts/setup-tree-sitter-grammars.sh --write-env-file .tree-sitter.env
+          cat .tree-sitter.env >> "$GITHUB_ENV"
 
       - name: Run PostgreSQL Integration Smoke
         env:
