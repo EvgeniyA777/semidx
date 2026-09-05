@@ -145,7 +145,7 @@ after this memory file.
 - Compact-first staged retrieval is now fully aligned as the canonical public flow: `resolve_context` is compact-first, `expand_context` / `fetch_context_detail` are the explicit later stages, selection artifacts are snapshot-bound, and the implementation/docs/examples line is captured by `ADR-024` plus the completed `plans/002_compact_first_staged_retrieval_plan.md`.
 - `plans/019` is the planned LLM one-shot delivery track: add an external `get_context` facade over the same snapshot-bound staged state machine, retain ContextPacket as the structured source of truth, make Markdown an optional bounded projection, and contribute staged/one-shot strategy adapters to the benchmark substrate owned exclusively by `plans/020`. Its top-level response budget is authoritative, `structured`/`markdown`/diagnostic allocations are disjoint, and usage telemetry distinguishes aggregate from stage accounting. ADR-024 remains current; changing the documented canonical default requires comparative evidence and a new ADR.
 - `plans/020` is in progress and is the exclusive owner of the real-repository task corpus, immutable `BenchmarkRun`/`TaskAttempt` identities, A/B/C/D strategy harness, provider/API/model usage adapters, price schedules, and success-per-cost aggregation. Stage 1 (`returned_tokens` fidelity) is delivered. Stage 0 now separates harness executor models from `evaluated_*` attempt identities, uses `implicit_cache_observed_v1` (no explicit cache objects; implicit reads recorded), and gates the current Gemini 2.5 schedule at 2026-10-16; calibration/final lock remain pending, and Stage 2 has not started.
-- `plans/018` is in progress. Stages 0-3 are delivered and committed (see the numbered next-steps section below for the detail). Stage 3 (TypeScript SCIP) is complete: toolchain preflight, JVM SCIP reader, SCIP->CanonicalFactKey normalization, the shadow/default-off SCIP provider adapter (`semidx.runtime.providers.scip-typescript`) with a per-document stale gate, and the SCIP-vs-Stage-2 shadow comparison harness (`semidx.runtime.providers.scip-shadow-compare`) with latency/size metrics. Stage 4 (Java SCIP) is in progress: the toolchain and symbol-grammar preflight is done and it invalidated Variant C's typed-refinement premise for Java and reproduced a same-arity false-exact-identity defect (both recorded below); the adapter is not yet built. All of it is additive and default-off: `adapters/parse-file` still owns default Java/TypeScript extraction, and the SCIP adapter is a standalone entry point not wired into `providers.clj` / `provider-selection` / `provider-execution` (project-level batch index vs per-file parse; catalog/planner integration is a scheduled open slice). Multi-provider evidence must normalize to a provider-neutral `CanonicalFactKey` before arbitration; provider ids, native symbols, source identity, and mutable evidence are not stable merge keys. Cross-provider Java overload and TypeScript re-export identity fixtures are Stage 0/1 admission gates (executed as goldens).
+- `plans/018` is in progress. Stages 0-3 are delivered and committed (see the numbered next-steps section below for the detail). Stage 3 (TypeScript SCIP) is complete: toolchain preflight, JVM SCIP reader, SCIP->CanonicalFactKey normalization, the shadow/default-off SCIP provider adapter (`semidx.runtime.providers.scip-typescript`) with a per-document stale gate, and the SCIP-vs-Stage-2 shadow comparison harness (`semidx.runtime.providers.scip-shadow-compare`) with latency/size metrics. Stage 4 (Java SCIP) is complete (2026-09-05): preflight (which invalidated Variant C's typed-refinement premise for Java and reproduced a same-arity false-exact-identity defect), a repo-managed external toolchain, language bridges in `scip-normalize`, the shared `scip-adapter` boundary, the `scip-java` adapter, and the same-arity overload guard. Stages 5-7 are not started, and the next stage is an owner decision between Stage 5 (LSP overlay) and a consolidation slice. All of it is additive and default-off: `adapters/parse-file` still owns default Java/TypeScript extraction, and the SCIP adapter is a standalone entry point not wired into `providers.clj` / `provider-selection` / `provider-execution` (project-level batch index vs per-file parse; catalog/planner integration is a scheduled open slice). Multi-provider evidence must normalize to a provider-neutral `CanonicalFactKey` before arbitration; provider ids, native symbols, source identity, and mutable evidence are not stable merge keys. Cross-provider Java overload and TypeScript re-export identity fixtures are Stage 0/1 admission gates (executed as goldens).
 - `plans/007` remains an active architecture reference, not an executable queue. It closes only after its continuation ownership, freshness/lifecycle, provider-catalog, relation-parity, public-boundary, and documentation-handoff gates have recorded evidence; a future successor must be self-contained rather than merely linked. On closure its frontmatter becomes `completed` / `historical_reference_only`, and active implementation must use the named successor plans and ADRs instead.
 - Stage execution routing is explicit in `plans/018`, `plans/019`, and `plans/020`: Claude Code owns the provider-authority track, while Antigravity owns the benchmark and one-shot delivery tracks. High effort is allowed when justified by contract irreversibility, identity/arbitration, freshness, benchmark verdicts, public defaults, conflicting evidence, or repeated verification failures, and a high-effort handoff must record its concrete justification. Every stage-closing model must read the candidate next stage, cross-plan gates, progress/MEMORY/SPEC state, completed diff and checks, file ownership, and current model/quota constraints, then record a `NextStageRoutingRecommendation`; it may recommend `stop` or `defer` and never auto-bypasses an admission gate.
 - Dedicated `impact_analysis` now computes impact hints directly from the resolved selection artifact instead of reading `expand_context`'s budget-gated `:impact_hints` field; it must return a non-null map with `:callers`, `:dependents`, `:related_tests`, and `:risky_neighbors` vectors even when `expand_context` omits impact hints for token-budget reasons.
@@ -432,6 +432,49 @@ after this memory file.
    protobuf 3.15.6 against our 3.25.1 via gRPC). No build tool, `pom.xml`,
    coursier, or Scala CLI needed. `parse-scip-symbol` needs NO change: it already
    parses the Java grammar including `+N` and backtick-escaped `<init>`.
+   **Stage 4 is COMPLETE (2026-09-05).** Toolchain:
+   `scripts/setup-scip-java.sh` installs eight sha256-pinned jars
+   (`scripts/scip-java-toolchain/dependencies.txt`) plus the committed driver
+   `ScipJavaIndexer.java` into gitignored `.scip-java-toolchain/`; the adapter
+   runs `javac` with the SemanticDB plugin then the driver, both as external
+   processes. `scripts/scip-java-corpus-snapshot.sh` regenerates
+   `fixtures/provider-authority/scip/java-corpus.scrubbed.scip` (byte-stable,
+   host-path-free; the driver owns `--scrub-project-root` so Java fixtures do not
+   depend on the TypeScript JS scrubber). Code:
+   `semidx.runtime.providers.scip-normalize` now dispatches through **language
+   bridges** (plain data in `bridges`) — `parse-scip-symbol` is language-neutral
+   and needed no change; `normalize-index` requires `:language` because neither
+   indexer populates `Document.language`. The Java bridge builds a
+   `symbol -> {path, arity}` table from every document's `SymbolInformation`,
+   which is what makes a cross-file reference key on the **defining** file;
+   owner/symbol reproduce the heuristic lane exactly, so all four corpus units
+   have byte-identical `canonical_fact_key_id`s across SCIP and regex.
+   Constructors translate `<init>` -> `Class#Class`; nested types, undeclared
+   symbols, and unreadable arity are `:unmapped` with a reason (degrade, never
+   guess). `semidx.runtime.providers.scip-adapter` is the shared language-neutral
+   boundary (stale gate, FactBatch assembly, result shapes, overload guard);
+   `scip-typescript` was rewritten to delegate to it, and
+   `semidx.runtime.providers.scip-java` is the Java adapter.
+   **Same-arity guard (Stage 4 exit criterion):**
+   `scip-adapter/withhold-ambiguous-arity-only-overloads` detects an
+   all-`arity_only` group whose definitions carry different native symbols,
+   withholds every fact in it (references included), emits
+   `:same_arity_arity_only_overload_ambiguous`, and sets `coverage.complete`
+   false. Contrast is executable as a test: guard on -> 0 facts / 2 withheld /
+   diagnostic; guard off -> 1 fact at `exact` / 0 diagnostics (the defect).
+   **Evidence contract change:** `fact-arbitration/normalize-fact-evidence` built
+   a fixed map and silently dropped unknown keys; it gains `:native_details`, one
+   opaque passthrough map (omitted when empty) so a language cannot leak field
+   names into the kernel. Java native detail (`+N` disambiguator, signature
+   documentation) rides there. Deferred and named: nested types, SCIP
+   `Relationship`/implementations, `call/*` relations, catalog/planner
+   integration of the project-scoped providers, Java latency/storage metrics, and
+   the coverage the two-file corpus cannot exercise (inheritance, static imports,
+   method references, entity fields — extending the corpus would change the
+   Stage 0 baseline and needs its own decision). Next stage is an **owner
+   decision** between Stage 5 (LSP overlay) and a consolidation slice; Stage 5
+   must not assume the `java-lsp` typed-signature capability, which the fixture
+   deliberately holds at the `arity_only` floor pending real jdtls output.
 3. Execute `plans/019` as an additive one-shot delivery track after its budget
    ledger and the `plans/020` run/strategy contracts are accepted. Its evaluation
    stage contributes adapters to `plans/020`; it does not own a second corpus,

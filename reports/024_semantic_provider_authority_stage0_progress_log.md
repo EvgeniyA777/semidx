@@ -42,7 +42,7 @@ and is appended by later stages.
 | 1 — Evidence model and arbitration kernel | **completed** 2026-08-28 — kernel, FactBatch, executable golden parity, and round-trip coverage all delivered |
 | 2 — Provider plan and legacy adapter shadow path | **completed** 2026-08-28 |
 | 3 — TypeScript SCIP vertical slice | **completed** 2026-09-01 — preflight, JVM SCIP reader, SCIP→CanonicalFactKey normalization, the shadow/default-off provider adapter (`scip-typescript`) with per-document stale gate, and the SCIP-vs-Stage-2 shadow comparison harness (`scip-shadow-compare`) with latency/size metrics all delivered. Named deferrals: SCIP `Relationship`/implementations and `call/*` facts (none in corpus / no relation type), and catalog/planner integration of a project-scoped provider. |
-| 4 — Java SCIP vertical slice | **in progress** 2026-09-05 — toolchain and symbol-grammar preflight done against real scip-java; the Stage 0 SCIP spelling was found false and corrected, Variant C's typed-refinement premise invalidated for Java, and a same-arity false-identity defect reproduced. Adapter not yet built. |
+| 4 — Java SCIP vertical slice | **completed** 2026-09-05 — preflight (fixture corrected, Variant C invalidated for Java, same-arity defect reproduced), repo-managed external toolchain, language bridges in `scip-normalize`, the `scip-java` adapter, and the same-arity overload guard. Named deferrals: nested types, `Relationship`/implementations, and catalog/planner integration of a project-scoped provider. |
 | 5–7 | not started |
 
 ## Scope Executed (Stage 0)
@@ -1675,4 +1675,199 @@ fallback_executor_or_model: Sonnet for toolchain and fixture plumbing; not for
   the same-arity guard.
 model_availability_checked_at: not checked this session.
 confidence: high (both contract questions resolved on verified evidence)
+```
+
+---
+
+# Stage 4 — Java SCIP Vertical Slice: Implementation (2026-09-05)
+
+Continues the preflight above, which settled both contract questions before any
+code was written. Delivered in three commits, each verified before the next.
+
+## Delivered
+
+| Artifact | Role |
+| --- | --- |
+| `scripts/scip-java-toolchain/dependencies.txt` | eight jars pinned by coordinate and sha256, with the rationale for each |
+| `scripts/scip-java-toolchain/ScipJavaIndexer.java` | committed driver; `scip-semanticdb` ships no CLI entry point. Also owns the opt-in `--scrub-project-root` step, so Java fixture regeneration does not depend on the TypeScript toolchain's JS scrubber |
+| `scripts/setup-scip-java.sh` | downloads and digest-verifies every jar, then compiles the driver; fails closed on mismatch, replaces a drifted cache |
+| `scripts/scip-java-corpus-snapshot.sh` | regenerates the fixture, re-verifies the pin, refuses to keep an artifact containing a host path |
+| `fixtures/provider-authority/scip/java-corpus.scrubbed.scip` | real scip-java output over the protected corpus, `project_root` scrubbed |
+| `src/semidx/runtime/providers/scip_normalize.clj` | language **bridges** as data; the Java bridge plus `signature-arity` and `java-index-context` |
+| `src/semidx/runtime/providers/scip_adapter.clj` | the shared, language-neutral adapter boundary, including the overload guard |
+| `src/semidx/runtime/providers/scip_java.clj` | the Java adapter: toolchain resolution, the two subprocesses, entry points |
+| `src/semidx/runtime/fact_arbitration.clj` | `:native_details` passthrough on `FactEvidence` |
+| `test/.../scip_java_test.clj`, `scip_normalize_test.clj` | 13 + 6 new tests |
+
+## The bridge seam
+
+`scip-normalize` hard-coded TypeScript: it reconstructed the source path from
+the moniker and stamped `"typescript"` on every fact. The language-specific part
+is now a bridge — plain data in `bridges`, one per language — while
+`parse-scip-symbol` stays language-neutral. That was verified, not assumed: the
+existing parser already handles the Java grammar including the `+N`
+disambiguator and the backtick-escaped `<init>`, so it needed no change.
+
+The seam exists because the two indexers disagree about where identity lives. A
+TypeScript moniker reconstructs the file path; a Java moniker carries only the
+package. The Java bridge therefore builds a `symbol -> {path, arity}` table from
+every document's `SymbolInformation` in one pass, which is also what makes a
+**cross-file reference key on the defining file** rather than the referencing
+one — verified on the corpus, where `Validator#validate` referenced from
+`OrderService.java` keys on `src/example/Validator.java`.
+
+Java specifics:
+
+- owner and symbol reproduce the heuristic lane exactly
+  (`example.OrderService#handle`, owner `example.OrderService`), checked against
+  real `semidx.runtime.languages.java` output before the bridge was written. All
+  four corpus units produce **byte-identical `canonical_fact_key_id`s across
+  SCIP and regex**, both overloads included.
+- `overload_identity` is `{:arity n :signature_precision "arity_only"
+  :signature_key nil}`; the `+N` disambiguator and the signature documentation
+  ride as evidence.
+- arity is parsed from `signature_documentation.text` with depth-aware
+  splitting, so a comma inside `List<String>` or
+  `Map<String, List<Integer>>` is not a separator.
+- constructors are translated from `<init>` to the class-name spelling the regex
+  lane uses (`example.OrderService#OrderService`), rather than dropped as the
+  TypeScript bridge drops them.
+- degrade instead of guess: a symbol the index does not declare, a method with no
+  readable arity, and a **nested type** are all `:unmapped` with a reason.
+  Nested types are excluded deliberately — inventing an outer/inner owner
+  spelling that has not been verified against the heuristic lane would split
+  identity silently rather than merge it.
+
+## The same-arity guard (Stage 4 exit criterion)
+
+`withhold-ambiguous-arity-only-overloads` in the shared boundary. A group is
+ambiguous when two or more of its definition facts share a core key, are
+`arity_only`, and were spelled with different provider-native symbols. Every
+fact in such a group is withheld — references included, since a reference cannot
+be attributed either — a diagnostic names the symbol and both native spellings,
+and `coverage.complete` goes false.
+
+Verified as a contrast, which is what makes it self-documenting:
+
+| | facts emitted | authority | diagnostics |
+| --- | --- | --- | --- |
+| guard on | **0** (2 withheld) | — | `same_arity_arity_only_overload_ambiguous` naming both native symbols |
+| guard off | **1** | `exact` | **none** |
+
+The guard-off row is the reproduced defect and is kept executable as a test, so
+the guard cannot be quietly removed. The protected corpus has no same-arity pair
+(`handle` is arity 1 and arity 2) and adding one would change the Stage 0
+extraction baseline, so the case is supplied synthetically, exactly as the
+fixture specifies. A separate test asserts the guard does **not** fire on the
+real corpus.
+
+## Evidence contract gap found while testing
+
+`normalize-fact-evidence` built a fixed map and silently dropped any key it did
+not know, including the native overload detail the owner required to be carried
+as evidence. It gains `:native_details`, a single opaque passthrough map omitted
+when empty. It is deliberately one slot rather than named fields such as
+`:native_disambiguator`, so a language cannot leak its own vocabulary into the
+language-neutral kernel. Existing evidence keeps its previous shape.
+
+## Exit criteria check (plan Stage 4)
+
+- **No TypeScript-specific rule enters the shared SCIP adapter boundary** — met:
+  `scip-adapter` is language-neutral and the TypeScript adapter was rewritten to
+  delegate to it; its tests are unchanged and green.
+- **Same-arity overloads never produce a false exact identity** — met, with the
+  contrast above.
+- **Provider absence and stale artifacts degrade cleanly** — met: a missing
+  toolchain is `:unavailable`, a partial install is treated as no install, a
+  compile failure is `:failed` with the compiler output, and the document-level
+  stale gate drops missing or mismatched documents. All four tested.
+- **Java state-invariant facts preserve stable relation identity while gaining
+  richer evidence** — **not applicable to this slice and deliberately not
+  claimed.** The adapter emits unit facts only; no relation facts are produced,
+  so the plans/017 `structure/declares-field` and `dataflow/writes-field`
+  relations are untouched and their identity is trivially preserved. Emitting
+  Java relations from SCIP would need a `Relationship` payload the corpus does
+  not contain.
+
+## Deferred (named honestly)
+
+- **Nested types** — `:unmapped :nested-type-symbol`, pending ground truth on
+  how the heuristic lane spells a nested-class owner.
+- **`Relationship` / implementations facts and `call/*` relations** — none in the
+  corpus; no `call/*` relation type exists. Unchanged from Stage 3.
+- **Java-specific coverage the plan lists but the two-file corpus cannot
+  exercise**: inheritance, static imports, method references, entity fields, and
+  field-write relations. The corpus has no superclass, no static import, no
+  method reference, and no entity class. Extending the protected corpus changes
+  the Stage 0 baseline, so this needs its own decision rather than being smuggled
+  into this slice.
+- **Catalog / planner integration** of a `:scope :project` provider — unchanged
+  from Stage 3.
+- **Latency and storage metrics for the Java run** — the harness measures them
+  for TypeScript via `shadow-report`; the Java path is compared through
+  `compare-scip-run` but not timed.
+
+## Verification
+
+- `clojure -M:test`: **530 tests, 3053 assertions, 0 failures, 0 errors**
+  (503 -> 510 -> 517 -> 530 across this session's commits).
+- `./scripts/validate-contracts.sh`: `contracts_validation=ok`, 72 JSON files,
+  at every commit.
+- Toolchain: clean-checkout install from scratch; idempotent re-run; a corrupted
+  cached jar is refetched; an unsatisfiable pin fails closed with
+  `sha256_mismatch`; the snapshot is byte-stable across reruns and under macOS
+  system bash 3.2.
+- The committed Java artifact reads back through `semidx.runtime.scip/read-index`
+  with an empty `project_root`, and the end-to-end toolchain run produces the
+  same facts as the committed fixture.
+- Cross-tier parity checked twice: per-symbol in the REPL before the bridge was
+  written, and at corpus scale through the shadow-comparison harness, which
+  needed no change to diff Java.
+- `git diff --check` clean; English-only scan of every new and edited file clean.
+- **Not run** (gate later stages that change extraction): semantic-quality
+  report, protected retrieval replay, snapshot-diff parity, PostgreSQL round
+  trips. This slice changes no extraction and persists nothing.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 4 — Java SCIP vertical slice (preflight, toolchain, language
+  bridges, adapter, same-arity overload guard)
+recommended_next_stage: OWNER DECISION between two candidates, not an automatic
+  start:
+  (a) Stage 5 — LSP live overlay, the plan's next stage; or
+  (b) a consolidation slice: catalog/planner integration of the two
+      project-scoped SCIP providers, plus the Java corpus extension the Stage 4
+      deferrals name (inheritance, static imports, method references, entity
+      fields).
+recommended_executor: Claude Code team lead, no Fable, no Explore agent
+recommended_model: Claude Opus for Stage 5 (live freshness, cancellation, and
+  deterministic batch behaviour interact, and the java-lsp identity claim is
+  still unverified); Claude Sonnet for the consolidation slice
+effort: high for Stage 5; medium for consolidation
+effort_justification: Stage 5 introduces a stateful external process and the
+  first evidence whose freshness changes under the user's hands, and it must
+  re-verify the java-lsp spelling this session deliberately lowered to the
+  arity_only floor. The consolidation slice is bounded work over proven seams.
+rationale: the SCIP seam is now proven for both languages against real tool
+  output, with cross-tier key parity and an explicit guard against the one
+  identity failure the arity-only tier makes possible. Two structural debts are
+  outstanding and neither blocks Stage 5, but both grow with each new provider:
+  the project-scoped providers are still standalone entry points, and the Java
+  corpus cannot exercise half the coverage Stage 4 nominally owns.
+prerequisites_or_blockers:
+  - Stage 5 must NOT assume the java-lsp typed-signature capability. The fixture
+    now holds it at the arity_only floor precisely because an unverified exact
+    claim is what Stage 4 had to repair; raising it requires real jdtls output.
+  - if the corpus is extended, it changes the Stage 0 extraction baseline and
+    the protected-behaviour fixtures must be regenerated in the same commit.
+  - still shadow/default-off; no default-path wiring until Stage 6.
+file_ownership_and_conflict_risk: LOW. Stage 4 touched only the SCIP provider
+  namespaces, the arbitration evidence shape (additive), the Java fixtures, and
+  the toolchain scripts. Stage 5 would add an LSP client and adapter; the
+  consolidation slice would touch providers.clj and provider-selection.
+fallback_executor_or_model: Sonnet for toolchain and fixture plumbing; not for
+  LSP freshness or identity decisions.
+model_availability_checked_at: not checked this session.
+confidence: high for the delivered slice; the next-stage choice is the owner's
 ```
