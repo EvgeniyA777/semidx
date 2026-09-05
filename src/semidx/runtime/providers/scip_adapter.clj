@@ -64,19 +64,23 @@
       (re-find windows-drive-re p) :absolute_document_path
       (some #{".."} (str/split p #"[/\\]")) :parent_traversal_in_document_path)))
 
-(defn- within-root?
-  "True when `relative-path` canonically resolves inside `project-root`.
+(defn- containment-problem
+  "Nil when `relative-path` canonically resolves inside `project-root`, otherwise
+  the reason it does not.
 
   Defence in depth behind `document-path-problem`: a symlink can leave the root
-  without any `..` segment. An unresolvable path is treated as outside."
+  without any `..` segment. A path that cannot be canonicalized at all is treated
+  as outside, and the filesystem's own message is returned rather than printed —
+  these adapters run behind the MCP stdio transport, where anything written to
+  stdout corrupts the protocol stream."
   [project-root relative-path]
   (try
     (let [root (.getCanonicalFile (io/file (str project-root)))
           target (.getCanonicalFile (io/file root (str relative-path)))]
-      (str/starts-with? (str target) (str root java.io.File/separator)))
+      (when-not (str/starts-with? (str target) (str root java.io.File/separator))
+        {:reason :document_escapes_project_root}))
     (catch Exception e
-      (println "cannot canonicalize a SCIP document path:" (.getMessage e))
-      false)))
+      {:reason :document_path_unresolvable :detail (.getMessage e)})))
 
 (defn workspace-digest
   "sha256 of the workspace file for `relative-path` under `project-root`, or nil
@@ -84,16 +88,13 @@
   `semidx.runtime.workspace-state/sha256-file`, so a digest here is comparable to
   workspace freshness.
 
-  Callers must screen the path with `document-path-problem` first; this returns
-  nil rather than throwing if an unusable path reaches it anyway."
+  Callers must screen the path with `document-path-problem` first. This does not
+  guard against I/O failures itself; `document-freshness` owns that, so the
+  reason reaches a diagnostic instead of being swallowed here."
   [project-root relative-path]
-  (try
-    (let [f (io/file (str project-root) (str relative-path))]
-      (when (.isFile f)
-        (str "sha256:" (workspace-state/sha256-file f))))
-    (catch Exception e
-      (println "cannot digest a SCIP document path:" (.getMessage e))
-      nil)))
+  (let [f (io/file (str project-root) (str relative-path))]
+    (when (.isFile f)
+      (str "sha256:" (workspace-state/sha256-file f)))))
 
 (defn document-freshness
   "Classify one SCIP document against the workspace. Returns
@@ -110,21 +111,31 @@
   gate is document-level: range-level invalidation is a later refinement
   (reports/024 finding F2).
 
-  A path that must not be resolved at all — blank, absolute, or escaping the
-  project root — is `:invalid` and is reported rather than digested."
+  A path that must not be resolved at all — blank, absolute, escaping the
+  project root, or unreadable — is `:invalid` and is reported rather than
+  digested. Every failure returns a reason for the caller's diagnostic; nothing
+  is printed, because these adapters run behind the MCP stdio transport."
   [project-root relative-path expected-digests]
-  (if-let [problem (or (document-path-problem relative-path)
-                       (when-not (within-root? project-root relative-path)
-                         :document_escapes_project_root))]
-    {:state :invalid :reason problem}
-    (let [actual (workspace-digest project-root relative-path)
-          expected (get expected-digests relative-path)]
-      (cond
-        (nil? actual) {:state :missing}
-        (and expected (not= expected actual)) {:state :mismatch
-                                               :expected expected
-                                               :actual actual}
-        :else {:state :fresh :content_digest actual}))))
+  (if-let [problem (or (when-let [reason (document-path-problem relative-path)]
+                         {:reason reason})
+                       (containment-problem project-root relative-path))]
+    (merge {:state :invalid} problem)
+    (let [digest (try
+                   {:value (workspace-digest project-root relative-path)}
+                   (catch Exception e
+                     {:error (.getMessage e)}))]
+      (if (:error digest)
+        {:state :invalid
+         :reason :document_path_unreadable
+         :detail (:error digest)}
+        (let [actual (:value digest)
+              expected (get expected-digests relative-path)]
+          (cond
+            (nil? actual) {:state :missing}
+            (and expected (not= expected actual)) {:state :mismatch
+                                                   :expected expected
+                                                   :actual actual}
+            :else {:state :fresh :content_digest actual}))))))
 
 (defn stale-diagnostic [relative-path freshness]
   (case (:state freshness)
@@ -138,13 +149,14 @@
                :actual (:actual freshness)
                :message (str "SCIP artifact for " relative-path
                              " does not match the workspace file; dropped from exact facts")}
-    :invalid {:code :scip_document_path_invalid
-              :document relative-path
-              :reason (:reason freshness)
-              :message (str "SCIP document path " (pr-str relative-path)
-                            " is not a safe project-relative path ("
-                            (name (:reason freshness))
-                            "); dropped without being read")}))
+    :invalid (cond-> {:code :scip_document_path_invalid
+                      :document relative-path
+                      :reason (:reason freshness)
+                      :message (str "SCIP document path " (pr-str relative-path)
+                                    " is not a safe project-relative path ("
+                                    (name (:reason freshness))
+                                    "); dropped without being read")}
+               (:detail freshness) (assoc :detail (:detail freshness)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Arity-only overload guard (plans/018 Stage 4 exit criterion, finding S1a)

@@ -110,11 +110,12 @@
   ([] (provider-status {}))
   ([opts]
    (let [toolchain (resolve-toolchain opts)
+         ;; Probe result only; the reason a probe failed reaches the caller
+         ;; through the reason codes below, never through stdout — these
+         ;; adapters run behind the MCP stdio transport.
          javac? (try
                   (zero? (int (:exit (sh/sh "javac" "-version"))))
-                  (catch Exception e
-                    (println "javac -version failed:" (.getMessage e))
-                    false))
+                  (catch Exception _ false))
          base {:provider_id provider-id
                :observed_at (str (java.time.Instant/now))}
          reasons (cond-> []

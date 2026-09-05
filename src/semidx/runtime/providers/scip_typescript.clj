@@ -99,9 +99,10 @@
     (let [{:keys [exit out]} (sh/sh cli "--version")]
       (when (zero? (int exit))
         (scip-adapter/present-path out)))
-    (catch Exception e
-      (println "scip-typescript --version failed:" (.getMessage e))
-      nil)))
+    ;; Best-effort by contract: a version we cannot read is reported as nil in
+    ;; the result, not printed. Anything on stdout would corrupt the MCP stdio
+    ;; transport these adapters run behind.
+    (catch Exception _ nil)))
 
 (defn provider-status
   "Observe whether the SCIP TypeScript provider can run right now.

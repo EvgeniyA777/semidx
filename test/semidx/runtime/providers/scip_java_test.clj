@@ -355,3 +355,44 @@
                            corpus-root "src/example/OrderService.java" nil))))
     (is (= :missing (:state (scip-adapter/document-freshness
                              corpus-root "src/example/Missing.java" nil))))))
+
+(def ^:private nul-path
+  "A path with a NUL byte: unnameable on any supported filesystem, so resolving
+  it throws inside the JDK. Built here rather than written as a literal."
+  (str "a" (char 0) "b"))
+
+(deftest the-stale-gate-never-writes-to-stdout
+  ;; These adapters run behind the MCP stdio transport, where anything on stdout
+  ;; corrupts the protocol stream. Every failure path must return its reason for
+  ;; a diagnostic instead of printing it.
+  (testing "no path — valid, missing, unsafe, or unresolvable — prints"
+    (doseq [path ["src/example/OrderService.java"
+                  "src/example/Missing.java"
+                  "../typescript/src/orders.ts"
+                  "/etc/hosts"
+                  ""
+                  nul-path]]
+      (is (= "" (with-out-str
+                  (scip-adapter/document-freshness corpus-root path nil)))
+          (str "document-freshness printed for " (pr-str path)))))
+
+  (testing "a whole adapter run over a hostile index prints nothing"
+    (let [hostile {:documents [{:relative-path "../typescript/src/orders.ts"
+                                :symbols []
+                                :occurrences []}
+                               {:relative-path "/etc/hosts"
+                                :symbols []
+                                :occurrences []}]}]
+      (is (= "" (with-out-str
+                  (sj/facts-from-index hostile {:project-root corpus-root})))))))
+
+(deftest an-unresolvable-document-path-degrades-with-a-reason
+  (let [freshness (scip-adapter/document-freshness corpus-root nul-path nil)]
+    (is (= :invalid (:state freshness)))
+    (is (contains? #{:document_path_unresolvable :document_path_unreadable}
+                   (:reason freshness)))
+    (is (string? (:detail freshness))
+        "the filesystem's own message is carried for the diagnostic")
+    (let [diagnostic (scip-adapter/stale-diagnostic nul-path freshness)]
+      (is (= :scip_document_path_invalid (:code diagnostic)))
+      (is (string? (:detail diagnostic))))))
