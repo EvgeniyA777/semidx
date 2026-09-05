@@ -29,6 +29,8 @@ tmp/
 .scip-toolchain/
 .scip.env
 scripts/scip-toolchain/node_modules/
+.scip-java-toolchain/
+.scip-java.env
 
 # Python bytecode
 __pycache__/
