@@ -107,16 +107,30 @@
 ;; --------------------------------------------------------------------------
 
 (deftest shadow-run-produces-heuristic-facts-from-the-real-corpus-test
-  (let [result (execution/shadow-facts-for-file {:root_path java-root :path java-path})]
+  ;; Deliberately not asserting an exact provider list: whether
+  ;; `java-tree-sitter` is admitted depends on whether a Java grammar is
+  ;; installed, so an equality check here encodes the machine it was written on.
+  ;; It did: this passed locally without a grammar and failed on CI, which has
+  ;; one. The invariants below hold either way.
+  (let [result (execution/shadow-facts-for-file {:root_path java-root :path java-path})
+        batches (mapv (juxt :provider_id :operation) (:batches result))]
     (is (= "shadow" (:mode result)))
-    (is (= 4 (count (:facts result))))
+    (is (= 4 (count (:facts result)))
+        "the same four units regardless of how many providers found them")
     (testing "regex evidence never reaches exact authority"
-      (is (= #{"heuristic"} (set (map :authority (:facts result))))))
+      (is (empty? (remove #{"heuristic" "structural"} (map :authority (:facts result))))
+          "a shadow run has no exact tier at all")
+      (is (contains? (set (map :authority (:facts result))) "heuristic")
+          "the regex tier always contributes"))
     (is (empty? (:errors result))
         "every emitted batch must satisfy the Stage 1 evidence contract")
     (testing "batches name the operation they answered"
-      (is (= [["java-regex" "definitions"]]
-             (mapv (juxt :provider_id :operation) (:batches result)))))
+      (is (some #{["java-regex" "definitions"]} batches)
+          "regex is admitted on every machine")
+      (is (every? #(= "definitions" (second %)) batches)
+          "Stage 2 claims definitions only")
+      (is (empty? (remove #{"java-regex" "java-tree-sitter"} (map first batches)))
+          "no provider outside the Java catalog may appear"))
     (testing "the plan that produced them is retained with the result"
       (is (= "file_bytes_sha256" (get-in result [:plan :source_identity :digest_basis])))
       (is (= "sha256" (subs (get-in result [:plan :source_identity :content_digest]) 0 6)))
