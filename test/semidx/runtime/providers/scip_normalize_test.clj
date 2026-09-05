@@ -1,23 +1,32 @@
 (ns semidx.runtime.providers.scip-normalize-test
-  "Stage 3 (plans/018, ADR-046) tests for SCIP -> CanonicalFactKey normalization.
+  "Stage 3/4 (plans/018, ADR-046) tests for SCIP -> CanonicalFactKey
+  normalization.
 
-  Three layers:
+  Layers:
 
-  1. `parse-scip-symbol` against hand-written SCIP symbol strings.
-  2. `scip-symbol->unit` — the moniker -> semidx spelling bridge.
-  3. `normalize-index` over the committed real artifact
-     `typescript-corpus.scrubbed.scip`, checked against the Stage 0 identity
-     fixture and the arbitration kernel."
+  1. `parse-scip-symbol` against hand-written SCIP symbol strings. It is
+     language-neutral, so both indexers' grammars are checked against it.
+  2. `scip-symbol->unit` — the per-language moniker -> semidx spelling bridge.
+  3. `normalize-index` over the committed real artifacts
+     `typescript-corpus.scrubbed.scip` and `java-corpus.scrubbed.scip`, checked
+     against the Stage 0 identity fixtures and the arbitration kernel."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [semidx.runtime.fact-arbitration :as fa]
+            [semidx.runtime.languages.java :as java-language]
             [semidx.runtime.providers.scip-normalize :as sn]
             [semidx.runtime.scip :as scip]))
 
 (def ^:private fixture-scip
   "fixtures/provider-authority/scip/typescript-corpus.scrubbed.scip")
+
+(def ^:private java-fixture-scip
+  "fixtures/provider-authority/scip/java-corpus.scrubbed.scip")
+
+(def ^:private java-corpus-root
+  "fixtures/provider-authority/corpus/java")
 
 (def ^:private anchored-identity
   {:content_digest "sha256:corpus-fixture" :revision "test-revision"})
@@ -76,7 +85,7 @@
 ;; --- scip-symbol->unit -------------------------------------------------
 
 (defn- unit-of [sym]
-  (sn/scip-symbol->unit (sn/parse-scip-symbol sym)))
+  (sn/scip-symbol->unit "typescript" (sn/parse-scip-symbol sym)))
 
 (deftest bridges-mappable-symbols-onto-semidx-spelling
   (testing "top-level function: <module>/<name>, module from the file path"
@@ -132,7 +141,8 @@
 (deftest normalizes-the-committed-scip-artifact
   (let [{:keys [facts unmapped]}
         (sn/normalize-index (scip/read-index fixture-scip)
-                            {:source-identity anchored-identity})]
+                            {:language "typescript"
+                             :source-identity anchored-identity})]
 
     (testing "every emitted fact is a well-formed exact-authority unit fact"
       (is (seq facts))
@@ -185,7 +195,7 @@
                                       :roles #{:definition} :range [1 0 3]}
                                      {:symbol "scip-typescript npm . . src/`x.ts`/bar("
                                       :roles #{} :range [2 0 3]}]}]}
-         {:source-identity anchored-identity})]
+         {:language "typescript" :source-identity anchored-identity})]
     (is (= ["src.x/foo"] (map #(get-in % [:key :symbol]) facts))
         "the good occurrence still produces its fact")
     (is (= [:unparseable-descriptors] (map :reason unmapped))
@@ -193,7 +203,8 @@
 
 (deftest scip-and-regex-evidence-merge-into-one-exact-fact
   (let [{:keys [facts]} (sn/normalize-index (scip/read-index fixture-scip)
-                                            {:source-identity anchored-identity})
+                                            {:language "typescript"
+                                             :source-identity anchored-identity})
         scip-normalize (filter #(= "src.orders/normalize" (get-in % [:key :symbol])) facts)
         regex-fact {:key {:fact_kind "unit" :language "typescript" :path "src/orders.ts"
                           :owner "src.orders" :symbol "src.orders/normalize"
@@ -227,6 +238,7 @@
                            first)
         ;; the SCIP native re-export target moniker, mapped by this slice
         mapped (sn/scip-symbol->unit
+                "typescript"
                 (sn/parse-scip-symbol (:native_re_export_target scip-spelling)))]
     (testing "the fixture still describes scip-typescript's verified behaviour"
       (is (false? (:alias_symbol_emitted scip-spelling)))
@@ -259,3 +271,183 @@
                                              :path (:path expected) :owner (:owner expected)
                                              :symbol (:symbol expected) :overload_identity nil}))
             (str (:fact distinct-fact) " — " (:reason distinct-fact)))))))
+
+;; --- Java bridge -------------------------------------------------------
+;;
+;; scip-java puts neither parameter types nor arity in the symbol: it
+;; disambiguates overloads with a source-order ordinal (`handle(+1).`) and
+;; carries the signature only as documentation text. The Java exact tier
+;; therefore commits arity_only, and arity is parsed from that text. See
+;; reports/024 finding S1 and the identity fixture's
+;; `scip_java_verified_contract`.
+
+(deftest signature-arity-counts-parameters-not-commas
+  (testing "plain and empty parameter lists"
+    (is (= 1 (sn/signature-arity "public String handle(String order)")))
+    (is (= 2 (sn/signature-arity "public String handle(String order, int retries)")))
+    (is (= 0 (sn/signature-arity "public void noArgs()")))
+    (is (= 1 (sn/signature-arity "public OrderService(Validator validator)"))))
+
+  (testing "a comma inside a generic or an array does not add an argument"
+    (is (= 1 (sn/signature-arity "public List<String> handleAll(List<String> orders)")))
+    (is (= 2 (sn/signature-arity "int[] f(int[] a, Map<String, List<Integer>> m)"))
+        "the comma inside Map<String, List<Integer>> is nested, not a separator"))
+
+  (testing "no signature text means no arity, never a guess"
+    (is (nil? (sn/signature-arity nil)))
+    (is (nil? (sn/signature-arity "")))
+    (is (nil? (sn/signature-arity "not a signature")))))
+
+(defn- java-fixture-index [] (scip/read-index java-fixture-scip))
+
+(defn- java-unit-of
+  ([sym] (java-unit-of sym (sn/java-index-context (java-fixture-index))))
+  ([sym context]
+   (sn/scip-symbol->unit "java"
+                         (assoc (sn/parse-scip-symbol sym) :native_symbol sym)
+                         context)))
+
+(deftest java-bridge-reproduces-the-heuristic-lane-spelling
+  (testing "a method keys on <package>.<Class>#<method>, the regex lane's spelling"
+    (let [unit (java-unit-of "semanticdb maven . . example/OrderService#handle().")]
+      (is (= "example.OrderService" (:owner unit)))
+      (is (= "example.OrderService#handle" (:symbol unit)))
+      (is (= "method" (:kind unit)))
+      (is (= "src/example/OrderService.java" (:path unit))
+          "the path comes from the declaring document, not the moniker")))
+
+  (testing "the overload ordinal is evidence, and both overloads key on arity"
+    (let [first-overload (java-unit-of "semanticdb maven . . example/OrderService#handle().")
+          second-overload (java-unit-of "semanticdb maven . . example/OrderService#handle(+1).")]
+      (is (= 1 (get-in first-overload [:overload_identity :arity])))
+      (is (= 2 (get-in second-overload [:overload_identity :arity])))
+      (is (= "" (:native_disambiguator first-overload)))
+      (is (= "+1" (:native_disambiguator second-overload)))
+      (is (= "arity_only" (get-in second-overload [:overload_identity :signature_precision])))
+      (is (nil? (get-in second-overload [:overload_identity :signature_key]))
+          "owner decision 2026-09-05: the Java exact tier commits no typed signature")))
+
+  (testing "a constructor is translated from <init> to the class-name spelling"
+    (let [unit (java-unit-of "semanticdb maven . . example/OrderService#`<init>`().")]
+      (is (= "example.OrderService#OrderService" (:symbol unit)))
+      (is (= "constructor" (:kind unit)))
+      (is (= 1 (get-in unit [:overload_identity :arity]))))))
+
+(deftest java-bridge-unmapped-reasons
+  (let [context (sn/java-index-context (java-fixture-index))]
+    (doseq [[reason sym]
+            {:type-symbol "semanticdb maven . . example/OrderService#"
+             :field-symbol "semanticdb maven . . example/OrderService#validator."
+             :external-symbol "semanticdb maven jdk 17 java/lang/String#trim()."
+             :local-symbol "local 0"
+             :nested-type-symbol "semanticdb maven . . example/Outer#Inner#run()."
+             :symbol-not-declared-in-index "semanticdb maven . . example/Absent#gone()."}]
+      (is (= reason (:unmapped (java-unit-of sym context))) sym))))
+
+(deftest java-normalization-over-the-committed-artifact
+  (let [{:keys [facts unmapped]}
+        (sn/normalize-index (java-fixture-index)
+                            {:language "java" :source-identity anchored-identity})]
+
+    (testing "every emitted fact is a well-formed exact-authority java unit fact"
+      (is (seq facts))
+      (is (every? #(= "java" (get-in % [:key :language])) facts))
+      (is (every? #(= "arity_only" (get-in % [:key :overload_identity :signature_precision]))
+                  facts))
+      (is (empty? (mapcat (comp fa/fact-evidence-errors fa/normalize-fact-evidence)
+                          (mapcat :evidence facts)))
+          "anchored source identity + exact + fresh must validate clean"))
+
+    (testing "the two same-name overloads stay distinct canonical keys"
+      (let [handle-keys (->> facts
+                             (filter #(= "example.OrderService#handle"
+                                         (get-in % [:key :symbol])))
+                             (map #(fa/canonical-fact-key-id (:key %)))
+                             set)]
+        (is (= 2 (count handle-keys))
+            "arity 1 and arity 2 must not collapse")))
+
+    (testing "a cross-file reference keys on the DEFINING file, not the referencing one"
+      (let [validate-facts (filter #(= "example.Validator#validate"
+                                       (get-in % [:key :symbol]))
+                                   facts)
+            evidence (mapcat :evidence validate-facts)]
+        (is (seq validate-facts))
+        (is (every? #(= "src/example/Validator.java" (get-in % [:key :path])) validate-facts)
+            "the identity is the declaration's path")
+        (is (contains? (set (map (comp :path :evidence_location) evidence))
+                       "src/example/OrderService.java")
+            "but the evidence records where the reference physically is")))
+
+    (testing "unmapped symbols carry a reason, and locals/externals are among them"
+      (is (every? :reason unmapped))
+      (is (contains? (set (map :reason unmapped)) :external-symbol))
+      (is (contains? (set (map :reason unmapped)) :local-symbol)))))
+
+(deftest java-scip-keys-match-the-regex-tier
+  (let [{:keys [facts]} (sn/normalize-index (java-fixture-index)
+                                            {:language "java"
+                                             :source-identity anchored-identity})
+        path "src/example/OrderService.java"
+        lines (str/split-lines (slurp (io/file java-corpus-root path)))
+        regex-units (:units (java-language/parse-file java-corpus-root path lines {}))
+        scip-key-ids (set (map #(fa/canonical-fact-key-id (:key %)) facts))]
+    (is (seq regex-units))
+    (testing "every regex-tier unit lands on a key SCIP also produced"
+      (doseq [unit regex-units]
+        (let [regex-key-id (fa/canonical-fact-key-id
+                            {:fact_kind "unit"
+                             :language "java"
+                             :path path
+                             :owner (:module unit)
+                             :symbol (:symbol unit)
+                             :overload_identity (when-let [arity (:method_arity unit)]
+                                                  {:arity arity
+                                                   :signature_precision "arity_only"
+                                                   :signature_key nil})})]
+          (is (contains? scip-key-ids regex-key-id)
+              (str (:symbol unit) " arity " (:method_arity unit)
+                   " must produce one key across both tiers")))))))
+
+(deftest java-identity-fixture-parity
+  (let [fixture (read-identity-fixture "java-overload-canonical-key.json")
+        spelling (->> (get-in fixture [:same_fact_must_merge :provider_spellings])
+                      (filter #(= "scip-java" (:provider_id %)))
+                      first)
+        expected (get-in fixture [:same_fact_must_merge :expected_canonical_key])
+        mapped (java-unit-of (:native_symbol spelling))]
+
+    (testing "the fixture records the verified scip-java contract"
+      (is (true? (:ground_truth spelling)))
+      (is (nil? (:native_signature_key spelling)))
+      (is (= "arity_only" (get-in spelling [:variant_c_contribution :signature_precision])))
+      (is (nil? (get-in spelling [:variant_c_contribution :signature_key]))))
+
+    (testing "the scip-java moniker resolves to the fixture's canonical key"
+      (is (= (:owner expected) (:owner mapped)))
+      (is (= (:symbol expected) (:symbol mapped)))
+      (is (= (:path expected) (:path mapped)))
+      (is (= (get-in expected [:overload_identity :arity])
+             (get-in mapped [:overload_identity :arity]))))
+
+    (testing "the fixture's distinct facts keep distinct keys"
+      (let [mapped-key-id (fa/canonical-fact-key-id
+                           {:fact_kind "unit" :language "java" :path (:path mapped)
+                            :owner (:owner mapped) :symbol (:symbol mapped)
+                            :overload_identity (:overload_identity mapped)})]
+        (doseq [distinct-fact (:distinct_facts_must_not_merge fixture)
+                :let [key (:expected_canonical_key distinct-fact)]]
+          (is (not= mapped-key-id
+                    (fa/canonical-fact-key-id
+                     {:fact_kind "unit" :language "java" :path (:path key)
+                      :owner (:owner key) :symbol (:symbol key)
+                      :overload_identity {:arity (:arity key)
+                                          :signature_precision "arity_only"
+                                          :signature_key nil}}))
+              (str (:fact distinct-fact) " — " (:reason distinct-fact))))))))
+
+(deftest an-unsupported-language-is-refused-not-guessed
+  (is (thrown? clojure.lang.ExceptionInfo
+               (sn/normalize-index {:documents []} {:language "cobol"})))
+  (is (= :unsupported-language
+         (:unmapped (sn/scip-symbol->unit "cobol" (sn/parse-scip-symbol "x y . . a/b#c()."))))))

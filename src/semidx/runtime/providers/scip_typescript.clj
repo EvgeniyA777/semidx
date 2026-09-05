@@ -271,7 +271,8 @@
                                      fresh))
         normalized (scip-normalize/normalize-index
                     {:documents fresh}
-                    {:provider-id provider-id
+                    {:language "typescript"
+                     :provider-id provider-id
                      :provider-version provider-version
                      :source-identity (fn [relative-path]
                                         {:content_digest (get digest-by-path relative-path)})})

@@ -1,5 +1,5 @@
 (ns semidx.runtime.providers.scip-normalize
-  "Stage 3 of the Semantic Provider Authority Migration (plans/018, ADR-046):
+  "Stage 3/4 of the Semantic Provider Authority Migration (plans/018, ADR-046):
   normalize SCIP index data into provider-neutral facts for
   `semidx.runtime.fact-arbitration`.
 
@@ -8,32 +8,34 @@
   plus a record of every SCIP symbol that was deliberately not turned into a
   fact.
 
-  Two pieces do the work:
+  Three pieces do the work:
 
   - `parse-scip-symbol` decomposes a SCIP symbol string into its scheme, package
     fields, and typed descriptors (namespace `/`, type `#`, term `.`, method
-    `().`, parameter `(x)`, ...), handling backtick-escaped names.
-  - `scip-symbol->unit` bridges a parsed TypeScript symbol onto semidx's own
-    conceptual spelling — `ts-module-name` for the owner, `<module>/<name>` for a
-    top-level function, `<module>.<Class>#<method>` for a method — so a SCIP
-    moniker lands on the same `CanonicalFactKey` the regex and tree-sitter tiers
-    already produce.
+    `().`, parameter `(x)`, ...), handling backtick-escaped names. It is
+    language-neutral and needs no per-language branch.
+  - a **language bridge** maps a parsed moniker onto semidx's own conceptual
+    spelling. Bridges are plain data (`bridges`), one per language, because the
+    two indexers disagree on where identity even lives: a TypeScript moniker
+    reconstructs the source file path, while a Java moniker carries the package
+    and the path must come from `Document.relative_path`.
+  - `normalize-index` walks occurrences and applies the bridge.
 
-  Scope of this slice (owner-confirmed): only the definition kinds semidx models
-  as units — top-level functions/vars and class methods. Classes, fields,
-  constructors, parameters, and external/stdlib symbols are recorded as
-  `:unmapped` with a reason and become no fact; whether SCIP should promote them
-  as exact-only units is a later decision.
+  Scope of the units minted (owner-confirmed): only the definition kinds semidx
+  models. Parameters, locals, and external/stdlib symbols are recorded as
+  `:unmapped` with a reason and become no fact; whether SCIP should promote
+  SCIP-only kinds is a later decision.
 
-  Not in this slice: source-identity anchoring and artifact-freshness checks
-  (the caller injects `source-identity`; the provider adapter computes the real
-  digest and the stale-artifact gate), call-hierarchy facts (no `call/*`
-  relation type exists), and any wiring into the default extraction path."
+  Not here: source-identity anchoring and artifact-freshness checks (the caller
+  injects `source-identity`; the provider adapter computes the real digest and
+  the stale-artifact gate), call-hierarchy facts (no `call/*` relation type
+  exists), the same-arity ambiguity guard (adapter policy, see
+  `semidx.runtime.providers.scip-overloads`), and any wiring into the default
+  extraction path."
   (:require [clojure.string :as str]
             [semidx.runtime.language-registry :as language-registry]
             [semidx.runtime.languages.typescript :as ts]))
 
-(def default-provider-id "scip-typescript")
 (def default-provider-version "1")
 
 ;; --- SCIP symbol grammar ---------------------------------------------------
@@ -43,6 +45,10 @@
 ;; <name>     ::= <identifier> | '`' <escaped> '`'      ('``' is an escaped backtick)
 ;; descriptor suffixes: '/' namespace, '#' type, '.' term, '().' method,
 ;;                      '(x)' parameter, '[x]' type-parameter, ':' meta, '!' macro
+;;
+;; Verified against both scip-typescript@0.4.0 and scip-java 0.12.3. The Java
+;; overload disambiguator (`handle(+1).`) parses as a method descriptor whose
+;; `:disambiguator` is "+1"; it is evidence, never key material.
 
 (defn- read-name
   "Read a descriptor name from the front of `chars`. Returns [name remaining]."
@@ -131,7 +137,25 @@
                :raw sym
                :message (ex-message e)})))))))
 
-;; --- SCIP symbol -> semidx conceptual spelling ---------------------------
+;; --- Shared bridge helpers -----------------------------------------------
+
+(defn- local-project-symbol?
+  "A global symbol defined by the project under index. Both indexers spell the
+  local package as `.`; anything else (a JDK class, an npm dependency) is
+  external and mints no unit."
+  [parsed]
+  (= "." (:package-name parsed)))
+
+(defn- unmapped-reason
+  "The `:unmapped` reason shared by every bridge for a symbol no bridge should
+  see, or nil when the symbol is the bridge's to interpret."
+  [parsed]
+  (cond
+    (:error parsed) (:error parsed)
+    (= "local" (:scheme parsed)) :local-symbol
+    (not (local-project-symbol? parsed)) :external-symbol))
+
+;; --- EcmaScript bridge (TypeScript / JavaScript) -------------------------
 
 (defn- source-file-namespace?
   "A namespace descriptor whose name looks like an ecmascript source file."
@@ -162,7 +186,7 @@
       :else
       {:path nil})))
 
-(defn- descriptors->owner+symbol
+(defn- ecmascript-descriptors->unit
   "Map the symbol-naming descriptors (everything after the file namespace) onto
   semidx's TypeScript spelling, given the file's `module` name. Returns a unit
   map or `{:unmapped <reason>}`.
@@ -219,33 +243,209 @@
       :else
       {:unmapped :unsupported-descriptor-shape})))
 
+(defn- ecmascript-symbol->unit
+  "Bridge a parsed scip-typescript symbol onto a semidx unit identity.
+
+  Identity comes entirely from the moniker: the leading namespace descriptors up
+  to and including the file reconstruct the path, `ts-module-name` turns that
+  into the owner, and the trailing descriptors name the symbol. A cross-file
+  reference therefore still keys on the defining file, not the referencing one."
+  [parsed _context]
+  (let [{:keys [path descriptors]} (split-path-and-symbol (:descriptors parsed))]
+    (if-not path
+      {:unmapped :no-source-file-namespace}
+      (let [module (ts/ts-module-name path)
+            mapped (ecmascript-descriptors->unit descriptors module)]
+        (if (:unmapped mapped)
+          mapped
+          (assoc mapped :path path))))))
+
+;; --- Java bridge ---------------------------------------------------------
+
+(defn signature-arity
+  "Parameter count parsed from a Java `signature_documentation` text such as
+  `\"public String handle(String order, int retries)\"`, or nil when the text is
+  absent or has no parameter list.
+
+  scip-java puts no arity and no parameter types in the symbol — it disambiguates
+  overloads with a source-order ordinal — so this text is the only place arity
+  can be read from. Splitting is depth-aware so a generic parameter
+  (`List<String> orders`) counts once, and a method whose arity cannot be
+  determined must be degraded by the caller rather than guessed."
+  [signature-text]
+  (when-let [text (not-empty (str signature-text))]
+    (let [open (str/index-of text "(")]
+      (when open
+        (let [chars (subs text (inc open))
+              params (loop [cs (seq chars) depth 0 acc []]
+                       (cond
+                         (empty? cs) nil
+                         (and (= \) (first cs)) (zero? depth)) (apply str acc)
+                         :else
+                         (recur (rest cs)
+                                (case (first cs)
+                                  (\< \( \[) (inc depth)
+                                  (\> \) \]) (dec depth)
+                                  depth)
+                                (conj acc (first cs)))))]
+          (when params
+            (if (str/blank? params)
+              0
+              (count
+               (loop [cs (seq params) depth 0 current [] acc []]
+                 (cond
+                   (empty? cs) (conj acc (apply str current))
+                   (and (= \, (first cs)) (zero? depth))
+                   (recur (rest cs) depth [] (conj acc (apply str current)))
+                   :else
+                   (recur (rest cs)
+                          (case (first cs)
+                            (\< \( \[) (inc depth)
+                            (\> \) \]) (dec depth)
+                            depth)
+                          (conj current (first cs))
+                          acc)))))))))))
+
+(defn java-index-context
+  "Per-index lookup the Java bridge needs, built in one pass over every
+  document's `symbols`.
+
+  A Java moniker carries the package, not the source file, so the defining path
+  can only come from the document that declares the symbol. Arity likewise comes
+  from that symbol's signature documentation. Building this table up front is
+  what lets a cross-file reference key on the *defining* file: the occurrence
+  lives in one document, the identity is looked up from another."
+  [scip-index]
+  {:symbol->info
+   (into {}
+         (for [document (:documents scip-index)
+               symbol-info (:symbols document)
+               :let [signature (get-in symbol-info [:signature-documentation :text])]]
+           [(:symbol symbol-info)
+            {:path (:relative-path document)
+             :kind (:kind symbol-info)
+             :arity (signature-arity signature)
+             :signature_documentation signature}]))})
+
+(defn- java-descriptors->unit
+  "Map Java descriptors onto semidx's Java spelling.
+
+  The regex and tree-sitter lanes spell a method `example.OrderService#handle`
+  with owner `example.OrderService`, so the bridge reproduces exactly that and
+  the tiers meet on one core key. scip-java spells a constructor `<init>`, while
+  semidx repeats the class name, so constructors are translated rather than
+  dropped.
+
+  Anything whose owner cannot be derived without guessing is unmapped with a
+  reason. Nested types are deliberately included there: joining an outer and
+  inner type would invent an owner spelling that has not been verified against
+  the heuristic lane, and an unverified owner silently splits identity instead of
+  merging it."
+  [descriptors]
+  (let [kinds (map :kind descriptors)
+        namespaces (take-while #(= :namespace (:kind %)) descriptors)
+        rest-descriptors (drop (count namespaces) descriptors)
+        package (str/join "." (map :name namespaces))
+        types (filter #(= :type (:kind %)) rest-descriptors)]
+    (cond
+      (empty? rest-descriptors)
+      {:unmapped :package-symbol}
+
+      (some #{:parameter :type-parameter :meta :macro} kinds)
+      {:unmapped :non-unit-descriptor}
+
+      (> (count types) 1)
+      {:unmapped :nested-type-symbol}
+
+      (and (= 1 (count rest-descriptors))
+           (= :type (:kind (first rest-descriptors))))
+      {:unmapped :type-symbol}
+
+      (and (= 2 (count rest-descriptors))
+           (= :type (:kind (first rest-descriptors)))
+           (= :method (:kind (second rest-descriptors))))
+      (let [class-name (:name (first rest-descriptors))
+            method-name (:name (second rest-descriptors))
+            owner (if (str/blank? package) class-name (str package "." class-name))
+            constructor? (= "<init>" method-name)]
+        {:owner owner
+         :symbol (str owner "#" (if constructor? class-name method-name))
+         :kind (if constructor? "constructor" "method")
+         :native_disambiguator (:disambiguator (second rest-descriptors))})
+
+      (and (= 2 (count rest-descriptors))
+           (= :type (:kind (first rest-descriptors)))
+           (= :term (:kind (second rest-descriptors))))
+      {:unmapped :field-symbol}
+
+      :else
+      {:unmapped :unsupported-descriptor-shape})))
+
+(defn- java-symbol->unit
+  "Bridge a parsed scip-java symbol onto a semidx unit identity.
+
+  Unlike the ecmascript bridge, the path and the arity are looked up from the
+  index context rather than read out of the moniker. A symbol the index does not
+  declare (referenced but defined outside the compiled set) is unmapped, and so
+  is a method whose arity cannot be read: the plan forbids guessing a canonical
+  key, and an arity-less Java unit key would collide with every other overload."
+  [parsed context]
+  (let [mapped (java-descriptors->unit (:descriptors parsed))]
+    (if (:unmapped mapped)
+      mapped
+      (let [info (get-in context [:symbol->info (:native_symbol parsed)])]
+        (cond
+          (nil? info) {:unmapped :symbol-not-declared-in-index}
+          (nil? (:arity info)) {:unmapped :arity-unavailable}
+          :else
+          (assoc mapped
+                 :path (:path info)
+                 :native_signature_documentation (:signature_documentation info)
+                 ;; Owner decision 2026-09-05: the Java exact tier commits arity
+                 ;; only. scip-java carries no parameter types, and rebuilding
+                 ;; them from occurrence layout would be inference. See
+                 ;; fixtures/provider-authority/identity/java-overload-canonical-key.json.
+                 :overload_identity {:arity (:arity info)
+                                     :signature_precision "arity_only"
+                                     :signature_key nil}))))))
+
+;; --- Bridge registry ----------------------------------------------------
+
+(def bridges
+  "Language bridges as data, keyed by semidx language name.
+
+  `:index-context` is called once per index and its result is handed to every
+  `:symbol->unit` call, so a bridge that needs a cross-document lookup builds it
+  once. `:default-provider-id` names the toolchain that produces the language's
+  artifact."
+  {"typescript" {:language "typescript"
+                 :default-provider-id "scip-typescript"
+                 :index-context (constantly {})
+                 :symbol->unit ecmascript-symbol->unit}
+   "java" {:language "java"
+           :default-provider-id "scip-java"
+           :index-context java-index-context
+           :symbol->unit java-symbol->unit}})
+
+(defn bridge-for
+  "The bridge for `language`, or nil."
+  [language]
+  (get bridges language))
+
 (defn scip-symbol->unit
-  "Bridge a parsed SCIP TypeScript symbol onto a semidx unit identity. Returns
-  `{:owner :symbol :kind :path}` for a mappable unit, otherwise
+  "Bridge a parsed SCIP symbol onto a semidx unit identity for `language`.
+  Returns `{:owner :symbol :kind :path ...}` for a mappable unit, otherwise
   `{:unmapped <reason>}`.
 
-  `:external-symbol` covers anything defined in another package (package name is
-  not the local-project `.`), e.g. a stdlib reference."
-  [parsed]
-  (cond
-    (:error parsed)
-    {:unmapped (:error parsed)}
-
-    (= "local" (:scheme parsed))
-    {:unmapped :local-symbol}
-
-    (not= "." (:package-name parsed))
-    {:unmapped :external-symbol}
-
-    :else
-    (let [{:keys [path descriptors]} (split-path-and-symbol (:descriptors parsed))]
-      (if-not path
-        {:unmapped :no-source-file-namespace}
-        (let [module (ts/ts-module-name path)
-              mapped (descriptors->owner+symbol descriptors module)]
-          (if (:unmapped mapped)
-            mapped
-            (assoc mapped :path path)))))))
+  `context` is the bridge's index context (see `java-index-context`); pass `{}`
+  for a bridge that needs none."
+  ([language parsed] (scip-symbol->unit language parsed {}))
+  ([language parsed context]
+   (if-let [bridge (bridge-for language)]
+     (if-let [reason (unmapped-reason parsed)]
+       {:unmapped reason}
+       ((:symbol->unit bridge) parsed context))
+     {:unmapped :unsupported-language})))
 
 ;; --- Fact emission -------------------------------------------------------
 
@@ -254,14 +454,14 @@
   canonical identity. `document` is where the occurrence physically is (which is
   the defining file for a definition, but another file for a cross-file
   reference); the symbol's own defining path lives in the key."
-  [{:keys [provider-id provider-version source-identity]} document occurrence unit]
+  [{:keys [provider-id provider-version source-identity language]} document occurrence unit]
   (let [definition? (contains? (:roles occurrence) :definition)]
     {:key {:fact_kind "unit"
-           :language "typescript"
+           :language language
            :path (:path unit)
            :owner (:owner unit)
            :symbol (:symbol unit)
-           :overload_identity nil
+           :overload_identity (:overload_identity unit)
            :dispatch_identity nil}
      :evidence [{:provider_id provider-id
                  :provider_version provider-version
@@ -275,15 +475,21 @@
                  :evidence_location {:path document
                                      :scip_range (:range occurrence)
                                      :scip_roles (vec (sort (map name (:roles occurrence))))}
-                 :native_symbol (:symbol occurrence)}]
+                 :native_symbol (:symbol occurrence)
+                 ;; Provider-native overload detail is evidence, never key
+                 ;; material (owner decision 2026-09-05).
+                 :native_disambiguator (:native_disambiguator unit)
+                 :native_signature_documentation (:native_signature_documentation unit)}]
      :value {:kind (:kind unit)}}))
 
 (defn normalize-index
   "Normalize `semidx.runtime.scip/read-index` output into arbitration facts.
 
   `opts`:
-  - `:provider-id` / `:provider-version` — evidence provenance (defaults
-    `\"scip-typescript\"` / `\"1\"`).
+  - `:language` — required; selects the bridge (`\"typescript\"`, `\"java\"`).
+    Neither indexer populates `Document.language`, so the caller must say.
+  - `:provider-id` / `:provider-version` — evidence provenance (defaults to the
+    bridge's `:default-provider-id` and `\"1\"`).
   - `:source-identity` — either one identity map applied to every fact, or a
     function of a document's `relative-path` returning that document's identity
     map. ADR-046 requires an anchor (`content_digest` / `document_version` /
@@ -292,20 +498,29 @@
 
   Returns `{:facts [...] :unmapped [...]}`. `:unmapped` lists every SCIP symbol
   occurrence that was deliberately not turned into a fact, each with a `:reason`."
-  [scip-index {:keys [provider-id provider-version source-identity]
-               :or {provider-id default-provider-id
-                    provider-version default-provider-version}}]
-  (let [identity-fn (if (fn? source-identity)
+  [scip-index {:keys [language provider-id provider-version source-identity]
+               :or {provider-version default-provider-version}}]
+  (let [bridge (or (bridge-for language)
+                   (throw (ex-info "No SCIP normalization bridge for language"
+                                   {:error_code :unsupported_scip_language
+                                    :language language
+                                    :supported (vec (sort (keys bridges)))})))
+        provider-id (or provider-id (:default-provider-id bridge))
+        context ((:index-context bridge) scip-index)
+        identity-fn (if (fn? source-identity)
                       source-identity
                       (constantly (or source-identity {})))]
     (reduce
      (fn [acc {:keys [relative-path occurrences]}]
-       (let [context {:provider-id provider-id
-                      :provider-version provider-version
-                      :source-identity (identity-fn relative-path)}]
+       (let [fact-context {:provider-id provider-id
+                           :provider-version provider-version
+                           :language language
+                           :source-identity (identity-fn relative-path)}]
          (reduce
           (fn [acc occurrence]
-            (let [unit (scip-symbol->unit (parse-scip-symbol (:symbol occurrence)))]
+            (let [parsed (assoc (parse-scip-symbol (:symbol occurrence))
+                                :native_symbol (:symbol occurrence))
+                  unit (scip-symbol->unit language parsed context)]
               (if (:unmapped unit)
                 (update acc :unmapped conj
                         {:native_symbol (:symbol occurrence)
@@ -313,7 +528,7 @@
                          :range (:range occurrence)
                          :reason (:unmapped unit)})
                 (update acc :facts conj
-                        (occurrence->fact context relative-path occurrence unit)))))
+                        (occurrence->fact fact-context relative-path occurrence unit)))))
           acc
           occurrences)))
      {:facts [] :unmapped []}
