@@ -130,16 +130,24 @@
 (defn normalize-fact-evidence
   "Normalize one FactEvidence record (ADR-046). Provider-native identifiers are
   retained for diagnostics but never enter the canonical key. Returns a map;
-  invalid records are surfaced by `fact-evidence-errors`, not dropped here."
+  invalid records are surfaced by `fact-evidence-errors`, not dropped here.
+
+  `:native_details` is the one open slot for provider-native detail a language
+  adapter wants to keep visible — scip-java's `+N` overload disambiguator and its
+  signature documentation, for instance. It is deliberately a single opaque map
+  rather than named fields, so a language cannot leak its own vocabulary into
+  this kernel, and it is dropped when empty so evidence that has none keeps its
+  previous shape."
   [ev]
-  {:provider_id (blank->nil (:provider_id ev))
-   :provider_version (blank->nil (:provider_version ev))
-   :authority (blank->nil (:authority ev))
-   :operation (blank->nil (:operation ev))
-   :freshness (or (blank->nil (:freshness ev)) "unknown")
-   :source_identity (or (:source_identity ev) {})
-   :evidence_location (:evidence_location ev)
-   :native_symbol (blank->nil (:native_symbol ev))})
+  (cond-> {:provider_id (blank->nil (:provider_id ev))
+           :provider_version (blank->nil (:provider_version ev))
+           :authority (blank->nil (:authority ev))
+           :operation (blank->nil (:operation ev))
+           :freshness (or (blank->nil (:freshness ev)) "unknown")
+           :source_identity (or (:source_identity ev) {})
+           :evidence_location (:evidence_location ev)
+           :native_symbol (blank->nil (:native_symbol ev))}
+    (seq (:native_details ev)) (assoc :native_details (:native_details ev))))
 
 (def source-identity-anchors
   "Fields that can tie evidence to the content it describes (ADR-046).

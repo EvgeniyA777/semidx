@@ -477,9 +477,17 @@
                                      :scip_roles (vec (sort (map name (:roles occurrence))))}
                  :native_symbol (:symbol occurrence)
                  ;; Provider-native overload detail is evidence, never key
-                 ;; material (owner decision 2026-09-05).
-                 :native_disambiguator (:native_disambiguator unit)
-                 :native_signature_documentation (:native_signature_documentation unit)}]
+                 ;; material (owner decision 2026-09-05). scip-java's ordinal
+                 ;; disambiguator and its signature text are the only way an
+                 ;; overload can be told apart after the fact, so they must stay
+                 ;; visible even though nothing may key on them.
+                 :native_details (cond-> {}
+                                   (:native_disambiguator unit)
+                                   (assoc :disambiguator (:native_disambiguator unit))
+
+                                   (:native_signature_documentation unit)
+                                   (assoc :signature_documentation
+                                          (:native_signature_documentation unit)))}]
      :value {:kind (:kind unit)}}))
 
 (defn normalize-index
