@@ -262,49 +262,105 @@
 
 ;; --- Java bridge ---------------------------------------------------------
 
+(defn- identifier-char? [^Character c]
+  (or (Character/isLetterOrDigit c) (= \_ c) (= \$ c)))
+
+(defn- parameter-list-start
+  "Index of the `(` that opens `declaration-name`'s parameter list in a Java
+  signature text, or nil.
+
+  Not simply the first `(`: scip-java prefixes the declaration with its
+  annotations, and an annotation with arguments (`@Ann(x = 1)`) opens a paren
+  group of its own. Reading that group instead of the parameter list produced a
+  wrong arity in both directions — under-counting `f(String, int)` as 1 and
+  over-counting `g(String)` as 2 — which would mint an exact fact on the wrong
+  overload bucket.
+
+  The name is matched at an identifier boundary and must be followed directly by
+  `(`. The LAST such match wins, because everything that can repeat the name —
+  annotations, a return type — precedes the declaration itself."
+  [^String text declaration-name]
+  (when-let [name (not-empty (str declaration-name))]
+    (let [n (count name)
+          len (count text)]
+      (loop [from 0 found nil]
+        (let [idx (str/index-of text name from)]
+          (if (nil? idx)
+            found
+            (let [before-ok? (or (zero? idx)
+                                 (not (identifier-char? (.charAt text (dec idx)))))
+                  after (+ idx n)
+                  after-ok? (and (< after len) (= \( (.charAt text after)))]
+              (recur (inc idx)
+                     (if (and before-ok? after-ok?) after found)))))))))
+
+(defn- balanced-group
+  "The text inside the paren group whose `(` sits at `open`, or nil when the
+  group never closes."
+  [^String text open]
+  (loop [i (inc open) depth 0 acc []]
+    (if (>= i (count text))
+      nil
+      (let [c (.charAt text i)]
+        (cond
+          (and (= \) c) (zero? depth)) (apply str acc)
+          :else
+          (recur (inc i)
+                 (case c
+                   (\< \( \[) (inc depth)
+                   (\> \) \]) (dec depth)
+                   depth)
+                 (conj acc c)))))))
+
+(defn- split-top-level
+  "Split a parameter list on commas that are not nested inside `<>`, `()`, or
+  `[]`, so `Map<String, List<Integer>> m` counts once."
+  [params]
+  (loop [cs (seq params) depth 0 current [] acc []]
+    (cond
+      (empty? cs) (conj acc (apply str current))
+      (and (= \, (first cs)) (zero? depth))
+      (recur (rest cs) depth [] (conj acc (apply str current)))
+      :else
+      (recur (rest cs)
+             (case (first cs)
+               (\< \( \[) (inc depth)
+               (\> \) \]) (dec depth)
+               depth)
+             (conj current (first cs))
+             acc))))
+
 (defn signature-arity
-  "Parameter count parsed from a Java `signature_documentation` text such as
+  "Parameter count for `declaration-name` parsed from a Java
+  `signature_documentation` text such as
   `\"public String handle(String order, int retries)\"`, or nil when the text is
-  absent or has no parameter list.
+  absent or its parameter list cannot be located unambiguously.
 
   scip-java puts no arity and no parameter types in the symbol — it disambiguates
   overloads with a source-order ordinal — so this text is the only place arity
-  can be read from. Splitting is depth-aware so a generic parameter
-  (`List<String> orders`) counts once, and a method whose arity cannot be
-  determined must be degraded by the caller rather than guessed."
-  [signature-text]
+  can be read from. `declaration-name` is required precisely because the text may
+  be prefixed by annotations; see `parameter-list-start`. Returning nil is the
+  intended outcome when the list cannot be found: the caller degrades to
+  `:arity-unavailable` rather than minting an exact key from a guess."
+  [signature-text declaration-name]
   (when-let [text (not-empty (str signature-text))]
-    (let [open (str/index-of text "(")]
-      (when open
-        (let [chars (subs text (inc open))
-              params (loop [cs (seq chars) depth 0 acc []]
-                       (cond
-                         (empty? cs) nil
-                         (and (= \) (first cs)) (zero? depth)) (apply str acc)
-                         :else
-                         (recur (rest cs)
-                                (case (first cs)
-                                  (\< \( \[) (inc depth)
-                                  (\> \) \]) (dec depth)
-                                  depth)
-                                (conj acc (first cs)))))]
-          (when params
-            (if (str/blank? params)
-              0
-              (count
-               (loop [cs (seq params) depth 0 current [] acc []]
-                 (cond
-                   (empty? cs) (conj acc (apply str current))
-                   (and (= \, (first cs)) (zero? depth))
-                   (recur (rest cs) depth [] (conj acc (apply str current)))
-                   :else
-                   (recur (rest cs)
-                          (case (first cs)
-                            (\< \( \[) (inc depth)
-                            (\> \) \]) (dec depth)
-                            depth)
-                          (conj current (first cs))
-                          acc)))))))))))
+    (when-let [open (parameter-list-start text declaration-name)]
+      (when-let [params (balanced-group text open)]
+        (if (str/blank? params)
+          0
+          (count (split-top-level params)))))))
+
+(defn- java-declaration-name
+  "The name that appears in a Java signature text for these descriptors: the
+  method name, or the class name for a constructor — scip-java spells the symbol
+  `<init>` while the signature text repeats the class name. Nil for anything that
+  has no parameter list."
+  [descriptors]
+  (let [last-descriptor (last descriptors)]
+    (when (= :method (:kind last-descriptor))
+      (if (= "<init>" (:name last-descriptor))
+        (:name (last (filter #(= :type (:kind %)) (butlast descriptors))))
+        (:name last-descriptor)))))
 
 (defn java-index-context
   "Per-index lookup the Java bridge needs, built in one pass over every
@@ -312,19 +368,22 @@
 
   A Java moniker carries the package, not the source file, so the defining path
   can only come from the document that declares the symbol. Arity likewise comes
-  from that symbol's signature documentation. Building this table up front is
-  what lets a cross-file reference key on the *defining* file: the occurrence
-  lives in one document, the identity is looked up from another."
+  from that symbol's signature documentation, located by the declaration name so
+  a leading annotation cannot be mistaken for the parameter list. Building this
+  table up front is what lets a cross-file reference key on the *defining* file:
+  the occurrence lives in one document, the identity is looked up from another."
   [scip-index]
   {:symbol->info
    (into {}
          (for [document (:documents scip-index)
                symbol-info (:symbols document)
-               :let [signature (get-in symbol-info [:signature-documentation :text])]]
+               :let [signature (get-in symbol-info [:signature-documentation :text])
+                     descriptors (:descriptors (parse-scip-symbol (:symbol symbol-info)))
+                     declaration-name (java-declaration-name descriptors)]]
            [(:symbol symbol-info)
             {:path (:relative-path document)
              :kind (:kind symbol-info)
-             :arity (signature-arity signature)
+             :arity (signature-arity signature declaration-name)
              :signature_documentation signature}]))})
 
 (defn- java-descriptors->unit

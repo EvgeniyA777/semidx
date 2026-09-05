@@ -283,20 +283,42 @@
 
 (deftest signature-arity-counts-parameters-not-commas
   (testing "plain and empty parameter lists"
-    (is (= 1 (sn/signature-arity "public String handle(String order)")))
-    (is (= 2 (sn/signature-arity "public String handle(String order, int retries)")))
-    (is (= 0 (sn/signature-arity "public void noArgs()")))
-    (is (= 1 (sn/signature-arity "public OrderService(Validator validator)"))))
+    (is (= 1 (sn/signature-arity "public String handle(String order)" "handle")))
+    (is (= 2 (sn/signature-arity "public String handle(String order, int retries)" "handle")))
+    (is (= 0 (sn/signature-arity "public void noArgs()" "noArgs")))
+    (is (= 1 (sn/signature-arity "public OrderService(Validator validator)" "OrderService"))))
 
   (testing "a comma inside a generic or an array does not add an argument"
-    (is (= 1 (sn/signature-arity "public List<String> handleAll(List<String> orders)")))
-    (is (= 2 (sn/signature-arity "int[] f(int[] a, Map<String, List<Integer>> m)"))
+    (is (= 1 (sn/signature-arity "public List<String> handleAll(List<String> orders)" "handleAll")))
+    (is (= 2 (sn/signature-arity "int[] f(int[] a, Map<String, List<Integer>> m)" "f"))
         "the comma inside Map<String, List<Integer>> is nested, not a separator"))
 
-  (testing "no signature text means no arity, never a guess"
-    (is (nil? (sn/signature-arity nil)))
-    (is (nil? (sn/signature-arity "")))
-    (is (nil? (sn/signature-arity "not a signature")))))
+  (testing "an annotation with arguments is not the parameter list"
+    ;; These texts are the real shape scip-java 0.12.3 emits, captured from a
+    ;; scratch project. Reading the annotation's paren group instead of the
+    ;; declaration's was wrong in both directions.
+    (is (= 2 (sn/signature-arity "@Ann(x = 1)\npublic void f(String a, int b)" "f"))
+        "under-counted as 1 before the fix")
+    (is (= 1 (sn/signature-arity "@Ann(x = 2, note = \"two\")\npublic String g(String a)" "g"))
+        "over-counted as 2 before the fix")
+    (is (= 3 (sn/signature-arity "@Ann(x = 3)\npublic Annotated(String a, int b, int c)"
+                                 "Annotated"))
+        "a constructor is located by its class name, which is what the text repeats")
+    (is (= 0 (sn/signature-arity "@Deprecated\npublic void none()" "none"))
+        "a marker annotation has no paren group at all"))
+
+  (testing "the declaration wins over an annotation that repeats its name"
+    (is (= 1 (sn/signature-arity "@f(1)\npublic void f(int x)" "f"))
+        "the last identifier-boundary match is the declaration, not the annotation"))
+
+  (testing "an unlocatable parameter list yields nil so the caller degrades"
+    (is (nil? (sn/signature-arity nil "f")))
+    (is (nil? (sn/signature-arity "" "f")))
+    (is (nil? (sn/signature-arity "not a signature" "f")))
+    (is (nil? (sn/signature-arity "public void f(int x)" nil))
+        "no declaration name means the list cannot be located")
+    (is (nil? (sn/signature-arity "public void f(int x" "f"))
+        "an unbalanced group is not guessed at")))
 
 (defn- java-fixture-index [] (scip/read-index java-fixture-scip))
 

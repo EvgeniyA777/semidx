@@ -254,3 +254,104 @@
           (is (empty? (:facts result))))
         (finally (.delete empty-dir))))
     (println "Java SCIP toolchain not resolved; skipping empty-project test")))
+
+;; --- review regressions (2026-09-05) --------------------------------
+
+(def ^:private annotated-index
+  "A method and a constructor carrying annotations with arguments, spelled the
+  way scip-java 0.12.3 really spells them.
+
+  The signature text and the `\\n` between the annotation and the declaration are
+  ground truth captured from a scratch project through the real toolchain, not
+  invented. Reading the annotation's paren group instead of the declaration's
+  gave `f` arity 1 and `g` arity 2 — wrong in both directions, and enough to mint
+  an exact fact on the wrong overload bucket."
+  {:documents
+   [{:relative-path "src/example/OrderService.java"
+     :symbols [{:symbol "semanticdb maven . . example/Annotated#f()."
+                :kind :method
+                :signature-documentation {:text "@Ann(x = 1)\npublic void f(String a, int b)"}}
+               {:symbol "semanticdb maven . . example/Annotated#g()."
+                :kind :method
+                :signature-documentation
+                {:text "@Ann(x = 2, note = \"two\")\npublic String g(String a)"}}
+               {:symbol "semanticdb maven . . example/Annotated#`<init>`()."
+                :kind :constructor
+                :signature-documentation
+                {:text "@Ann(x = 3)\npublic Annotated(String a, int b, int c)"}}]
+     :occurrences [{:symbol "semanticdb maven . . example/Annotated#f()."
+                    :roles #{:definition} :range [5 16 17]}
+                   {:symbol "semanticdb maven . . example/Annotated#g()."
+                    :roles #{:definition} :range [9 18 19]}
+                   {:symbol "semanticdb maven . . example/Annotated#`<init>`()."
+                    :roles #{:definition} :range [13 11 20]}]}]})
+
+(deftest annotation-arguments-do-not-corrupt-the-arity-in-the-key
+  (let [result (sj/facts-from-index annotated-index {:project-root corpus-root})
+        arity-of (fn [symbol]
+                   (->> (:facts result)
+                        (filter #(= symbol (:symbol (:core_key %))))
+                        first
+                        :core_key
+                        :arity))]
+    (is (= "ready" (:result result)))
+    (is (= 2 (arity-of "example.Annotated#f")))
+    (is (= 1 (arity-of "example.Annotated#g")))
+    (is (= 3 (arity-of "example.Annotated#Annotated"))
+        "an annotated constructor is located by the class name the text repeats")
+
+    (testing "the corrected arity is what the canonical key is built from"
+      (is (= (fa/canonical-fact-key-id
+              {:fact_kind "unit" :language "java"
+               :path "src/example/OrderService.java"
+               :owner "example.Annotated" :symbol "example.Annotated#f"
+               :overload_identity {:arity 2 :signature_precision "arity_only"
+                                   :signature_key nil}})
+             (->> (:facts result)
+                  (filter #(= "example.Annotated#f" (:symbol (:core_key %))))
+                  first
+                  :canonical_fact_key_id))))))
+
+(deftest a-method-with-an-unreadable-signature-degrades-rather-than-guessing
+  (let [index {:documents
+               [{:relative-path "src/example/OrderService.java"
+                 :symbols [{:symbol "semanticdb maven . . example/Odd#mystery()."
+                            :kind :method
+                            :signature-documentation {:text "no parameter list here"}}]
+                 :occurrences [{:symbol "semanticdb maven . . example/Odd#mystery()."
+                                :roles #{:definition} :range [1 0 7]}]}]}
+        result (sj/facts-from-index index {:project-root corpus-root})]
+    (is (empty? (:facts result)) "no exact fact is minted from a guessed arity")
+    (is (= [:arity-unavailable]
+           (distinct (map :reason (:unmapped result)))))))
+
+(deftest a-scip-document-path-cannot-escape-the-project-root
+  (testing "a traversal path is refused without being read"
+    (let [index {:documents
+                 [{:relative-path "../typescript/src/orders.ts"
+                   :symbols []
+                   :occurrences [{:symbol "semanticdb maven . . example/X#y()."
+                                  :roles #{:definition} :range [1 0 1]}]}]}
+          result (sj/facts-from-index index {:project-root corpus-root})]
+      (is (empty? (:facts result)))
+      (is (= ["../typescript/src/orders.ts"] (get-in result [:coverage :invalid_documents])))
+      (is (empty? (get-in result [:coverage :stale_documents]))
+          "an unsafe path is not the same condition as a stale one")
+      (is (false? (get-in result [:coverage :complete])))
+      (let [diagnostic (first (filter #(= :scip_document_path_invalid (:code %))
+                                      (:diagnostics result)))]
+        (is (= :parent_traversal_in_document_path (:reason diagnostic))))))
+
+  (testing "an absolute path degrades instead of throwing"
+    (doseq [[path reason] {"/etc/hosts" :absolute_document_path
+                           "C:\\Windows\\win.ini" :absolute_document_path
+                           "" :blank_document_path}]
+      (is (= {:state :invalid :reason reason}
+             (scip-adapter/document-freshness corpus-root path nil))
+          path)))
+
+  (testing "a legitimate project-relative path is unaffected"
+    (is (= :fresh (:state (scip-adapter/document-freshness
+                           corpus-root "src/example/OrderService.java" nil))))
+    (is (= :missing (:state (scip-adapter/document-freshness
+                             corpus-root "src/example/Missing.java" nil))))))

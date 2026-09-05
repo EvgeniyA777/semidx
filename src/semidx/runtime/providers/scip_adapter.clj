@@ -44,15 +44,56 @@
 ;; Per-document stale gate
 ;; ---------------------------------------------------------------------------
 
+(def ^:private windows-drive-re #"^[A-Za-z]:[\\/]")
+
+(defn document-path-problem
+  "Why a SCIP `Document.relative_path` must not be resolved against the project
+  root, or nil when it is safe to resolve.
+
+  A SCIP artifact is an external input: it may be malformed, produced against a
+  different root, or supplied by a caller. Resolving its paths blindly let a
+  document claim coverage of a file outside the project and still be anchored as
+  fresh exact evidence, and an absolute path threw out of the whole run instead
+  of degrading."
+  [relative-path]
+  (let [p (str relative-path)]
+    (cond
+      (str/blank? p) :blank_document_path
+      (str/starts-with? p "/") :absolute_document_path
+      (str/starts-with? p "\\") :absolute_document_path
+      (re-find windows-drive-re p) :absolute_document_path
+      (some #{".."} (str/split p #"[/\\]")) :parent_traversal_in_document_path)))
+
+(defn- within-root?
+  "True when `relative-path` canonically resolves inside `project-root`.
+
+  Defence in depth behind `document-path-problem`: a symlink can leave the root
+  without any `..` segment. An unresolvable path is treated as outside."
+  [project-root relative-path]
+  (try
+    (let [root (.getCanonicalFile (io/file (str project-root)))
+          target (.getCanonicalFile (io/file root (str relative-path)))]
+      (str/starts-with? (str target) (str root java.io.File/separator)))
+    (catch Exception e
+      (println "cannot canonicalize a SCIP document path:" (.getMessage e))
+      false)))
+
 (defn workspace-digest
   "sha256 of the workspace file for `relative-path` under `project-root`, or nil
   when the file does not exist. Same basis as
   `semidx.runtime.workspace-state/sha256-file`, so a digest here is comparable to
-  workspace freshness."
+  workspace freshness.
+
+  Callers must screen the path with `document-path-problem` first; this returns
+  nil rather than throwing if an unusable path reaches it anyway."
   [project-root relative-path]
-  (let [f (io/file (str project-root) (str relative-path))]
-    (when (.isFile f)
-      (str "sha256:" (workspace-state/sha256-file f)))))
+  (try
+    (let [f (io/file (str project-root) (str relative-path))]
+      (when (.isFile f)
+        (str "sha256:" (workspace-state/sha256-file f))))
+    (catch Exception e
+      (println "cannot digest a SCIP document path:" (.getMessage e))
+      nil)))
 
 (defn document-freshness
   "Classify one SCIP document against the workspace. Returns
@@ -67,16 +108,23 @@
   ADR-046 requires evidence to be tied to the content it describes, so a
   document that cannot be anchored contributes nothing at exact authority. The
   gate is document-level: range-level invalidation is a later refinement
-  (reports/024 finding F2)."
+  (reports/024 finding F2).
+
+  A path that must not be resolved at all — blank, absolute, or escaping the
+  project root — is `:invalid` and is reported rather than digested."
   [project-root relative-path expected-digests]
-  (let [actual (workspace-digest project-root relative-path)
-        expected (get expected-digests relative-path)]
-    (cond
-      (nil? actual) {:state :missing}
-      (and expected (not= expected actual)) {:state :mismatch
-                                             :expected expected
-                                             :actual actual}
-      :else {:state :fresh :content_digest actual})))
+  (if-let [problem (or (document-path-problem relative-path)
+                       (when-not (within-root? project-root relative-path)
+                         :document_escapes_project_root))]
+    {:state :invalid :reason problem}
+    (let [actual (workspace-digest project-root relative-path)
+          expected (get expected-digests relative-path)]
+      (cond
+        (nil? actual) {:state :missing}
+        (and expected (not= expected actual)) {:state :mismatch
+                                               :expected expected
+                                               :actual actual}
+        :else {:state :fresh :content_digest actual}))))
 
 (defn stale-diagnostic [relative-path freshness]
   (case (:state freshness)
@@ -89,7 +137,14 @@
                :expected (:expected freshness)
                :actual (:actual freshness)
                :message (str "SCIP artifact for " relative-path
-                             " does not match the workspace file; dropped from exact facts")}))
+                             " does not match the workspace file; dropped from exact facts")}
+    :invalid {:code :scip_document_path_invalid
+              :document relative-path
+              :reason (:reason freshness)
+              :message (str "SCIP document path " (pr-str relative-path)
+                            " is not a safe project-relative path ("
+                            (name (:reason freshness))
+                            "); dropped without being read")}))
 
 ;; ---------------------------------------------------------------------------
 ;; Arity-only overload guard (plans/018 Stage 4 exit criterion, finding S1a)
@@ -259,7 +314,8 @@
                                                   expected-document-digests)))
                      documents)
         fresh (filterv #(= :fresh (:state (:freshness %))) graded)
-        stale (filterv #(not= :fresh (:state (:freshness %))) graded)
+        invalid (filterv #(= :invalid (:state (:freshness %))) graded)
+        stale (filterv #(contains? #{:missing :mismatch} (:state (:freshness %))) graded)
         digest-by-path (into {} (map (juxt :relative-path
                                            (comp :content_digest :freshness))
                                      fresh))
@@ -274,7 +330,7 @@
                   (withhold-ambiguous-arity-only-overloads (:facts normalized))
                   {:facts (:facts normalized) :withheld [] :diagnostics []})
         covered-paths (mapv :relative-path fresh)
-        complete? (and (empty? stale) (empty? (:withheld guarded)))
+        complete? (and (empty? stale) (empty? invalid) (empty? (:withheld guarded)))
         batches (facts->batches (:facts guarded)
                                 {:provider-id provider-id
                                  :provider-version provider-version
@@ -282,7 +338,7 @@
                                  :complete? complete?})
         arbitrated (fact-arbitration/arbitrate-batches batches)
         diagnostics (vec (concat (map #(stale-diagnostic (:relative-path %) (:freshness %))
-                                      stale)
+                                      (concat stale invalid))
                                  (:diagnostics guarded)
                                  (when-let [s (unmapped-summary (:unmapped normalized))]
                                    [s])))]
@@ -298,6 +354,7 @@
      :diagnostics diagnostics
      :coverage {:covered_paths covered-paths
                 :stale_documents (mapv :relative-path stale)
+                :invalid_documents (mapv :relative-path invalid)
                 :withheld_fact_count (count (:withheld guarded))
                 :complete complete?}
      :unmapped (:unmapped normalized)}))
