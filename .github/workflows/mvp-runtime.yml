@@ -64,6 +64,13 @@ jobs:
           ./scripts/setup-tree-sitter-grammars.sh --write-env-file .tree-sitter.env
           cat .tree-sitter.env >> "$GITHUB_ENV"
 
+      # The benchmark agent's lexical arm shells out to ripgrep, and its
+      # preflight refuses an arm whose tool is missing — which surfaced as the
+      # live-runner contract test failing before any provider call, with an
+      # empty usage matrix and an unresolved price.
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Verify generated gRPC sources
         run: clojure -T:build grpc-verify-generated
 
@@ -165,6 +172,13 @@ jobs:
         run: |
           ./scripts/setup-tree-sitter-grammars.sh --write-env-file .tree-sitter.env
           cat .tree-sitter.env >> "$GITHUB_ENV"
+
+      # The benchmark agent's lexical arm shells out to ripgrep, and its
+      # preflight refuses an arm whose tool is missing — which surfaced as the
+      # live-runner contract test failing before any provider call, with an
+      # empty usage matrix and an unresolved price.
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
 
       - name: Run PostgreSQL Integration Smoke
         env:

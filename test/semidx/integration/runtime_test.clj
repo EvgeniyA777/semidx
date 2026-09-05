@@ -556,8 +556,17 @@
         diag-codes (set (map :code (:diagnostics order-file)))]
     (is (= "elixir" (:language order-file)))
     (is (= "full" (:parser_mode order-file)))
-    (is (or (contains? diag-codes "tree_sitter_missing_grammar")
-            (contains? diag-codes "tree_sitter_unavailable")))
+    ;; The diagnostic this test is named for exists only when the grammar really
+    ;; is missing. CI installs the Elixir grammar, so asserting it there tested
+    ;; the runner's toolchain rather than the fallback behaviour. Assert the
+    ;; named condition when it holds, and its converse otherwise; either way the
+    ;; extraction below must still succeed.
+    (if (str/blank? (str (System/getenv "SEMIDX_TREE_SITTER_ELIXIR_GRAMMAR_PATH")))
+      (is (or (contains? diag-codes "tree_sitter_missing_grammar")
+              (contains? diag-codes "tree_sitter_unavailable"))
+          "a missing grammar must be reported, never silently ignored")
+      (is (not (contains? diag-codes "tree_sitter_missing_grammar"))
+          "with the grammar installed there is nothing missing to report"))
     (is validate-unit-id)
     (is (some #(= "MyApp.Order/process_order" (:symbol %)) callers))))
 
@@ -2406,8 +2415,17 @@
            (shared-language/tree-sitter-cli-path {:tree_sitter_cli_path (.getPath explicit-file)})))
     (is (true? (shared-language/tree-sitter-available? {:tree_sitter_cli_path (.getPath explicit-file)})))
     (is (false? (shared-language/tree-sitter-available? {:tree_sitter_cli_path (.getPath missing-file)})))
-    (is (= (.getPath managed-file)
-           (shared-language/tree-sitter-cli-path {:tree_sitter_grammars_dir (str (io/file tmp-root ".tree-sitter-grammars"))})))))
+    ;; ADR-047 precedence is: explicit option > environment > repo-managed >
+    ;; PATH. An ambient SEMIDX_TREE_SITTER_CLI_PATH therefore outranks
+    ;; :tree_sitter_grammars_dir by design, and CI exports one, so this asserted
+    ;; a branch that only exists on a bare machine. Assert whichever branch the
+    ;; environment actually exercises instead of assuming the bare one.
+    (let [managed-opts {:tree_sitter_grammars_dir (str (io/file tmp-root ".tree-sitter-grammars"))}]
+      (if-let [env-cli (not-empty (str (System/getenv "SEMIDX_TREE_SITTER_CLI_PATH")))]
+        (is (= env-cli (shared-language/tree-sitter-cli-path managed-opts))
+            "an explicit environment CLI outranks a repo-managed grammars dir")
+        (is (= (.getPath managed-file) (shared-language/tree-sitter-cli-path managed-opts))
+            "the repo-managed toolchain wins when nothing more explicit is set")))))
 
 (deftest tree-sitter-parser-path-test
   (let [clj-grammar (System/getenv "SEMIDX_TREE_SITTER_CLOJURE_GRAMMAR_PATH")
