@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-09-01"
+updated: "2026-09-05"
 ---
 
 # Progress Log: Semantic Provider Authority Migration (plans/018)
@@ -42,7 +42,7 @@ and is appended by later stages.
 | 1 — Evidence model and arbitration kernel | **completed** 2026-08-28 — kernel, FactBatch, executable golden parity, and round-trip coverage all delivered |
 | 2 — Provider plan and legacy adapter shadow path | **completed** 2026-08-28 |
 | 3 — TypeScript SCIP vertical slice | **completed** 2026-09-01 — preflight, JVM SCIP reader, SCIP→CanonicalFactKey normalization, the shadow/default-off provider adapter (`scip-typescript`) with per-document stale gate, and the SCIP-vs-Stage-2 shadow comparison harness (`scip-shadow-compare`) with latency/size metrics all delivered. Named deferrals: SCIP `Relationship`/implementations and `call/*` facts (none in corpus / no relation type), and catalog/planner integration of a project-scoped provider. |
-| 4 — Java SCIP vertical slice | not started |
+| 4 — Java SCIP vertical slice | **in progress** 2026-09-05 — toolchain and symbol-grammar preflight done against real scip-java; the Stage 0 SCIP spelling was found false and corrected, Variant C's typed-refinement premise invalidated for Java, and a same-arity false-identity defect reproduced. Adapter not yet built. |
 | 5–7 | not started |
 
 ## Scope Executed (Stage 0)
@@ -1482,4 +1482,197 @@ fallback_executor_or_model: Sonnet 5 for the toolchain/adapter plumbing; not for
 model_availability_checked_at: not checked this session.
 confidence: high (the seam is proven for TypeScript; Stage 4 is a reuse with a
   harder identity surface)
+```
+
+---
+
+# Stage 4 — Java SCIP: Toolchain And Identity Preflight (2026-09-05)
+
+## Scope of this session
+
+Preflight only, **documentation and fixtures**. No production source changed and
+no adapter was built. This session answered the two questions Stage 4 could not
+start without, and both answers changed an owner-approved contract, so they were
+recorded and confirmed before any code.
+
+## What was verified, and how
+
+`scip-java` was run end to end over the protected Java corpus and its output read
+with the existing `semidx.runtime.scip` reader:
+
+1. `javac` with the `semanticdb-javac` 0.12.3 compiler plugin over
+   `fixtures/provider-authority/corpus/java` -> two `.semanticdb` files.
+2. A ~20-line Java driver calling `ScipSemanticdb.run` from `scip-semanticdb`
+   0.12.3 -> `index.scip`.
+3. `semidx.runtime.scip/read-index` on that artifact.
+
+No build tool, no `pom.xml`, no coursier, and no Scala CLI were needed.
+
+## Finding S1 (High) — the Stage 0 scip-java spelling was false
+
+The fixture seeded `scip-java maven . . example/OrderService#handle(java.lang.String).`
+with `signature_key "java.lang.String"`, marked `ground_truth: false` and
+explicitly flagged for re-verification. Real output:
+
+| Claim | Fixture | Real scip-java 0.12.3 |
+| --- | --- | --- |
+| scheme | `scip-java` | `semanticdb` |
+| `handle(String)` | `...#handle(java.lang.String).` | `...#handle().` |
+| `handle(String,int)` | typed signature | `...#handle(+1).` |
+| `signature_key` | `"java.lang.String"` | absent — no types in the symbol |
+
+Overloads are disambiguated by a **source-order ordinal**, counted over the
+method name across all arities. Neither parameter types nor arity are in the
+moniker. Arity and a human-readable signature come only from
+`SymbolInformation.signature_documentation.text`
+(`"public String handle(String order, int retries)"`) — **simple** type names
+with parameter names included, which is the shape F1 rejected as Variant B and
+is close to what the regex tier already produces. Fully-qualified types exist
+only as separate occurrences inside the method's declaration range.
+
+Two further Java facts, both relevant to the adapter:
+
+- a Java moniker carries the **package** path (`example/`), not the source file
+  path, so the path must come from `Document.relative_path` — unlike TypeScript,
+  where the moniker reconstructs it;
+- JDK symbols carry a non-`.` package (`semanticdb maven jdk 17 java/lang/String#`)
+  and are already excluded as external by the existing rule.
+
+**Resolution — owner decision 2026-09-05.** Variant C's claim that "the exact
+tier adds `signature_precision=typed` with a fully-qualified, type-only
+`signature_key`" is **invalidated for Java**. The Java exact tier commits:
+
+```clojure
+{:arity n :signature_precision "arity_only" :signature_key nil :ordinal nil}
+```
+
+The native symbol, the `+N` disambiguator, and the raw signature documentation
+are evidence only. Reconstructing FQ types from occurrence layout was considered
+and rejected as guessing, which the plan forbids. Variant C's two-layer model
+(core key + optional refinement) is unchanged and still correct; only the premise
+that a Java provider can supply the refinement is withdrawn.
+
+The fixture is corrected and the scip-java spelling is now ground truth. The
+`java-lsp` spelling was **lowered** to the same `arity_only` floor rather than
+left asserting a typed capability: it is still unverified, and asserting an
+unverified exact-tier capability is precisely the mistake this finding repairs.
+Stage 5 may raise it only against real jdtls output.
+
+## Finding S2 (High) — same-arity overloads silently merge into a false exact fact
+
+Raised by the owner against the handoff's claim that same-arity overloads "fall
+into the already-implemented F1a rule". The claim was wrong, and the defect was
+reproduced.
+
+`arbitrate-facts` partitions a core-key group by distinct typed `signature_key`s.
+The F1a split and its `:arity_ambiguous_heuristic` diagnostic fire only when the
+group has **two or more** distinct typed signatures. With every Java exact fact
+now at `arity_only`, a group of same-arity overloads has **zero** typed
+signatures, so the common-case branch runs.
+
+Reproduced with two arity-1 facts on `example.OrderService#handle`, both
+`arity_only`, native symbols `handle().` and `handle(+1).`:
+
+```text
+canonical facts: 1
+diagnostics:     []
+authority:       exact
+```
+
+Two genuinely distinct overloads collapsed into one canonical fact at exact
+authority with no diagnostic — a false exact identity.
+
+**Resolution — owner decision 2026-09-05.** This is a hard Stage 4 requirement,
+recorded in the plan's Stage 4 exit criteria and specified in the fixture's new
+`same_arity_overloads_must_not_silently_merge` section. The Java adapter must
+detect an all-`arity_only` group sharing
+`(language, path, owner, symbol, arity)`, never emit one exact canonical fact for
+it, emit a diagnostic naming the group, and withhold the exact contribution so
+the lower tiers supply the units.
+
+The protected corpus has no same-arity overload pair (`handle` is arity 1 and
+arity 2). Adding one would change the Stage 0 extraction baseline, so the case is
+specified and will be tested synthetically. The fixture section is marked
+`specification_for_stage_4` and is executed by the adapter slice, not by this
+one — an unexecuted golden is not a golden.
+
+## Toolchain decision (owner, 2026-09-05): external process, repo-managed
+
+`scip-semanticdb` is a small Java library (3 dependencies) with no CLI entry
+point; the full `scip-java` CLI is a heavy Scala artifact pulling coursier and an
+embedded Kotlin compiler. Two options were weighed: add `scip-semanticdb` to
+`deps.edn` and call it in process, or install pinned jars into a gitignored
+toolchain directory and invoke `javac`/`java` as external processes.
+
+**External process, repo-managed, was chosen.** It mirrors ADR-047 and the
+Stage 3 TypeScript pattern, keeps Sourcegraph's libraries and their
+protobuf-java out of the semidx runtime classpath (the runtime already carries
+protobuf 3.25.1 via gRPC; `scip-semanticdb` declares 3.15.6), keeps Java SCIP
+indexing an external provider toolchain rather than part of the core runtime, and
+gives a clean failure mode: toolchain missing or failing -> provider unavailable
+diagnostic -> fallback to existing extraction.
+
+## Deliverables
+
+| Artifact | Change |
+| --- | --- |
+| `fixtures/provider-authority/identity/java-overload-canonical-key.json` | scip-java spelling corrected to ground truth; new `scip_java_verified_contract` section; `java-lsp` lowered to the unverified `arity_only` floor; expected merged key now `arity_only`; per-overload `scip_java_ground_truth` added to each distinct fact; new `same_arity_overloads_must_not_silently_merge` specification; normalization obligations rewritten |
+| `plans/018_semantic_provider_authority_migration_plan.md` | `CanonicalFactKey` contract example annotated as illustrative-not-Java; Stage 4 gains the amendment, the external-toolchain deliverable, and the same-arity exit criterion |
+| `reports/024` (this section) | findings S1 and S2, both owner decisions, and the evidence |
+
+## Verification
+
+- `clojure -M:test` targeted `semidx.runtime.fact-arbitration-test`: **22 tests,
+  114 assertions, 0 failures** — the corrected fixture is still executed green as
+  a golden, confirming the correction is consistent with the kernel.
+- JSON validity of the corrected fixture: pass (`python3 -m json.tool`).
+- Ground truth captured from real tool output via the project nREPL, not seeded:
+  every claim in `scip_java_verified_contract` is read from the `.scip` artifact
+  produced in this session.
+- S2 reproduced in the REPL against the committed kernel before it was written up.
+- **Not run**: full suite and contract validation — this session changed no
+  source; they run with the adapter slice.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 4 preflight — Java SCIP toolchain proven end to end, symbol
+  grammar verified, Stage 0 fixture corrected, Variant C invalidated for Java,
+  same-arity false-identity defect reproduced and specified
+recommended_next_stage: Stage 4 continued — repo-managed external Java SCIP
+  toolchain (setup script + pinned jars + committed driver + corpus .scip
+  fixture), the language bridge refactor in scip-normalize, the Java SCIP
+  provider adapter, and the same-arity ambiguity guard
+recommended_executor: Claude Code team lead, no Fable, no Explore agent
+recommended_model: Claude Opus for the same-arity guard and the language-bridge
+  refactor (identity-critical); Sonnet for the setup script, driver, and fixture
+  plumbing
+effort: high
+effort_justification: the identity questions are now settled on evidence, but the
+  same-arity guard is a correctness gate against a reproduced false-exact-identity
+  defect, and the bridge refactor must factor TypeScript-specific path
+  reconstruction out of scip-normalize without regressing the TypeScript goldens.
+rationale: both blocking contract questions are answered and recorded, and the
+  toolchain is proven runnable on this machine, so the remaining work is bounded
+  implementation against a now-truthful specification.
+prerequisites_or_blockers:
+  - scip-normalize hard-codes "typescript" and reconstructs the path from the
+    moniker; Java needs the path from Document.relative_path and an owner/symbol
+    bridge over package+class descriptors. parse-scip-symbol needs NO change: it
+    already parses the Java grammar including the +N disambiguator and the
+    backtick-escaped <init>.
+  - the same-arity guard must be executed against the fixture's
+    same_arity_overloads_must_not_silently_merge section, which is currently
+    specification_for_stage_4 and not yet a golden.
+  - arity must be parsed from signature_documentation.text; a method whose arity
+    cannot be determined must degrade, not guess.
+  - still shadow/default-off; no default-path wiring until Stage 6.
+file_ownership_and_conflict_risk: LOW-MEDIUM. The next slice adds a setup script,
+  a committed Java driver, a Java corpus .scip fixture, a Java branch in the SCIP
+  normalization boundary, an adapter, and tests. The shadow-comparison harness is
+  language-neutral and needs no change.
+fallback_executor_or_model: Sonnet for toolchain and fixture plumbing; not for
+  the same-arity guard.
+model_availability_checked_at: not checked this session.
+confidence: high (both contract questions resolved on verified evidence)
 ```

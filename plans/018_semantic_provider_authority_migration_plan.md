@@ -4,7 +4,7 @@ doc_type: "architecture_plan"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-08-28"
+updated: "2026-09-05"
 ---
 
 # Architecture Plan: Semantic Provider Authority Migration
@@ -333,6 +333,15 @@ checks. They are not unconditional confidence grants.
  :dispatch_identity nil}
 ```
 
+The `signature_key` above is illustrative of the two-layer model, not of what
+any current Java provider emits. Verified 2026-09-05: `scip-java` supplies no
+parameter types in its symbols — it disambiguates overloads with a source-order
+ordinal — so the Java exact tier commits `signature_precision: "arity_only"`
+with a `nil` `signature_key`, exactly like the heuristic tier. The two-layer
+model is unchanged; only the assumption that the Java exact tier can supply the
+typed refinement is withdrawn. See Stage 4 and
+`fixtures/provider-authority/identity/java-overload-canonical-key.json`.
+
 Relation facts use the corresponding provider-neutral form:
 
 ```clojure
@@ -622,12 +631,65 @@ Deliverables and gates mirror Stage 3, with Java-specific coverage for overloads
 constructors, inheritance, static imports, method references, entity fields, and
 field-write relations.
 
+#### Amendment (owner decision, 2026-09-05): Java overload identity is arity-only
+
+Stage 4 preflight indexed the protected Java corpus with real `scip-java`
+(`semanticdb-javac` 0.12.3 + `scip-semanticdb` 0.12.3) and found the Stage 0
+fixture's seeded SCIP spelling to be false. Verified behaviour:
+
+- the symbol scheme is `semanticdb`, not `scip-java`;
+- overloads carry a **source-order ordinal** (`handle().`, `handle(+1).`), not a
+  typed signature; the ordinal counts over the method name across all arities;
+- neither parameter types nor arity are recoverable from the moniker;
+- arity and a human-readable signature come only from
+  `SymbolInformation.signature_documentation.text`, whose type names are simple
+  and whose parameter names are included — the shape F1 rejected as Variant B;
+- fully-qualified parameter types exist only as separate occurrences inside the
+  method's declaration range.
+
+Therefore the Java exact tier commits:
+
+```clojure
+{:arity n :signature_precision "arity_only" :signature_key nil :ordinal nil}
+```
+
+The native symbol, the `+N` disambiguator, and the raw signature documentation
+are **evidence only** and must never enter the canonical key. Reconstructing a
+typed signature from occurrence layout is inference, and this plan forbids
+guessing a canonical key; a wrong key is worse than an honest arity-only one.
+
+Additional deliverables:
+
+- A repo-managed **external** Java SCIP toolchain: pinned jars installed by a
+  setup script into a gitignored directory, a committed minimal Java driver
+  (`scip-semanticdb` ships no CLI entry point), and an adapter that invokes
+  `javac` and `java` as external processes. The toolchain is never added to the
+  semidx runtime classpath, mirroring ADR-047 and the Stage 3 TypeScript
+  pattern, so no provider dependency can conflict with the runtime protobuf and
+  gRPC stack.
+- A same-arity ambiguity guard (below).
+
 Exit criteria:
 
 - No TypeScript-specific rule enters the shared SCIP adapter boundary.
 - Java state-invariant facts preserve stable relation identity while gaining
   richer evidence.
 - Provider absence and stale artifacts degrade cleanly.
+- **Same-arity overloads never produce a false exact identity.** With every Java
+  exact fact at `arity_only`, two genuinely distinct same-arity overloads share a
+  core key and carry no typed signature to split on, so the arbitrator's
+  common-case branch would merge them into one exact canonical fact with no
+  diagnostic. This was reproduced on 2026-09-05 and is a hard requirement, not an
+  observation. The Java adapter must:
+  1. detect a group of two or more definition facts sharing
+     `(language, path, owner, symbol, arity)` where every fact is `arity_only`;
+  2. never emit a single exact canonical fact for that group;
+  3. emit a diagnostic naming the ambiguous group; and
+  4. withhold the exact contribution for that group so the lower tiers supply the
+     units, rather than assert an exact identity it cannot justify.
+
+  Non-ambiguous groups are unaffected and still merge with the heuristic tier on
+  the core key.
 
 Commit boundary: Java SCIP provider remains shadow/default-off.
 

@@ -145,7 +145,7 @@ after this memory file.
 - Compact-first staged retrieval is now fully aligned as the canonical public flow: `resolve_context` is compact-first, `expand_context` / `fetch_context_detail` are the explicit later stages, selection artifacts are snapshot-bound, and the implementation/docs/examples line is captured by `ADR-024` plus the completed `plans/002_compact_first_staged_retrieval_plan.md`.
 - `plans/019` is the planned LLM one-shot delivery track: add an external `get_context` facade over the same snapshot-bound staged state machine, retain ContextPacket as the structured source of truth, make Markdown an optional bounded projection, and contribute staged/one-shot strategy adapters to the benchmark substrate owned exclusively by `plans/020`. Its top-level response budget is authoritative, `structured`/`markdown`/diagnostic allocations are disjoint, and usage telemetry distinguishes aggregate from stage accounting. ADR-024 remains current; changing the documented canonical default requires comparative evidence and a new ADR.
 - `plans/020` is in progress and is the exclusive owner of the real-repository task corpus, immutable `BenchmarkRun`/`TaskAttempt` identities, A/B/C/D strategy harness, provider/API/model usage adapters, price schedules, and success-per-cost aggregation. Stage 1 (`returned_tokens` fidelity) is delivered. Stage 0 now separates harness executor models from `evaluated_*` attempt identities, uses `implicit_cache_observed_v1` (no explicit cache objects; implicit reads recorded), and gates the current Gemini 2.5 schedule at 2026-10-16; calibration/final lock remain pending, and Stage 2 has not started.
-- `plans/018` is in progress. Stages 0-3 are delivered and committed (see the numbered next-steps section below for the detail). Stage 3 (TypeScript SCIP) is complete: toolchain preflight, JVM SCIP reader, SCIP->CanonicalFactKey normalization, the shadow/default-off SCIP provider adapter (`semidx.runtime.providers.scip-typescript`) with a per-document stale gate, and the SCIP-vs-Stage-2 shadow comparison harness (`semidx.runtime.providers.scip-shadow-compare`) with latency/size metrics. The next step is Stage 4 (Java SCIP). All of it is additive and default-off: `adapters/parse-file` still owns default Java/TypeScript extraction, and the SCIP adapter is a standalone entry point not wired into `providers.clj` / `provider-selection` / `provider-execution` (project-level batch index vs per-file parse; catalog/planner integration is a scheduled open slice). Multi-provider evidence must normalize to a provider-neutral `CanonicalFactKey` before arbitration; provider ids, native symbols, source identity, and mutable evidence are not stable merge keys. Cross-provider Java overload and TypeScript re-export identity fixtures are Stage 0/1 admission gates (executed as goldens).
+- `plans/018` is in progress. Stages 0-3 are delivered and committed (see the numbered next-steps section below for the detail). Stage 3 (TypeScript SCIP) is complete: toolchain preflight, JVM SCIP reader, SCIP->CanonicalFactKey normalization, the shadow/default-off SCIP provider adapter (`semidx.runtime.providers.scip-typescript`) with a per-document stale gate, and the SCIP-vs-Stage-2 shadow comparison harness (`semidx.runtime.providers.scip-shadow-compare`) with latency/size metrics. Stage 4 (Java SCIP) is in progress: the toolchain and symbol-grammar preflight is done and it invalidated Variant C's typed-refinement premise for Java and reproduced a same-arity false-exact-identity defect (both recorded below); the adapter is not yet built. All of it is additive and default-off: `adapters/parse-file` still owns default Java/TypeScript extraction, and the SCIP adapter is a standalone entry point not wired into `providers.clj` / `provider-selection` / `provider-execution` (project-level batch index vs per-file parse; catalog/planner integration is a scheduled open slice). Multi-provider evidence must normalize to a provider-neutral `CanonicalFactKey` before arbitration; provider ids, native symbols, source identity, and mutable evidence are not stable merge keys. Cross-provider Java overload and TypeScript re-export identity fixtures are Stage 0/1 admission gates (executed as goldens).
 - `plans/007` remains an active architecture reference, not an executable queue. It closes only after its continuation ownership, freshness/lifecycle, provider-catalog, relation-parity, public-boundary, and documentation-handoff gates have recorded evidence; a future successor must be self-contained rather than merely linked. On closure its frontmatter becomes `completed` / `historical_reference_only`, and active implementation must use the named successor plans and ADRs instead.
 - Stage execution routing is explicit in `plans/018`, `plans/019`, and `plans/020`: Claude Code owns the provider-authority track, while Antigravity owns the benchmark and one-shot delivery tracks. High effort is allowed when justified by contract irreversibility, identity/arbitration, freshness, benchmark verdicts, public defaults, conflicting evidence, or repeated verification failures, and a high-effort handoff must record its concrete justification. Every stage-closing model must read the candidate next stage, cross-plan gates, progress/MEMORY/SPEC state, completed diff and checks, file ownership, and current model/quota constraints, then record a `NextStageRoutingRecommendation`; it may recommend `stop` or `defer` and never auto-bypasses an admission gate.
 - Dedicated `impact_analysis` now computes impact hints directly from the resolved selection artifact instead of reading `expand_context`'s budget-gated `:impact_hints` field; it must return a non-null map with `:callers`, `:dependents`, `:related_tests`, and `:risky_neighbors` vectors even when `expand_context` omits impact hints for token-budget reasons.
@@ -400,6 +400,38 @@ after this memory file.
    a TS regression (the identity fixtures + this harness are the guard).
    Verification: `clojure -M:test` 510 tests / 2928 assertions / 0 failures; the
    end-to-end tests run the real CLI and are skipped when it does not resolve.
+   **Stage 4 preflight (2026-09-05) — two owner decisions that changed approved
+   contracts.** Real `scip-java` (`semanticdb-javac` 0.12.3 + `scip-semanticdb`
+   0.12.3) was run over the protected Java corpus; the Stage 0 SCIP spelling was
+   false. Verified: the scheme is `semanticdb` (not `scip-java`); overloads carry
+   a **source-order ordinal** (`handle().`, `handle(+1).`) counted over the method
+   name across all arities, **not** a typed signature; neither parameter types nor
+   arity are in the moniker; arity and a signature string come only from
+   `SymbolInformation.signature_documentation.text`, whose types are simple and
+   whose param names are included; FQ types exist only as separate occurrences
+   inside the declaration range; a Java moniker carries the **package** path, not
+   the file path (path must come from `Document.relative_path`, unlike
+   TypeScript). **Decision 1: Variant C's typed-refinement claim is INVALIDATED
+   FOR JAVA** — the Java exact tier commits
+   `{:arity n :signature_precision "arity_only" :signature_key nil :ordinal nil}`;
+   native symbol, `+N` disambiguator, and signature documentation are evidence
+   only; reconstructing FQ types from occurrence layout was rejected as guessing.
+   Variant C's two-layer model itself is unchanged. **Decision 2: same-arity
+   overloads must not silently merge (reproduced defect).** With every Java exact
+   fact at `arity_only`, a same-arity group has zero typed signatures, so
+   `arbitrate-facts` takes its common-case branch and merges two genuinely
+   distinct overloads into ONE canonical fact at exact authority with ZERO
+   diagnostics — a false exact identity, reproduced in the REPL. The Java adapter
+   must detect an all-`arity_only` group sharing
+   `(language, path, owner, symbol, arity)`, never emit one exact fact for it,
+   emit a diagnostic, and withhold the exact contribution so lower tiers supply
+   the units. This is a Stage 4 exit criterion. **Toolchain decision: external
+   process, repo-managed** — pinned jars in a gitignored dir + a committed minimal
+   Java driver (`scip-semanticdb` has no CLI main), invoked as external
+   `javac`/`java` processes; never on the semidx runtime classpath (it declares
+   protobuf 3.15.6 against our 3.25.1 via gRPC). No build tool, `pom.xml`,
+   coursier, or Scala CLI needed. `parse-scip-symbol` needs NO change: it already
+   parses the Java grammar including `+N` and backtick-escaped `<init>`.
 3. Execute `plans/019` as an additive one-shot delivery track after its budget
    ledger and the `plans/020` run/strategy contracts are accepted. Its evaluation
    stage contributes adapters to `plans/020`; it does not own a second corpus,
