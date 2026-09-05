@@ -42,7 +42,7 @@ and is appended by later stages.
 | 1 — Evidence model and arbitration kernel | **completed** 2026-08-28 — kernel, FactBatch, executable golden parity, and round-trip coverage all delivered |
 | 2 — Provider plan and legacy adapter shadow path | **completed** 2026-08-28 |
 | 3 — TypeScript SCIP vertical slice | **completed** 2026-09-01 — preflight, JVM SCIP reader, SCIP→CanonicalFactKey normalization, the shadow/default-off provider adapter (`scip-typescript`) with per-document stale gate, and the SCIP-vs-Stage-2 shadow comparison harness (`scip-shadow-compare`) with latency/size metrics all delivered. Named deferrals: SCIP `Relationship`/implementations and `call/*` facts (none in corpus / no relation type), and catalog/planner integration of a project-scoped provider. |
-| 4 — Java SCIP vertical slice | **completed** 2026-09-05 — preflight (fixture corrected, Variant C invalidated for Java, same-arity defect reproduced), repo-managed external toolchain, language bridges in `scip-normalize`, the `scip-java` adapter, and the same-arity overload guard. Named deferrals: nested types, `Relationship`/implementations, and catalog/planner integration of a project-scoped provider. |
+| 4 — Java SCIP vertical slice | **completed** 2026-09-05 (review findings S3/S4 fixed same day) — preflight (fixture corrected, Variant C invalidated for Java, same-arity defect reproduced), repo-managed external toolchain, language bridges in `scip-normalize`, the `scip-java` adapter, and the same-arity overload guard. Named deferrals: nested types, `Relationship`/implementations, and catalog/planner integration of a project-scoped provider. |
 | 5–7 | not started |
 
 ## Scope Executed (Stage 0)
@@ -1871,3 +1871,72 @@ fallback_executor_or_model: Sonnet for toolchain and fixture plumbing; not for
 model_availability_checked_at: not checked this session.
 confidence: high for the delivered slice; the next-stage choice is the owner's
 ```
+
+## Review Repair (2026-09-05, Stage 4)
+
+External review of the Stage 4 slice raised one High and one Medium finding.
+Both were reproduced before being fixed, and both turned out to be worse than
+reported.
+
+| ID | Severity | Finding | Resolution |
+| --- | --- | --- | --- |
+| S3 | **High** | `signature-arity` took the **first** `(` in `signature_documentation` as the Java parameter list, but scip-java prefixes the declaration with its annotations. An annotation with arguments is read instead of the parameter list, so an exact fact can land on the wrong arity bucket or collide with another overload. | **Fixed.** The parameter list is now located from the declaration name. |
+| S4 | Medium | The stale gate resolved `Document.relative_path` against the project root without validating it, so a `..` segment anchored exact evidence to a file outside the project. | **Fixed.** Unsafe paths are `:invalid`, dropped unread, and reported. |
+
+### S3 — verified, and wrong in both directions
+
+The review reported an under-count. A scratch project run through the real
+toolchain showed the error also over-counts, which is worse: it silently moves a
+fact onto an arity bucket that a *different* overload legitimately owns.
+
+| real signature documentation (scip-java 0.12.3) | real arity | old result |
+| --- | --- | --- |
+| `@Ann(x = 1)` + `public void f(String a, int b)` | 2 | **1** |
+| `@Ann(x = 2, note = "two")` + `public String g(String a)` | 1 | **2** |
+| `@Ann(x = 3)` + `public Annotated(String a, int b, int c)` | 3 | **1** |
+| `public void plain(String a, int b)` (no annotation) | 2 | 2 |
+
+`signature-arity` now takes the declaration name, matches it at an identifier
+boundary, requires a directly following `(`, and takes the **last** such match —
+everything that can repeat the name (annotations, the return type) precedes the
+declaration, so the last match is the declaration's own. Constructors are
+located by the class name, which is what the signature text repeats where the
+symbol says `<init>`; `java-index-context` derives that name from the parsed
+symbol. When the list cannot be located the function returns nil and the caller
+degrades to `:arity-unavailable`, per the plan's rule that a canonical key is
+never guessed.
+
+All four probe cases are correct after the fix (2, 1, 3, 2).
+
+### S4 — verified, and it threw rather than degraded
+
+Two behaviours, both reproduced:
+
+```text
+"../typescript/src/orders.ts" -> {:state :fresh :content_digest "sha256:ef1db2..."}
+"/etc/hosts"                  -> IllegalArgumentException: not a relative path
+```
+
+The first anchored exact evidence to a file in the *TypeScript* corpus, outside
+the Java project root. The second took the whole run down instead of degrading —
+a SCIP artifact is an external input and must never be able to do that.
+
+`document-path-problem` now rejects blank, absolute, Windows-drive, and any
+`..`-segment path, and a canonical containment check follows as defence in depth
+against symlinks, which need no `..` to escape. Such a document is `:invalid`,
+is dropped **without being read**, and surfaces as `:scip_document_path_invalid`
+with its reason. It is tracked in a new `coverage.invalid_documents` field
+rather than folded into `stale_documents`, because an unsafe path is a different
+condition from a stale one. `workspace-digest` no longer throws.
+
+### Verification
+
+- `clojure -M:test`: **533 tests, 3077 assertions, 0 failures, 0 errors**
+  (was 530 / 3053; +3 tests).
+- Regression tests use the signature text captured from the real toolchain, and
+  cover the adversarial case where the annotation repeats the method name
+  and an unbalanced paren group.
+- `./scripts/validate-contracts.sh`: ok, 72 files. `git diff --check` clean.
+  English-only clean.
+- `./scripts/scip-java-corpus-snapshot.sh` regenerates the committed fixture
+  byte-identically after the change.

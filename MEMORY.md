@@ -475,6 +475,27 @@ after this memory file.
    decision** between Stage 5 (LSP overlay) and a consolidation slice; Stage 5
    must not assume the `java-lsp` typed-signature capability, which the fixture
    deliberately holds at the `arity_only` floor pending real jdtls output.
+   **Stage 4 review repair (2026-09-05), two findings, both reproduced first and
+   both worse than reported.** S3 (High): `signature-arity` used the FIRST paren
+   in `signature_documentation`, but scip-java prefixes the declaration with its
+   annotations, so `@Ann(x = 1)` was read as the parameter list — wrong in BOTH
+   directions (`f(String,int)` -> 1, `g(String)` -> 2, annotated 3-arg
+   constructor -> 1), which can land an exact fact on an arity bucket another
+   overload owns. Fixed: the parameter list is located from the declaration name
+   (identifier-boundary match, directly followed by `(`, LAST match wins because
+   annotations and the return type precede the declaration); constructors are
+   located by the class name the text repeats where the symbol says `<init>`;
+   unlocatable -> nil -> `:arity-unavailable` degrade. S4 (Medium): the stale
+   gate joined project-root with `Document.relative_path` unvalidated, so
+   `"../typescript/src/orders.ts"` returned `:fresh` while digesting a file
+   OUTSIDE the project, and `"/etc/hosts"` THREW instead of degrading. Fixed:
+   `scip-adapter/document-path-problem` rejects blank, absolute, Windows-drive,
+   and any `..` segment, with a canonical containment check as defence in depth
+   against symlinks; such a document is `:invalid`, dropped without being read,
+   reported as `:scip_document_path_invalid`, and tracked in a new
+   `coverage.invalid_documents` field (an unsafe path is not a stale one);
+   `workspace-digest` no longer throws. Suite after repair: 533 tests / 3077
+   assertions / 0 failures.
 3. Execute `plans/019` as an additive one-shot delivery track after its budget
    ledger and the `plans/020` run/strategy contracts are accepted. Its evaluation
    stage contributes adapters to `plans/020`; it does not own a second corpus,
