@@ -4,10 +4,12 @@ set -eu
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-clojure -M:ccc refresh --root "$repo_root" --changed >/dev/null
-if ! git diff --quiet -- docs/code-context.md; then
-  echo "code context summary changed; stage docs/code-context.md and retry push" >&2
-  exit 1
+if [ -f docs/code-context.md ] && [ -f deps.edn ]; then
+  clojure -M:ccc refresh --root "$repo_root" --changed >/dev/null
+  if ! git diff --quiet -- docs/code-context.md; then
+    echo "code context summary changed; stage docs/code-context.md and retry push" >&2
+    exit 1
+  fi
 fi
 
 status=0
