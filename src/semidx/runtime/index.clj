@@ -48,65 +48,216 @@
    {}
    units))
 
-(defn- parse-files [root-path paths parser-opts]
-  (letfn [(distinct-vec [xs]
-            (->> xs (remove nil?) distinct vec))
-          (enrich-elixir-use-imports [{:keys [files units diagnostics relations]}]
-            (let [module->use-imports (->> (vals files)
-                                           (filter #(= "elixir" (:language %)))
-                                           (keep (fn [{:keys [module use_expansion_imports]}]
-                                                   (when (and (seq module) (seq use_expansion_imports))
-                                                     [module use_expansion_imports])))
-                                           (into {}))
-                  files* (reduce-kv (fn [acc path {:keys [language imports use_modules] :as file-rec}]
-                                      (if (and (= "elixir" language) (seq use_modules))
-                                        (let [implicit-imports (->> use_modules
-                                                                    (mapcat #(get module->use-imports % []))
-                                                                    distinct-vec)]
-                                          (assoc acc path
-                                                 (assoc file-rec
-                                                        :imports (distinct-vec (concat imports implicit-imports)))))
-                                        (assoc acc path file-rec)))
-                                    {}
-                                    files)
-                  units* (mapv (fn [unit]
-                                 (let [imports* (get-in files* [(:path unit) :imports])]
-                                   (if (and (= "elixir" (get-in files* [(:path unit) :language]))
-                                            (seq imports*))
-                                     (assoc unit :imports imports*)
-                                     unit)))
-                               units)]
-              {:files files*
-               :units units*
-               :diagnostics diagnostics
-               :relations relations}))]
-    (adapters/with-parser-context
-     root-path
-     paths
-     parser-opts
-     (fn [context-parser-opts]
-       (->> paths
-            (reduce
-             (fn [acc path]
-               (let [parsed (adapters/parse-file root-path path context-parser-opts)
-                     file-rec {:path path
-                               :language (:language parsed)
-                               :module (:module parsed)
-                               :imports (:imports parsed)
-                               :use_modules (:use_modules parsed)
-                               :use_expansion_imports (:use_expansion_imports parsed)
-                               :test_target_modules (:test_target_modules parsed)
-                               :semantic_pipeline (:semantic_pipeline parsed)
-                               :parser_mode (:parser_mode parsed)
-                               :diagnostics (:diagnostics parsed)}]
-                 (-> acc
-                     (update :files assoc path file-rec)
-                     (update :units into (:units parsed))
-                     (update :relations into (:relations parsed))
-                     (update :diagnostics into
-                             (map (fn [d] (assoc d :path path)) (:diagnostics parsed))))))
-             {:files {} :units [] :diagnostics [] :relations []})
-            enrich-elixir-use-imports)))))
+(def provider-pipeline-modes
+  "How the plans/018 provider pipeline participates in an index build.
+
+  `:authority` makes the provider plan own default extraction for Java and
+  TypeScript: arbitrated facts upgrade the units the parse produced, supply the
+  ones it missed, and a unit whose only evidence is heuristic is labelled
+  `fallback`. `:shadow` runs the pipeline alongside the real parse and records
+  what it would have produced, changing no unit. `:off` is the default and the
+  rollback: not a single provider is planned or executed and the build is what it
+  was before this seam existed.
+
+  Every mode is part of workspace identity (Stage 6.3), so a snapshot built under
+  one is never served to a build asking for another. Making `:authority` the
+  default therefore costs every existing workspace exactly one rebuild, reported
+  as `authority_model_changed` — see `default-provider-pipeline-mode` for why
+  that flip has not happened yet."
+  #{:off :shadow :authority})
+
+(def default-provider-pipeline-mode
+  "The mode a build gets when it asks for nothing, and an unrecognised value
+  resolves here too rather than to `:off`: since the flip, `:off` is a deliberate
+  opt-out from the semantic tier and a typo must not silently grant it.
+
+  `:authority` since 2026-09-08. The first attempt at this flip was reverted the
+  same day because Stage 6.2 wrote `parser_mode \"fallback\"` onto heuristic
+  units, which the rest of the system reads as \"the parser could not extract
+  structure\" — collapsing the confidence ceiling and switching off impact
+  analysis and the state-invariant packet for every Java workspace without a
+  semantic toolchain. `bugs/005` separated the two meanings: the evidence tier
+  lives on `:authority`, `parser_mode` still means extraction failure, and the
+  flip landed on the second attempt."
+  :authority)
+
+(defn provider-pipeline-mode [parser-opts]
+  (let [mode (or (:provider_pipeline parser-opts)
+                 (:provider-pipeline parser-opts))
+        mode (cond-> mode (string? mode) keyword)]
+    (if (contains? provider-pipeline-modes mode)
+      mode
+      default-provider-pipeline-mode)))
+
+(defn- provider-shadow-observation
+  "Run the provider pipeline over one build's eligible paths, project tier first.
+
+  Project-scoped providers index a repository once and then cover many of its
+  documents, so they have to run here rather than per file. Without their
+  coverage the per-file plan reaches only the locally probed tiers — tree-sitter
+  and regex — and the observation has nothing to compare itself against, which
+  was the state Stage 6a shipped in.
+
+  Failure is contained on purpose: a shadow observation must never fail a real
+  index build. A contained failure marks every eligible path failed rather than
+  quietly shrinking the count, so a broken seam cannot read as a small clean
+  run."
+  [root-path paths parser-opts]
+  (let [started (System/nanoTime)
+        elapsed-ms #(/ (double (- (System/nanoTime) started)) 1e6)]
+    (try
+      (let [result ((requiring-resolve 'semidx.runtime.provider-batch/facts-for-project)
+                    {:root_path root-path
+                     :paths paths
+                     :parser_opts parser-opts})]
+        ;; measured after the run, not beside it: a map literal evaluates its
+        ;; values in order, so reading the clock in the same map reports zero
+        {:elapsed_ms (elapsed-ms)
+         :result result})
+      (catch Throwable t
+        {:elapsed_ms (elapsed-ms)
+         :failed_paths (vec paths)
+         :error (or (.getMessage t) (str (class t)))}))))
+
+(defn- provider-document-states
+  "Per-provider document coverage, as counts rather than path lists.
+
+  A comparison is unreadable without it: a short `exact_only` list means one
+  thing when the exact tier covered every document and another when it covered
+  two."
+  [batch-result]
+  (into (sorted-map)
+        (map (fn [[provider-id state]]
+               [provider-id (-> state
+                                (update :fresh count)
+                                (update :stale count)
+                                (update :invalid count)
+                                (update :uncovered count))]))
+        (:documents batch-result)))
+
+(defn- provider-comparison-counts
+  "The exact-versus-legacy comparison reduced to counts.
+
+  `scip-shadow-compare/project-report` owns what the comparison means; only its
+  sizes travel on an event, because the symbol lists it also returns are the
+  facts themselves and belong in a snapshot rather than in telemetry."
+  [batch-result]
+  (let [report ((requiring-resolve 'semidx.runtime.providers.scip-shadow-compare/project-report)
+                batch-result)
+        comparison (:comparison report)]
+    {:agreed (count (:agreed comparison))
+     :exact_only (count (:exact_only comparison))
+     :legacy_only (count (:legacy_only comparison))
+     :authority_upgrades (count (:authority_upgrade comparison))
+     :multi_provider_symbols (count (get-in report [:co_arbitration :multi_provider_symbols]))}))
+
+(defn provider-shadow-summary
+  "Reduce one build's provider observation to a bounded summary.
+
+  Additive and bounded: counts, authority distribution, document coverage,
+  diagnostic codes, the tier comparison, and latency — never the facts
+  themselves, which would duplicate the snapshot."
+  [{:keys [elapsed_ms result failed_paths error]}]
+  (let [total-ms (Math/round (double (or elapsed_ms 0)))]
+    (if failed_paths
+      {:mode "shadow"
+       :files_observed (count failed_paths)
+       :files_failed (count failed_paths)
+       :fact_count 0
+       :gap_count 0
+       :error_count 0
+       :authorities {}
+       :diagnostic_codes {}
+       :error error
+       :total_elapsed_ms total-ms}
+      (let [files (:files result)
+            facts (mapcat :facts files)]
+        {:mode "shadow"
+         :files_observed (count files)
+         :files_failed 0
+         :fact_count (count facts)
+         :gap_count (reduce + 0 (map #(count (get-in % [:execution :gaps])) files))
+         :error_count (reduce + 0 (map #(count (:errors %)) files))
+         :authorities (into (sorted-map) (frequencies (map :authority facts)))
+         :diagnostic_codes (->> (:diagnostics result)
+                                (map (comp str :code))
+                                frequencies
+                                (into (sorted-map)))
+         :providers (provider-document-states result)
+         :comparison (provider-comparison-counts result)
+         :total_elapsed_ms total-ms}))))
+
+(defn- provider-eligible-paths [paths]
+  (let [descriptors-for (requiring-resolve 'semidx.runtime.providers/descriptors-for)]
+    (filterv #(seq (descriptors-for %)) paths)))
+
+(defn- parse-files
+  ([root-path paths parser-opts]
+   (parse-files root-path paths parser-opts nil))
+  ([root-path paths parser-opts authority-ctx]
+   (letfn [(parse-one [path opts]
+             (if authority-ctx
+               ((requiring-resolve 'semidx.runtime.provider-authority/parse-file)
+                root-path path opts authority-ctx)
+               (adapters/parse-file root-path path opts)))
+           (distinct-vec [xs]
+             (->> xs (remove nil?) distinct vec))
+           (enrich-elixir-use-imports [{:keys [files units diagnostics relations]}]
+             (let [module->use-imports (->> (vals files)
+                                            (filter #(= "elixir" (:language %)))
+                                            (keep (fn [{:keys [module use_expansion_imports]}]
+                                                    (when (and (seq module) (seq use_expansion_imports))
+                                                      [module use_expansion_imports])))
+                                            (into {}))
+                   files* (reduce-kv (fn [acc path {:keys [language imports use_modules] :as file-rec}]
+                                       (if (and (= "elixir" language) (seq use_modules))
+                                         (let [implicit-imports (->> use_modules
+                                                                     (mapcat #(get module->use-imports % []))
+                                                                     distinct-vec)]
+                                           (assoc acc path
+                                                  (assoc file-rec
+                                                         :imports (distinct-vec (concat imports implicit-imports)))))
+                                         (assoc acc path file-rec)))
+                                     {}
+                                     files)
+                   units* (mapv (fn [unit]
+                                  (let [imports* (get-in files* [(:path unit) :imports])]
+                                    (if (and (= "elixir" (get-in files* [(:path unit) :language]))
+                                             (seq imports*))
+                                      (assoc unit :imports imports*)
+                                      unit)))
+                                units)]
+               {:files files*
+                :units units*
+                :diagnostics diagnostics
+                :relations relations}))]
+     (adapters/with-parser-context
+       root-path
+       paths
+       parser-opts
+       (fn [context-parser-opts]
+         (->> paths
+              (reduce
+               (fn [acc path]
+                 (let [parsed (parse-one path context-parser-opts)
+                       file-rec {:path path
+                                 :language (:language parsed)
+                                 :module (:module parsed)
+                                 :imports (:imports parsed)
+                                 :use_modules (:use_modules parsed)
+                                 :use_expansion_imports (:use_expansion_imports parsed)
+                                 :test_target_modules (:test_target_modules parsed)
+                                 :semantic_pipeline (:semantic_pipeline parsed)
+                                 :parser_mode (:parser_mode parsed)
+                                 :diagnostics (:diagnostics parsed)}]
+                   (-> acc
+                       (update :files assoc path file-rec)
+                       (update :units into (:units parsed))
+                       (update :relations into (:relations parsed))
+                       (update :diagnostics into
+                               (map (fn [d] (assoc d :path path)) (:diagnostics parsed))))))
+               {:files {} :units [] :diagnostics [] :relations []})
+              enrich-elixir-use-imports))))))
 
 (defn- snapshot-file-lines [root-path path]
   (let [f (io/file root-path path)]
@@ -473,41 +624,47 @@
          resolved-relations (resolve-relation-targets (:relations files-data) units-by-id (:files files-data))
          relation-indexes (relations/index-relations resolved-relations)]
      (attach-lifecycle
-      {:root_path root-path
-       :snapshot_id (uuid)
-       :indexed_at (now-iso)
-       :repo_identity repo-identity*
-       :repo_key (:repo_key repo-identity*)
-       :workspace_path (:workspace_path repo-identity*)
-       :workspace_key (:workspace_key repo-identity*)
-       :git_branch (:git_branch repo-identity*)
-       :git_commit (:git_commit repo-identity*)
-       :git_dirty (:git_dirty repo-identity*)
-       :identity_source (:identity_source repo-identity*)
-       :files (:files files-data)
-       :file_snapshots (build-file-snapshots root-path (:files files-data))
-       :diagnostics (:diagnostics files-data)
-       :units units-by-id
-       :unit_order (mapv :unit_id units)
-       :symbol_index (build-symbol-index units)
-       :path_index (index-by :path units)
-       :module_index (index-by :module units)
-       :callers_index callers-index
-       :callees_index callees-index
-       :relations (:relations relation-indexes)
-       :relation_forward_index (:relation_forward_index relation-indexes)
-       :relation_reverse_index (:relation_reverse_index relation-indexes)
-       :relation_diagnostics (:relation_diagnostics relation-indexes)
-       :module_dependents (build-module-dependents (:files files-data))
-       :test_target_index (build-test-target-index (:files files-data))
-       :detected_languages (:detected_languages activation-metadata)
-       :active_languages (:active_languages activation-metadata)
-       :language_fingerprint (:language_fingerprint activation-metadata)
-       :activation_state (:activation_state activation-metadata)
-       :supported_languages (:supported_languages activation-metadata)
-       :selection_hint (:selection_hint activation-metadata)
-       :manual_language_selection (:manual_language_selection activation-metadata)
-       :workspace_state (:workspace_state lifecycle-opts)}
+      (cond->
+       {:root_path root-path
+        :snapshot_id (uuid)
+        :indexed_at (now-iso)
+        :repo_identity repo-identity*
+        :repo_key (:repo_key repo-identity*)
+        :workspace_path (:workspace_path repo-identity*)
+        :workspace_key (:workspace_key repo-identity*)
+        :git_branch (:git_branch repo-identity*)
+        :git_commit (:git_commit repo-identity*)
+        :git_dirty (:git_dirty repo-identity*)
+        :identity_source (:identity_source repo-identity*)
+        :files (:files files-data)
+        :file_snapshots (build-file-snapshots root-path (:files files-data))
+        :diagnostics (:diagnostics files-data)
+        :units units-by-id
+        :unit_order (mapv :unit_id units)
+        :symbol_index (build-symbol-index units)
+        :path_index (index-by :path units)
+        :module_index (index-by :module units)
+        :callers_index callers-index
+        :callees_index callees-index
+        :relations (:relations relation-indexes)
+        :relation_forward_index (:relation_forward_index relation-indexes)
+        :relation_reverse_index (:relation_reverse_index relation-indexes)
+        :relation_diagnostics (:relation_diagnostics relation-indexes)
+        :module_dependents (build-module-dependents (:files files-data))
+        :test_target_index (build-test-target-index (:files files-data))
+        :detected_languages (:detected_languages activation-metadata)
+        :active_languages (:active_languages activation-metadata)
+        :language_fingerprint (:language_fingerprint activation-metadata)
+        :activation_state (:activation_state activation-metadata)
+        :supported_languages (:supported_languages activation-metadata)
+        :selection_hint (:selection_hint activation-metadata)
+        :manual_language_selection (:manual_language_selection activation-metadata)
+        :workspace_state (:workspace_state lifecycle-opts)}
+        ;; plans/018 Stage 6a. Conditional rather than nil-valued: a snapshot is
+        ;; serialized, diffed, and round-tripped, so an always-present key would
+        ;; change the shape of every default build.
+        (:provider_summary files-data)
+        (assoc :provider_summary (:provider_summary files-data)))
       lifecycle-opts))))
 
 (defn- shadow-reuse-mode? [mode]
@@ -631,9 +788,30 @@
       (let [discovered (if (seq (:paths opts))
                          (filtered-paths (normalize-paths (:paths opts)) (:active_languages activation-state))
                          (activation/active-source-paths discovery activation-state))
-            files-data (parse-files root_path discovered parser_opts)
+            ;; plans/018 Stage 6.1. The project tier runs once per build, before
+            ;; parsing, because a SCIP provider indexes a repository in one run;
+            ;; planning it per file would reindex the project once per document.
+            authority-ctx (when (= :authority (provider-pipeline-mode parser_opts))
+                            ((requiring-resolve 'semidx.runtime.provider-authority/build-context)
+                             root_path discovered parser_opts))
+            files-data (parse-files root_path discovered parser_opts authority-ctx)
+            ;; plans/018 Stage 6.4. Both observing modes report on the same key,
+            ;; and `:mode` tells them apart. The authority summary is built from
+            ;; what the build produced rather than by running the pipeline again,
+            ;; which is what borrowing the shadow path here would have cost.
+            provider-summary (case (provider-pipeline-mode parser_opts)
+                               :shadow (let [eligible (provider-eligible-paths discovered)]
+                                         (when (seq eligible)
+                                           (provider-shadow-summary
+                                            (provider-shadow-observation root_path eligible parser_opts))))
+                               :authority (when authority-ctx
+                                            ((requiring-resolve
+                                              'semidx.runtime.provider-authority/build-summary)
+                                             authority-ctx files-data))
+                               nil)
             index (build-index-state root_path
-                                     files-data
+                                     (cond-> files-data
+                                       provider-summary (assoc :provider_summary provider-summary))
                                      {:provenance_source "fresh_build"
                                       :requested_snapshot_id pinned_snapshot_id
                                       :max_snapshot_age_seconds max_snapshot_age_seconds

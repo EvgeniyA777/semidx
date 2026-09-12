@@ -185,6 +185,20 @@
                                        :message "pinned snapshot not found"
                                        :details {:pinned_snapshot_id pinned-id}})))
 
+                  ;; plans/018 Stage 6.3. The authority model a build runs under
+                  ;; is part of workspace identity: the same files indexed under
+                  ;; a different model produce different units and different
+                  ;; labels. Resolved lazily, like every other provider entry
+                  ;; point here, so the lifecycle load path stays free of the
+                  ;; provider namespaces when nobody asks for them.
+                  authority-model (let [parser-opts (or (get-opt opts :parser_opts) {})
+                                        mode ((requiring-resolve
+                                               'semidx.runtime.index/provider-pipeline-mode)
+                                              parser-opts)]
+                                    ((requiring-resolve
+                                      'semidx.runtime.provider-authority/authority-model)
+                                     mode))
+
                   ;; 1. Capture current workspace state (skipped for pinned reuse).
                   current-workspace-state (when-not (seq pinned-id)
                                             (ws/capture-workspace-state
@@ -192,7 +206,8 @@
                                              discovery-profile
                                              "1"
                                              (some-> prior-snapshot :workspace_state)
-                                             active-paths))
+                                             active-paths
+                                             authority-model))
 
                   ;; 3. Decide freshness. Pinned requests short-circuit to reuse and
                   ;; never run rebuild/update, per the runtime API contract.
@@ -274,9 +289,37 @@
                                                 (if (some? (get-opt opts :max_snapshot_age_seconds))
                                                   "max_age_stale"
                                                   "staleness_rule_stale")
-                                                
-                                                (:manual_language_selection activation-state) "manual_language_selection"
-                                                (seq paths) "paths_subset_requested"
+
+                                                ;; An actual initial build is the only
+                                                ;; case that may be attributed to
+                                                ;; something other than what freshness
+                                                ;; decided: there is no prior snapshot, so
+                                                ;; the interesting fact is why this build
+                                                ;; was scoped the way it was.
+                                                (= reason "initial_build")
+                                                (cond
+                                                  (:manual_language_selection activation-state)
+                                                  "manual_language_selection"
+
+                                                  (seq paths) "paths_subset_requested"
+                                                  :else "initial_build")
+
+                                                ;; Everything else freshness decided is
+                                                ;; forwarded verbatim — bugs/002. A
+                                                ;; whitelist used to send
+                                                ;; `no_prior_manifest`,
+                                                ;; `manifest_schema_incompatible`,
+                                                ;; `provider_or_pipeline_version_changed`,
+                                                ;; `delta_exceeds_threshold` and
+                                                ;; `authority_model_changed` to
+                                                ;; `initial_build`, so a workspace that
+                                                ;; rebuilt on every run because its delta
+                                                ;; kept exceeding the threshold reported
+                                                ;; the same reason as a cold start, and
+                                                ;; sent whoever asked why to look at
+                                                ;; storage instead of at the ratio.
+                                                (seq reason) reason
+
                                                 :else "initial_build")
                       
                       build-opts (cond-> (assoc opts

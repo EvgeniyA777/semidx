@@ -1,6 +1,6 @@
 # Code Context: semidx
 
-- fingerprint: 9127750caf80d1d1c09b707245327e73a7259364
+- fingerprint: 417751dc5933e67a08413866a1ff0305ff59fc6b
 
 ## Tree
 ```text
@@ -18,7 +18,8 @@ semidx
     ├ integration
     ├ mcp
     ├ runtime
-    └ test_runner_test.clj
+    ├ test_runner_test.clj
+    └ test_support
 ```
 
 ## Entry Points
@@ -45,15 +46,15 @@ semidx
 ### util
 - none
 ### test
+- semidx.integration.clojure-onboarding-test
 - semidx.integration.css-onboarding-test
+- semidx.integration.elixir-onboarding-test
 - semidx.integration.freshness-baseline-test
 - semidx.integration.freshness-regression-test
 - semidx.integration.html-onboarding-test
+- semidx.integration.java-onboarding-test
 - semidx.integration.javascript-onboarding-test
-- semidx.integration.lua-onboarding-test
-- semidx.integration.policy-governance-test
-- semidx.integration.runtime-test
-- ... +43 more
+- ... +60 more
 ### other
 - semidx.contracts.cli
 - semidx.contracts.schemas
@@ -63,7 +64,7 @@ semidx
 - semidx.mcp.session-registry
 - semidx.runtime.adapters
 - semidx.runtime.authz
-- ... +70 more
+- ... +77 more
 
 ## Domain Model
 - ArmRunner [protocol]
@@ -97,9 +98,9 @@ semidx
 - semidx.core -> semidx.runtime.snapshot-diff
 - semidx.core -> semidx.runtime.storage
 - semidx.core -> semidx.runtime.usage-metrics
-- semidx.integration.css-onboarding-test -> clojure.java.io
-- semidx.integration.css-onboarding-test -> clojure.test
-- ... +541 more
+- semidx.integration.clojure-onboarding-test -> clojure.java.io
+- semidx.integration.clojure-onboarding-test -> clojure.test
+- ... +667 more
 
 ## Namespaces
 ### semidx.contracts.cli
@@ -162,8 +163,8 @@ semidx
 - mcp-retrieval-query-schema [section]
 ### semidx.mcp.http-server
 - path: src/semidx/mcp/http_server.clj
-- requires: clojure.data.json, clojure.java.io, clojure.string, semidx.mcp.core, semidx.mcp.session-registry
-- aliases: core -> semidx.mcp.core, io -> clojure.java.io, json -> clojure.data.json, sessions -> semidx.mcp.session-registry, str -> clojure.string
+- requires: clojure.data.json, clojure.java.io, clojure.string, semidx.core, semidx.mcp.core, semidx.mcp.session-registry, semidx.runtime.usage-metrics
+- aliases: core -> semidx.mcp.core, io -> clojure.java.io, json -> clojure.data.json, sci -> semidx.core, sessions -> semidx.mcp.session-registry, str -> clojure.string, usage -> semidx.runtime.usage-metrics
 - symbols:
 - default-host [section]
 - default-port [section]

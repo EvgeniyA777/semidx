@@ -8,8 +8,10 @@
   It knows how to run providers and how to report what happened. It does not
   decide authority, merge semantics, retrieval confidence, or transport shapes.
 
-  Everything here is shadow work: it never writes to the active snapshot and
-  never changes what `adapters/parse-file` returns."
+  This was shadow-only until Stage 6 made `:authority` the default mode. Its
+  facts now reach the snapshot through `semidx.runtime.provider-authority`, which
+  merges them with the parse. It still decides nothing itself: no authority, no
+  merge, no confidence, no transport shape."
   (:require [semidx.runtime.fact-arbitration :as fact-arbitration]
             [semidx.runtime.languages.shared :as shared]
             [semidx.runtime.provider-selection :as provider-selection]
@@ -130,13 +132,22 @@
      :gaps (operation-gaps plan batches)
      :diagnostics (vec (mapcat :diagnostics batches))}))
 
-(defn shadow-facts-for-file
+(defn facts-for-file
   "Plan, execute, and arbitrate one file's providers in shadow mode.
 
-  This is the Stage 2 seam end to end. Its result is a shadow artifact: no
-  caller writes it into a snapshot, and default extraction is untouched."
+  This is the Stage 2 seam end to end. Since Stage 6 it runs on the default
+  path for Java and TypeScript: `provider-authority` calls it and merges what it
+  returns into the snapshot. Under `:shadow` the same call is an observation and
+  under `:off` it does not happen at all. The result itself is still just facts —
+  this function writes nothing.
+
+  `:batch_coverage` and `:observed_statuses` are the passthrough to
+  `provider-selection/provider-plan`. They let a project batch or a live overlay
+  provider's already computed facts join this file's arbitration, delivered
+  through the injected `run-provider` role; with neither supplied the plan and
+  the result are what they were before those tiers existed."
   [{:keys [root_path path lines parser_opts mode denied_providers execution_policy
-           run-provider]
+           run-provider batch_coverage observed_statuses]
     :or {mode "shadow"}}]
   (let [lines (or lines (shared/slurp-lines (File. (str root_path) (str path))))
         source-identity (providers/source-identity {:root_path root_path
@@ -148,7 +159,9 @@
                :mode mode
                :parser_opts parser_opts
                :denied_providers denied_providers
-               :execution_policy execution_policy})
+               :execution_policy execution_policy
+               :batch_coverage batch_coverage
+               :observed_statuses observed_statuses})
         execution (execute-plan plan {:root_path root_path
                                       :lines lines
                                       :parser_opts parser_opts

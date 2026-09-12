@@ -1,22 +1,19 @@
 (ns semidx.runtime.providers.scip-typescript
   "Stage 3 of the Semantic Provider Authority Migration (plans/018, ADR-046):
-  the TypeScript SCIP provider adapter. Shadow / default-off.
+  the TypeScript SCIP provider adapter. On the default path since Stage 6,
+  whenever its toolchain resolves.
 
   Everything language-neutral — the per-document stale gate, `FactBatch`
   assembly, and the result shapes — lives in
   `semidx.runtime.providers.scip-adapter`. What remains here is only how the
   scip-typescript toolchain is resolved and invoked.
 
-  SCIP is a project-level batch index, not a per-file parse. Unlike the Stage 2
-  tree-sitter and regex adapters in `semidx.runtime.providers`, which run per file
-  behind the ProviderPlan orchestrator, this adapter is a standalone entry point:
-  `shadow-facts-for-project` runs the repo-managed `scip-typescript` CLI once over
-  a project, reads the `.scip` with `semidx.runtime.scip`, normalizes it,
-  applies the stale gate, and returns arbitrated shadow facts. Reconciling a
-  project-scoped provider with the per-file planning model is a later slice; it
-  is deliberately not wired into `provider-selection` / `provider-execution`
-  here, mirroring the standalone-seam choice Stage 2 made for the same reason.
-  Nothing here touches default extraction.
+  SCIP is a project-level batch index, not a per-file parse, so this adapter is
+  not a `semidx.runtime.providers/run-provider` engine. Stage 4.5 gave that
+  shape a home: `semidx.runtime.provider-batch` owns the status and run roles,
+  runs `facts-for-project` once per project, and hands the resulting
+  facts to per-file planning as batch coverage. Nothing here touches default
+  extraction, and the provider stays default-off.
 
   Source mode (owner-confirmed):
 
@@ -24,13 +21,14 @@
     through the ADR-047 chain — explicit option ->
     `SEMIDX_SCIP_TYPESCRIPT_CLI_PATH` -> repo-managed `.scip-toolchain/` ->
     ambient `PATH`;
-  - a missing CLI is not an index-run error: `shadow-facts-for-project` returns
+  - a missing CLI is not an index-run error: `facts-for-project` returns
     an `:unavailable` result with diagnostics and no facts, and a caller
     degrades to tree-sitter / regex;
   - `facts-from-index` accepts an already-read SCIP index and is the test /
     fixture seam only, not a production source mode."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as sh]
+            [semidx.runtime.providers :as providers]
             [semidx.runtime.providers.scip-adapter :as scip-adapter]
             [semidx.runtime.scip :as scip]))
 
@@ -41,20 +39,12 @@
 (def descriptor
   "Catalog descriptor for the SCIP TypeScript provider.
 
-  Kept here rather than in `semidx.runtime.providers/descriptors` while the
-  provider is project-scoped and standalone: adding it to the per-file catalog
-  would route a per-file `run-provider` call at an engine that catalog cannot
-  execute. Exposed so the later catalog-integration slice has one source of
-  truth for the claim."
-  {:provider_id provider-id
-   :provider_version provider-version
-   :languages [language]
-   :classification "semantic"
-   :engine :scip
-   :scope :project
-   :selectors {:extensions [".ts" ".tsx"]}
-   :operation_capabilities {:definitions "exact"
-                            :references "exact"}})
+  Stage 4.5 moved the data into `semidx.runtime.providers/project-descriptors`,
+  which is now the single source of truth for every provider claim; this var
+  re-exports it so existing callers keep one name. The dependency runs adapter
+  -> catalog and never the other way, because the catalog is on the per-file
+  planning path and must not load this namespace's protobuf classes."
+  (providers/descriptor provider-id))
 
 ;; ---------------------------------------------------------------------------
 ;; CLI resolution (ADR-047-style chain)
@@ -157,7 +147,7 @@
 (defn facts-from-index
   "Turn an already-read SCIP index into arbitrated shadow facts.
 
-  Test / fixture seam only — production callers use `shadow-facts-for-project`,
+  Test / fixture seam only — production callers use `facts-for-project`,
   which generates the index with the repo-managed CLI first.
 
   `opts`:
@@ -174,7 +164,7 @@
           (select-keys opts [:project-root :expected-document-digests
                              :provider-id :provider-version]))))
 
-(defn shadow-facts-for-project
+(defn facts-for-project
   "Run the repo-managed `scip-typescript` CLI over `root_path`, then normalize,
   gate, and arbitrate its output into shadow facts.
 
@@ -189,7 +179,7 @@
   snapshot."
   [{:keys [root_path expected_document_digests] :as opts}]
   (when-not root_path
-    (throw (ex-info "shadow-facts-for-project requires :root_path"
+    (throw (ex-info "facts-for-project requires :root_path"
                     {:error_code :missing_root_path})))
   (let [cli (resolve-cli opts)]
     (if-not cli

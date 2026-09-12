@@ -93,7 +93,8 @@
                   {:run-provider (scripted-runner {})})
           definitions (first (filter #(= :definitions (:operation %)) (:gaps result)))]
       (is (= "no_provider_admitted" (:reason definitions)))
-      (is (= ["java-tree-sitter" "java-regex"] (mapv :provider_id (:excluded definitions))))))
+      (is (= ["java-lsp" "java-tree-sitter" "java-regex"]
+           (mapv :provider_id (:excluded definitions))))))
 
   (testing "a covered operation is not a gap"
     (let [result (execution/execute-plan
@@ -112,7 +113,7 @@
   ;; installed, so an equality check here encodes the machine it was written on.
   ;; It did: this passed locally without a grammar and failed on CI, which has
   ;; one. The invariants below hold either way.
-  (let [result (execution/shadow-facts-for-file {:root_path java-root :path java-path})
+  (let [result (execution/facts-for-file {:root_path java-root :path java-path})
         batches (mapv (juxt :provider_id :operation) (:batches result))]
     (is (= "shadow" (:mode result)))
     (is (= 4 (count (:facts result)))
@@ -141,21 +142,21 @@
                 (-> result
                     (dissoc :plan)
                     (update :batches (partial mapv #(dissoc % :diagnostics)))))
-        first-run (execution/shadow-facts-for-file {:root_path java-root :path java-path})
-        second-run (execution/shadow-facts-for-file {:root_path java-root :path java-path})]
+        first-run (execution/facts-for-file {:root_path java-root :path java-path})
+        second-run (execution/facts-for-file {:root_path java-root :path java-path})]
     (is (= (strip first-run) (strip second-run))
         "same content and same catalog must produce the same shadow facts")
     (is (= (get-in first-run [:plan :operations]) (get-in second-run [:plan :operations]))
         "planning is deterministic too; only status observation times differ")))
 
 (deftest tree-sitter-unavailability-routes-to-regex-with-a-degradation-test
-  (let [result (execution/shadow-facts-for-file
+  (let [result (execution/facts-for-file
                 {:root_path java-root
                  :path java-path
                  :denied_providers ["java-tree-sitter"]})
         definitions (get-in result [:plan :operations :definitions])]
     (testing "the structural provider is excluded with a stated reason"
-      (is (= ["java-tree-sitter"] (mapv :provider_id (:excluded definitions))))
+      (is (= ["java-lsp" "java-tree-sitter"] (mapv :provider_id (:excluded definitions))))
       (is (seq (:reason (first (:excluded definitions))))))
     (testing "the lexical provider covers the operation, so there is no gap"
       (is (= ["java-regex"] (mapv :provider_id (:providers definitions))))
@@ -178,7 +179,7 @@
         control-b (build)
         control-diff (differing control-a control-b)
         before (build)
-        shadow (execution/shadow-facts-for-file {:root_path java-root :path java-path})
+        shadow (execution/facts-for-file {:root_path java-root :path java-path})
         after (build)]
     (is (seq (:facts shadow)) "the shadow run must actually have done something")
 

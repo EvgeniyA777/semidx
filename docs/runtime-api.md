@@ -80,6 +80,24 @@ Example with parser options:
                 :tree_sitter_enabled false}})
 ```
 
+**What the engine options do, and do not do.** `:java_engine`,
+`:typescript_engine`, `:clojure_engine`, `:elixir_engine` and
+`:tree_sitter_enabled` choose which **local** extractor runs — the structural
+tree-sitter path or the lexical one. They still do exactly that, including for
+Java and TypeScript under the provider plan, where the chosen extractor is the
+tier the plan merges its semantic evidence with.
+
+What they cannot do is override the **semantic** tier: whether fresh SCIP or LSP
+evidence participates is decided by the provider plan from observed toolchain
+status, not by a parser option, and it never was decided by one. To turn the
+provider plan off wholesale, set `:provider_pipeline "off"`; that is the
+documented rollback and it restores the pre-Stage-6 path exactly.
+
+A deprecation of these options was announced on 2026-09-08 and withdrawn the same
+day: it rested on the claim that the options had become inert, which is false —
+they still select the local tier, and `plans/018` explicitly retains them for
+diagnosis and emergency rollback.
+
 Legacy tree-sitter extraction path (current implementation):
 
 ```clojure
@@ -1478,6 +1496,30 @@ Endpoints:
 
 HTTP create/retrieval responses now also include additive `project_context` metadata summarizing the current canonical per-root activation state. If activation is already in progress, HTTP returns `409 language_activation_in_progress` and a `Retry-After` header.
 
+`POST /v1/index/create` also returns an additive `provider_summary` when the
+build ran the plans/018 provider pipeline. Since 2026-09-08 `authority` is the
+**default** mode, so a build that says nothing about `provider_pipeline` runs it:
+for Java and TypeScript the provider plan owns extraction, units carry an
+`authority`, and a file with no exact or structural evidence carries a
+`provider_authority_degraded` diagnostic. `parser_opts.provider_pipeline` set to
+`off` is the rollback and restores the previous behaviour exactly; `shadow`
+observes without changing units. The key is absent, not null, for a build that ran no
+pipeline, so a client that never asks for one sees exactly the response it saw
+before. `mode` distinguishes the two: a `shadow` summary reports what the
+pipeline would have produced beside the snapshot and carries the tier
+`comparison`; an `authority` summary reports what the snapshot is made of and
+carries `units_supplied`, `units_conflicted`, and `files_degraded` instead. The
+library surface exposes the same map under `:provider_summary` on the index, and
+the MCP `create_index` result carries it under the same name.
+
+The gRPC `CreateIndexResponse` carries it as `provider_summary_json`, the same
+way `HealthResponse` carries `capabilities_json`. proto3 has no absent scalar, so
+a build that ran no pipeline sends an empty string and
+`create-index-response->map` turns that back into nil — a client that never asks
+reads exactly what it read before the field existed. Regenerating the stubs needs
+no system `protoc`: the repo-managed toolchain (ADR-042) is fetched by
+`clojure -T:build grpc-generate`.
+
 ## Minimal gRPC Edge
 
 Run a minimal gRPC wrapper over the same library runtime semantics:
@@ -1547,7 +1589,9 @@ clojure -T:build compile-java
 
 Ordinary `clojure -M:test` and `clojure -M:runtime-grpc` runs never invoke
 `protoc` or require network access. They compile the committed Java sources with
-the local JDK only when `target/classes` is missing or stale.
+the local JDK only when `target/classes` is missing or stale. CI and local
+development should use JDK 21 where possible, but the generated sources remain
+compiled with `--release 17` to preserve Java 17 bytecode compatibility.
 
 `HealthResponse` carries `capabilities_json`, a JSON-encoded copy of the same versioned capability payload returned by `semidx.core/capabilities`, MCP `capabilities`, and HTTP `GET /capabilities`. gRPC clients should call `Health` as capability preflight before selecting `language_policy_json` for indexing.
 

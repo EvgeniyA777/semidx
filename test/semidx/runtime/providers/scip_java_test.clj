@@ -11,7 +11,8 @@
             [semidx.runtime.providers.scip-adapter :as scip-adapter]
             [semidx.runtime.providers.scip-java :as sj]
             [semidx.runtime.providers.scip-shadow-compare :as cmp]
-            [semidx.runtime.scip :as scip]))
+            [semidx.runtime.scip :as scip]
+            [semidx.test-support.scip-toolchain :as toolchain]))
 
 (def ^:private fixture-scip
   "fixtures/provider-authority/scip/java-corpus.scrubbed.scip")
@@ -217,10 +218,10 @@
     (is (every? #(= :scip_document_source_missing (:code %))
                 (filter :document (:diagnostics result))))))
 
-;; --- shadow-facts-for-project ---------------------------------------
+;; --- facts-for-project ---------------------------------------
 
-(deftest shadow-facts-for-project-is-unavailable-not-an-error
-  (let [result (sj/shadow-facts-for-project
+(deftest facts-for-project-is-unavailable-not-an-error
+  (let [result (sj/facts-for-project
                 {:root_path corpus-root
                  :scip_java_toolchain_dir "/semidx/does-not-exist"})]
     (is (= "unavailable" (:result result)))
@@ -228,19 +229,19 @@
     (is (empty? (:facts result)))
     (is (= [:scip_provider_unavailable] (map :code (:diagnostics result))))))
 
-(deftest shadow-facts-for-project-requires-a-root-path
-  (is (thrown? clojure.lang.ExceptionInfo (sj/shadow-facts-for-project {}))))
+(deftest facts-for-project-requires-a-root-path
+  (is (thrown? clojure.lang.ExceptionInfo (sj/facts-for-project {}))))
 
 (deftest end-to-end-through-the-repo-managed-toolchain
   (if (sj/resolve-toolchain {})
-    (let [result (sj/shadow-facts-for-project {:root_path corpus-root})]
+    (let [result (sj/facts-for-project {:root_path corpus-root})]
       (is (= "ready" (:result result)))
       (is (empty? (:errors result)))
       (is (= modelled-symbols (facts-of result))
           "the toolchain path produces the same facts as the committed fixture")
       (is (every? #(= "exact" (:authority %)) (:facts result)))
       (is (zero? (get-in result [:coverage :withheld_fact_count]))))
-    (println "Java SCIP toolchain not resolved; skipping end-to-end test")))
+    (toolchain/unresolved! "Java SCIP toolchain" "end-to-end test")))
 
 (deftest a-project-with-no-java-sources-fails-visibly
   (if (sj/resolve-toolchain {})
@@ -248,12 +249,12 @@
                              (str "semidx-scip-java-empty-" (System/nanoTime)))]
       (try
         (.mkdirs empty-dir)
-        (let [result (sj/shadow-facts-for-project {:root_path empty-dir})]
+        (let [result (sj/facts-for-project {:root_path empty-dir})]
           (is (= "failed" (:result result)))
           (is (= [:scip_index_failed] (map :code (:diagnostics result))))
           (is (empty? (:facts result))))
         (finally (.delete empty-dir))))
-    (println "Java SCIP toolchain not resolved; skipping empty-project test")))
+    (toolchain/unresolved! "Java SCIP toolchain" "empty-project test")))
 
 ;; --- review regressions (2026-09-05) --------------------------------
 

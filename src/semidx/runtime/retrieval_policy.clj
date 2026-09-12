@@ -345,6 +345,43 @@
 (defn- language-strength [language]
   (registry/strength-for-language language))
 
+(defn max-confidence-level
+  ([levels] (reduce max-confidence-level "low" levels))
+  ([left right]
+   (if (confidence-level<=? left right)
+     (str right)
+     (str left))))
+
+(defn- evidence-strength
+  "The ceiling a language's selected units earn from the evidence behind them,
+  or nil when no provider evidence was recorded.
+
+  plans/018 Stage 6.2. The per-language strength is a static claim about how good
+  the lane's parser is; it was the only signal available while every unit came
+  from that parser. Once a semantic provider has resolved the symbols, the claim
+  is out of date in the direction that matters: TypeScript is `low` because a
+  regular expression is guessing, not because a SCIP index is.
+
+  Only a wholly exact selection lifts the ceiling. A mixed one is as good as its
+  weakest member, which is the rule `confidence-ceiling` already applies across
+  languages."
+  [units]
+  (when (some :authority units)
+    (when (every? #(= "exact" (:authority %)) units)
+      "high")))
+
+(def ^:private confidence-level-below
+  {"high" "medium"
+   "medium" "low"
+   "low" "low"})
+
+(defn- heuristic-only?
+  "Every selected unit of this language rests on heuristic evidence — a regular
+  expression matched the source text and nothing stronger saw it."
+  [units]
+  (and (some :authority units)
+       (every? #(= "heuristic" (:authority %)) units)))
+
 (defn- selected-language-strengths [index units]
   (let [by-language (->> units
                          (group-by #(unit-language index %))
@@ -353,9 +390,31 @@
     (into {}
           (map (fn [[language grouped-units]]
                  [language
-                  (if (every? #(= "fallback" (:parser_mode %)) grouped-units)
+                  (cond
+                    ;; The parser could not extract structure at all.
+                    (every? #(= "fallback" (:parser_mode %)) grouped-units)
                     "low"
-                    (language-strength language))]))
+
+                    ;; A wholly exact selection rises above the lane's static
+                    ;; claim: TypeScript is rated low because a regex is
+                    ;; guessing, not because a SCIP index is.
+                    (evidence-strength grouped-units)
+                    (max-confidence-level (language-strength language)
+                                          (evidence-strength grouped-units))
+
+                    ;; And a wholly heuristic one falls a step below it. The
+                    ;; static strength describes a lane at its best — with its
+                    ;; structural parser available — so a selection that had only
+                    ;; the lexical tier should not claim the same number
+                    ;; (plans/018 owner decision, 2026-09-06).
+                    ;;
+                    ;; This is safe to say only because
+                    ;; `retrieval/impact-seed-degradations` no longer reads a low
+                    ;; level as an absence of structure; see bugs/005.
+                    (heuristic-only? grouped-units)
+                    (confidence-level-below (language-strength language))
+
+                    :else (language-strength language))]))
           by-language)))
 
 (defn- confidence-ceiling [coverage-level selected-language-strengths]

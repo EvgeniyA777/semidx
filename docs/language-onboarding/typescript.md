@@ -6,8 +6,12 @@ Created with `scripts/new-language-adapter.sh` and now upgraded with strategic s
 
 - Language key: `typescript`
 - File extensions: `.ts,.tsx`
-- Current legacy parser function: `semidx.runtime.languages.typescript/parse-file`
-  (regex default and tree-sitter option retained only during migration)
+- Extraction: the provider plan owns the default path since 2026-09-08
+  (`plans/018` Stage 6). `semidx.runtime.languages.typescript/parse-file` is the
+  local tier underneath it, and `:typescript_engine` still chooses which local
+  extractor runs — it cannot override the semantic tier, which the plan admits
+  from observed toolchain status. `:provider_pipeline "off"` restores the
+  pre-migration path.
 - Fixture files:
   - `fixtures/retrieval/typescript-happy-path.json`
   - `fixtures/retrieval/typescript-ambiguity.json`

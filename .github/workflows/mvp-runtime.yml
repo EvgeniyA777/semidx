@@ -31,6 +31,29 @@ on:
       - "deps.edn"
       - ".github/workflows/mvp-runtime.yml"
 
+# While a PR is open, a push to `dev` fires this workflow twice on the same
+# content: once for `push` and once for `pull_request`. Adding `dev` to
+# `push.branches` was necessary (see the note above); the duplicate pair is its
+# side effect, and it costs ~20 minutes of runner time per push.
+#
+# The key deliberately is NOT `github.ref`: that is `refs/heads/dev` for the push
+# and `refs/pull/N/merge` for the pull_request, so the two events would land in
+# different groups and nothing would collapse. `github.head_ref` is set only on
+# `pull_request` (the source branch) and empty on `push`, so this expression
+# resolves to the branch name for both and puts the pair in one group.
+#
+# Which of the two survives is decided by arrival order, not configured. In
+# practice the `push` event is delivered 2-4 seconds before `pull_request`, so
+# the `pull_request` run cancels the `push` run and the surviving run is the one
+# the PR displays and the one that tests the merge commit. Nothing enforces that
+# ordering; the repository has no branch protection or rulesets, so a cancelled
+# run blocks nothing either way. To get the duplicate pair back for a flaky-test
+# investigation — it is what proved the MCP teardown race in #3 — re-run the
+# cancelled run from the Actions UI.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   runtime-gates:
     runs-on: ubuntu-latest
@@ -75,10 +98,57 @@ jobs:
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y ripgrep
 
+      # plans/018 Stages 3 and 4 ship provider adapters that shell out to a real
+      # indexer. Without these toolchains their four end-to-end tests skipped and
+      # the suite still reported green, so the CLI resolution chain, the
+      # javac + semanticdb-javac + scip-semanticdb pipeline, and the freshness
+      # gate against a live artifact ran in no environment at all — the same
+      # shape as the Elixir lane defect fixed in #3.
+      #
+      # Both setup scripts fail closed on version drift: `npm ci` against the
+      # committed lockfile, and sha256-verified pinned jars.
+      #
+      # Deliberately WITHOUT --write-env-file, unlike the tree-sitter step above.
+      # Exporting SEMIDX_SCIP_TYPESCRIPT_CLI_PATH job-wide breaks three tests
+      # that force the unavailable branch by pointing :scip_toolchain_dir at a
+      # nonexistent directory, because ADR-047 ranks the environment variable
+      # ABOVE the repo-managed directory, so the override resolved a real CLI and
+      # `resolve-cli` stopped returning nil. Both adapters already fall back to
+      # `.scip-toolchain/` and `.scip-java-toolchain/` relative to the checkout,
+      # which is the resolution step the end-to-end tests are named for — the
+      # repo-managed one. Setting the override would have had CI exercise the
+      # environment branch instead, and no branch at all for absence.
+      - name: Setup scip-typescript toolchain
+        run: ./scripts/setup-scip-typescript.sh
+
+      - name: Setup Java SCIP toolchain
+        run: ./scripts/setup-scip-java.sh
+
+      # Same reasoning as the SCIP steps: install without --write-env-file, so
+      # the end-to-end tests exercise the repo-managed resolution step they are
+      # named for rather than the environment override that outranks it.
+      - name: Setup TypeScript LSP toolchain
+        run: ./scripts/setup-typescript-lsp.sh
+
+      # jdtls needs a JDK 21 or newer to run at all; under 17 its OSGi framework
+      # refuses to resolve and the application never registers. CI's JDK already
+      # satisfies that, so no separate JVM is configured here — the adapter
+      # checks the version itself and degrades with a named reason when it does
+      # not hold.
+      - name: Setup jdtls toolchain
+        run: ./scripts/setup-jdtls.sh
+
       - name: Verify generated gRPC sources
         run: clojure -T:build grpc-verify-generated
 
       - name: Run MVP Gates
+        env:
+          # Assert the end-to-end tests actually ran instead of trusting the
+          # steps above: with these set, an unresolved toolchain fails the test
+          # rather than printing a skip. The two flags are separate because
+          # installing a toolchain and requiring it are separate decisions.
+          SEMIDX_REQUIRE_SCIP_TOOLCHAINS: "1"
+          SEMIDX_REQUIRE_LSP_TOOLCHAINS: "1"
         run: ./scripts/run-mvp-gates.sh
 
   semantic-quality-report:
@@ -160,8 +230,9 @@ jobs:
           # CI parses the same way a developer machine does.
           clj-kondo: "2026.01.19"
 
-      # This job runs the same suite as runtime-gates, so it needs the same
-      # toolchain. It previously ran without Node, the tree-sitter CLI, or the
+      # The narrowed namespace set still needs the tree-sitter toolchain
+      # (semidx.integration.runtime-test) and ripgrep (benchmark-report-test).
+      # This job previously ran without Node, the tree-sitter CLI, or the
       # grammars, which meant it was testing a degraded runtime and failing for
       # reasons that had nothing to do with PostgreSQL.
       - name: Setup Node
@@ -184,7 +255,25 @@ jobs:
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y ripgrep
 
+      # This job used to run the entire suite to gain 16 assertions, repeating
+      # verbatim in the same runner image, on the same commit, what runtime-gates
+      # had just run. Only four namespaces read SEMIDX_TEST_POSTGRES_URL, and
+      # measurement confirms they hold the whole delta: the full suite is 3128
+      # assertions without the variable and 3144 with it, while these four alone
+      # are 821 without and 837 with. Everything else was a repeat.
+      #
+      # The job is narrowed, not deleted: the PostgreSQL path is what caught the
+      # snapshot round-trip defect that reports/021 had carried as a known issue
+      # since August and that #3 fixed.
+      #
+      # The SCIP toolchains are therefore not installed here either — none of
+      # these four namespaces touches them.
       - name: Run PostgreSQL Integration Smoke
         env:
           SEMIDX_TEST_POSTGRES_URL: jdbc:postgresql://localhost:5432/semantic_index_test?user=semantic_user&password=semantic_pass
-        run: clojure -M:test
+        run: |
+          clojure -M:test \
+            -n semidx.integration.runtime-test \
+            -n semidx.runtime.storage-test \
+            -n semidx.runtime.fact-arbitration-test \
+            -n semidx.runtime.benchmark-report-test

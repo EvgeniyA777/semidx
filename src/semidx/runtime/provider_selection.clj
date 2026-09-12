@@ -93,19 +93,68 @@
     {:providers admitted
      :excluded excluded}))
 
+(defn- batch-descriptors-for
+  "Project descriptors whose completed batch covered `path`.
+
+  Two conditions must hold: the descriptor selects the path, and the run
+  reported that path as covered. Coverage is the signal, not the selector — an
+  unavailable or failed project run reports no covered paths, so it contributes
+  no candidate and the plan falls back to the file-scoped tiers on its own."
+  [path batch-coverage]
+  (when (seq batch-coverage)
+    (vec (for [d (providers/descriptors-for-project)
+               :let [covered (set (get batch-coverage (:provider_id d)))]
+               :when (and (contains? covered path)
+                          (providers/selects-path? d path))]
+           d))))
+
 (defn provider-plan
   "Build a ProviderPlan for one file.
 
   `operations` defaults to every operation the eligible descriptors claim, so a
-  caller cannot silently plan fewer operations than the catalog supports."
+  caller cannot silently plan fewer operations than the catalog supports.
+
+  Two optional inputs, both absent by default:
+
+  - `:batch_coverage` — `provider_id -> covered paths` from a completed project
+    provider run (Stage 4.5). A project provider becomes a candidate for this
+    file only where a run actually covered it.
+  - `:observed_statuses` — statuses for providers the catalog cannot probe
+    itself: project batch indexers and language servers, observed by the
+    boundary that owns their lifecycle. They are merged only for candidates
+    where `providers/locally-probed?` is false, so an externally supplied status
+    can never override a real tree-sitter or regex probe. Without one such a
+    candidate is excluded as `provider_status_unknown`, exactly like any
+    unobserved provider.
+
+  With neither supplied, the candidate list, the statuses, and the operation set
+  are what this function produced before the provider tiers were added, so the
+  plan is unchanged."
   [{:keys [path language source_identity operations mode parser_opts
-           execution_policy denied_providers statuses]
+           execution_policy denied_providers statuses batch_coverage
+           observed_statuses]
     :or {mode default-mode}}]
-  (let [descriptors (providers/descriptors-for path)
-        statuses (or statuses (providers/statuses path (or parser_opts {})))
+  (let [batch-descriptors (batch-descriptors-for path batch_coverage)
+        descriptors (into (providers/descriptors-for path) batch-descriptors)
+        externally-probed (->> descriptors
+                               (remove providers/locally-probed?)
+                               (mapv :provider_id))
+        statuses (merge (or statuses (providers/statuses path (or parser_opts {})))
+                        (select-keys (or observed_statuses {}) externally-probed))
         policy (merge default-execution-policy execution_policy)
+        ;; An externally probed provider widens the operation set only when it is
+        ;; actually `ready` for this file. The catalog knowing that some tier
+        ;; could answer `references` is not a reason to plan that operation and
+        ;; report a permanent gap for it — and neither is having observed that
+        ;; tier to be unavailable, which is the same absence stated out loud.
+        ;; This is the rule Stage 2 applied when it refused to claim operations
+        ;; nothing produces.
         operations (or (seq operations)
                        (->> descriptors
+                            (filter (fn [descriptor]
+                                      (or (providers/locally-probed? descriptor)
+                                          (= "ready" (get-in statuses
+                                                             [(:provider_id descriptor) :state])))))
                             (mapcat (comp keys :operation_capabilities))
                             distinct
                             sort
@@ -124,6 +173,49 @@
      :path path
      :language (or language (first (mapcat :languages descriptors)))
      :source_identity (or source_identity {})
+     :mode (if (contains? modes mode) mode default-mode)
+     :execution_policy policy
+     :operations planned
+     :statuses statuses}))
+
+(defn project-plan
+  "Build a project-scoped ProviderPlan for one repository root (Stage 4.5).
+
+  Admission is `plan-operation`, unchanged: strongest claimed authority first,
+  provider id as the tie-break, every exclusion recorded with its reason, and an
+  unobserved status excluded rather than assumed ready. `:statuses` must be
+  supplied — the file catalog cannot probe a project toolchain, so an absent map
+  means every candidate is excluded as `provider_status_unknown`. That is the
+  intended default: nothing plans a SCIP provider unless a caller observed it.
+
+  Execution is once per provider, not once per (operation, provider);
+  `planned-provider-ids` is the list a batch runner iterates."
+  [{:keys [root_path languages operations mode execution_policy denied_providers statuses]
+    :or {mode default-mode}}]
+  (let [descriptors (providers/descriptors-for-project languages)
+        statuses (or statuses {})
+        policy (merge default-execution-policy execution_policy)
+        operations (or (seq operations)
+                       (->> descriptors
+                            (mapcat (comp keys :operation_capabilities))
+                            distinct
+                            sort
+                            vec))
+        planned (into (sorted-map)
+                      (map (fn [operation]
+                             [operation (plan-operation {:descriptors descriptors
+                                                         :operation operation
+                                                         :statuses statuses
+                                                         :mode mode
+                                                         :execution_policy policy
+                                                         :denied_providers denied_providers})]))
+                      operations)]
+    {:plan_schema_version plan-schema-version
+     :catalog_version providers/catalog-version
+     :scope "project"
+     :root_path root_path
+     :languages (vec (or (seq languages)
+                         (distinct (mapcat :languages descriptors))))
      :mode (if (contains? modes mode) mode default-mode)
      :execution_policy policy
      :operations planned

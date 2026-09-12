@@ -122,11 +122,95 @@
     (cond-> {:surface "mcp"
              :session_id (:session_id state*)}
       (:name client-info) (assoc :actor_id (:name client-info))
-      (:tenant_id state*) (assoc :tenant_id (:tenant_id state*)))))
+      (:tenant_id state*) (assoc :tenant_id (:tenant_id state*))
+      ;; The task declared through `set_task_context`, if any. It describes the
+      ;; work in progress rather than one request, so every call in the staged
+      ;; flow inherits it without the caller repeating it.
+      (:task_id state*) (assoc :task_id (:task_id state*)))))
 
-(defn record-mcp-event! [state event]
+(defn- resolve-identity
+  "Reconcile a session-scoped identity with one supplied on the call.
+
+  The session-scoped value wins, because it describes the working context rather
+  than a single request. A per-call value that loses is returned as `:evidence`
+  instead of being dropped — it is what an offline join against a host
+  transcript keys on. With no session-scoped value the per-call one is used
+  outright, which keeps the pre-existing `query.trace` contract working."
+  [session-value supplied-value]
+  (if session-value
+    {:value session-value
+     :evidence (when (and supplied-value (not= session-value supplied-value))
+                 supplied-value)}
+    {:value supplied-value}))
+
+(defn record-mcp-event!
+  "Record one MCP usage event, merging the session's own identity with whatever
+  the request supplied.
+
+  Identity rules, all from plans/022 Stage 0 findings:
+
+  - a trace **refines** identity, it never erases it. Fields the request did not
+    supply are dropped before merging, so a query without a trace no longer
+    blanks the server's `actor_id` or `tenant_id`;
+  - **session-scoped identity wins**: the server session id is the identity of
+    the MCP session itself, and a task declared through `set_task_context` is
+    the identity of the work in progress. Before this, `resolve_context` was the
+    one operation that lost its session id, so events did not group;
+  - a per-call value that loses is **kept as evidence** in
+    `payload.client_session_id` / `payload.client_task_id`, only when it differs
+    from the winner, so the common case gains no payload noise;
+  - with no declared task, `query.trace.task_id` still applies to that call, so
+    the existing trace contract keeps working."
+  [state event]
   (when-let [sink (:usage_metrics @state)]
-    (usage/safe-record-event! sink (merge (tool-usage-context state) event))))
+    (let [context (tool-usage-context state)
+          supplied (into {} (remove (comp nil? val)) event)
+          session (resolve-identity (:session_id context) (:session_id supplied))
+          task (resolve-identity (:task_id context) (:task_id supplied))
+          merged (cond-> (merge context supplied)
+                   (:value session) (assoc :session_id (:value session))
+                   (:value task) (assoc :task_id (:value task)))
+          evidence (cond-> {}
+                     (:evidence session) (assoc :client_session_id (:evidence session))
+                     (:evidence task) (assoc :client_task_id (:evidence task)))]
+      (usage/safe-record-event!
+       sink
+       (cond-> merged
+         (seq evidence) (assoc :payload (merge (or (:payload merged) {}) evidence)))))))
+
+(def capture-query-text-env "SEMIDX_USAGE_METRICS_CAPTURE_QUERY_TEXT")
+
+(defn capture-query-text?
+  "Whether raw query text may be written to telemetry. Off unless explicitly
+  enabled, because passive collection runs unattended."
+  []
+  (= "1" (str/trim (str (System/getenv capture-query-text-env)))))
+
+(defn redact-query-summary
+  "The telemetry copy of a normalized query summary.
+
+  `details` is the user's own words. Passive collection writes to a database
+  nobody is watching at the time, so by default the text is replaced with a
+  digest and a length: enough to tell two queries apart, to spot repeats, and to
+  correlate with a host transcript that does hold the text, without storing the
+  prompt itself. Everything structural — purpose, target kinds, budget — is kept
+  as is.
+
+  Set `SEMIDX_USAGE_METRICS_CAPTURE_QUERY_TEXT=1` to record the raw text.
+
+  This affects telemetry only. The summary returned to the caller is untouched:
+  a client asking what its query normalized to must still get an answer."
+  [summary]
+  (when summary
+    (let [details (:details summary)
+          text (when (string? details) details)]
+      (cond
+        (nil? text) summary
+        (capture-query-text?) summary
+        :else (-> summary
+                  (dissoc :details)
+                  (assoc :details_hash (usage/hash-root-path text)
+                         :details_chars (count text)))))))
 
 (defn usage-fields-for-query [query]
   {:trace_id (get-in query [:trace :trace_id])
@@ -225,9 +309,30 @@
          distinct
          vec)))
 
-(defn normalize-parser-opts [parser-opts]
+(def provider-pipeline-env "SEMIDX_PROVIDER_PIPELINE")
+
+(defn deployment-parser-opts
+  "Parser options the deployment sets rather than the caller.
+
+  Only the plans/018 provider pipeline mode today. It belongs in the environment
+  because it is an operator's decision to observe, made once for a server, and a
+  caller should not have to repeat it on every `create_index` — nor be able to
+  forget it and silently stop observing."
+  []
+  (if-let [mode (some-> (System/getenv provider-pipeline-env) str/trim not-empty)]
+    {:provider_pipeline mode}
+    {}))
+
+(defn normalize-parser-opts
+  "Caller options win over deployment options, which win over nothing.
+
+  An explicit `parser_opts` still replaces the built-in defaults, as before; the
+  deployment layer is merged underneath so switching observation on does not
+  require touching any caller."
+  [parser-opts]
   (let [opts (ensure-map-or-nil parser-opts "parser_opts")]
-    (if (nil? opts) default-parser-opts opts)))
+    (merge (deployment-parser-opts)
+           (if (nil? opts) default-parser-opts opts))))
 
 (defn normalize-language-policy [language-policy]
   (let [policy (ensure-map-or-nil language-policy "language_policy")]
@@ -277,25 +382,31 @@
         action (or (:lifecycle_action lifecycle) (if cache-hit? "reuse" "full_rebuild"))
         reason (or (:lifecycle_reason lifecycle) (if cache-hit? "cached_entry" "initial_build"))
         diagnostics (or (:lifecycle_diagnostics lifecycle) [])]
-    {:index_id (:index_id entry)
-     :snapshot_id (:snapshot_id index)
-     :indexed_at (:indexed_at index)
-     :index_lifecycle lifecycle
-     :root_path (:root_path entry)
-     :file_count (count (:files index))
-     :unit_count (count (:units index))
-     :detected_languages (:detected_languages index)
-     :active_languages (:active_languages index)
-     :language_fingerprint (:language_fingerprint index)
-     :activation_state (:activation_state index)
-     :selection_hint (:selection_hint index)
-     :recommended_next_step "repo_map"
-     :recommended_flow canonical-mcp-flow
-     :usage_hint mcp-first-usage-hint
-     :cache_hit (= action "reuse")
-     :lifecycle_action action
-     :lifecycle_reason reason
-     :lifecycle_diagnostics diagnostics}))
+    (cond-> {:index_id (:index_id entry)
+             :snapshot_id (:snapshot_id index)
+             :indexed_at (:indexed_at index)
+             :index_lifecycle lifecycle
+             :root_path (:root_path entry)
+             :file_count (count (:files index))
+             :unit_count (count (:units index))
+             :detected_languages (:detected_languages index)
+             :active_languages (:active_languages index)
+             :language_fingerprint (:language_fingerprint index)
+             :activation_state (:activation_state index)
+             :selection_hint (:selection_hint index)
+             :recommended_next_step "repo_map"
+             :recommended_flow canonical-mcp-flow
+             :usage_hint mcp-first-usage-hint
+             :cache_hit (= action "reuse")
+             :lifecycle_action action
+             :lifecycle_reason reason
+             :lifecycle_diagnostics diagnostics}
+      ;; plans/018 Stage 6.4. Conditional, like everywhere else this key
+      ;; appears: a build that ran no provider pipeline must answer exactly what
+      ;; it answered before. Telemetry already carried it; a caller reading the
+      ;; response had no way to see the same thing.
+      (:provider_summary index)
+      (assoc :provider_summary (:provider_summary index)))))
 
 (defn- entry-root-consistent? [entry]
   (= (:root_path entry)
@@ -448,9 +559,16 @@
        :file_count (count (get-in entry [:index :files]))
        :unit_count (count (get-in entry [:index :units]))
        :cache_hit cache-hit?
-       :payload {:force_rebuild force-rebuild
-                 :paths_count (count paths)
-                 :snapshot_id (get-in entry [:index :snapshot_id])}})))
+       :payload (cond-> {:force_rebuild force-rebuild
+                         :paths_count (count paths)
+                         :snapshot_id (get-in entry [:index :snapshot_id])}
+                   ;; plans/018 Stage 6a: the library surface attaches this to
+                   ;; its own event, but the MCP surface suppresses that one and
+                   ;; emits this. Without the key here the summary never reaches
+                   ;; the telemetry of a real session, which is the only place
+                   ;; sessions actually happen.
+                  (get-in entry [:index :provider_summary])
+                  (assoc :provider_summary (get-in entry [:index :provider_summary])))})))
 
 (defn project-context-for-entry [entry]
   {:detected_languages (get-in entry [:index :detected_languages])
@@ -752,7 +870,7 @@
                       :policy_version (get-in result-meta [:retrieval_policy :version])
                       :query_ingress_mode query_ingress_mode
                       :query_normalized query_normalized
-                      :normalized_query_summary continuation-summary
+                      :normalized_query_summary (redact-query-summary continuation-summary)
                       :continuation_artifact {:selection_id (:selection_id result)
                                               :snapshot_id (:snapshot_id result)
                                               :next_tool "expand_context"}
@@ -1101,6 +1219,12 @@
                                "unit_ids" {:type "array" :items {:type "string"}}}
                   :required ["index_id"]
                   :additionalProperties false}}
+   {:name "set_task_context"
+    :description "Declare which task this session is working on, so usage events group into one task attempt. Call it before starting a task and again when switching; pass null to clear. Optional: telemetry is only recorded when the host enables it."
+    :inputSchema {:type "object"
+                  :properties {"task_id" {:type ["string" "null"]
+                                          :description "Identifier for the current task. Null clears the task context."}}
+                  :additionalProperties false}}
    {:name "health"
     :description "Check if the SCI MCP server is alive and ready. Returns immediately with server status and uptime. Use to verify MCP availability before starting a workflow."
     :inputSchema {:type "object"
@@ -1127,6 +1251,43 @@
      :capabilities_summary {:capability_version capabilities/current-capability-version
                             :lanes_count (count registry/language-lanes)}}))
 
+(defn tool-set-task-context
+  "Declare, change, or clear the task this MCP session is working on.
+
+  A task boundary is declared and never inferred (plans/022). `task_id`
+  describes the working context rather than one retrieval, so it lives on the
+  session: every later call inherits it and a staged flow — create_index,
+  resolve_context, expand_context, fetch_context_detail — groups into one task
+  attempt without the caller repeating the field.
+
+  This is deliberately not part of `initialize`: that is a transport handshake,
+  while one session can work through several tasks in sequence.
+
+  Passing `null` (or omitting `task_id`) clears it, which must be explicit —
+  a task never expires on its own."
+  [state args]
+  (when-not (map? args)
+    (invalid-request "set_task_context arguments must be an object"))
+  (let [raw (:task_id args)
+        task-id (cond
+                  (nil? raw) nil
+                  (string? raw) (let [trimmed (str/trim raw)]
+                                  (when-not (str/blank? trimmed) trimmed))
+                  :else (invalid-request "task_id must be a string or null"))
+        previous (:task_id @state)]
+    (if task-id
+      (swap! state assoc :task_id task-id)
+      (swap! state dissoc :task_id))
+    {:task_id task-id
+     :previous_task_id previous
+     :session_id (:session_id @state)
+     :status (cond
+               (and task-id (= task-id previous)) "unchanged"
+               task-id "declared"
+               previous "cleared"
+               :else "noop")
+     :recommended_next_step "create_index"}))
+
 (def tool-handlers
   {"create_index" tool-create-index
    "repo_map" tool-repo-map
@@ -1139,7 +1300,8 @@
    "traverse_relations" tool-traverse-relations
    "skeletons" tool-skeletons
    "health" tool-health
-   "capabilities" tool-capabilities})
+   "capabilities" tool-capabilities
+   "set_task_context" tool-set-task-context})
 
 (defn format-json [payload]
   (json/write-str payload :escape-slash false))

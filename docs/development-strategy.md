@@ -4,7 +4,7 @@ doc_type: "strategy"
 lifecycle: "active"
 status: "accepted"
 agent_action: "reference_for_context"
-updated: "2026-08-27"
+updated: "2026-09-08"
 ---
 
 # Project Development Strategy
@@ -50,7 +50,7 @@ remains a separate research track until validated.
 
 | Priority | Direction | Value | Stage |
 | --- | --- | --- | --- |
-| P0 | Retrieval value benchmark harness | Proves whether semidx is worth using against a competent baseline, including explicit negative-utility cases. | Now |
+| P0 | External pilot readiness and task-value evidence | Tests usefulness, total task cost, operational reliability, and adoption barriers with 2-3 external teams. | Next goals |
 | P1 | Semantic provider authority | Raises trust in graph facts through exact, structural, heuristic, and fallback evidence. | Next |
 | P1 | One-shot context delivery | Reduces agent round trips without weakening staged retrieval. | Next |
 | P1 | Persistent JVM runtime reuse | Removes avoidable cold-start tax when clients use short-lived invocations or restart the runtime per request/session. | Integration quick win |
@@ -63,32 +63,110 @@ remains a separate research track until validated.
 
 ## Stage 0: Prove The Code-Graph Value Claim
 
-Primary direction: `plans/020_retrieval_value_benchmark_harness_plan.md`.
+### Next Goals: External Validation
 
-Why first:
+Accepted on 2026-09-08. These goals own the next product-validation direction;
+they are not an executable implementation plan or evidence of completed pilots.
+The proposition to test is that verifiable code relations, a fresh index, and
+budgeted context improve real agent tasks enough to justify adoption.
+Adoption by a large company remains a hypothesis, not a committed outcome.
 
-- It is the exit gate for `SPEC.md` Phase 1.
-- It tests whether semidx beats a competent `rg` plus targeted-read baseline on
-  real work.
-- It protects the project from building more surfaces around an unproven value
-  claim.
+#### 1. Prepare A Reproducible Pilot Distribution
 
-Deliver next:
+Provide a versioned build, documented prerequisites, MCP setup, startup
+diagnostics, and update, rollback, and removal instructions. Make required and
+optional language toolchains explicit.
 
-- Finish Stage 0 calibration and final threshold lock.
-- Build the four-arm task harness.
-- Add the negative-utility calibration slice before the verdict run: Zig
-  signature/API extraction, Zig struct/config fields, Zig blast-radius seed
-  correctness, and stale-snapshot-after-edit behavior.
-- Add attempt-first aggregation over normalized provider cost.
-- Run the first real-repository evidence suite.
-- Write the verdict back into `SPEC.md`.
+Acceptance evidence: an external team installs the build and completes the
+first retrieval workflow from the documentation without the author's manual
+intervention. Record setup time and any assistance needed; unresolved steps
+remain onboarding defects.
 
-Exit decision:
+#### 2. Run Pilots With 2-3 External Teams
 
-- If the success signal passes, continue broad code-graph productization.
-- If it fails, narrow the product line to the strongest lane and stop presenting
-  semidx as a general-purpose index.
+Recruit teams with different repositories and real tasks covering bug
+investigation, change-impact assessment, and implementation. Record each
+team's existing workflow, repository characteristics, expectations, and
+adoption constraints before use.
+
+Acceptance evidence: pilot records from 2-3 external teams, including task
+outcomes, feedback, and reasons for continuing, declining, or abandoning use.
+Participation and schedules are not yet confirmed.
+
+#### 3. Measure Task Quality Against The Existing Workflow
+
+Compare the ordinary workflow with semidx-assisted work on comparable tasks.
+Record model and host versions, starting repository state, available tools,
+budgets, and cache conditions. Control task difficulty and order or learning
+effects; disclose differences that prevent a fair comparison.
+
+Agree task acceptance checks and success thresholds before evaluation. Judge
+answer or change correctness, relevant checks, and corrections required after
+review. Preserve failures and cases where semidx adds no value.
+
+Acceptance evidence: a reproducible comparison with task-level outcomes,
+sample sizes, and limitations. A small pilot can support a scoped adoption
+decision; it does not establish superiority across repositories or languages.
+
+#### 4. Measure Full Cost Per Successful Task
+
+Include all model usage, tool calls, indexing and refresh work, elapsed time,
+and human intervention. Show cold-start and reused-index results separately,
+and document how shared indexing cost is allocated. Keep monetary cost,
+latency, resource usage, and human time visible as distinct measures.
+
+Use host usage records for billed model cost and identify missing measurements
+explicitly. Include failed attempts and retries in the cost of reaching a
+successful result; report task success alongside cost so failures cannot look
+like savings.
+
+Acceptance evidence: comparable end-to-end cost records for both workflows,
+with coverage gaps and allocation assumptions disclosed.
+
+#### 5. Validate Operational Reliability And Deployment Fit
+
+On pilot repositories, including a large repository with its size recorded,
+exercise incremental updates, branch changes, restarts, and provider failures.
+Measure index freshness, resource use, response latency, degradation, and
+recovery time against targets agreed with the pilot team in advance.
+
+Check installation, code-access boundaries, telemetry storage and export,
+updates, and maintenance against each team's actual requirements.
+
+Acceptance evidence: a reproducible scenario report and a deployment checklist
+showing observed results, unmet targets, and concrete adoption blockers.
+
+#### 6. Choose The Next Investment From Pilot Evidence
+
+Consolidate where semidx helps, where it loses, and what prevents adoption.
+Prioritize graph quality, performance, packaging, and integrations from those
+findings. Narrow the supported use case when the evidence supports only a
+specific lane or task type.
+
+Acceptance evidence: a decision report linking each proposed follow-up to
+observed results, with an explicit continue, narrow, or defer decision.
+A full Java migration is deferred; reconsider it only when a concrete consumer
+need or measured constraint justifies the migration cost. Expected interest
+from large companies alone is insufficient justification.
+
+### Measurement And Execution Boundaries
+
+- [`plans/022`](../plans/022_passive_session_telemetry_activation_plan.md)
+  remains the passive telemetry execution track. It supplies observations and
+  host-session joins; passive telemetry alone cannot establish an advantage
+  over a baseline.
+- [`plans/020`](../plans/020_retrieval_value_benchmark_harness_plan.md) remains
+  paused. These goals do not resume its four-arm harness or change its scope.
+- Before pilot execution, prepare a numbered plan that fixes the comparison
+  protocol, acceptance thresholds, data handling, and ownership or reuse of
+  existing measurement artifacts. Do not silently create a competing corpus,
+  usage normalizer, or scorecard.
+- The Phase 1 value gate in [`SPEC.md`](../SPEC.md) remains unchanged. Record
+  pilot findings with their limits; do not declare that gate passed unless its
+  evidence requirements are met.
+- Prepare distribution and recruit pilot teams first. Measure task quality,
+  full cost, and reliability during the pilots, then make the investment
+  decision. This documentation change does not initiate external outreach.
 
 ## Stage 1: Raise Fact Authority
 
@@ -138,7 +216,8 @@ Deliver next:
 - Preserve `selection_id`, `snapshot_id`, diagnostics, and guardrails.
 - Add the MCP structured slice.
 - Add bounded Markdown projection only as a packet renderer.
-- Feed one-shot strategy adapters into the `plans/020` scorecard.
+- Evaluate one-shot delivery through the agreed comparison protocol when that
+  work is scheduled; `plans/020` remains paused.
 
 Exit decision:
 

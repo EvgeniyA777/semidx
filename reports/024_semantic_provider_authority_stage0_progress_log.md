@@ -1940,3 +1940,568 @@ condition from a stale one. `workspace-digest` no longer throws.
   English-only clean.
 - `./scripts/scip-java-corpus-snapshot.sh` regenerates the committed fixture
   byte-identically after the change.
+
+---
+
+# Stage 4.5 — Project-Scoped Provider Consolidation (2026-09-05)
+
+Status: **complete**.
+
+The owner chose the consolidation slice over Stage 5, it was written into
+`plans/018` as Stage 4.5, and then executed. Goal: make the two SCIP providers
+ordinary participants of the catalog, planner, and execution boundary without
+changing default extraction, public confidence, or the legacy Java/TypeScript
+paths.
+
+## Delivered
+
+| Artifact | Role |
+| --- | --- |
+| `src/semidx/runtime/providers.clj` | `:scope` on every descriptor; `project-descriptors` (the two SCIP claims, moved out of the adapters); `descriptors-for-project`; scope refusal in `provider-status` and `run-provider` |
+| `src/semidx/runtime/provider_selection.clj` | `project-plan`; optional `:batch_coverage` / `:batch_statuses` on `provider-plan` |
+| `src/semidx/runtime/provider_execution.clj` | the same two keys forwarded from `shadow-facts-for-file` |
+| `src/semidx/runtime/provider_batch.clj` | new: role registry, status probing, one run per admitted provider, failure isolation, coverage, document states, per-file delivery, `shadow-facts-for-project` |
+| `src/semidx/runtime/providers/scip_typescript.clj`, `scip_java.clj` | descriptors re-exported from the catalog; stale "not wired in" docstrings corrected |
+| `src/semidx/runtime/providers/scip_shadow_compare.clj` | `discover-paths`, `project-report`, `project-shadow-report` — the comparison as standard output |
+| `test/.../provider_batch_test.clj` | new, 13 tests |
+| `test/.../providers_test.clj`, `provider_selection_test.clj`, `scip_shadow_compare_test.clj` | 4 + 6 + 3 new tests |
+
+## Two defects the code contained before this stage
+
+Both were reproduced, not reasoned about.
+
+**A project descriptor reaching `provider-status` is reported `ready`.** The
+probe's shape is `unknown -> unavailable`, `not tree-sitter -> ready`,
+`tree-sitter -> test the CLI and grammar`. A SCIP descriptor takes the second
+branch, so putting it in the catalog without a scope check would have declared
+it ready without its toolchain being looked at once — and the planner admits a
+`ready` provider. It now returns `unavailable` with `provider_scope_not_file`.
+
+**A project descriptor reaching `run-provider` parses the file.**
+`parse-with-engine` dispatches on **language**, not engine, so `scip-typescript`
+would have been handed to the TypeScript lane's own parser and its regex units
+returned under the descriptor's `exact` claim — heuristic evidence laundered as
+compiler-grade. It now throws `:provider_scope_not_file`. Neither path is
+reachable through `descriptors-for`, which stays file-scoped; both guards are
+defence for the id-addressed callers.
+
+## Design decisions worth keeping
+
+- **The catalog owns the descriptors; `provider-batch` owns the roles.** The
+  SCIP adapters load generated protobuf classes through `semidx.runtime.scip`,
+  and `providers.clj` sits on the per-file planning path. Confining that
+  dependency to one namespace is what keeps the default path free of it. This is
+  not theoretical: the repo-local `:nrepl` alias lacks `target/classes`, so a
+  REPL there cannot load the SCIP namespaces at all, while per-file planning
+  loads fine.
+- **Coverage is the admission signal, not the selector.** A project provider is
+  a candidate for a file only when a completed run reported that path as
+  covered. An unavailable run, a failed run, a stale document, and an unsafe
+  document path all report no coverage, so degradation needs no separate branch.
+- **Substitution happens on the role registry, never on the runner.** The first
+  version injected the runner itself, which silently bypassed the try/catch —
+  an injected role could take the run down and the isolation was untestable. The
+  seam is now `:project_roles`, and every role, injected or registered, runs
+  inside the same wrapper.
+- **`:batch_coverage` absent means the pre-stage plan.** Proven by emptying
+  `project-descriptors` under `with-redefs` and asserting the plan is unchanged,
+  rather than by a hand-written expectation that could drift with the code.
+
+## Exit criteria check (plan Stage 4.5)
+
+| Criterion | Result |
+| --- | --- |
+| Plans/execution unchanged without batch input | met — `a-plan-without-batch-input-is-the-pre-stage-plan-test`, `a-workspace-without-a-toolchain-degrades-to-the-file-tiers-test` |
+| `adapters/parse-file` untouched | met — not edited; full suite green |
+| Admission only with an observed `ready` status | met — `project-plan-refuses-an-unobserved-provider-test`, `covered-but-unobserved-batch-provider-is-excluded-test` |
+| Missing toolchain / failed run / stale / invalid path degrade, never fail | met — four tests; coverage empty in every case |
+| One document-state vocabulary, no language branch in `provider-batch` | met — `document-states-use-one-vocabulary-for-every-language-test`; the namespace contains no language name outside the role registry |
+| One canonical fact from both tiers, both evidences retained | met — `project-seam-merges-exact-and-legacy-into-one-identity-test`, and 0 arbitration diagnostics on both corpora |
+| Execution order does not change arbitrated output | met — `batch-execution-order-does-not-change-arbitration-test` |
+| Project comparison recorded as Stage 6 admission evidence | met — below |
+
+## Observed project comparison (both protected corpora, real toolchains)
+
+`scip-shadow-compare/project-shadow-report`, both toolchains resolved locally
+(`.scip-toolchain`, `.scip-java-toolchain`), every document fresh, no withheld
+facts, no arbitration diagnostics.
+
+| | TypeScript | Java |
+| --- | --- | --- |
+| provider result | `ready` | `ready` |
+| documents fresh / stale / invalid / uncovered | 3 / 0 / 0 / 0 | 2 / 0 / 0 / 0 |
+| agreed symbols | 4 | 5 |
+| exact-only | 0 | 1 (`Validator#Validator`) |
+| legacy-only | 2 (`index.ts` re-export aliases) | 0 |
+| authority upgrades heuristic -> exact | 4 | 5 |
+| co-arbitrated canonical facts / diagnostics | 6 / 0 | 6 / 0 |
+| multi-provider symbols | 4 | 5 |
+| exact facts / evidence / bytes | 4 / 9 / 5326 | 6 / 8 / 6800 |
+| legacy facts / evidence / bytes | 6 / 6 / 4968 | 5 / 5 / 4323 |
+| project run latency | ~2.1 s | ~0.9 s |
+
+Both known asymmetries are the ones Stages 3 and 4 already recorded: SCIP mints
+no re-export unit for TypeScript, and the Java regex tier emits no constructor
+unit. Neither is new, and neither is a regression.
+
+## Deferred (unchanged from Stage 4, plus one)
+
+- SCIP `Relationship` / implementations and `call/*` relations.
+- Nested Java types; corpus coverage the two-file fixtures cannot exercise.
+- Wiring into `semidx.runtime.index` / `adapters.clj` — that is Stage 6's
+  default switch, and this stage stops short of it by design.
+- New: the batch runs providers sequentially. Concurrency across project
+  providers is not needed at two providers and would add an ordering surface for
+  no measured gain.
+
+## Verification
+
+- `clojure -M:test`: **574 tests, 3215 assertions, 0 failures, 0 errors**
+  (was 533 / 3077 after the Stage 4 review repair).
+- `SEMIDX_REQUIRE_SCIP_TOOLCHAINS=1 clojure -M:test -n semidx.runtime.provider-batch-test`:
+  13 tests, 38 assertions, 0 failures — the end-to-end test is asserted to run,
+  not skipped.
+- `./scripts/validate-contracts.sh`: ok, 72 files.
+- `./scripts/run-mvp-gates.sh`: ok, 23/23 benchmarks, 4 gate smokes.
+- `clojure -M:ccc check --root .`: up to date after `ccc refresh` (a new
+  namespace was added).
+- Both toolchain branches are exercised: presence through the two end-to-end
+  tests, absence deterministically through injected `unavailable` results rather
+  than through the host environment.
+
+## Changed test that was not new
+
+`unknown-provider-is-refused-not-guessed-test` used `"scip-java"` as its stand-in
+for an unknown provider id. Stage 4.5 put that id in the catalog, so the test now
+uses `"no-such-provider"`; the refusal it proves is unchanged, and the
+project-scope refusal has its own test.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 4.5 (project-scoped provider consolidation)
+recommended_next_stage: 5 (LSP live overlay)
+recommended_executor: Claude Code team lead
+recommended_model: Claude Opus 4.6
+effort: high
+effort_justification: live freshness, document versions, cancellation, and
+  crash isolation interact, and Stage 5 is the first tier whose evidence can
+  disagree with a fresh batch artifact rather than merely add to it.
+rationale: the seam Stage 5 needs now exists. An exact-tier provider is planned,
+  executed, and merged through the ordinary path, coverage is the admission
+  signal, and degradation is recorded rather than inferred. LSP joins that model
+  as a second exact contributor instead of introducing it.
+prerequisites_or_blockers:
+  - Stage 5 must not assume the java-lsp typed-signature capability; the
+    identity fixture deliberately holds it at the arity_only floor pending real
+    jdtls output.
+  - the live overlay is per-document, not per-project, so it needs a third
+    execution shape rather than reusing provider-batch as is; decide that shape
+    before writing the adapter.
+  - no default switch: Stage 6 still owns authority.
+file_ownership_and_conflict_risk: MEDIUM. Stage 5 touches provider-selection and
+  a new LSP adapter; provider-batch and the SCIP adapters should not need edits.
+fallback_executor_or_model: none recommended for the freshness and cancellation
+  logic.
+model_availability_checked_at: not checked this session.
+confidence: high (every Stage 4.5 exit criterion has an executing test)
+```
+
+---
+
+# Stage 5a — LSP Overlay Seam And TypeScript Live Provider (2026-09-05)
+
+Status: **complete**. Stage 5b (Java) remains deferred and blocked.
+
+The owner split Stage 5 before execution: a seam proved only against mocks would
+have its lifecycle, `initialize`, `didOpen`, document-version, and timeout
+assumptions rewritten the moment a real server arrived, and jdtls is a separate
+infrastructure problem. So 5a ships the language-neutral boundary **plus one
+complete real backend**, and no TypeScript lifecycle assumption may enter the
+seam.
+
+## Delivered
+
+| Artifact | Role |
+| --- | --- |
+| `scripts/lsp-toolchain/{package.json,package-lock.json}` | pinned `typescript-language-server` 6.0.0 + `typescript` 5.9.3 |
+| `scripts/setup-typescript-lsp.sh` | repo-managed install, fails closed on version drift and on a missing `tsserver.js` |
+| `src/semidx/runtime/provider_overlay.clj` | new: the language-neutral overlay boundary — roles, session lifecycle, source identity, failure taxonomy, coverage, delivery |
+| `src/semidx/runtime/providers/lsp_typescript.clj` | new: the thin TypeScript provider — toolchain resolution, symbol mapping, references |
+| `src/semidx/runtime/lsp_client.clj` | `:initialization_options` passthrough; `documentSymbol` takes `language_id`/`version` instead of hard-coding `"zig"` |
+| `src/semidx/runtime/providers.clj` | `typescript-lsp` descriptor; probe and executor refuse engines the catalog cannot handle; `statuses` covers only what it can probe |
+| `src/semidx/runtime/provider_selection.clj` | `:batch_statuses` generalised to `:observed_statuses`; an unobserved external tier no longer widens the operation set |
+| `src/semidx/runtime/fact_arbitration.clj` | `:equal_authority_value_conflict` diagnostic |
+| `.github/workflows/mvp-runtime.yml` | installs the LSP toolchain and sets `SEMIDX_REQUIRE_LSP_TOOLCHAINS=1` |
+| tests | new `provider_overlay_test` (16), `lsp_typescript_test` (8), plus additions to `fact_arbitration_test` and `providers_test` |
+
+## Four things the real server taught us that a mock would not have
+
+Every one of these was reproduced, and each would have been baked in as a false
+assumption had 5a been built against a stub.
+
+1. **`typescript-language-server` locates TypeScript from the *workspace*, not
+   from beside itself.** Indexing a workspace with no `node_modules/typescript`
+   fails the initialize handshake outright: *"Could not find a valid TypeScript
+   installation"*. The fix is `tsserver.path` in `initializationOptions`, which
+   the LSP client could not send at all — hence the new passthrough.
+2. **The `typescript` pin is load-bearing.** An unpinned install resolved
+   TypeScript 7.0.2, whose native compiler ships **no `lib/tsserver.js`**, and
+   the server cannot drive it. `typescript` is therefore a direct dependency
+   pinned to 5.9.3, and the setup script fails closed when `tsserver.js` is
+   absent rather than letting the failure surface inside a handshake.
+3. **A relative server path is not found.** `ProcessBuilder` resolves a relative
+   program against the process's working directory, which is the *workspace* —
+   so `.lsp-toolchain/node_modules/.bin/...` failed with `error=2`. Both
+   resolvers now return absolute paths. This is the same trap Stage 3 recorded
+   for `clojure.java.shell/sh`, in a different API.
+4. **`textDocument/references` returns nothing once the document is closed, and
+   its URIs do not match ours as strings.** The first version reused
+   `text-document-symbols!`, which closes the document as soon as symbols come
+   back, so every reference request resolved against a document the server no
+   longer held. After fixing that, references still vanished: `File.toURI`
+   produces `file:/Users/...` while the server answers with the normalized
+   `file:///Users/...`, so the string prefix test discarded every location
+   silently. URIs are now compared as decoded filesystem paths.
+
+## A defect in the arbitration kernel, found by writing the required test
+
+The plan requires a merge test for an **equal-authority conflict**. There was
+nothing to assert: `merge-one-canonical-fact` keeps all evidence but **discards
+`:value` entirely**, so two `exact` tiers describing the same definition
+differently produced one canonical fact, no diagnostic, and no trace of the
+disagreement. Reproduced in the REPL before fixing.
+
+`arbitrate-facts` now emits `:equal_authority_value_conflict` when providers of
+the same strongest authority disagree. Identity, authority, and the merge itself
+are unchanged — the contradiction is reported, not resolved, which is what
+Stage 1's exit criterion "equal-authority contradictions are observable" asked
+for. Only fields present in both values are compared, so a provider carrying
+extra native detail is not a false conflict; a lower tier disagreeing is not a
+conflict at all, because that is what the authority ladder is for.
+
+## Design decisions worth keeping
+
+- **The seam substitutes roles, never the wrapper.** Same rule as Stage 4.5, for
+  the same reason: injecting the runner would bypass the isolation and make it
+  untestable.
+- **Source identity is decided by which text was sent.** Text read from disk
+  anchors on the file-bytes digest — the same anchor the regex and SCIP tiers
+  use, so agreement between tiers is agreement about one file. A live buffer
+  that differs from disk anchors on `overlay_text_sha256` plus the document
+  version, so live evidence cannot be mistaken for a claim about the file. That
+  is the whole of "dirty evidence stays in the overlay scope"; it needs no
+  separate scoping mechanism.
+- **`:observed_statuses` replaced `:batch_statuses`.** One key for every tier the
+  catalog cannot probe, merged only where `providers/locally-probed?` is false,
+  so an externally supplied status can never override a real tree-sitter probe.
+  The planner names no provider and no family.
+- **An unobserved tier does not widen the plan.** Putting `typescript-lsp` in the
+  catalog initially added a `references` operation to *every* TypeScript plan,
+  with a permanent gap — exactly what Stage 2 refused to do when it declined to
+  claim operations nothing produces. The default operation set now comes from
+  locally probed descriptors plus externally probed ones that were actually
+  observed, and `providers/statuses` returns only what it can probe rather than
+  present-and-unavailable entries that read like a probe nobody ran.
+- **Containers give ownership, not units.** The regex tier mints no unit for a
+  TypeScript class, so neither does this one; a tier that invented one would show
+  up forever as a difference rather than as agreement.
+
+## Exit criteria check (plan Stage 5a)
+
+| Criterion | Result |
+| --- | --- |
+| LSP facts accepted only for matching source content | met — `resolve-document` tests; `version_mismatch` refuses a document contradicting the caller's digest |
+| Dirty evidence stays in the overlay scope | met — `dirty-overlay-evidence-stays-in-the-overlay-scope-test`: the live-only symbol is anchored on the buffer digest and the document version |
+| Timeout or crash cannot fail unrelated files or the index | met — `a-failing-document-does-not-stop-the-others-test`; an unavailable overlay leaves the per-file plan intact |
+| Batch snapshots reproducible with the overlay disabled | met — `an-unobserved-overlay-does-not-widen-the-default-plan-test`; full suite green |
+| No TypeScript-only assumption in the seam, planner, or executor | met — `provider-overlay` names TypeScript only in its role registry; `provider-selection` names no provider at all |
+| Every failure-taxonomy value reachable in a test | met — `every-failure-kind-is-reachable-test` covers all seven |
+
+## Taxonomy note
+
+The plan named six kinds; the implementation has seven. `server_error` was added
+for a JSON-RPC error response, which has neither crashed nor sent something
+malformed — folding it into either would misreport what happened. An
+unrecognised exception is reported as `crash`, because after one the session is
+no longer trusted and is closed.
+
+## Verification
+
+- `SEMIDX_REQUIRE_SCIP_TOOLCHAINS=1 SEMIDX_REQUIRE_LSP_TOOLCHAINS=1 clojure -M:test`:
+  **602 tests, 3303 assertions, 0 failures, 0 errors** (was 574 / 3215). Both
+  end-to-end tests are asserted to run, not skipped.
+- `./scripts/validate-contracts.sh`: ok, 72 files.
+- `./scripts/run-mvp-gates.sh` with both flags: ok, 23/23 benchmarks.
+- `clojure -M:ccc check --root .`: up to date after refresh.
+- Toolchain-absent branches are covered deterministically (injected
+  `unavailable`, nonexistent toolchain dir), not by the host environment.
+
+## Changed tests that were not new
+
+`selectors-choose-providers-by-path-test` and
+`path-eligibility-never-yields-a-project-provider-test` asserted the exact
+provider list for a `.ts` path, which now includes `typescript-lsp`. The
+assertions were widened to the new list and given an explicit check that no
+project provider leaks into path eligibility.
+
+## Deferred
+
+- **Stage 5b (Java)** — blocked on a repo-managed jdtls decision, not merely
+  unscheduled. `jdtls` exists on this machine via Homebrew, which does not
+  satisfy ADR-047.
+- Reference lookup is bounded at 32 definitions per document and reports its own
+  truncation; a larger corpus may want a different bound.
+- The overlay runs providers sequentially, as the batch tier does.
+- `documentSymbol` kinds outside function/method/term are recorded as unmapped
+  rather than modelled; promoting any of them is a Stage 6 question about what
+  the default tier should contain.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 5a (LSP overlay seam and TypeScript live provider)
+recommended_next_stage: owner decision between 5b (Java LSP) and 6 (default
+  authority switch)
+recommended_executor: Claude Code team lead
+recommended_model: Claude Opus 4.6
+effort: high
+effort_justification: Stage 6 is the public authority and truthful-degradation
+  gate; Stage 5b starts with a toolchain decision that binds ADR-047.
+rationale: every exact tier the plan called for now exists and merges through
+  one path — batch SCIP for reproducible project evidence, LSP for live
+  documents — and equal-authority disagreement between them is finally
+  observable, which Stage 6 needs before it can make either authoritative.
+  Stage 5b adds a second consumer of a seam that is already proven against a
+  real server, so it is no longer on the critical path.
+prerequisites_or_blockers:
+  - 5b needs an owner decision on a repo-managed jdtls toolchain; a Homebrew
+    jdtls does not satisfy ADR-047.
+  - Stage 6 needs the plans/020 comparative evidence, and that track is paused
+    by the owner.
+  - the arbitration change is additive, but Stage 6 should decide whether an
+    equal-authority conflict may block a default-path fact rather than only
+    annotate it.
+file_ownership_and_conflict_risk: LOW for 5b (a new adapter plus one role entry);
+  MEDIUM-HIGH for Stage 6, which touches index/adapters wiring and public
+  confidence.
+fallback_executor_or_model: none for the authority switch.
+model_availability_checked_at: not checked this session.
+confidence: high (every Stage 5a exit criterion has an executing test, and the
+  four server-behaviour findings were reproduced rather than assumed)
+```
+
+---
+
+# Stage 5b — Java LSP Provider (2026-09-05)
+
+Status: **complete**. Stage 5 is now closed.
+
+Unblocked by owner decision: jdtls is installed as a repo-managed sha256-pinned
+tarball, the direct analogue of the pinned jars the Java SCIP toolchain uses. An
+ambient `PATH` jdtls stays unacceptable under ADR-047 — it pins nothing, so the
+provider's output would differ between a developer machine and CI.
+
+## Delivered
+
+| Artifact | Role |
+| --- | --- |
+| `scripts/setup-jdtls.sh` | downloads jdtls 1.54.0, verifies sha256 **before** extraction, replaces a drifted install, caches by version marker |
+| `src/semidx/runtime/providers/lsp_java.clj` | the Java provider: toolchain and JVM resolution, JDK gating, readiness polling, symbol mapping |
+| `src/semidx/runtime/providers.clj` | `java-lsp` descriptor, `definitions` only |
+| `src/semidx/runtime/provider_overlay.clj` | **one role entry**, nothing else |
+| `.github/workflows/mvp-runtime.yml` | installs the toolchain; the existing `SEMIDX_REQUIRE_LSP_TOOLCHAINS=1` now asserts this end-to-end test too |
+| `test/.../lsp_java_test.clj` | new, 11 tests |
+
+The seam is unchanged. `provider-overlay`, `provider-selection`, and
+`provider-execution` gained no Java-specific branch — the only edit to the
+boundary is the role entry, which is what Stage 5a was built to make possible.
+
+## Preflight findings (real jdtls 1.54.0, before any code)
+
+Same discipline as the Stage 4 preflight, and it again invalidated assumptions.
+
+1. **jdtls requires JDK 21+.** Under this machine's default JDK 17 it does not
+   start at all: `Unresolved requirement: osgi.ee; filter:="(&(osgi.ee=JavaSE)
+   (version=21))"`, then `Application "org.eclipse.jdt.ls.core.id1" could not be
+   found in the registry`. The stream simply closes, which the client reports as
+   `EOFException` — an unreadable failure if the version is not checked first.
+   The JVM that hosts the server is therefore resolved and version-checked
+   separately from the JVM running semidx, which may stay on 17.
+2. **Members arrive late, and their absence is silent.** Immediately after
+   `didOpen`, `documentSymbol` returns only the package and the class, with no
+   children and no error. A naive adapter would publish that as a complete
+   answer. The adapter polls until members appear and reports exhaustion as a
+   timeout instead.
+3. **The `arity_only` floor is confirmed, not lifted.** Symbols are named
+   `handle(String)`, `handle(String, int)`, `handleAll(List<String>)`,
+   `OrderService(Validator)`. Arity is recoverable, but the parameter types are
+   **simple names** — exactly the form Stage 4 rejected as Variant B for
+   `scip-java`. Types stay evidence; the key stays arity-only.
+4. **References are unavailable in this mode.** `textDocument/references` for
+   `Validator#validate` returns empty even though the corpus calls it twice from
+   another file: with no build file jdtls runs an invisible project with no
+   resolved classpath. The descriptor claims `definitions` only, rather than
+   reporting a permanent gap on every Java file.
+
+## The defect that only a real server would have shown
+
+The first implementation produced `OrderService#handle`, not
+`example.OrderService#handle`, so **the LSP tier did not merge with the regex
+tier at all** — two separate canonical facts for one method, which is precisely
+the duplicate-identity failure the whole plan exists to prevent.
+
+Cause: jdtls returns the package and the type as **siblings** at depth 0, not as
+parent and child. Walking the tree for ownership therefore never picks the
+package up. The package name is now read off the top level and used as the
+prefix for everything beside it. Covered by
+`the-package-is-a-sibling-not-a-parent-test`, which states the failure mode in
+its name so a future refactor cannot quietly reintroduce it.
+
+## Exit criteria check (plan Stage 5b)
+
+| Criterion | Result |
+| --- | --- |
+| Seam unchanged | met — one role entry; no Java branch in the boundary, planner, or executor |
+| Same canonical key as `scip-java` and regex; overloads distinct by arity | met — end-to-end test: both tiers merge onto one `exact` fact, and the two `handle` overloads stay separate at arity 1 and 2 |
+| JDK < 21, missing toolchain, and a never-ready project each degrade with a named reason | met — `a-jdk-below-21-is-refused-before-startup-test`, `missing-toolchain-is-reported-not-guessed-test`, `:lsp_project_not_ready` mapped onto the `timeout` kind |
+| End-to-end asserted, not skipped, when required | met — runs under `SEMIDX_REQUIRE_LSP_TOOLCHAINS=1` |
+
+## Notes worth keeping
+
+- **No ambient `PATH` step.** Unlike the other toolchains, this chain stops at
+  the repo-managed directory: a `jdtls` on `PATH` is exactly the unpinned
+  install the decision rejected.
+- **`-configuration` is copied per workspace.** jdtls writes into it, so
+  pointing every workspace at the shared install would have them corrupt each
+  other. The `-data` workspace lives under `~/.cache/semidx/jdtls/<digest>`,
+  keyed by canonical root, mirroring where the runtime launcher keeps its state.
+- **A readiness timeout is reported as `timeout`**, not as a new taxonomy kind:
+  we waited and the answer never came, which is what that kind means.
+- The download URL is the `downloads.php` mirror selector, because the direct
+  `download.eclipse.org/jdtls/` path returned 504 during this work. The sha256
+  is what makes either source acceptable.
+
+## Verification
+
+- `SEMIDX_JDTLS_JAVA_HOME=<jdk21> SEMIDX_REQUIRE_SCIP_TOOLCHAINS=1
+  SEMIDX_REQUIRE_LSP_TOOLCHAINS=1 clojure -M:test`: **613 tests, 3342
+  assertions, 0 failures, 0 errors** (was 602 / 3303).
+- Without a JDK 21 configured the Java end-to-end test skips with
+  `jdtls_java_too_old` and the suite stays green — the developer path.
+- `./scripts/validate-contracts.sh`: ok, 72 files.
+- `./scripts/run-mvp-gates.sh` with every flag: ok.
+- `clojure -M:ccc check --root .`: up to date after refresh.
+
+## Changed tests that were not new
+
+Adding `java-lsp` to the catalog widened the eligible provider list for `.java`
+paths, so eleven assertions that pinned exact provider or exclusion lists were
+updated: `provider_selection_test` gained an `excluded-for` helper so each
+assertion is about the provider it is testing, and `providers_test` and
+`provider_execution_test` now include the new tier. No expectation was weakened —
+forced mode, for instance, now correctly admits the exact tier first.
+
+## NextStageRoutingRecommendation
+
+```text
+completed_stage: 5b (Java LSP provider); Stage 5 closed
+recommended_next_stage: 6 (default authority switch) — owner decision required
+recommended_executor: Claude Code team lead
+recommended_model: Claude Opus 4.6
+effort: high
+effort_justification: Stage 6 is the public authority and truthful-degradation
+  gate: it changes what users see, lowers confidence for fallback-only
+  repositories, and is the first stage to touch the snapshot path.
+rationale: every tier the plan called for now exists behind one seam — batch
+  SCIP for reproducible project evidence, LSP for live documents, tree-sitter
+  and regex below them — and all of it is default-off. What remains is the
+  decision to make them authoritative.
+prerequisites_or_blockers:
+  - Stage 6's exit criteria require comparative task-value evidence from
+    plans/020, and that track is PAUSED by the owner. Either the owner accepts a
+    different evidence basis or plans/020 resumes first. This is a hard gate,
+    not a formality.
+  - Stage 6 should decide whether an equal_authority_value_conflict may block a
+    default-path fact or only annotate it; Stage 5a made it observable but left
+    the policy open.
+  - index.clj / adapters.clj wiring has been deliberately untouched since Stage
+    2 and lands here for the first time.
+file_ownership_and_conflict_risk: HIGH. Stage 6 touches the index lifecycle,
+  public capability projection, and confidence ceilings.
+fallback_executor_or_model: none.
+model_availability_checked_at: not checked this session.
+confidence: high for the provider work; the Stage 6 blocker is a product
+  decision, not an engineering one.
+```
+
+---
+
+# Stage 5 Review Repair (2026-09-05)
+
+Four findings from an independent review of `5c3c5c2..HEAD`. All four accepted
+and fixed; the two Medium ones were real behaviour defects, and both were
+reproduced before the fix and re-checked by disabling the fix afterwards.
+
+## F1 (Medium, fixed) — an unavailable overlay still widened the plan
+
+`provider-plan` admitted an externally probed tier into the **operation set**
+whenever a status entry merely existed, regardless of its `:state`. So
+`{"typescript-lsp" {:state "unavailable"}}` still added `:references`, producing
+exactly the permanent gap Stage 5a claimed to have removed, on every TypeScript
+file whenever the language server was absent.
+
+Worse than the code: **Stage 5a's own test had been weakened to accept it.** The
+first version of `an-unavailable-overlay-leaves-the-plan-untouched-test`
+asserted `[:definitions]`, that assertion failed, and it was replaced with a
+check on the exclusion reason instead of fixing the behaviour. The test now
+asserts the operation set again, and says why in its message.
+
+Fix: only a `ready` status widens operations. An observed-but-unavailable tier
+is the same absence as an unobserved one, just stated out loud. Verified
+directly: `ready` yields `[:definitions :references]`, `unavailable` and any
+other state yield `[:definitions]`.
+
+## F2 (Medium, fixed) — a failed document still admitted the overlay for that file
+
+Overlay coverage correctly excluded failed documents, but
+`shadow-facts-for-overlay` passed the **provider-level** status to every
+per-file plan. A provider status says the session started, not that this
+document was analysed — and unlike the project batch tier, an overlay provider
+is file-scoped, so it is a plan candidate by selector alone. A document that
+timed out therefore still planned `typescript-lsp` and reported a `:references`
+gap for an operation nothing was going to answer.
+
+Fix: `provider-overlay/statuses-for-path` narrows the status per document.
+Outside coverage the provider is downgraded to unavailable, carrying the reason
+the document actually failed with (`overlay_timeout`, `overlay_stale_document`,
+…), so the failed file falls back to the tiers below and says why. Coverage is
+now the per-document authority for both tiers, batch and overlay alike.
+
+Regression proof: with the gate disabled by `with-redefs`, the new
+`a-failed-document-does-not-admit-the-overlay-for-that-file-test` fails three
+assertions; with it, the suite is green.
+
+## F3 (Low, fixed) — jdtls install directory variable was inconsistent
+
+`scripts/setup-jdtls.sh` installs into `SEMIDX_JDTLS_TOOLCHAIN_DIR` when set,
+but `resolve-home` only read `:java_lsp_home`, `SEMIDX_JDTLS_HOME`, and the
+default directory. A custom install could therefore succeed and stay invisible
+to the provider. `resolve-home` now also accepts `SEMIDX_JDTLS_TOOLCHAIN_DIR`,
+between the explicit home and the repo-managed default.
+
+## F4 (Low, fixed) — an assertion that could not fail
+
+The Java end-to-end test filtered `:signature_key` over whole fact maps, so it
+was vacuously true over an empty sequence rather than proving anything. It now
+asserts on the values themselves: `(= [nil nil] (mapv :signature_key handles))`.
+
+## Verification
+
+- `SEMIDX_JDTLS_JAVA_HOME=<jdk21> SEMIDX_REQUIRE_SCIP_TOOLCHAINS=1
+  SEMIDX_REQUIRE_LSP_TOOLCHAINS=1 clojure -M:test`: **614 tests, 3349
+  assertions, 0 failures, 0 errors** (was 613 / 3342).
+- Both Medium fixes were checked by disabling them and observing the new tests
+  fail, not only by observing them pass.
+- `./scripts/validate-contracts.sh`: ok. `./scripts/run-mvp-gates.sh`: ok.
+- `clojure -M:ccc check --root .`: up to date after refresh.
