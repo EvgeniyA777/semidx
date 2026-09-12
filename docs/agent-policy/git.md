@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-05"
+updated: "2026-09-12"
 ---
 
 # Git Workflow Policy
@@ -90,20 +90,3 @@ owns the task procedure for applying this policy.
   checkout-over-write only after explicit user authorization.
 - Do not use stash as a coordination mechanism for user-owned work unless the
   user asks for it.
-
-## Current Long Unit Id Bugfix Case
-
-For the long `unit_id` contract bug recorded in
-`notes/2026-09-04-fetch-context-long-unit-id-contract.md`:
-
-- Treat the fix as a separate follow-up bugfix slice, not as part of Stage 4.
-- Do not start the slice until the user explicitly commands it, because another
-  agent may still be working on the branch.
-- When authorized, stay on the current branch unless the user explicitly asks
-  for a new branch.
-- Re-check `git status --short` and preserve any unrelated or another-owned
-  dirty files.
-- Commit the bugfix as its own coherent commit or small series of coherent
-  commits, with contract/schema changes, runtime changes, tests, and docs
-  grouped by concern.
-- Do not push the branch unless the user explicitly requests a push.

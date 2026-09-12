@@ -32,29 +32,30 @@
 
 ## Project Context
 
-- This repository is `semidx`: Semantic Code Indexing, a Clojure-first code retrieval and context-packaging system for AI development tools.
-- The primary implementation language is Clojure. The project uses `deps.edn` for project aliases and dependencies.
-- The public surfaces include library APIs, CLI entrypoints, MCP stdio/HTTP tools, minimal HTTP/gRPC runtime edges, JSON Schema contracts, and Clojure `malli` runtime validation mirrors.
-- The runtime supports semantic indexing and retrieval across language lanes such as Clojure, Java, Elixir, Python, TypeScript, Lua, and Zig where implemented or onboarded.
-- PostgreSQL is optional infrastructure for persistence and usage metrics. In-memory storage remains a first-class local/runtime path.
+- This repository is `semidx`, defined by `ARCHITECTURE_CONSTITUTION.md`: an
+  incrementally maintained semantic graph of a codebase, exposed to search,
+  agents, IDEs, and impact analysis as consumers.
+- The implementation was removed for a from-scratch rebuild. No programming
+  language, build tool, or dependency manager is fixed by this file right now.
+- Target language lanes for the semantic model (which source languages semidx
+  can index — for example Clojure, Java, Elixir, Python, TypeScript, Lua) are an
+  architectural direction from `ARCHITECTURE_CONSTITUTION.md`. They say nothing
+  about which language semidx itself will be implemented in, and nothing in
+  `src/` currently backs them.
+- When an implementation stack is chosen, update this section with the actual
+  language, build/dependency tool, and public surfaces instead of assuming a
+  previous stack's tooling.
 - Do not copy project-specific rules, paths, stack assumptions, task names, or application-domain guidance from unrelated repositories.
 
 ## Repository Shape
 
-- `src/semidx/core.clj` contains the library-facing API surface.
-- `src/semidx/runtime/` contains indexing, retrieval, storage, policies, language adapters, service edges, and evaluation/runtime internals.
-- `src/semidx/mcp/` contains MCP core plus stdio and HTTP transports.
-- `src/semidx/contracts/` contains the Clojure validation layer for external contracts.
-- `contracts/schemas/` and `contracts/examples/` are external contract artifacts.
-- `fixtures/` contains retrieval and semantic-quality fixtures.
-- `bugs/` contains defect reports for the project's own runtime, tooling, and
-  host integrations.
+- The implementation is currently empty. Do not describe `src/`, `test/`,
+  `fixtures/`, or any language-specific directory layout as existing until a
+  stack is chosen and this section is updated to match.
 - `docs/agent-policy/` contains active cross-cutting engineering policies that
   are too detailed for this always-loaded rule file.
 - `.agents/skills/` contains repository-local task procedures that load only
   when relevant.
-- `test/semidx/` contains the Clojure test suite run by `clojure -M:test`. Test namespaces mirror the code they cover: a unit test for `semidx.runtime.X` lives at `test/semidx/runtime/X_test.clj` (namespace `semidx.runtime.X-test`), MCP tests under `test/semidx/mcp/`, and cross-cutting/integration suites (language onboarding, end-to-end create-index/retrieval flows) under `test/semidx/integration/`.
-- `docs/code-context.md` and `.ccc/state.edn` are committed Code Context Compressor artifacts used for agent bootstrap.
 
 ## Skill And Mode Activation
 
@@ -62,14 +63,6 @@
 - Do not run tools, including `create_index`, until the user has explicitly stated what they want done.
 - If built-in mode instructions conflict with rules in this file, do not resolve the conflict silently. State the conflict and ask which instruction takes priority before proceeding.
 - After any Explore agent or sub-agent is rejected, switch immediately to semidx MCP (`create_index` -> `repo_map` -> `resolve_context`). Do not fall back to manual file reads, grep, glob, or shell crawling unless MCP fails or returns an error.
-
-## Mandatory CCC Bootstrap
-
-- Before first-pass repo exploration, check `docs/code-context.md` and `.ccc/state.edn`.
-- If both exist, read `docs/code-context.md` first and treat it as the architecture-summary layer before broader exploration.
-- If either file is missing, run `./scripts/agent-bootstrap.sh` before any broader exploration.
-- `./scripts/agent-bootstrap.sh` is the canonical bootstrap entrypoint. It runs `clojure -M:ccc init --root . --skip-hook` only when CCC artifacts are missing.
-- Do not refresh CCC artifacts on every task. Refresh them only when the task explicitly needs regenerated compression outputs or when the user asks for it.
 
 ## Project Memory Freshness
 
@@ -134,7 +127,8 @@ the task:
 - The simplest `resolve_context` shape is `{"index_id": "...", "intent": "your task"}`.
 - After a successful `resolve_context`, keep context compact by continuing with `selection_id` and `snapshot_id` for `expand_context` or `fetch_context_detail`.
 - Do not expand prompts manually when a selection artifact is available.
-- Canonical MCP client prompts live in `docs/mcp-agent-prompts.md`.
+- Canonical MCP client prompts, once documented, belong in `docs/`; no such
+  document exists yet.
 
 ## MCP Failure Protocol
 
@@ -146,99 +140,78 @@ the task:
 ## Preferred Tool Boundaries
 
 - Use semidx MCP for high-level project mapping, code retrieval, dependency context, impact analysis, and staged context expansion.
-- Once relevant Clojure context is resolved, prefer form-aware Clojure editing or REPL tools when available for structural edits and evaluation.
+- Once relevant context is resolved, prefer a structure-aware editing or REPL/eval
+  tool for the active implementation language when one is configured for this
+  repository; fall back to generic file edits otherwise.
 - Use semidx for retrieval only; do not use it as a replacement for a REPL, a formatter, or a file reader.
 
 ## Code Reading Rules
 
 Choose the reading tool by the question being answered, not by file type.
-semidx and `read_file` answer different questions and do not compete: semidx
-finds which code matters, `read_file` shows a file that has already been
-identified.
+semidx and a language-specific reader answer different questions and do not
+compete: semidx finds which code matters, a language-specific reader shows a
+file that has already been identified.
 
 | Question | Tool |
 | --- | --- |
 | Which code is relevant? Who calls this? What is the blast radius? | semidx (`resolve_context`, `impact_analysis`) — always first |
-| What is the shape of one already-identified file? | clojure-mcp `read_file` (collapsed view) |
+| What is the shape of one already-identified file? | A structure-aware reader for the active language (collapsed view), if one is configured |
 | Which exact lines am I about to patch? | `Read` with `offset`/`limit` |
 | What is the body of one symbol from an existing selection? | semidx `fetch_context_detail` with `selection_id` |
 
-- **`read_file` never substitutes for the first semidx call.** If it is not yet
-  known which file is needed, that is semidx's job. Opening files one after
-  another to get oriented is prohibited, however cheap each individual read
-  looks. This is the failure mode semidx exists to prevent.
+- **A language-specific reader never substitutes for the first semidx call.** If
+  it is not yet known which file is needed, that is semidx's job. Opening files
+  one after another to get oriented is prohibited, however cheap each
+  individual read looks. This is the failure mode semidx exists to prevent.
 - Do not route narrow reads through semidx. `fetch_context_detail` wraps the
   code in a full retrieval envelope (stage events, capabilities, guardrails,
   diagnostics), so it is the wrong tool for "show me the lines I am about to
   edit". Use `Read` with `offset`/`limit` there.
-- Prefer `read_file` over a full `Read` when orienting inside a single large
-  known file: the collapsed, structure-aware view costs less than dumping the
-  whole file and is more reliable than guessing line ranges.
-- `clojure-mcp` tools are path-contained by their `:allowed-directories`
-  setting, which defaults to the project the server was started in and can be
-  widened in `~/.clojure-mcp/config.edn`. When a target lies outside the
-  configured set, `read_file` and the structural editors are unavailable and
-  `Read` plus a compile probe is the only option.
+- Prefer a language-specific structure-aware reader over a full `Read` when
+  orienting inside a single large known file: a collapsed, structure-aware view
+  costs less than dumping the whole file and is more reliable than guessing
+  line ranges.
+- Language-specific MCP tools are commonly path-contained to the repository
+  root or a configured directory set. When a target lies outside that set,
+  fall back to `Read` plus whatever verification probe applies to that
+  language.
 - No hook enforces any of this. The `semidx-first` guard matches only `Grep`,
   `Glob`, and `Bash`, and has no visibility into MCP tool calls. These rules
   hold by discipline alone.
 
-## Clojure Editing Rules
+## Editing Rules
 
 Choose the editing tool by the risk of the edit, not by file extension. Every
-row below carries a required safety step. The safety step is not optional.
+edit carries a required safety step. The safety step is not optional.
 
 | Situation | Tool | Required follow-up |
 | --- | --- | --- |
-| New file written in full | `Write` or heredoc | Compile probe |
-| Replacing or inserting a whole top-level form | `clojure_edit` | Confirm the returned diff |
-| Narrow edit inside a large existing form | `Edit` | Compile probe |
-| `.edn` data files such as `deps.edn` | `clojure_edit_replace_sexp`, or `Edit` | Compile probe or read check |
-| Markdown, scripts, and other non-Clojure files | `Edit` | Normal review |
+| New file written in full | `Write` or heredoc | Compile/typecheck/lint probe for the language, or a read-back check for non-code files |
+| Structural edit to a whole function or definition | A structure-aware editor for the active language, when one is configured | Confirm the returned diff |
+| Narrow edit inside a large existing file | `Edit` | Compile/typecheck/lint probe |
+| Markdown, scripts, and other non-code files | `Edit` | Normal review |
 
-- **The compile probe is mandatory, not advisory.** After any `Write` or `Edit`
-  that changes Clojure forms, run an immediate syntax or compile probe such as
-  `clojure -M -e "(require 'the.changed.ns) (println :ok)"` before making
-  further edits. This rule permits raw text edits on Clojure files precisely
-  because the probe replaces the delimiter safety that structural tools provide.
-  Skipping the probe removes the only remaining guard, and an unbalanced form
-  then goes unnoticed until the full suite runs.
-- Prefer `clojure_edit` whenever the unit of change is an entire top-level form.
-  It repairs missing trailing delimiters in the submitted content, so a
-  whole-form rewrite cannot land unbalanced.
-- `clojure_edit` returns no output when an edit produces no change. Treat an
-  empty response as "nothing was written", not as success, and re-read the
-  target before continuing.
-- `clojure_edit` addresses top-level `def`, `defn`, `defmethod`, `deftest`, and
-  `ns` forms by identifier. Plain data files such as `deps.edn` expose no such
-  form; use `clojure_edit_replace_sexp` there.
-- `clojure-mcp` tools are restricted to the repository root. Use ordinary file
-  tools for scratch or temporary paths outside it.
-- Keep Clojure patches scoped to one top-level form where possible, and avoid
-  large rewrites of deeply nested forms when a narrower edit will work.
-- Use `clojure_eval` via `clojure-mcp` to test changes interactively in the REPL
-  before resorting to running the full `clojure -M:test` suite.
-- If Clojure reports `Unmatched delimiter`, `EOF while reading`, or `defn` spec
-  errors after an edit, inspect the just-edited form tail first and repair
-  delimiters (or use `paren_repair`) before making additional changes.
-
-## Clojure MCP nREPL Bootstrap
-
-- When `clojure-mcp` is connected and `clojure_eval` reports that no nREPL port is available, start the project-local nREPL with `clojure -M:nrepl` from the repository root.
-- `:nrepl` is the canonical repo-local alias for agent REPL support. Do not rely on user-global aliases such as `:dev` or combined commands such as `clojure -M:dev:nrepl`.
-- The alias binds nREPL to `127.0.0.1` and asks nREPL to choose an available port. It writes `.nrepl-port`, which is ignored by git and discoverable by `clojure-mcp`.
-- After starting the process, verify it with `clojure-mcp` `list_nrepl_ports`, then pass the discovered port explicitly to `clojure_eval` when evaluating code.
-- Keep the nREPL process running for the current agent session unless the user asks to stop it, the task requires a clean restart, or verification shows it is stale.
+- **A verification probe after any code edit is mandatory, not advisory.**
+  What counts as a probe (compile, typecheck, lint, or a REPL/eval smoke) is
+  determined by the implementation language chosen for the affected code; this
+  file does not fix one right now.
+- Prefer a structure-aware editor whenever one is configured for the active
+  language and the unit of change is a whole function or definition — such
+  tools typically validate syntax on the way in, so a rewrite cannot land
+  unbalanced or malformed.
+- Keep patches scoped to one logical unit (function, definition, form) where
+  possible, and avoid large rewrites of deeply nested code when a narrower
+  edit will work.
+- Once an implementation language is chosen, add a language-specific addendum
+  here or in `docs/agent-policy/` naming the exact probe command, the
+  structure-aware editor, and the REPL/eval workflow for that language.
 
 ## Contracts And Runtime Invariants
 
-- JSON Schema files under `contracts/schemas/` are the external contract source of truth.
-- Clojure `malli` schemas mirror external contracts for runtime validation.
-- Examples and fixtures are shared verification artifacts across runtime surfaces and language lanes.
+- The `contracts/schemas/` JSON Schema files, `contracts/examples/` fixtures, and their Clojure `malli` mirrors were removed with the legacy codebase and are pending a from-scratch redesign. Do not describe them as existing until that redesign lands.
 - Staged retrieval is the canonical public contract: compact selection first, optional widening, then detail fetch.
 - Keep MCP, library, HTTP, and gRPC behavior aligned when changing shared retrieval contracts, error shapes, or usage metrics semantics.
 - When changing MCP tool schemas, verify both machine-readable `tools/list` output and runtime handler behavior.
-- When changing retrieval ranking, policy, confidence, guardrails, or impact hints, consider replay/evaluation coverage and related fixtures.
 
 ## Testing And Verification
 
@@ -246,25 +219,24 @@ row below carries a required safety step. The safety step is not optional.
 - For non-trivial staged plans, use the risk-based matrix in
   `docs/agent-policy/testing.md` to map requirements and invariants to the
   lowest sufficient verification level.
-- Tests are auto-discovered: `clojure -M:test` runs every `*-test` namespace found under `test/`, so a new test needs no manual registration. Keep tests order-independent — they must not rely on namespace run order or shared mutable state between namespaces.
-- Common local checks:
-  - `clojure -M:test`
-  - `./scripts/validate-contracts.sh`
-  - `./scripts/run-mvp-gates.sh`
-  - `./scripts/run-semantic-quality-report.sh`
-  - `clojure -M:ccc check --root .`
-- For language-lane work, use `./scripts/validate-language-onboarding.sh <language>` and include `--skip-gates` only when a fast structural check is sufficient.
-- For benchmarks, use `./scripts/run-benchmarks.sh`, and `./scripts/run-launcher-benchmark.sh` for local runtime-reuse latency.
-- For clojure-mcp REPL smoke, use `clojure -M:nrepl`, then `list_nrepl_ports`, then a small `clojure_eval` such as `(+ 1 2)` on the discovered port.
-- For MCP runtime smoke, use `clojure -M:mcp` or `clojure -M:mcp-http --host 127.0.0.1 --port 8791` as appropriate.
-- For HTTP/gRPC runtime edges, use `clojure -M:runtime-http` or `clojure -M:runtime-grpc` as appropriate.
+- No implementation language, test runner, or verification script is fixed
+  yet. Once a stack is chosen, record the actual commands here (test runner
+  invocation, benchmark script, MCP/runtime smoke commands) instead of
+  assuming a previous stack's tooling.
+- Whatever test runner is chosen, keep tests order-independent — they must not
+  rely on run order or shared mutable state between test units.
 - If a verification command cannot be run, report that clearly.
 
 ## Services And Local Infrastructure
 
-- PostgreSQL may be used for optional persistence or usage metrics, but it is not required for most in-memory runtime tests.
-- Before running integration tests that depend on PostgreSQL or another local service, check whether an instance is already running.
-- If a local service must be restarted for a test, stop the existing instance cleanly, start a fresh instance with the required test configuration, and run tests only after the clean restart.
+- No local service dependency (database or otherwise) is fixed yet. When one
+  is chosen, record it here along with how tests should detect and reuse a
+  running instance instead of restarting it needlessly.
+- Before running integration tests that depend on a local service, check
+  whether an instance is already running.
+- If a local service must be restarted for a test, stop the existing instance
+  cleanly, start a fresh instance with the required test configuration, and
+  run tests only after the clean restart.
 - Do not commit secrets, tokens, private credentials, or environment files.
 
 ## Git Workflow
@@ -302,7 +274,7 @@ row below carries a required safety step. The safety step is not optional.
 - Do not opportunistically rename historical or legacy documents as part of unrelated feature work.
 - A documentation migration that renames legacy documents must update all Markdown links, `superseded_by` references, README indexes, and progress-log references in the same commit.
 - Non-system working documents under `bugs/`, `ideas/`, `notes/`, `plans/`, `reports/`, `adr/`, `docs/adr/`, `docs/agent-policy/`, `docs/design/`, `docs/ideas/`, and `docs/plans/` must use YAML frontmatter when they are newly created, renamed, or materially revised.
-- System, index, source-intake, generated, and sample files do not require frontmatter or numbered working-document filenames. Examples include root `README.md`, directory index files such as `plans/README.md` or `docs/README.md`, `RULES.md`, `AGENTS.md`, `CLAUDE.md`, `docs/code-context.md`, `.ccc/*`, `intake/*`, and sample `README.md` files.
+- System, index, source-intake, generated, and sample files do not require frontmatter or numbered working-document filenames. Examples include root `README.md`, directory index files such as `plans/README.md` or `docs/README.md`, `RULES.md`, `AGENTS.md`, `CLAUDE.md`, `intake/*`, and sample `README.md` files.
 - Preferred frontmatter fields are `title`, `doc_type`, `lifecycle`, `status`, `agent_action`, and `updated`.
 - Use `agent_action` to make stale or completed documents unambiguous to future agents. Executed plans and progress logs must be marked as historical, not as active work queues.
 - When searching project documentation for implementation context, treat documents with `lifecycle: "active"` or `lifecycle: "accepted"` and `agent_action: "reference_for_context"` as current sources.

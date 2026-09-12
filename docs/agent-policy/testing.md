@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-01"
+updated: "2026-09-12"
 ---
 
 # Testing and Verification Policy
@@ -31,7 +31,8 @@ Choose the lowest level that reliably proves the behavior:
   source normalization, stale-artifact behavior, and semantic-quality
   regressions.
 - Use runtime smoke checks for CLI, MCP stdio/HTTP, gRPC launchers, optional
-  PostgreSQL paths, external toolchains, and process-runner behavior.
+  external service paths (database or otherwise), external toolchains, and
+  process-runner behavior.
 
 Do not test mechanical delegation merely to increase counts. Do test custom
 branching, identity stability, merge/arbitration decisions, fallback behavior,
@@ -52,8 +53,9 @@ defects.
 - Each retrieval or ranking change: compact selection shape, expansion/detail
   continuity, token-budget behavior, impact hints, diagnostics, and low
   confidence handling.
-- Each storage or service-edge change: in-memory path, PostgreSQL path when
-  touched, serialization boundaries, lifecycle cleanup, and error reporting.
+- Each storage or service-edge change: in-memory path, the chosen persistence
+  backend's path when touched, serialization boundaries, lifecycle cleanup, and
+  error reporting.
 - Each external runtime dependency: local absence, CI/offline behavior, path or
   env-var resolution, generated-artifact freshness, and startup mode.
 
@@ -66,9 +68,9 @@ Common lanes include:
 | --- | --- | --- |
 | Focused unit | One namespace or pure function set | Fast proof for local behavior |
 | Runtime integration | Multiple runtime namespaces, storage, providers, or adapters | Cross-module behavior and degradation |
-| Contract validation | Schemas and examples under `contracts/` | Public contract compatibility |
-| Language onboarding | `./scripts/validate-language-onboarding.sh <language>` | Language-lane parser and fixture confidence |
-| MVP gates | `./scripts/run-mvp-gates.sh` or staged gate scripts | Release-facing regression confidence |
+| Contract validation | Schemas and examples under `contracts/`, once that layer is redesigned (see `RULES.md` → Contracts And Runtime Invariants) | Public contract compatibility |
+| Language onboarding | Command TBD until the language-lane onboarding tooling is rebuilt | Language-lane parser and fixture confidence |
+| Release gates | Command TBD until staged gate tooling is rebuilt | Release-facing regression confidence |
 | Runtime smoke | MCP, HTTP, gRPC, CLI, or provider process commands | Startup and operational boundary proof |
 
 Coverage reports are diagnostic. An arbitrary percentage does not replace
