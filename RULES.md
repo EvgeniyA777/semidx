@@ -22,6 +22,14 @@
 - Keep `AGENTS.md` and `CLAUDE.md` thin. Update this file when project rules change.
 - All repository rule files and committed project documentation must be written in English.
 
+## Architectural Constitution
+
+- Before planning or modifying semidx architecture, read `ARCHITECTURE_CONSTITUTION.md`.
+- `ARCHITECTURE_CONSTITUTION.md` contains normative architectural constraints.
+- If an implementation decision conflicts with it, the architecture document wins.
+- Do not change the architectural direction implicitly.
+- Any proposed deviation must first be explicitly documented and justified.
+
 ## Project Context
 
 - This repository is `semidx`: Semantic Code Indexing, a Clojure-first code retrieval and context-packaging system for AI development tools.
