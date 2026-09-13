@@ -11,16 +11,20 @@ why. This is not a changelog of removed implementation; see `git log`.
   approximate separation, stable identity, incrementality with consistent
   observation, language frontends plus a common core, consumer independence, and
   local operation without mandatory source-data transmission.
-- Two post-distillation corrections were applied to the DRAFT before
+- Three post-distillation corrections were applied to the DRAFT before
   ratification. §1 now states the graph-authority boundary the way the
   pre-distillation draft had resolved it: text-derived and approximate
   mechanisms may discover candidates, rank them, and render located source, but
   never establish a program relationship. The distillation had replaced that
   with a blanket "on top of the semantic graph", which contradicted
-  [CONFORMANCE.md](CONFORMANCE.md). §7 lost its closing sentence requiring a
-  viable non-MCP consumer path: it named one protocol in the identity document
-  and turned on the undefined word "viable". Consumer independence remains
-  protected by §7's authority clause and is checked by `CONFORMANCE.md`.
+  [CONFORMANCE.md](CONFORMANCE.md). §1 also lost "Everything else is an index,
+  projection, interface, or consumer of that graph": read strictly, "of that
+  graph" forbade the source-text index the same section permits, and the
+  preceding sentence carries the authority claim by itself. §7 lost its closing
+  sentence requiring a viable non-MCP consumer path: it named one protocol in
+  the identity document and turned on the undefined word "viable". Consumer
+  independence remains protected by §7's authority clause and is checked by
+  `CONFORMANCE.md`.
 - The constitution still owns exactly five terms whose distinctions are product
   identity: entity, node, relationship, assertion, and fact. Source containers
   are entities; source ingestion can establish facts about source organization;

@@ -54,8 +54,7 @@ exist, and is the failure §3 forbids.
 
 `semidx` is an incrementally maintained semantic graph of a codebase.
 
-The semantic graph is the source of truth. Everything else is an index,
-projection, interface, or consumer of that graph.
+The semantic graph is the source of truth.
 
 Search, vector embeddings, RAG, MCP, agent context, navigation, impact analysis,
 and future compilation tooling may exist.
