@@ -5,13 +5,15 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## What Exists And Why
 
-- `ARCHITECTURE_CONSTITUTION.md` remains **DRAFT, not ratified**. It has been
-  distilled to product identity rather than conformance mechanics: semantic
+- `ARCHITECTURE_CONSTITUTION.md` is **RATIFIED — 2026-09-13**. It is frozen:
+  §18 provides no amendment procedure, and a constraint that turns out to be
+  wrong is grounds for a fork with its own constitution, never for an edit.
+  What it fixes is product identity rather than conformance mechanics: semantic
   graph as the product, entity nodes rather than chunks, exact/unresolved/
   approximate separation, stable identity, incrementality with consistent
   observation, language frontends plus a common core, consumer independence, and
   local operation without mandatory source-data transmission.
-- Three post-distillation corrections were applied to the DRAFT before
+- Four post-distillation corrections were applied to the DRAFT before
   ratification. §1 now states the graph-authority boundary the way the
   pre-distillation draft had resolved it: text-derived and approximate
   mechanisms may discover candidates, rank them, and render located source, but
@@ -91,8 +93,11 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## Active Constraints And Known Gaps
 
-- Ratification has not been performed. The DRAFT status keeps the constitution
-  correctable until an explicit ratification commit changes the status line.
+- Ratification was performed on 2026-09-13, in its own commit, after the three
+  post-distillation corrections and a final adversarial pass found no remaining
+  identity-level conflict. The constitution is no longer correctable. Do not
+  propose editing it, and do not treat a companion document as a way to
+  reinterpret a clause.
 - The constitution now intentionally freezes fewer things. Detailed mechanisms
   such as fingerprints, snapshot storage, revision models, fixture shapes,
   accuracy measurements, ADR procedure, and delivery sequencing live outside the
@@ -121,9 +126,9 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## Near-Term Priorities
 
-- Review the corrected constitution as the ratification candidate. The key
-  question is no longer whether every important mechanism is listed, but whether
-  every listed constraint really defines product identity.
+- Repair the process leftovers now that the freeze is real: the amendment
+  terminology in `scripts/check-constitution-amendment.sh` and mechanical freeze
+  enforcement, which was deliberately deferred until after ratification.
 - Select the implementation stack under the local-operation constraint, then
   update `RULES.md` with actual build tools, source layout, verification
   commands, editing tools, and service requirements.

@@ -1,6 +1,6 @@
 # semidx — Architecture Constitution
 
-**Status: DRAFT — not ratified.** See §18 for ratification and immutability.
+**Status: RATIFIED — 2026-09-13.** See §18 for ratification and immutability.
 
 ## Scope Of This Document
 
