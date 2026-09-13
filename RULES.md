@@ -32,8 +32,8 @@
 - `ARCHITECTURE_CONSTITUTION.md` has no amendment procedure. Its §18 gives it
   two states, declared on its own status line: DRAFT while it is being written,
   and RATIFIED, after which it never changes.
-- It is currently a DRAFT. Finishing it means closing the open questions in its
-  `Open Constitutional Questions` section, which is what ratification requires.
+- It was ratified on 2026-09-13 and is now frozen. Do not edit it and do not
+  propose editing it, including to clarify or reword a clause.
 - Never propose editing a ratified constitution. A constraint that turns out to
   be wrong means a different product, and the mechanism for a different product
   is a fork of the repository with its own constitution.
@@ -41,8 +41,9 @@
   guard needs it. Never bundle a change to the definition of the product into an
   unrelated change. The versioned pre-commit hook enforces this today; bypass is
   `SCI_SKIP_CONSTITUTION_AMENDMENT=1 git commit`.
-- Mechanical enforcement of the §18 freeze is deliberately deferred until after
-  ratification. Do not add it early.
+- Mechanical enforcement of the §18 freeze does not exist yet. It was deferred
+  until after ratification and is now due; it is tracked in `MEMORY.md` under
+  near-term priorities.
 
 ## Project Context
 

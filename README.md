@@ -15,7 +15,7 @@ agent context, and navigation are consumers of that graph, not the architectural
 center of the system. Text-derived retrieval may discover candidates and render
 located source; it never establishes a program relationship. See
 [ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md) for the product
-identity it freezes at ratification (still DRAFT), [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md) for
+identity it freezes (ratified 2026-09-13), [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md) for
 the reasoning, [SPEC.md](SPEC.md) and [CORE.md](CORE.md) for changing
 requirements, and [CONFORMANCE.md](CONFORMANCE.md) for verification scenarios.
 
