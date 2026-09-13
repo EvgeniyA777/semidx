@@ -321,7 +321,12 @@ edit carries a required safety step. The safety step is not optional.
 - Do not opportunistically rename historical or legacy documents as part of unrelated feature work.
 - A documentation migration that renames legacy documents must update all Markdown links, `superseded_by` references, README indexes, and progress-log references in the same commit.
 - Non-system working documents under `bugs/`, `ideas/`, `notes/`, `plans/`, `reports/`, `adr/`, `docs/adr/`, `docs/agent-policy/`, `docs/design/`, `docs/ideas/`, and `docs/plans/` must use YAML frontmatter when they are newly created, renamed, or materially revised.
-- System, index, source-intake, generated, and sample files do not require frontmatter or numbered working-document filenames. Examples include root `README.md`, directory index files such as `plans/README.md` or `docs/README.md`, `RULES.md`, `AGENTS.md`, `CLAUDE.md`, `intake/*`, and sample `README.md` files.
+- The root canonical documents carry the same frontmatter: `SPEC.md`, `CORE.md`,
+  `CONFORMANCE.md`, `ARCHITECTURE_RATIONALE.md`, and `GLOSSARY.md`.
+- `ARCHITECTURE_CONSTITUTION.md` is exempt and stays exempt. It is frozen and
+  declares its state on its own status line; frontmatter must never restate it,
+  because a second place to read the state is a second place for it to be wrong.
+- System, index, source-intake, generated, and sample files do not require frontmatter or numbered working-document filenames. Examples include root `README.md`, directory index files such as `plans/README.md` or `docs/README.md`, `RULES.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`, `intake/*`, and sample `README.md` files.
 - Preferred frontmatter fields are `title`, `doc_type`, `lifecycle`, `status`, `agent_action`, and `updated`.
 - Use `agent_action` to make stale or completed documents unambiguous to future agents. Executed plans and progress logs must be marked as historical, not as active work queues.
 - When searching project documentation for implementation context, treat documents with `lifecycle: "active"` or `lifecycle: "accepted"` and `agent_action: "reference_for_context"` as current sources.
@@ -338,6 +343,13 @@ edit carries a required safety step. The safety step is not optional.
   - Bug or follow-up report: `open`, `fixed`, `wont_fix`, `completed`.
   - Handoff: `ready`, `consumed`, `superseded`.
   - Idea or source-intake document: `draft`, `proposed`, `source_intake`, `historical`.
+  - Specification, rationale, or reference: `draft` while the document is still
+    being written, `active` once it is current and stable, `superseded` when
+    another document replaces it.
+  - Policy: `active` or `superseded`.
+- `draft` describes the document, not the thing it describes. A specification is
+  `active` when its own text is settled, even when the work it specifies has not
+  started and no evidence exists yet.
 - `lifecycle` describes whether a document is current; `status` describes the
   workflow state appropriate to its document type. Do not use synonyms such as
   `done`, `delivered`, or `implemented` in new or materially revised frontmatter.
