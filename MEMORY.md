@@ -43,6 +43,16 @@ why. This is not a changelog of removed implementation; see `git log`.
   rationale and section 15 answers for the pre-ratification corrections,
   including the deliberate revision of former OQ-1 and the source-container
   decision. It does not ratify the constitution or accept the candidate roster.
+- [ADR 002](docs/adr/002_pre_ratification_scope_corrections.md) records a second
+  round of draft corrections, all of scope rather than of substance: Invariant 1
+  now constrains semantic answers instead of every path to source text, which
+  removes its contradiction with the retrieval mechanisms section 8 permits;
+  section 9 illustrates consumer questions instead of mandating test and
+  documentation linkage; the architectural decision test has one scope, stated
+  once in section 15 and referenced by Invariant 10; and section 13 forbids each
+  listed system as the center while permitting it as a consumer. It also records
+  two items deliberately left unchanged — the unconditional freeze in section 18
+  and the fingerprint wording in section 7.
 - `.agents/skills/` holds task procedures for exploration, review, delivery,
   testing, documentation rules, and progress logs.
 - `README.md` remains a minimal human entry point describing semidx and
@@ -95,8 +105,16 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## Near-Term Priorities
 
-- Assess the corrected draft for a separate, explicit ratification decision;
-  after ratification, implement freeze enforcement as required by `RULES.md`.
+- Treat the constitution as a ratification candidate rather than as work
+  pending completion. Section 17 is empty, so nothing blocks ratification, but
+  nothing forces it either: the document already binds work through `RULES.md`
+  while DRAFT keeps it correctable, so the only thing ratification adds today is
+  the irreversibility. The recorded reason to wait is that no constraint has met
+  an implementation. A vertical slice that exercises identity, incremental
+  update, and consistent snapshots is the intended evidence, and it needs two
+  frontends of different shape, because a single language cannot exercise
+  Invariant 8 or the core/extension split at all. After ratification, implement
+  freeze enforcement as required by `RULES.md`.
 - Select the implementation stack under the local-operation constraint, then
   update `RULES.md` with actual build tools, source layout, verification
   commands, editing tools, and service requirements.

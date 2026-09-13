@@ -537,7 +537,9 @@ The semantic graph establishes program relationships.
 
 AI agents are important consumers of `semidx`, but `semidx` must not be architected specifically as an AI chat backend.
 
-Agents must be able to ask questions such as:
+A consumer's questions are expressed over entities and relationships, not over
+text. Which questions a given version answers, and on which surface, are
+concrete requirements and are not fixed here. The shape of such a question:
 
 ```text
 find semantic entity X
@@ -696,15 +698,18 @@ users depend on — after which the graph is unmaintained weight. The center is
 not settled once at the start; it is re-decided every time a feature chooses
 what to attach to.
 
-**Implications.** A new capability attaches to the graph, not to source text or
-to an index derived directly from source text. When a capability cannot be
-expressed over the graph, the correct response is to extend the graph, never to
-route around it.
+**Implications.** A capability that establishes what the program means attaches
+to the graph, not to source text or to an index derived directly from source
+text. A text-derived index may discover candidates, and a consumer may render
+source the graph located (§8); neither may be what establishes a program
+relationship. When a capability cannot be expressed over the graph, the correct
+response is to extend the graph, never to route around it.
 
 **Detection.** Trace each feature's data path from consumer back to source. A
-path that does not pass through the graph is a violation. In code this is a
-dependency-direction check: modules implementing consumers must not depend on
-parsers or raw source readers.
+semantic answer whose path does not pass through the graph is a violation. In
+code this is a dependency-direction check: a module that establishes program
+relationships must not depend on parsers or raw source readers; a module that
+only discovers candidates or renders located source may.
 
 ### Invariant 2 — Nodes are entities, not chunks
 
@@ -884,14 +889,14 @@ sequence of individually attractive features, each defensible on its own. Withou
 a standing burden of proof, the centre dissolves by accretion rather than by
 decision, and no single commit is identifiable as the mistake.
 
-**Implications.** The test in §15 is applied and its answers are recorded in a
-repository architecture decision record (ADR), linked to the change. A
-requirement that cannot name the constitutional clause justifying it is a
-candidate for removal.
+**Implications.** For every change within the scope §15 sets, the test in §15 is
+applied and its answers are recorded in a repository architecture decision
+record (ADR), linked to the change. A requirement that cannot name the
+constitutional clause justifying it is a candidate for removal.
 
-**Detection.** Process-level and active today. A merged feature with no recorded
-§15 answers violates this invariant even when the feature itself is sound,
-because the absence of the record is what permits the next one.
+**Detection.** Process-level and active today. A change within that scope merged
+with no recorded §15 answers violates this invariant even when the change itself
+is sound, because the absence of the record is what permits the next one.
 
 ### Invariant 11 — One consistent state per query
 
@@ -979,7 +984,7 @@ whatever it is called.
 
 ## 13. Explicit Non-Goals
 
-`semidx` is not primarily:
+None of the following is what `semidx` is:
 
 * a code chatbot;
 * a generic RAG framework;
@@ -989,9 +994,10 @@ whatever it is called.
 * a compiler;
 * a documentation generator.
 
-It may support these systems.
-
-It must never become them.
+`semidx` may support every one of them, and may contain one as a consumer or a
+projection of the graph. What is forbidden is the center: when the semantic
+graph exists to serve one of these rather than the other way round, `semidx` has
+become that thing and stopped being itself (§2, Invariant 1).
 
 ---
 
@@ -1006,7 +1012,8 @@ document and must not postpone the invariants required of a working graph.
 
 ## 15. Architectural Decision Test
 
-Before introducing a major feature or dependency, ask:
+Before introducing a feature or dependency that changes what the graph contains,
+how it is maintained, or what a consumer can rely on, ask:
 
 1. What semantic entity or relationship does this add?
 2. Does it improve the source-of-truth graph or merely provide another view over it?
