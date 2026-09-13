@@ -103,9 +103,15 @@ updated: "2026-09-13"
 
 ## Architectural Decision Records
 
-- The ADR procedure begins with implementation. Before that, architectural
-  reasoning belongs in the architecture documents themselves; `docs/adr/` stays
-  empty rather than accumulating records about their drafting.
+- The ADR procedure is active. The sequence starts at `001`, and
+  [docs/adr/README.md](../adr/README.md) is its index.
+- Records removed before the procedure was enabled do not reserve numbers, which
+  is why `001` is free. From the first ADR written under this procedure the
+  no-reuse rule applies strictly: a number is never reassigned, and a superseded
+  record stays in place with its frontmatter updated rather than being deleted.
+- Do not write an ADR about the drafting of the architecture documents
+  themselves. That reasoning belongs in `ARCHITECTURE_RATIONALE.md`, and the
+  drafting history belongs in `git log`.
 - Record answers to every question in constitution section 11 in an ADR under
   `docs/adr/NNN_slug.md`, using the Filenames and Frontmatter rules above.
 - Each record identifies the feature or dependency, applicable constitutional

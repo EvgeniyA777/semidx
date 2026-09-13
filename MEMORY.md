@@ -83,11 +83,13 @@ why. This is not a changelog of removed implementation; see `git log`.
   retrieval, code reading, and editing probes, and scopes the MCP sections as
   development tooling configured outside this repository rather than the rebuilt
   public API.
-- There are no ADRs. `docs/adr/` is deliberately empty until implementation
-  starts: the pre-implementation architecture record lives in the documents
-  themselves, and drafting history lives in `git log`. The reasoning for the
-  distillation is in [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md).
-  ADRs begin with the decisions that accompany real implementation work.
+- The ADR procedure is enabled and the sequence starts at `001`. None is written
+  yet; [docs/adr/README.md](docs/adr/README.md) is the index. Records removed
+  before the procedure was enabled do not reserve numbers, so `001` is free, and
+  from the first record onward numbers are never reassigned. Reasoning about the
+  architecture documents themselves stays in
+  [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md), and drafting history
+  stays in `git log`.
 - `README.md` is a minimal human entry point. It opens with a status line
   saying the repository is design rather than implementation, states the
   capabilities as intended behavior, and links to the architecture document set.
