@@ -46,10 +46,12 @@ compiler API, a language server, a static analyzer, or a custom extractor.
 Frontends differ in coverage and in how much they resolve. They do not define
 the model they feed.
 
-**projection** — A derived view over the graph that is not a source of truth: a
-lexical index, a vector index, an embedding window, a rendered snippet, or a
-rendered subgraph. A projection can be rebuilt or discarded without losing graph
-meaning.
+**projection** — A derived view that is not a source of truth: a lexical index,
+a vector index, an embedding window, a rendered snippet, or a rendered subgraph.
+A projection may be derived from the graph or built directly from source text.
+Either way it can be rebuilt or discarded without losing graph meaning, and
+either way it may discover, rank, or render — never establish a program
+relationship.
 
 **provenance** — The record of what produced an assertion: source ingestion, a
 frontend, an analyzer, exact system resolution, or another recorded method.
