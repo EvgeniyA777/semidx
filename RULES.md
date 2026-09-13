@@ -27,8 +27,12 @@
 - Before planning or modifying semidx architecture, read `ARCHITECTURE_CONSTITUTION.md`.
 - `ARCHITECTURE_CONSTITUTION.md` contains normative architectural constraints.
 - If an implementation decision conflicts with it, the architecture document wins.
-- Do not change the architectural direction implicitly.
-- Any proposed deviation must first be explicitly documented and justified.
+- Do not change the architectural direction implicitly. A decision inside the
+  constitutional boundary must be documented where project policy requires it.
+- A deviation from the ratified constitution cannot be documented or justified
+  into acceptability. §18 admits no exception: it requires a fork with its own
+  constitution. Documenting a violation does not make it one of the permitted
+  cases.
 - `ARCHITECTURE_CONSTITUTION.md` has no amendment procedure. Its §18 gives it
   two states, declared on its own status line: DRAFT while it is being written,
   and RATIFIED, after which it never changes.

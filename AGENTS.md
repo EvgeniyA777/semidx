@@ -12,7 +12,10 @@ Before planning or modifying semidx architecture, read `ARCHITECTURE_CONSTITUTIO
 If an implementation decision conflicts with it, the architecture document wins.
 
 Do not change the architectural direction implicitly.
-Any proposed deviation must first be explicitly documented and justified.
+A decision inside the constitutional boundary must be documented where project
+policy requires it. A deviation from the ratified constitution cannot be
+documented or justified into acceptability: §18 admits no exception and requires
+a fork with its own constitution.
 
 Before doing task work:
 

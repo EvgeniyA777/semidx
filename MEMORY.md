@@ -53,7 +53,12 @@ why. This is not a changelog of removed implementation; see `git log`.
 - `GLOSSARY.md` holds descriptive vocabulary and points to the canonical
   [document ownership policy](docs/agent-policy/documentation.md).
 - `RULES.md` remains the single source of truth for agent process rules. It is
-  language-agnostic because no implementation stack has been selected. Two
+  language-agnostic because no implementation stack has been selected. Its MCP
+  sections are scoped explicitly as development tooling configured outside this
+  repository, not as the rebuilt public API. `RULES.md`, `AGENTS.md`, and
+  `CLAUDE.md` no longer offer "documented and justified deviation" as a route
+  around the constitution: inside the boundary, decisions are documented; outside
+  it, §18 requires a fork. Two
   claims left over from the removed implementation were deleted: a language
   roster attributed to the constitution, and staged retrieval as the canonical
   public contract with MCP/library/HTTP/gRPC parity. Language coverage and
