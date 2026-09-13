@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-12"
+updated: "2026-09-13"
 ---
 
 # Git Workflow Policy
@@ -57,9 +57,52 @@ owns the task procedure for applying this policy.
 - Do not use `git add -A`, `git add .`, or broad pathspecs unless the user
   explicitly asks for that exact operation.
 
+## Constitution Freeze Enforcement
+
+- `ARCHITECTURE_CONSTITUTION.md` was ratified on 2026-09-13 and is frozen. Its
+  §18 has no amendment procedure; `RULES.md` owns the rule, this section owns its
+  enforcement.
+- `scripts/check-constitution-freeze.sh` runs from the versioned `pre-commit`
+  hook. It reads the status line from the version before the change: while DRAFT,
+  a constitution commit may touch only that file and `MEMORY.md`; once RATIFIED,
+  the text is pinned by the SHA-256 seal in
+  `scripts/constitution.freeze.sha256`.
+- The seal check hashes the staged blob from the git index, not the working tree,
+  and compares it with the hash recorded in `HEAD`'s seal. A staged edit is
+  refused even when the seal is regenerated in the same commit, and the seal
+  itself may not be modified, deleted, or renamed.
+- It fails closed: a missing SHA-256 tool, an unreadable status line, or an
+  absent or malformed seal blocks the commit.
+- The bypass is `SCI_SKIP_CONSTITUTION_FREEZE=1 git commit`. After ratification it
+  exists only for the one exception §18 allows — a mechanical repair that touches
+  no sentence — and that repair must regenerate the seal in the same commit with
+  `shasum -a 256 ARCHITECTURE_CONSTITUTION.md > scripts/constitution.freeze.sha256`.
+
+## Hooks
+
+- Install the versioned hooks with `./scripts/install-git-hooks.sh`; the tracked
+  sources live under `scripts/git-hooks/`.
+- The hooks are `pre-commit`, `commit-msg`, and `pre-push`. Keep
+  `scripts/check-agent-attribution.sh` wired into all three,
+  `scripts/check-constitution-freeze.sh` into `pre-commit`, and
+  `scripts/check-memory-freshness.sh` into `pre-push`.
+
+## Command Ordering
+
+- Never run dependent git commands in parallel. `git commit` and `git push` are
+  always sequential.
+- Use parallel tool execution only for independent reads or checks, never for
+  state-changing commands that depend on each other.
+- `git commit` records the whole index, not only the paths just added. Check
+  `git status --short` before committing, or commit explicit paths with
+  `git commit -- <paths>`.
+
 ## Commit Discipline
 
 - Commit each coherent repository mutation after verification.
+- Commit whenever code or documentation is touched, and make sure a completed
+  implementation stage ends with a commit.
+- Do not commit secrets, tokens, private credentials, or environment files.
 - Keep commits atomic: one behavior, contract, policy, or documentation concern
   per commit.
 - Stage only the files that belong to the current change.
@@ -84,6 +127,10 @@ owns the task procedure for applying this policy.
 
 ## Recovery
 
+- Do not revert existing user changes unless the user explicitly asks.
+- Before risky or multi-file changes, surface the dirty working tree and ask
+  whether to checkpoint it first. If uncommitted files remain from previous agent
+  runs, surface them and offer to commit and push them separately.
 - Prefer a new corrective commit for published or shared mistakes.
 - Prefer `git revert` for committed mistakes when preserving history matters.
 - Use destructive commands such as `git reset --hard`, branch deletion, or

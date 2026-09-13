@@ -60,24 +60,29 @@ why. This is not a changelog of removed implementation; see `git log`.
   describes has not started. `ARCHITECTURE_CONSTITUTION.md` carries no
   frontmatter by rule: its status line is the single place its state is
   declared.
-- `RULES.md` remains the single source of truth for agent process rules. It is
-  language-agnostic because no implementation stack has been selected. Its MCP
-  sections are scoped explicitly as development tooling configured outside this
-  repository, not as the rebuilt public API. `RULES.md`, `AGENTS.md`, and
-  `CLAUDE.md` no longer offer "documented and justified deviation" as a route
-  around the constitution: inside the boundary, decisions are documented; outside
-  it, §18 requires a fork. Two
-  claims left over from the removed implementation were deleted: a language
-  roster attributed to the constitution, and staged retrieval as the canonical
-  public contract with MCP/library/HTTP/gRPC parity. Language coverage and
-  public contracts are open `SPEC.md` requirements. The repository skills under
-  `.agents/skills/` lost the same layer (CanonicalFactKey, provider authority,
-  language lanes, MCP wire shape, a named PostgreSQL path) and now refer to the
-  properties the constitution protects.
-- `docs/agent-policy/{documentation,git,testing}.md` owns detailed cross-cutting
-  process. Documentation policy locates architectural decision-test answers in
-  repository ADRs and records the current ownership of constitution, rationale,
-  requirements, core roster, and conformance.
+- `RULES.md` remains the single source of truth for agent process rules, and is
+  now a kernel under an explicit 200-line budget stated in its first section: a
+  rule needing more than a few lines lives in `docs/agent-policy/` or
+  `.agents/skills/`, and `RULES.md` keeps one line pointing at it. It currently
+  runs 154 lines. It is language-agnostic because no implementation stack has
+  been selected.
+- `RULES.md`, `AGENTS.md`, and `CLAUDE.md` do not offer "documented and justified
+  deviation" as a route around the constitution: inside the boundary, decisions
+  are documented; outside it, §18 requires a fork. Claims left over from the
+  removed implementation are gone from all of them — a language roster attributed
+  to the constitution, staged retrieval as the canonical public contract, and the
+  same layer in the repository skills (CanonicalFactKey, provider authority,
+  language lanes, MCP wire shape, a named PostgreSQL path). Language coverage and
+  public contracts are open `SPEC.md` requirements.
+- `docs/agent-policy/{documentation,git,testing,tooling}.md` owns detailed
+  cross-cutting process. Documentation policy owns ownership, filenames,
+  frontmatter, lifecycle, the ADR procedure, progress logs, and the Plan
+  Readiness Gate; git policy owns hooks, command ordering, commit and push rules,
+  and both the attribution and constitution-freeze enforcement; testing policy
+  owns risk-based verification and local services; tooling policy owns MCP-first
+  retrieval, code reading, and editing probes, and scopes the MCP sections as
+  development tooling configured outside this repository rather than the rebuilt
+  public API.
 - There are no ADRs. `docs/adr/` is deliberately empty until implementation
   starts: the pre-implementation architecture record lives in the documents
   themselves, and drafting history lives in `git log`. The reasoning for the

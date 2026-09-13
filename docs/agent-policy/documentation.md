@@ -43,13 +43,71 @@ updated: "2026-09-13"
 - Give each rule or decision one canonical owner and link to it instead of
   copying the same normative text across multiple documents.
 
+## Filenames
+
+- New or renamed non-system working documents under `bugs/`, `ideas/`, `plans/`,
+  `reports/`, `adr/`, `docs/adr/`, `docs/design/`, `docs/ideas/`, and
+  `docs/plans/` use a chronological prefix scoped to that directory:
+  `NNN_slug.md`. Documents under `notes/` use a date prefix:
+  `YYYY-MM-DD_slug.md`.
+- Number sequences restart per directory. Choose the next number by scanning the
+  target directory for the highest existing numeric prefix, then incrementing it.
+- Do not reuse numbers and do not renumber existing prefixed documents casually.
+- These filename rules apply prospectively from the commit that introduced them.
+  An unnumbered or differently prefixed document found later is legacy until a
+  dedicated documentation migration renames it. Do not opportunistically rename
+  historical documents as part of unrelated feature work.
+- A migration that renames legacy documents must update all Markdown links,
+  `superseded_by` references, README indexes, and progress-log references in the
+  same commit.
+
+## Frontmatter
+
+- Non-system working documents under `bugs/`, `ideas/`, `notes/`, `plans/`,
+  `reports/`, `adr/`, `docs/adr/`, `docs/agent-policy/`, `docs/design/`,
+  `docs/ideas/`, and `docs/plans/` carry YAML frontmatter when they are newly
+  created, renamed, or materially revised.
+- The root canonical documents carry the same frontmatter: `SPEC.md`, `CORE.md`,
+  `CONFORMANCE.md`, `ARCHITECTURE_RATIONALE.md`, and `GLOSSARY.md`.
+- `ARCHITECTURE_CONSTITUTION.md` is exempt and stays exempt. It is frozen and
+  declares its state on its own status line; frontmatter must never restate it,
+  because a second place to read the state is a second place for it to be wrong.
+- System, index, source-intake, generated, and sample files need no frontmatter
+  and no numbered filename: root `README.md`, directory index files such as
+  `plans/README.md`, `RULES.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`,
+  `intake/*`, and sample `README.md` files.
+- The fields are `title`, `doc_type`, `lifecycle`, `status`, `agent_action`, and
+  `updated`.
+- Keep `status` consistent with document type:
+  - ADR: `proposed`, `accepted`, `rejected`, `deprecated`, `superseded`.
+  - Plan: `draft`, `planned`, `in_progress`, `blocked`, `completed`, `cancelled`.
+  - Progress log: `in_progress`, `blocked`, `completed`.
+  - Review or assessment: `draft`, `final`, `snapshot_complete`.
+  - Bug or follow-up report: `open`, `fixed`, `wont_fix`, `completed`.
+  - Handoff: `ready`, `consumed`, `superseded`.
+  - Idea or source-intake document: `draft`, `proposed`, `source_intake`,
+    `historical`.
+  - Specification, rationale, or reference: `draft` while the document is still
+    being written, `active` once it is current and stable, `superseded` when
+    another document replaces it.
+  - Policy: `active` or `superseded`.
+- `draft` describes the document, not the thing it describes. A specification is
+  `active` when its own text is settled, even when the work it specifies has not
+  started and no evidence exists yet.
+- `lifecycle` describes whether a document is current; `status` describes the
+  workflow state appropriate to its type. Do not use synonyms such as `done`,
+  `delivered`, or `implemented`.
+- Use `agent_action` to make stale or completed documents unambiguous to future
+  agents. Executed plans and progress logs are marked historical, never left
+  looking like active work queues.
+
 ## Architectural Decision Records
 
 - The ADR procedure begins with implementation. Before that, architectural
   reasoning belongs in the architecture documents themselves; `docs/adr/` stays
   empty rather than accumulating records about their drafting.
 - Record answers to every question in constitution section 11 in an ADR under
-  `docs/adr/NNN_slug.md`, using the naming and frontmatter rules in `RULES.md`.
+  `docs/adr/NNN_slug.md`, using the Filenames and Frontmatter rules above.
 - Each record identifies the feature or dependency, applicable constitutional
   clauses, decision, rationale, consequences, and verification evidence or
   planned conformance checks. Use an explicit rationale for any question marked
@@ -125,10 +183,40 @@ Ready criteria:
 
 ## Lifecycle
 
-- Use `active` or `accepted` documents as current sources.
-- Treat completed, archived, and superseded documents as historical unless their
-  frontmatter explicitly says they remain a current reference.
-- Mark executed plans and reports as historical in the same commit that
+- Common `lifecycle` values are `active`, `concept`, `accepted`, `completed`,
+  `superseded`, and `archived`. Common `agent_action` values are
+  `reference_for_context`, `use_as_input_for_future_plan_only`,
+  `historical_reference_only`, `do_not_implement_again`, and
+  `do_not_use_for_current_work`.
+- When searching documentation for implementation context, treat `active` or
+  `accepted` documents whose `agent_action` is `reference_for_context` as current
+  sources.
+- Treat `completed`, `archived`, and `superseded` documents as historical unless
+  their `agent_action` explicitly says otherwise. Do not use a historical
+  document for an implementation decision unless the user asks for historical
+  context.
+- If a current and a historical document conflict, follow the current one. If two
+  current documents conflict, ask for clarification before changing project
+  behavior.
+- When a document changes lifecycle state, update its frontmatter in the same
+  commit. Mark executed plans and reports as historical in the commit that
   completes or supersedes them.
 - Preserve useful evidence; do not leave completed checklists looking like
   pending work.
+
+## Progress Logs
+
+- When executing a documented plan, create or update a companion progress log
+  before or during the first implementation stage. Store it under root
+  `reports/` unless the plan names another location, with the standard
+  frontmatter.
+- If a plan is split into stages, update the log as each stage completes, and
+  keep the update in the same commit as the stage implementation when practical.
+- Record stage status, a meaningful summary of what changed, changed files or
+  commit hash when available, verification commands and results, known blockers,
+  skipped checks, and environment limitations.
+- Record review findings in the same log, including whether each was accepted,
+  rejected, deferred, or fixed. When fixing one, record the fix summary, changed
+  files or commit hash, and verification results.
+- Do not leave progress logs as stale checklists. Label backfilled entries as
+  historical notes instead of pretending they were updated live.

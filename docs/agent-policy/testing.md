@@ -76,8 +76,21 @@ Common lanes include:
 Coverage reports are diagnostic. An arbitrary percentage does not replace
 requirement and risk analysis.
 
+## Local Services
+
+- No local service dependency (database or otherwise) is fixed yet. When one is
+  chosen, record it here with how tests should detect and reuse a running
+  instance instead of restarting it needlessly.
+- Before running integration tests that depend on a local service, check whether
+  an instance is already running.
+- If a local service must be restarted for a test, stop the existing instance
+  cleanly, start a fresh one with the required test configuration, and run tests
+  only after the clean restart.
+
 ## Isolation And Evidence
 
+- Keep tests order-independent. They must not rely on run order or on shared
+  mutable state between test units.
 - Isolate data, clocks, ports, sessions, files, generated artifacts, and external
   state.
 - Prefer deterministic fixtures and explicit cleanup.
