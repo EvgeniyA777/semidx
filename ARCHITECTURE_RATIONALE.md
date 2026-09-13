@@ -2,7 +2,7 @@
 title: "Architecture rationale"
 doc_type: "rationale"
 lifecycle: "active"
-status: "draft"
+status: "active"
 agent_action: "reference_for_context"
 updated: "2026-09-13"
 ---

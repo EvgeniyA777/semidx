@@ -52,6 +52,14 @@ why. This is not a changelog of removed implementation; see `git log`.
   distillation and had no owner between it and this cleanup.
 - `GLOSSARY.md` holds descriptive vocabulary and points to the canonical
   [document ownership policy](docs/agent-policy/documentation.md).
+- Document status is synchronized. `SPEC.md` and `CORE.md` are `draft` because
+  their own text is unfinished: SPEC still lists ten requirement areas to
+  specify, and no kind in CORE is admitted. `CONFORMANCE.md`,
+  `ARCHITECTURE_RATIONALE.md`, and `GLOSSARY.md` are `active` because their text
+  is settled — a specification is not a draft merely because the work it
+  describes has not started. `ARCHITECTURE_CONSTITUTION.md` carries no
+  frontmatter by rule: its status line is the single place its state is
+  declared.
 - `RULES.md` remains the single source of truth for agent process rules. It is
   language-agnostic because no implementation stack has been selected. Its MCP
   sections are scoped explicitly as development tooling configured outside this

@@ -1,3 +1,12 @@
+---
+title: "Project glossary"
+doc_type: "reference"
+lifecycle: "active"
+status: "active"
+agent_action: "reference_for_context"
+updated: "2026-09-13"
+---
+
 # semidx Glossary
 
 The canonical vocabulary of the project: one term, one meaning, used the same

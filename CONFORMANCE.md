@@ -2,7 +2,7 @@
 title: "Conformance requirements"
 doc_type: "specification"
 lifecycle: "active"
-status: "draft"
+status: "active"
 agent_action: "reference_for_context"
 updated: "2026-09-13"
 ---
