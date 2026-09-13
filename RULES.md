@@ -29,6 +29,13 @@
 - If an implementation decision conflicts with it, the architecture document wins.
 - Do not change the architectural direction implicitly.
 - Any proposed deviation must first be explicitly documented and justified.
+- Amend `ARCHITECTURE_CONSTITUTION.md` only through its own §18 procedure:
+  bump the version, add a §19 log entry, and commit the amendment on its own.
+- The versioned pre-commit hook runs `scripts/check-constitution-amendment.sh`
+  and blocks a commit that changes `ARCHITECTURE_CONSTITUTION.md` together with
+  any file other than `MEMORY.md`.
+- If a combined commit is deliberate, bypass only after rechecking §18:
+  `SCI_SKIP_CONSTITUTION_AMENDMENT=1 git commit`.
 
 ## Project Context
 
@@ -251,7 +258,8 @@ edit carries a required safety step. The safety step is not optional.
   operation.
 - Use versioned git hook sources under `scripts/git-hooks/`; install them into `.git/hooks` with `./scripts/install-git-hooks.sh`.
 - The versioned hooks include `pre-commit`, `commit-msg`, and `pre-push`; keep
-  `scripts/check-agent-attribution.sh` wired into all three.
+  `scripts/check-agent-attribution.sh` wired into all three, and
+  `scripts/check-constitution-amendment.sh` wired into `pre-commit`.
 - If uncommitted files remain in the repo from previous agent runs, explicitly surface them and offer to commit and push them separately.
 - Commit changes every time code or documentation is touched (for example, automatically after completing each implementation stage of a project).
 - Group related changes into coherent commits during an implementation stage, but always ensure the stage ends with a commit.

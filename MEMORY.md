@@ -31,11 +31,15 @@ why. This is not a changelog of what was removed — see `git log` for history.
   pointing at the constitution, plus the license. Deliberately not a status
   page or getting-started guide, since there is nothing to run yet.
 - `scripts/` git-hygiene files (`check-agent-attribution.sh`,
-  `check-memory-freshness.sh`, `install-git-hooks.sh`, `git-hooks/*`) —
-  enforce process rules that hold regardless of implementation language: no
-  AI attribution, this file staying current. The freshness trigger list
-  includes `ARCHITECTURE_CONSTITUTION.md` and `SPEC.md`, so a change to
-  either requires a memory update in the same pushed range.
+  `check-memory-freshness.sh`, `check-constitution-amendment.sh`,
+  `install-git-hooks.sh`, `git-hooks/*`) — enforce process rules that hold
+  regardless of implementation language: no AI attribution, this file staying
+  current, and constitutional amendments staying standalone. The freshness
+  trigger list includes `ARCHITECTURE_CONSTITUTION.md` and `SPEC.md`, so a
+  change to either requires a memory update in the same pushed range. The
+  pre-commit amendment check blocks any commit touching
+  `ARCHITECTURE_CONSTITUTION.md` alongside a file other than `MEMORY.md`;
+  that pairing is allowed precisely because the freshness guard demands it.
 - `scripts/` toolchain installers (`setup-jdtls.sh`, `setup-scip-java.sh`,
   `setup-scip-typescript.sh`, `setup-tree-sitter-grammars.sh`,
   `setup-typescript-lsp.sh`, and their pinned `package.json` /

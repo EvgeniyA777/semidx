@@ -7,7 +7,7 @@ cd "$repo_root"
 hook_dir="$(git rev-parse --git-path hooks)"
 mkdir -p "$hook_dir"
 
-chmod +x scripts/git-hooks/pre-commit scripts/git-hooks/commit-msg scripts/git-hooks/pre-push scripts/check-agent-attribution.sh scripts/check-memory-freshness.sh
+chmod +x scripts/git-hooks/pre-commit scripts/git-hooks/commit-msg scripts/git-hooks/pre-push scripts/check-agent-attribution.sh scripts/check-memory-freshness.sh scripts/check-constitution-amendment.sh
 ln -sf "$repo_root/scripts/git-hooks/pre-commit" "$hook_dir/pre-commit"
 ln -sf "$repo_root/scripts/git-hooks/commit-msg" "$hook_dir/commit-msg"
 ln -sf "$repo_root/scripts/git-hooks/pre-push" "$hook_dir/pre-push"
