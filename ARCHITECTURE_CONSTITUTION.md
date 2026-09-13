@@ -373,6 +373,36 @@ Update granularity, the snapshot and versioning mechanism, storage
 representation, and propagation strategy are concrete requirements. They belong
 in `SPEC.md` and are expected to change.
 
+### Deployment Shape
+
+`semidx` must remain fully operable as a local process, with no required
+external service.
+
+This is stated here rather than in a section of its own because the argument for
+it is an incrementality argument. Every consumer in §3 works against one
+developer's working copy, and the question §6 and §7 exist to answer — what
+becomes invalid if this changes — is asked about code that is being edited right
+now. A shared service cannot see uncommitted local edits. Making one mandatory
+would reduce the graph to knowledge about committed history, which is the
+opposite of an incrementally maintained model.
+
+A shared service is permitted in exactly one role: supplying a precomputed
+baseline snapshot that a local process then brings up to date with local
+changes. Indexing is expensive, and sharing that cost is legitimate.
+
+One line keeps this a constraint rather than a preference:
+
+> A baseline that cannot be regenerated locally from source is a required
+> external dependency wearing a disguise.
+
+If a local process cannot build the graph by itself, with the service absent,
+the constraint is broken however the deployment is described.
+
+The consequences are intended: memory and startup are real budgets rather than
+implementation details, a server-resident database is not available to the core,
+and indexing cost is paid per developer. The budgets themselves are `SPEC.md`
+concerns. That they bind is not.
+
 ---
 
 ## 7. Change Awareness
@@ -839,6 +869,25 @@ distinguishable from "not supported here" on every public surface.
 unsupported. The response must distinguish absence from incapacity. A surface
 that returns an empty result for both is a violation.
 
+### Invariant 14 — Operable locally, always
+
+**Statement.** `semidx` must remain fully operable as a local process, with no required external service. A shared service may only supply a baseline that the local process could have built itself (§6).
+
+**Rationale.** The graph must answer questions about code as it is now,
+including edits that exist only in a working copy. No shared service can see
+those. A mandatory service would therefore confine the graph to committed
+history and make the incrementality the rest of this document requires
+pointless.
+
+**Implications.** Memory and startup are real budgets rather than
+implementation details, and a server-resident database is not available to the
+core. A remote baseline is an optimisation and never a prerequisite.
+
+**Detection.** From a clean checkout with no service reachable, build the graph
+and run every query. Both must succeed. A baseline that cannot be regenerated
+locally from source is a required dependency in disguise, and a deployment that
+needs one violates this invariant whatever it is called.
+
 ---
 
 ## 13. Explicit Non-Goals
@@ -916,31 +965,21 @@ All architectural decisions must remain compatible with this definition.
 
 ## 17. Open Constitutional Questions
 
-These are decisions of constitutional weight that are not yet made. They are
-recorded here rather than hidden inside hedged wording, because an unresolved
-question that is visible can be decided deliberately, while one buried in a
-qualifier gets decided by whichever implementation reaches it first.
+**None. Every constitutional question is closed.**
 
-Every open question must be closed before this document is ratified — an open
-question is the one thing that keeps it in draft. Implementation work that
-depends on an answer is blocked until the question is closed (§15, question 9).
+This section exists so that a question of constitutional weight has somewhere to
+be recorded rather than being hidden inside hedged wording. A question that is
+visible can be decided deliberately; one buried in a qualifier gets decided by
+whichever implementation reaches it first.
 
-After ratification this section must be empty, because a frozen document cannot
-answer a question later.
+While this document is a draft, a newly discovered constitutional question is
+recorded here, blocks any work that depends on its answer (§15, question 9), and
+blocks ratification until it is closed. An empty section is therefore the
+precondition for ratification in §18.
 
-### OQ-2 — Deployment shape
-
-* **Option A.** Local-first. `semidx` must remain fully operable as a local
-  process with no required external service.
-* **Option B.** Service-oriented. A shared instance serving multiple consumers
-  may be a required deployment mode.
-
-Why this is constitutional: it decides whether an external database or service
-dependency is permissible at all, which in turn constrains the storage model,
-the process model, and the memory and startup budgets in `SPEC.md`. It also
-changes what the product is from a consumer's perspective.
-
-Must be resolved before the storage and process model are chosen.
+After ratification this section stays empty permanently. A frozen document
+cannot answer a question later, so a constitutional question that arises then is
+grounds for a fork, not for reopening the document.
 
 ---
 

@@ -95,14 +95,19 @@ why. This is not a changelog of what was removed — see `git log` for history.
 
 ## Active Constraints And Blockers
 
-- `ARCHITECTURE_CONSTITUTION.md` §17 records one remaining open constitutional
-  question. Per §15 question 9, work depending on it is blocked until it is
-  closed, and it must not be settled implicitly by the first implementation
-  that needs an answer:
-  - **OQ-2** — deployment shape (local-first with no required external service
-    vs a shared service being a supported mode). Blocks the storage and process
-    model, and therefore constrains the stack decision below. It is the last
-    thing standing between the constitution and ratification.
+- `ARCHITECTURE_CONSTITUTION.md` §17 is **empty**: every constitutional
+  question is closed, which is the precondition §18 sets for ratification. The
+  constitution is ready to be ratified; ratification is a deliberate act and
+  has not been performed.
+- Deployment shape is **decided** (was OQ-2). semidx must remain fully
+  operable as a local process with no required external service (§6,
+  Deployment Shape; Invariant 14). A shared service is allowed in exactly one
+  role — supplying a baseline snapshot the local process could have built
+  itself. The guard against erosion, which must not be argued away: a baseline
+  that cannot be regenerated locally from source is a required dependency in
+  disguise. Consequences that bind the stack decision below: memory and
+  startup are real budgets, a server-resident database is unavailable to the
+  core, and indexing cost is per developer.
 - Cross-language unification is **decided** (was OQ-1). The model is a small
   mandatory shared core plus per-language extensions above it, with
   cross-language queries answered on the core alone. The core is fixed in §4:
@@ -117,11 +122,11 @@ why. This is not a changelog of what was removed — see `git log` for history.
 
 ## Near-Term Priorities
 
-- Resolve OQ-2, then decide the implementation stack (language,
-  build/dependency tool, source layout), then fill in `RULES.md`'s Project
+- Ratify the constitution — §17 is empty, so nothing blocks it — then write the
+  freeze-enforcement script.
+- Decide the implementation stack (language, build/dependency tool, source
+  layout) under the local-first constraint, then fill in `RULES.md`'s Project
   Context, Repository Shape, Editing Rules, Testing And Verification, and
   Services And Local Infrastructure sections with the real specifics.
-- Ratify the constitution once §17 is empty, then write the freeze-enforcement
-  script.
 - Write `SPEC.md` and design the contracts/schema layer, starting from the
   extension catalogue above the now-fixed core.
