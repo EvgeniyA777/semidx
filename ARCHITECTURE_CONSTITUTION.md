@@ -219,10 +219,10 @@ A change that fails this test must not be merged as `semidx`.
 While this document is DRAFT, any unresolved question about product identity is
 recorded here and blocks ratification until closed.
 
-After ratification this section stays empty. A question not settled by this
-constitution is resolved in companion requirements and ADRs only if the
-resolution complies with every clause as written. A resolution that conflicts
-with a clause requires the fork described in §18.
+After ratification this section records no open questions. A question not
+settled by this constitution is resolved in companion requirements and ADRs only
+if the resolution complies with every clause as written. A resolution that
+conflicts with a clause requires the fork described in §18.
 
 ## 13. Definition Of semidx
 
@@ -272,8 +272,8 @@ section numbering during the draft distillation.
 ### Draft
 
 While the status line reads DRAFT, text may change freely. Ratification is the
-act of setting that status line to RATIFIED with a date. It requires §12 to be
-empty.
+act of setting that status line to RATIFIED with a date. It requires §12 to
+record no open constitutional questions.
 
 ### Ratified
 
