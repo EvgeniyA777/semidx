@@ -46,9 +46,11 @@ why. This is not a changelog of removed implementation; see `git log`.
   process. Documentation policy locates architectural decision-test answers in
   repository ADRs and records the current ownership of constitution, rationale,
   requirements, core roster, and conformance.
-- [ADR 001](docs/adr/001_constitution_distillation.md) records the decision to
-  distill the constitution and move detailed engineering protection into
-  rationale, requirements, and conformance documents.
+- There are no ADRs. `docs/adr/` is deliberately empty until implementation
+  starts: the pre-implementation architecture record lives in the documents
+  themselves, and drafting history lives in `git log`. The reasoning for the
+  distillation is in [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md).
+  ADRs begin with the decisions that accompany real implementation work.
 - `README.md` is a minimal human entry point describing semidx and linking to
   the architecture document set. There is nothing to run yet.
 - Git-hygiene scripts under `scripts/` and `scripts/git-hooks/` enforce

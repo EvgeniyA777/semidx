@@ -157,7 +157,7 @@ The detailed draft material was not discarded:
   lifecycles.
 * [CORE.md](CORE.md) owns core-kind candidates and admission evidence.
 * [CONFORMANCE.md](CONFORMANCE.md) owns reviewable and executable checks.
-* ADRs under [docs/adr/](docs/adr/) own durable decisions and their historical
-  reasoning.
+* ADRs own durable decisions and their historical reasoning, starting with the
+  decisions that accompany implementation work. None exist yet.
 
 This split keeps the constitution strong by making it smaller.

@@ -45,6 +45,9 @@ updated: "2026-09-13"
 
 ## Architectural Decision Records
 
+- The ADR procedure begins with implementation. Before that, architectural
+  reasoning belongs in the architecture documents themselves; `docs/adr/` stays
+  empty rather than accumulating records about their drafting.
 - Record answers to every question in constitution section 11 in an ADR under
   `docs/adr/NNN_slug.md`, using the naming and frontmatter rules in `RULES.md`.
 - Each record identifies the feature or dependency, applicable constitutional
