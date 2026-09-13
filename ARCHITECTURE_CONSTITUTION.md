@@ -1,6 +1,6 @@
 # semidx — Architecture Constitution
 
-**Constitution version: 2.** Amendment history is recorded in §19.
+**Constitution version: 3.** Amendment history is recorded in §19.
 
 ## Scope Of This Document
 
@@ -25,6 +25,54 @@ at least two of the following hold:
 This document is versioned rather than lifecycled: it has no `status` or
 `lifecycle` state, because it is never superseded by a newer current document —
 it is amended in place under §18.
+
+## Normative Language
+
+This document uses normative keywords in the sense of RFC 2119. They are used
+deliberately, not stylistically.
+
+* **MUST**, **MUST NEVER** — an obligation or a prohibition. A violation is an
+  architectural defect, not a trade-off. Exceptions exist only where this
+  document names them in a closed list.
+* **MAY** — a permission genuinely granted to the implementation. It never means
+  that an obligation applies only when convenient.
+* **SHOULD** is not used anywhere in this document. A constitution states
+  obligations and permissions; it does not give advice. Anything that would be a
+  recommendation belongs in `SPEC.md`.
+
+Lower-case `must` and `may` in running prose carry the same force as the
+upper-case forms. The document does not distinguish them.
+
+Qualifiers that soften an obligation at the implementation's discretion — "where
+practical", "where useful", "whenever possible", "if feasible" — must never
+appear in a normative statement here. An obligation with a discretionary escape
+clause is not an obligation. Where such a qualifier covered a genuine undecided
+question, that question is recorded in §17 instead. Reintroducing one is a
+weakening amendment under §18 and requires a §19 entry.
+
+## Terminology
+
+The graph is the product, so its vocabulary is normative. These terms mean one
+thing each throughout this document, `SPEC.md`, and the implementation.
+
+| Term | Meaning |
+| --- | --- |
+| **semantic entity**, **entity** | A program construct the model represents: a module, a function, a type, a parameter. The canonical word for the modeled thing. |
+| **node** | The graph's *representation* of an entity. Used only where representation itself is the subject. |
+| **symbol** | A *named* entity — one a frontend can address by a stable name. A subset of entities; anonymous entities are entities but not symbols. |
+| **relationship** | A semantic connection between entities: `CALLS`, `USES_TYPE`, `IMPLEMENTS`. The canonical word for the connection. |
+| **edge** | The graph's *representation* of a relationship. Used only where representation itself is the subject. |
+| **assertion** | Anything the graph records: that an entity exists, that a relationship exists, what a relationship's target is, that two entities across snapshots are the same entity. Every assertion carries its source and resolution level (§11). |
+| **fact** | An assertion that is fully resolved and confirmed by a language frontend. A fact is a kind of assertion. **Not every assertion is a fact** — this is the distinction §11 exists to protect, and the reason the two words are not interchangeable. |
+| **frontend** | A language-specific component that produces assertions for the model (§10). |
+| **snapshot** | One consistent state of the graph, the state a query is answered against (§6). |
+| **fingerprint** | A digest of one aspect of an entity's meaning, used to decide what a change invalidates (§7). |
+| **consumer** | Anything that reads the graph: search, agents, IDE integration, impact analysis. |
+| **projection** | A derived view over the graph that is not a source of truth (§8). |
+
+Using **fact** where **assertion** is meant is not a wording slip. It asserts
+that something was resolved and confirmed when it may not have been, which is
+the failure §11 forbids.
 
 ## 1. Purpose
 
@@ -75,12 +123,11 @@ Semantic Extraction
 ┌─────────────────────────┐
 │     SEMANTIC GRAPH      │
 │                         │
-│ symbols                 │
-│ types                   │
-│ references              │
-│ calls                   │
-│ dependencies            │
+│ entities                │
+│   symbols, types, ...   │
 │ relationships           │
+│   calls, references,    │
+│   dependencies, ...     │
 │ semantic identities     │
 └────────────┬────────────┘
              │
@@ -102,7 +149,7 @@ The system must not be designed in reverse, where the graph exists merely to imp
 
 ### L1 — Structural Model
 
-Represents structural facts extracted from source code.
+Represents the structural entities extracted from source code.
 
 Examples:
 
@@ -127,7 +174,8 @@ This layer answers:
 
 ### L2 — Program Semantic Graph
 
-Represents exact relationships between program entities.
+Represents relationships between semantic entities, each carrying its source and
+resolution level (§11).
 
 Examples:
 
@@ -185,9 +233,9 @@ L3 may be implemented progressively. It must not block delivery of L1 and L2.
 
 ## 5. Stable Semantic Identity
 
-Graph nodes must represent semantic entities, not text fragments.
+Nodes must represent semantic entities, not text fragments.
 
-A symbol must retain a stable identity across edits.
+A semantic entity must retain a stable identity across edits.
 
 Example:
 
@@ -195,9 +243,9 @@ Example:
 UserService.login
 ```
 
-should remain conceptually the same graph entity when its body changes.
+must remain the same semantic entity when its body changes.
 
-Changes must be represented as changes to properties or dependencies of that entity rather than blindly deleting and recreating unrelated chunks.
+Changes must be represented as changes to the properties or relationships of that entity, not as a deletion of the entity followed by the creation of a new one.
 
 Stable identity is required for meaningful incremental updates.
 
@@ -206,10 +254,10 @@ Stable identity is required for meaningful incremental updates.
 Identity may be broken only when:
 
 * the entity was genuinely removed from the program;
-* no available frontend fact can distinguish the entity from a sibling — for
-  example, two otherwise identical anonymous entities in the same scope;
-* the frontend supplies no identity-bearing fact for that class of entity at
-  its current capability level.
+* no available frontend assertion can distinguish the entity from a sibling —
+  for example, two otherwise identical anonymous entities in the same scope;
+* the frontend supplies no identity-bearing assertion for that class of entity
+  at its current capability level.
 
 **This list is closed.** An identity break for any other reason — implementation
 convenience, reindexing strategy, or a frontend being awkward to work with — is
@@ -333,7 +381,7 @@ For example, vector search may answer:
 
 > Which code is conceptually related to authentication?
 
-After relevant semantic entities are found, exact graph relationships should answer:
+After relevant semantic entities are found, the graph's own relationships must answer:
 
 > What calls this function?
 > What type does it depend on?
@@ -349,7 +397,7 @@ The semantic graph establishes program relationships.
 
 AI agents are important consumers of `semidx`, but `semidx` must not be architected specifically as an AI chat backend.
 
-Agents should be able to ask questions such as:
+Agents must be able to ask questions such as:
 
 ```text
 find semantic entity X
@@ -375,7 +423,9 @@ MCP is not the core architecture.
 
 ## 10. Language Frontends
 
-Language-specific tools may provide facts to the semantic model.
+Language-specific tools may provide assertions to the semantic model. They
+provide facts only where they actually resolved what they asserted; the
+distinction is governed by §11.
 
 Possible sources include:
 
@@ -397,10 +447,10 @@ Frontends translate language-specific information into the common semantic model
 
 ## 11. Exact, Partial, and Approximate Knowledge Must Remain Separate
 
-The system must distinguish exact program facts, partially resolved assertions,
-and approximate semantic similarity. These are three categories, not two.
+Every assertion in the graph falls into exactly one of three categories, and the
+system must keep them distinct. These are three categories, not two.
 
-Exact:
+Resolved — these, and only these, are **facts**:
 
 ```text
 A CALLS B
@@ -424,15 +474,15 @@ this documentation appears relevant to C
 these two code regions have similar meaning
 ```
 
-Approximate relationships must never silently become authoritative graph facts.
+Approximate assertions must never silently become facts.
 
-A partially resolved assertion is exact in kind but unresolved in target. It is
-neither an exact program fact nor a similarity judgement, and it must not be
-coerced into either.
+A partially resolved assertion names a real relationship kind but does not
+establish its target. It is neither a fact nor a similarity judgement, and it
+must not be coerced into either.
 
-Coercing it upward — recording an unresolved call as a resolved `CALLS` edge —
-makes the graph state falsehoods. That is the one thing the word *exact* in §16
-forbids outright.
+Coercing it upward — recording an unresolved call as a resolved `CALLS`
+relationship — makes the graph state falsehoods. That is the one thing the word
+*exact* in §16 forbids outright.
 
 Discarding it — dropping every unresolved assertion — empties the graph exactly
 in the languages where dynamic dispatch dominates, which makes the system
@@ -442,8 +492,9 @@ Both failures are avoided by the same rule.
 
 ### Provenance Rule
 
-Every assertion in the graph — that a relationship exists, what its target is,
-that two entities across snapshots are the same entity — must carry:
+Every assertion in the graph — that an entity exists, that a relationship
+exists, what its target is, that two entities across snapshots are the same
+entity — must carry:
 
 * **what produced it** — which frontend, analyzer, or method;
 * **how far it was resolved.**
@@ -472,11 +523,11 @@ The semantic graph is the architectural center.
 
 ### Invariant 2
 
-Graph nodes represent semantic program entities, not arbitrary chunks of text.
+Nodes represent semantic entities, not arbitrary chunks of text.
 
 ### Invariant 3
 
-Exact dependencies, partially resolved assertions, and approximate similarity are three separate concepts, and every assertion carries its source and resolution level (§11).
+Facts, partially resolved assertions, and approximate assertions are three separate categories, and every assertion carries its source and resolution level (§11).
 
 ### Invariant 4
 
@@ -536,7 +587,7 @@ Degradation is a reported property of the system, not an internal detail. Identi
 
 It may support these systems.
 
-It should not become them.
+It must never become them.
 
 ---
 
@@ -573,7 +624,7 @@ Before introducing a major feature or dependency, ask:
 2. Does it improve the source-of-truth graph or merely provide another view over it?
 3. Does it preserve stable semantic identity?
 4. Does it preserve incremental update capability?
-5. Does it keep exact facts separate from approximate retrieval?
+5. Does it keep facts, partially resolved assertions, and approximate assertions separate?
 6. Could this decision cause the product to drift toward RAG, grep, or vector search as the center?
 7. Does it make future dependency and impact analysis easier or harder?
 8. Does every assertion it introduces carry its source and resolution level?
@@ -591,7 +642,7 @@ The canonical one-sentence definition of the project is:
 
 > **semidx is an incrementally maintained semantic graph of a codebase that provides exact program relationships as a foundation for search, AI context, navigation, impact analysis, and future incremental analysis and compilation tooling.**
 
-All architectural decisions should remain compatible with this definition.
+All architectural decisions must remain compatible with this definition.
 
 ---
 
@@ -609,7 +660,7 @@ that depends on the answer is blocked until then (§15, question 9).
 
 Referenced by Invariant 8.
 
-* **Option A.** One shared vocabulary of node and relationship kinds. Every
+* **Option A.** One shared vocabulary of entity and relationship kinds. Every
   language frontend maps onto it. Consumers get uniform queries across
   languages; language-specific constructs are either flattened or lost.
 * **Option B.** Per-language semantic schemas with a shared query layer above
@@ -621,7 +672,7 @@ that do not unify cleanly — multimethods and protocols, behaviours and dynamic
 dispatch, generics and ABI, structural typing. Reversing the choice after a
 schema is in use is a rewrite, and the schema is the consumer-visible contract.
 
-Must be resolved before the fact schema is committed to in `SPEC.md`.
+Must be resolved before the assertion schema is committed to in `SPEC.md`.
 
 ### OQ-2 — Deployment shape
 
@@ -658,5 +709,6 @@ Must be resolved before the storage and process model are chosen.
 
 | Version | Date | Change | Rationale |
 | --- | --- | --- | --- |
+| 3 | 2026-09-12 | Added the Normative Language section (RFC 2119 keywords, `SHOULD` declared unused, discretionary qualifiers banned from normative statements) and the Terminology section. Unified vocabulary across the document: entity vs node, relationship vs edge, and — the substantive one — **assertion** vs **fact**, where a fact is now defined as a fully resolved, frontend-confirmed assertion rather than a synonym. Replaced every remaining `should` with `must` or `must never` (§5, §8, §9, §13, §16). Retermed §3's graph diagram, §4 L1 and L2, §10, §11, Invariants 2 and 3, §15 question 5, and OQ-1. | Two gaps measured against standard practice. First, the version 2 amendment turned on the difference between `must` and `may` without the document ever declaring that those words were normative rather than stylistic, and four `should`s survived in normative positions. Second, the document mixed entity/node/symbol, relationship/edge, and fact/assertion as synonyms — and the version 2 amendment made that worse by introducing `assertion` and `edge` alongside the existing `fact` and `relationship`. For a document whose subject is exactness, and which is read by agents, that is a defect rather than a style question: `fact` and `assertion` differ precisely where §11 draws its line, so using them interchangeably asserts resolution that may not exist. Fixed before `SPEC.md` is written, so the assertion schema does not inherit the ambiguity. |
 | 2 | 2026-09-12 | Added the document's own scope boundary and the constitutional-versus-`SPEC.md` test. Hardened §5 (stable identity is unconditional, with a closed exemption list) and §7 (aspect-separated fingerprints are required, not optional). Extended §11 with partially resolved assertions and the Provenance Rule, and applied it to identity claims in §5. Fixed two observable properties of incrementality in §6. Amended Invariants 3 and 8; added Invariants 11, 12, 13. Added questions 8 and 9 to §15. Added §17, §18, §19. | The document defended strongly against becoming a RAG, grep, or vector-search product, but its positive requirements — the expensive, hard-to-reproduce ones — were written with `may`, `where useful`, and `where practical`. Drift was unlikely to arrive as a proposal to build a vector database; it was likely to arrive as a hundred local "not practical here" decisions, each individually defensible. This amendment converts those qualifiers into obligations with named exemptions, makes the two genuinely undecided forks visible as tracked questions instead of qualifiers, and gives the document an amendment record so it cannot be edited into agreement with the code it is supposed to constrain. |
 | 1 | 2026-09-12 | Initial document. | Fix the architectural target before any implementation exists, so a from-scratch rebuild has something to conform to. |

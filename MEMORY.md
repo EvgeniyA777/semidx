@@ -8,9 +8,15 @@ why. This is not a changelog of what was removed — see `git log` for history.
 - `ARCHITECTURE_CONSTITUTION.md` — the WHY/WHAT layer (purpose, semantic
   layers, invariants, non-goals). Exists so a future implementation has a
   fixed target to conform to, decided before any code exists. It holds only
-  what must not change; it is versioned (currently version 2) with an
+  what must not change; it is versioned (currently version 3) with an
   amendment log in §19, and is amended by standalone commits under §18 rather
-  than edited alongside the change it permits.
+  than edited alongside the change it permits. Its Normative Language section
+  makes `must`/`may` RFC 2119 keywords, declares `should` unused, and bans
+  discretionary qualifiers from normative statements. Its Terminology section
+  is the canonical vocabulary for the graph and binds `SPEC.md` and the
+  implementation too — in particular **assertion** (anything the graph
+  records) is not a synonym for **fact** (a resolved, frontend-confirmed
+  assertion).
 - `RULES.md` — the single source of truth for agent process rules. Written
   language-agnostic on purpose: no implementation stack is chosen yet, so it
   states process (git workflow, doc lifecycle, tool-usage discipline)
