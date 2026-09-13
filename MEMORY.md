@@ -32,16 +32,27 @@ why. This is not a changelog of removed implementation; see `git log`.
   principles exist, and [CONFORMANCE.md](CONFORMANCE.md) owns reviewable and
   eventually executable scenario families.
 - `CORE.md` is a **draft candidate roster**. No kind or roster version is
-  accepted or published yet. Open `module` semantics block dependent
-  `IMPORTS` and the current `DEFINES` candidate. Textual-inclusion coverage and
-  admission fixtures also remain unresolved.
+  accepted or published yet. Open `module` semantics block `IMPORTS`; they no
+  longer block `DEFINES`, whose container endpoint now ranges over whichever
+  container kinds are admitted, so basic containment does not wait on `module`.
+  Textual-inclusion coverage and admission fixtures remain unresolved.
 - `SPEC.md` is a **draft requirements entry point**. It owns changing
   requirements, semantic contract lifecycle, publication and migration rules,
-  outstanding specification work, and proposed delivery direction.
+  outstanding specification work, and proposed delivery direction. It also owns
+  the five core admission criteria (Adequacy, Identical meaning, Honest absence,
+  Subsidiarity, Common cost), which were constitutional text before the
+  distillation and had no owner between it and this cleanup.
 - `GLOSSARY.md` holds descriptive vocabulary and points to the canonical
   [document ownership policy](docs/agent-policy/documentation.md).
 - `RULES.md` remains the single source of truth for agent process rules. It is
-  language-agnostic because no implementation stack has been selected.
+  language-agnostic because no implementation stack has been selected. Two
+  claims left over from the removed implementation were deleted: a language
+  roster attributed to the constitution, and staged retrieval as the canonical
+  public contract with MCP/library/HTTP/gRPC parity. Language coverage and
+  public contracts are open `SPEC.md` requirements. The repository skills under
+  `.agents/skills/` lost the same layer (CanonicalFactKey, provider authority,
+  language lanes, MCP wire shape, a named PostgreSQL path) and now refer to the
+  properties the constitution protects.
 - `docs/agent-policy/{documentation,git,testing}.md` owns detailed cross-cutting
   process. Documentation policy locates architectural decision-test answers in
   repository ADRs and records the current ownership of constitution, rationale,
@@ -51,8 +62,10 @@ why. This is not a changelog of removed implementation; see `git log`.
   themselves, and drafting history lives in `git log`. The reasoning for the
   distillation is in [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md).
   ADRs begin with the decisions that accompany real implementation work.
-- `README.md` is a minimal human entry point describing semidx and linking to
-  the architecture document set. There is nothing to run yet.
+- `README.md` is a minimal human entry point. It opens with a status line
+  saying the repository is design rather than implementation, states the
+  capabilities as intended behavior, and links to the architecture document set.
+  There is nothing to run yet.
 - Git-hygiene scripts under `scripts/` and `scripts/git-hooks/` enforce
   attribution policy, memory freshness, and isolated constitution commits.
   `.github/workflows/agent-attribution.yml` enforces attribution policy in CI.
@@ -95,6 +108,10 @@ why. This is not a changelog of removed implementation; see `git log`.
 - No runtime conformance is claimed. The specifications describe future checks;
   the current verification is documentation consistency, references, and diff
   hygiene.
+- The constitution's §1 boundary is now stated once and consistently across
+  `CONFORMANCE.md`, `GLOSSARY.md`, and `README.md`: approximate and text-derived
+  mechanisms discover, rank, and render; only the graph establishes a program
+  relationship. Keep any future retrieval work on that line.
 
 ## Near-Term Priorities
 
@@ -108,3 +125,8 @@ why. This is not a changelog of removed implementation; see `git log`.
   coverage, and supply conformance evidence. Complete the dependent requirements
   and public contracts through `SPEC.md` before publication or an execution
   plan that relies on them.
+- Extend `scripts/check-memory-freshness.sh` to watch `CORE.md`,
+  `CONFORMANCE.md`, `ARCHITECTURE_RATIONALE.md`, and `docs/agent-policy/`, and
+  correct the amendment terminology in
+  `scripts/check-constitution-amendment.sh` together with post-ratification
+  freeze enforcement.
