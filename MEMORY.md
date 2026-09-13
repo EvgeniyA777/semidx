@@ -75,7 +75,7 @@ why. This is not a changelog of removed implementation; see `git log`.
   capabilities as intended behavior, and links to the architecture document set.
   There is nothing to run yet.
 - Git-hygiene scripts under `scripts/` and `scripts/git-hooks/` enforce
-  attribution policy, memory freshness, and isolated constitution commits.
+  attribution policy, memory freshness, and the constitution freeze seal.
   `.github/workflows/agent-attribution.yml` enforces attribution policy in CI.
 - Toolchain installers under `scripts/` set up pinned language-analysis tools:
   JDT LS, SCIP Java/TypeScript, tree-sitter grammars, and TypeScript LSP, with
@@ -107,13 +107,21 @@ why. This is not a changelog of removed implementation; see `git log`.
   opt-in, including for projections and diagnostics.
 - Coverage, unsupported constructs, unavailable analysis, unresolved assertions,
   approximate evidence, and confirmed absence must remain visible to consumers.
-- Freeze enforcement exists. `scripts/check-constitution-freeze.sh` replaces
-  the former amendment check and reads the status line from the version before
-  the change: while DRAFT it requires a constitution commit to stand alone with
-  at most `MEMORY.md`; once RATIFIED it blocks any change to the file. The
-  ratification commit itself passes because its predecessor was DRAFT. The
-  bypass `SCI_SKIP_CONSTITUTION_FREEZE=1` now covers only §18's one exception, a
-  mechanical repair that touches no sentence.
+- Freeze enforcement exists and is cryptographic.
+  `scripts/check-constitution-freeze.sh` reads the status line from the version
+  before the change: while DRAFT it requires a constitution commit to stand alone
+  with at most `MEMORY.md`; once RATIFIED it pins the text to the SHA-256 seal in
+  `scripts/constitution.freeze.sha256`. The sealed hash is
+  `27c6cf1a87ce69bc72016a802e160c464562c0bd2681093fbd32ad27e1970975`.
+- The expected hash always comes from `HEAD`'s seal, and the constitution is
+  hashed from the staged blob in the git index. Regenerating the seal beside an
+  edited constitution therefore does not authorise the edit, an unstaged
+  experiment is not a violation, and a staged one cannot hide behind a clean file
+  on disk. Deleting or renaming either file is refused, and the check fails
+  closed on a missing hash tool, an unreadable status line, or an absent or
+  malformed seal. The bypass `SCI_SKIP_CONSTITUTION_FREEZE=1` covers only §18's
+  one exception, a mechanical repair that touches no sentence, which must
+  regenerate the seal in the same commit.
 - Memory freshness watches `ARCHITECTURE_CONSTITUTION.md`,
   `ARCHITECTURE_RATIONALE.md`, `CONFORMANCE.md`, `CORE.md`, `SPEC.md`,
   `GLOSSARY.md`, the root entry points, `docs/agent-policy/`, `scripts/`, and the

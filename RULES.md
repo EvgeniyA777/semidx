@@ -39,10 +39,18 @@
 - `scripts/check-constitution-freeze.sh` enforces §18 through the versioned
   pre-commit hook. It reads the status line from the version before the change:
   while DRAFT, a constitution commit may touch only that file and `MEMORY.md`;
-  once RATIFIED, any change to the file is blocked. The bypass is
-  `SCI_SKIP_CONSTITUTION_FREEZE=1 git commit`, and after ratification it is only
-  for the one exception §18 allows — a mechanical repair that touches no
-  sentence.
+  once RATIFIED, the text is pinned by the SHA-256 seal in
+  `scripts/constitution.freeze.sha256`.
+- The seal check hashes the staged blob from the git index, not the working tree,
+  and compares it with the hash recorded in `HEAD`'s seal. A staged edit is
+  therefore refused even when the seal is regenerated in the same commit, and the
+  seal itself may not be modified, deleted, or renamed. It fails closed: a
+  missing SHA-256 tool, an unreadable status line, or an absent or malformed seal
+  blocks the commit.
+- The bypass is `SCI_SKIP_CONSTITUTION_FREEZE=1 git commit`. After ratification it
+  exists only for the one exception §18 allows — a mechanical repair that touches
+  no sentence — and that repair must regenerate the seal in the same commit with
+  `shasum -a 256 ARCHITECTURE_CONSTITUTION.md > scripts/constitution.freeze.sha256`.
 
 ## Project Context
 
