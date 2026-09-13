@@ -1,9 +1,9 @@
 # semidx
 
-**Status: design, not implementation.** There is nothing to run yet. This
-repository holds the architecture an implementation will have to satisfy: there
-is no graph implementation, no public surface, and no conformance evidence. Read
-every capability below as intended behavior, not as measured behavior.
+**Status: design, not implementation.** There is no graph implementation, no
+public surface, and no conformance evidence yet; this repository holds the
+architecture an implementation will have to satisfy. Read every capability below
+as intended behavior, not as measured behavior.
 
 semidx is designed to be an incrementally maintained semantic graph of a
 codebase that provides exact program relationships as a foundation for search,
