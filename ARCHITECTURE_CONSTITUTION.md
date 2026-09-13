@@ -1,6 +1,6 @@
 # semidx — Architecture Constitution
 
-**Constitution version: 3.** Amendment history is recorded in §19.
+**Constitution version: 4.** Amendment history is recorded in §19.
 
 ## Scope Of This Document
 
@@ -517,59 +517,267 @@ not.
 
 The following rules must remain true throughout development.
 
-### Invariant 1
+Each invariant is stated in four parts:
 
-The semantic graph is the architectural center.
+* **Statement** — the obligation itself.
+* **Rationale** — the failure it prevents. Without this, a later reader can see
+  the prohibition but not its purpose, and cannot judge whether a proposed
+  exception defeats it. Principles erode through exceptions that look local.
+* **Implications** — what follows concretely for an implementation.
+* **Detection** — how a violation becomes visible. An invariant nobody can
+  detect is an honour system, not a constraint.
 
-### Invariant 2
+Most Detection entries describe a check that requires an implementation, which
+does not exist yet. They are stated now so that the check is derived from the
+invariant rather than invented afterwards to match whatever was built. Two
+invariants (10 and 12) are detectable today, because they are properties of the
+process rather than of code. The amendment procedure in §18 is already enforced
+mechanically by `scripts/check-constitution-amendment.sh`.
 
-Nodes represent semantic entities, not arbitrary chunks of text.
+### Invariant 1 — The graph is the center
 
-### Invariant 3
+**Statement.** The semantic graph is the architectural center.
 
-Facts, partially resolved assertions, and approximate assertions are three separate categories, and every assertion carries its source and resolution level (§11).
+**Rationale.** Every consumer in §3 can be built directly on text more cheaply
+than on a graph. If one of them is, it works, it ships, and it becomes what
+users depend on — after which the graph is unmaintained weight. The center is
+not settled once at the start; it is re-decided every time a feature chooses
+what to attach to.
 
-### Invariant 4
+**Implications.** A new capability attaches to the graph, not to source text or
+to an index derived directly from source text. When a capability cannot be
+expressed over the graph, the correct response is to extend the graph, never to
+route around it.
 
-Vector search is optional. The semantic graph is not.
+**Detection.** Trace each feature's data path from consumer back to source. A
+path that does not pass through the graph is a violation. In code this is a
+dependency-direction check: modules implementing consumers must not depend on
+parsers or raw source readers.
 
-### Invariant 5
+### Invariant 2 — Nodes are entities, not chunks
 
-RAG is a consumer of `semidx`, not the definition of `semidx`.
+**Statement.** Nodes represent semantic entities, not arbitrary chunks of text.
 
-### Invariant 6
+**Rationale.** A chunk is defined by where the text was cut; an entity is
+defined by what the program declares. Chunks cannot hold stable identity (§5),
+cannot carry aspect-separated fingerprints (§7), and cannot be the endpoint of a
+resolved relationship. Admitting chunk nodes does not cost one property — §5,
+§6, §7, and §11 become unsatisfiable together.
 
-MCP is an interface, not the core.
+**Implications.** Every node originates in a frontend assertion about a declared
+construct. Text offsets are properties of an entity, never its identity.
+Embedding windows, retrieval chunks, and display snippets are projections
+attached to entities, not nodes in their own right.
 
-### Invariant 7
+**Detection.** Inspect node construction sites: a node whose identity derives
+from byte offsets, line ranges, or a splitting rule is a violation. Testable
+directly — reflowing whitespace or moving a declaration within a file must not
+change the set of node identities.
 
-The architecture must preserve a path toward incremental graph maintenance.
+### Invariant 3 — Three categories, always attributed
 
-### Invariant 8
+**Statement.** Facts, partially resolved assertions, and approximate assertions are three separate categories, and every assertion carries its source and resolution level (§11).
 
-Language-specific analysis must feed a shared semantic model rather than define its own private one.
+**Rationale.** Collapsing the categories fails in both directions, and both
+failures are severe: upward, the graph states relationships that were never
+established, destroying the claim in §16; downward, discarding everything
+unresolved empties the graph in exactly the languages where dynamic dispatch
+dominates.
+
+**Implications.** Resolution level and source are required fields, not optional
+annotations — it must be impossible to record an assertion without them. Every
+public surface exposes them. A consumer that wants only facts must be able to
+ask for only facts.
+
+**Detection.** At the schema level, attempt to construct an assertion with no
+source or resolution; it must be rejected by construction rather than by
+convention. At the data level, run a fixture containing known-unresolvable
+constructs: the count of partially resolved assertions must be non-zero and
+stable, since zero means they are being coerced or dropped.
+
+### Invariant 4 — Vectors are droppable
+
+**Statement.** Vector search is optional. The semantic graph is not.
+
+**Rationale.** This is not a judgement about embeddings as a technology. It
+fixes the direction of dependency. The invariant is breached the moment the
+graph can no longer be built or queried without the embedding pipeline — at
+which point an approximate component has become load-bearing for exact results.
+
+**Implications.** Indexing and every graph query must work with embeddings
+disabled. No graph construction step waits on an embedding model. Embeddings
+live in a component that can be removed without touching graph code.
+
+**Detection.** Run the full pipeline with vector features disabled. Indexing
+must complete and every graph query must return the same answers. Degraded
+recall in the discovery step is expected and permitted; a failure, an error, or
+a changed graph answer is a violation.
+
+### Invariant 5 — RAG consumes, it does not define
+
+**Statement.** RAG is a consumer of `semidx`, not the definition of `semidx`.
+
+**Rationale.** RAG is the most commercially legible framing of this work, so it
+exerts continuous pull. The erosion is not a decision to become a RAG product;
+it is the point at which retrieval quality becomes the only measured quality,
+after which further investment in the graph can no longer be justified to
+anyone, including the author.
+
+**Implications.** No structure exists in the graph solely to improve retrieval
+scores. A change justified only by a retrieval metric belongs in the projection
+layer (§8), not in the model.
+
+**Detection.** Visible in the metric set rather than the code. If the only
+quality routinely measured is retrieval quality, the per-language and
+per-relationship-kind measurements required by Invariant 12 are missing, and
+this invariant has already eroded regardless of what the architecture diagram
+still says.
+
+### Invariant 6 — MCP is an interface
+
+**Statement.** MCP is an interface, not the core.
+
+**Rationale.** Tool-call shapes exert ergonomic pressure on whatever they sit
+on. Modelling the graph to fit them is backwards, and it binds the model to a
+protocol that will change or be replaced while the graph must outlive it.
+
+**Implications.** The core exposes a surface that MCP adapts to, never the
+reverse. No concept in the graph schema is named after, or shaped by, an MCP
+tool. At least one non-MCP consumer path stays viable at all times.
+
+**Detection.** Remove the MCP layer; the core must remain fully usable through
+another surface. Any graph concept whose name or shape only makes sense in MCP
+terms is a violation, and is usually visible in the schema vocabulary alone.
+
+### Invariant 7 — The incremental path stays open
+
+**Statement.** The architecture must preserve a path toward incremental graph maintenance.
+
+**Rationale.** Incrementality has historically not been retrofittable: adding it
+later has meant rewriting storage and analysis together. The decisions that
+foreclose it are individually harmless-looking — assuming a whole-repository
+rebuild, deriving identity from position, fingerprinting at file granularity.
+None of them announces itself as the decision that closed the path.
+
+**Implications.** No design step may assume that a full rebuild is an acceptable
+answer. Storage must be able to update a region without rewriting the whole
+graph. The two properties in §6 hold from the first working version, not from a
+later hardening pass.
+
+**Detection.** Reindex after a one-line change and measure the work performed.
+Work proportional to repository size rather than to change size means the path
+is already gone, whatever the code claims. The measurement is cheap, and it must
+exist from the first version precisely because the regression is silent.
+
+### Invariant 8 — Frontends feed a shared model
+
+**Statement.** Language-specific analysis must feed a shared semantic model rather than define its own private one.
 
 How far that model is unified across languages is an open question (OQ-1, §17). Until OQ-1 is resolved, "where practical" is a tracked decision, not a discretionary exemption an implementation may grant itself.
 
-### Invariant 9
+**Rationale.** A frontend that writes its own private model makes cross-language
+questions impossible and makes its own output unreviewable, because there is no
+common definition to check it against. Coverage differences between languages
+are legitimate; private vocabularies are not.
 
-Architectural shortcuts must not destroy stable semantic identity.
+**Implications.** No frontend writes to storage in its own vocabulary.
+Translation happens at a named boundary (§10). Until OQ-1 is resolved, no
+schema commitment may be made that presupposes either answer.
 
-### Invariant 10
+**Detection.** Frontends must be replaceable. Swapping one frontend for another
+covering the same language must change resolution levels and coverage, never the
+shape of the graph. If it changes the shape, the frontend was defining the
+model.
 
-A feature that does not strengthen the semantic model or consume it must justify why it belongs in `semidx`.
+### Invariant 9 — Shortcuts must not damage identity
 
-### Invariant 11
+**Statement.** Architectural shortcuts must not destroy stable semantic identity.
 
-A query is answered against one consistent state of the graph. A consumer never observes a partially updated graph.
+**Rationale.** Identity damage is both silent and unrecoverable. A pseudo-delete
+followed by a create produces a graph that looks entirely normal, and once
+history has been fragmented that way, no later correction reconstructs it. Every
+other kind of shortcut in this system can be paid back; this one cannot.
 
-### Invariant 12
+**Implications.** Identity handling is not a place for expedient fixes. A
+shortcut that breaks identity must either fit a permitted break in §5 and be
+recorded as a break, or be rejected.
 
-The accuracy of the graph must be measurable. Any claim that `semidx` provides exact program relationships must be backed by a reproducible measurement against known fixtures, per language and per relationship kind.
+**Detection.** Measure identity churn across consecutive snapshots of a fixture
+repository with a known edit sequence: entities that neither changed nor moved
+must retain identity across every snapshot. Any unexplained churn is a
+violation, and the measurement must be routine, because this failure is
+invisible by inspection.
 
-### Invariant 13
+### Invariant 10 — Features carry the burden of proof
 
-Degradation is a reported property of the system, not an internal detail. Identity breaks, unresolved assertions, and relationship kinds a frontend cannot produce must be observable by consumers rather than hidden behind a uniform-looking graph.
+**Statement.** A feature that does not strengthen the semantic model or consume it must justify why it belongs in `semidx`.
+
+**Rationale.** Scope creep does not arrive as a bad proposal. It arrives as a
+sequence of individually attractive features, each defensible on its own. Without
+a standing burden of proof, the centre dissolves by accretion rather than by
+decision, and no single commit is identifiable as the mistake.
+
+**Implications.** The test in §15 is applied and its answers are recorded, not
+merely considered in passing. A section of `SPEC.md` that cannot name the
+constitutional clause justifying it is a candidate for removal.
+
+**Detection.** Process-level and active today. A merged feature with no recorded
+§15 answers violates this invariant even when the feature itself is sound,
+because the absence of the record is what permits the next one.
+
+### Invariant 11 — One consistent state per query
+
+**Statement.** A query is answered against one consistent state of the graph. A consumer never observes a partially updated graph.
+
+**Rationale.** Without this, every consumer must defensively handle a graph that
+disagrees with itself, and that defensive handling leaks into every public
+contract. Once consumers have built around an inconsistent graph, the guarantee
+can never be introduced later without breaking them — it is the clearest case
+of a property that must exist from the first version or never.
+
+**Implications.** Readers and writers are separated by a versioning mechanism.
+No public surface returns a result assembled from more than one state. "The
+index is rebuilding" is never part of a correctness explanation given to a
+consumer.
+
+**Detection.** Query a fixture repository concurrently with a reindex. Every
+result must be identical to the result taken strictly before or strictly after
+the reindex. A mixture of the two is a violation.
+
+### Invariant 12 — Accuracy is measured, not claimed
+
+**Statement.** The accuracy of the graph must be measurable. Any claim that `semidx` provides exact program relationships must be backed by a reproducible measurement against known fixtures, per language and per relationship kind.
+
+**Rationale.** *Exact* is the product claim in §16. An unmeasured claim degrades
+silently, and it degrades fastest precisely when language coverage widens, which
+is also when it is most tempting to stop checking.
+
+**Implications.** Fixture repositories with ground-truth relationships are a
+deliverable, not an internal detail of a test suite. Measurements are per
+language and per relationship kind, and they are published alongside the
+capability matrix rather than kept internal.
+
+**Detection.** Self-detecting and active today: the absence of a current
+measurement is itself the violation. No implementation is required to observe
+it.
+
+### Invariant 13 — Degradation is reported
+
+**Statement.** Degradation is a reported property of the system, not an internal detail. Identity breaks, unresolved assertions, and relationship kinds a frontend cannot produce must be observable by consumers rather than hidden behind a uniform-looking graph.
+
+**Rationale.** A graph that looks uniform while being partial teaches consumers
+to trust it uniformly. The harm then lands at the consumer, is invisible where
+it is caused, and surfaces as inexplicably wrong answers far from the frontend
+that could not resolve anything. Honest partial coverage is usable; undisclosed
+partial coverage is worse than no coverage.
+
+**Implications.** Coverage and resolution information is part of the response
+contract, not diagnostic output that may be dropped. "Nothing found" must be
+distinguishable from "not supported here" on every public surface.
+
+**Detection.** For each public surface, query a construct that is knowingly
+unsupported. The response must distinguish absence from incapacity. A surface
+that returns an empty result for both is a violation.
 
 ---
 
@@ -709,6 +917,7 @@ Must be resolved before the storage and process model are chosen.
 
 | Version | Date | Change | Rationale |
 | --- | --- | --- | --- |
+| 4 | 2026-09-12 | Restated all thirteen invariants in four parts — Statement, Rationale, Implications, Detection — and gave each a short name. No invariant's obligation was changed, weakened, or added; this amendment adds justification, consequences, and a means of observing violation to the existing thirteen. | Two gaps. First, the invariants stated obligations without recording why they exist, so a later reader could see a prohibition but not its purpose — and therefore could not judge whether a proposed exception defeated it. That is the mechanism by which principles erode: not a decision to abandon them, but a sequence of exceptions that each look local. Second, no invariant said how a violation would be detected, which left the whole document on an honour system — the same weakness `RULES.md` already admits about its own Code Reading Rules. Most Detection entries need an implementation that does not exist yet; they are written now so each check derives from its invariant rather than being invented afterwards to match whatever was built. Invariants 10 and 12 are detectable today because they are properties of the process, and §18 is now enforced mechanically by `scripts/check-constitution-amendment.sh`. |
 | 3 | 2026-09-12 | Added the Normative Language section (RFC 2119 keywords, `SHOULD` declared unused, discretionary qualifiers banned from normative statements) and the Terminology section. Unified vocabulary across the document: entity vs node, relationship vs edge, and — the substantive one — **assertion** vs **fact**, where a fact is now defined as a fully resolved, frontend-confirmed assertion rather than a synonym. Replaced every remaining `should` with `must` or `must never` (§5, §8, §9, §13, §16). Retermed §3's graph diagram, §4 L1 and L2, §10, §11, Invariants 2 and 3, §15 question 5, and OQ-1. | Two gaps measured against standard practice. First, the version 2 amendment turned on the difference between `must` and `may` without the document ever declaring that those words were normative rather than stylistic, and four `should`s survived in normative positions. Second, the document mixed entity/node/symbol, relationship/edge, and fact/assertion as synonyms — and the version 2 amendment made that worse by introducing `assertion` and `edge` alongside the existing `fact` and `relationship`. For a document whose subject is exactness, and which is read by agents, that is a defect rather than a style question: `fact` and `assertion` differ precisely where §11 draws its line, so using them interchangeably asserts resolution that may not exist. Fixed before `SPEC.md` is written, so the assertion schema does not inherit the ambiguity. |
 | 2 | 2026-09-12 | Added the document's own scope boundary and the constitutional-versus-`SPEC.md` test. Hardened §5 (stable identity is unconditional, with a closed exemption list) and §7 (aspect-separated fingerprints are required, not optional). Extended §11 with partially resolved assertions and the Provenance Rule, and applied it to identity claims in §5. Fixed two observable properties of incrementality in §6. Amended Invariants 3 and 8; added Invariants 11, 12, 13. Added questions 8 and 9 to §15. Added §17, §18, §19. | The document defended strongly against becoming a RAG, grep, or vector-search product, but its positive requirements — the expensive, hard-to-reproduce ones — were written with `may`, `where useful`, and `where practical`. Drift was unlikely to arrive as a proposal to build a vector database; it was likely to arrive as a hundred local "not practical here" decisions, each individually defensible. This amendment converts those qualifiers into obligations with named exemptions, makes the two genuinely undecided forks visible as tracked questions instead of qualifiers, and gives the document an amendment record so it cannot be edited into agreement with the code it is supposed to constrain. |
 | 1 | 2026-09-12 | Initial document. | Fix the architectural target before any implementation exists, so a from-scratch rebuild has something to conform to. |
