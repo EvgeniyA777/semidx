@@ -5,4 +5,4 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 ./scripts/check-agent-attribution.sh --staged
-./scripts/check-constitution-amendment.sh --staged
+./scripts/check-constitution-freeze.sh --staged

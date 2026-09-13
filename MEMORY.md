@@ -107,15 +107,17 @@ why. This is not a changelog of removed implementation; see `git log`.
   opt-in, including for projections and diagnostics.
 - Coverage, unsupported constructs, unavailable analysis, unresolved assertions,
   approximate evidence, and confirmed absence must remain visible to consumers.
-- Freeze enforcement is deliberately deferred until after ratification.
-  `scripts/check-constitution-amendment.sh` still enforces the useful boundary
-  that constitution changes may share a commit only with `MEMORY.md`. Its
-  obsolete amendment terminology is to be corrected with post-ratification
-  freeze enforcement, not by disabling the existing check.
-- Memory freshness currently watches `ARCHITECTURE_CONSTITUTION.md` and
-  `SPEC.md`, but not `CORE.md`, `ARCHITECTURE_RATIONALE.md`, or
-  `CONFORMANCE.md`. Updates to those documents still fall under the memory
-  update rule in `RULES.md`; extending mechanical coverage remains process work.
+- Freeze enforcement exists. `scripts/check-constitution-freeze.sh` replaces
+  the former amendment check and reads the status line from the version before
+  the change: while DRAFT it requires a constitution commit to stand alone with
+  at most `MEMORY.md`; once RATIFIED it blocks any change to the file. The
+  ratification commit itself passes because its predecessor was DRAFT. The
+  bypass `SCI_SKIP_CONSTITUTION_FREEZE=1` now covers only §18's one exception, a
+  mechanical repair that touches no sentence.
+- Memory freshness watches `ARCHITECTURE_CONSTITUTION.md`,
+  `ARCHITECTURE_RATIONALE.md`, `CONFORMANCE.md`, `CORE.md`, `SPEC.md`,
+  `GLOSSARY.md`, the root entry points, `docs/agent-policy/`, `scripts/`, and the
+  working-document directories.
 - No runtime conformance is claimed. The specifications describe future checks;
   the current verification is documentation consistency, references, and diff
   hygiene.
@@ -126,9 +128,9 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## Near-Term Priorities
 
-- Repair the process leftovers now that the freeze is real: the amendment
-  terminology in `scripts/check-constitution-amendment.sh` and mechanical freeze
-  enforcement, which was deliberately deferred until after ratification.
+- Choose the implementation stack and take the decisions that block a first
+  vertical slice. Nothing in the document set contradicts itself any more; what
+  remains open is decisions, not text.
 - Select the implementation stack under the local-operation constraint, then
   update `RULES.md` with actual build tools, source layout, verification
   commands, editing tools, and service requirements.
@@ -136,8 +138,7 @@ why. This is not a changelog of removed implementation; see `git log`.
   coverage, and supply conformance evidence. Complete the dependent requirements
   and public contracts through `SPEC.md` before publication or an execution
   plan that relies on them.
-- Extend `scripts/check-memory-freshness.sh` to watch `CORE.md`,
-  `CONFORMANCE.md`, `ARCHITECTURE_RATIONALE.md`, and `docs/agent-policy/`, and
-  correct the amendment terminology in
-  `scripts/check-constitution-amendment.sh` together with post-ratification
-  freeze enforcement.
+- `scripts/git-hooks/pre-push` still carries an inert block that refreshes
+  `docs/code-context.md` through a Clojure alias when `deps.edn` exists. Both
+  files went with the removed implementation, so the block never runs; remove it
+  when the rebuilt stack settles what replaces it.

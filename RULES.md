@@ -33,17 +33,16 @@
   two states, declared on its own status line: DRAFT while it is being written,
   and RATIFIED, after which it never changes.
 - It was ratified on 2026-09-13 and is now frozen. Do not edit it and do not
-  propose editing it, including to clarify or reword a clause.
-- Never propose editing a ratified constitution. A constraint that turns out to
-  be wrong means a different product, and the mechanism for a different product
-  is a fork of the repository with its own constitution.
-- Commit constitution changes on their own, plus `MEMORY.md` when the freshness
-  guard needs it. Never bundle a change to the definition of the product into an
-  unrelated change. The versioned pre-commit hook enforces this today; bypass is
-  `SCI_SKIP_CONSTITUTION_AMENDMENT=1 git commit`.
-- Mechanical enforcement of the §18 freeze does not exist yet. It was deferred
-  until after ratification and is now due; it is tracked in `MEMORY.md` under
-  near-term priorities.
+  propose editing it, including to clarify or reword a clause. A constraint that
+  turns out to be wrong means a different product, and the mechanism for a
+  different product is a fork of the repository with its own constitution.
+- `scripts/check-constitution-freeze.sh` enforces §18 through the versioned
+  pre-commit hook. It reads the status line from the version before the change:
+  while DRAFT, a constitution commit may touch only that file and `MEMORY.md`;
+  once RATIFIED, any change to the file is blocked. The bypass is
+  `SCI_SKIP_CONSTITUTION_FREEZE=1 git commit`, and after ratification it is only
+  for the one exception §18 allows — a mechanical repair that touches no
+  sentence.
 
 ## Project Context
 
@@ -279,7 +278,7 @@ edit carries a required safety step. The safety step is not optional.
 - Use versioned git hook sources under `scripts/git-hooks/`; install them into `.git/hooks` with `./scripts/install-git-hooks.sh`.
 - The versioned hooks include `pre-commit`, `commit-msg`, and `pre-push`; keep
   `scripts/check-agent-attribution.sh` wired into all three, and
-  `scripts/check-constitution-amendment.sh` wired into `pre-commit`.
+  `scripts/check-constitution-freeze.sh` wired into `pre-commit`.
 - If uncommitted files remain in the repo from previous agent runs, explicitly surface them and offer to commit and push them separately.
 - Commit changes every time code or documentation is touched (for example, automatically after completing each implementation stage of a project).
 - Group related changes into coherent commits during an implementation stage, but always ensure the stage ends with a commit.
