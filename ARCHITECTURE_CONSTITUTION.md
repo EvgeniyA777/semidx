@@ -1,6 +1,6 @@
 # semidx — Architecture Constitution
 
-**Constitution version: 4.** Amendment history is recorded in §19.
+**Constitution version: 5.** Amendment history is recorded in §19.
 
 ## Scope Of This Document
 
@@ -50,29 +50,30 @@ clause is not an obligation. Where such a qualifier covered a genuine undecided
 question, that question is recorded in §17 instead. Reintroducing one is a
 weakening amendment under §18 and requires a §19 entry.
 
-## Terminology
+## Defined Terms
 
-The graph is the product, so its vocabulary is normative. These terms mean one
-thing each throughout this document, `SPEC.md`, and the implementation.
+Five terms are defined here, and only five. Each earns its place because the
+distinction it draws is itself a constraint: Invariant 2 turns on entity versus
+chunk, and §11 turns on assertion versus fact. An obligation written in
+undefined words is ambiguous, so these definitions are part of the obligations.
 
 | Term | Meaning |
 | --- | --- |
 | **semantic entity**, **entity** | A program construct the model represents: a module, a function, a type, a parameter. The canonical word for the modeled thing. |
 | **node** | The graph's *representation* of an entity. Used only where representation itself is the subject. |
-| **symbol** | A *named* entity — one a frontend can address by a stable name. A subset of entities; anonymous entities are entities but not symbols. |
 | **relationship** | A semantic connection between entities: `CALLS`, `USES_TYPE`, `IMPLEMENTS`. The canonical word for the connection. |
-| **edge** | The graph's *representation* of a relationship. Used only where representation itself is the subject. |
 | **assertion** | Anything the graph records: that an entity exists, that a relationship exists, what a relationship's target is, that two entities across snapshots are the same entity. Every assertion carries its source and resolution level (§11). |
 | **fact** | An assertion that is fully resolved and confirmed by a language frontend. A fact is a kind of assertion. **Not every assertion is a fact** — this is the distinction §11 exists to protect, and the reason the two words are not interchangeable. |
-| **frontend** | A language-specific component that produces assertions for the model (§10). |
-| **snapshot** | One consistent state of the graph, the state a query is answered against (§6). |
-| **fingerprint** | A digest of one aspect of an entity's meaning, used to decide what a change invalidates (§7). |
-| **consumer** | Anything that reads the graph: search, agents, IDE integration, impact analysis. |
-| **projection** | A derived view over the graph that is not a source of truth (§8). |
 
 Using **fact** where **assertion** is meant is not a wording slip. It asserts
 that something was resolved and confirmed when it may not have been, which is
 the failure §11 forbids.
+
+The rest of the project vocabulary — including `frontend`, `snapshot`,
+`fingerprint`, `consumer`, `projection`, `symbol`, `edge`, `provenance`,
+`resolution level`, and `capability matrix` — is defined in
+[GLOSSARY.md](GLOSSARY.md). That file is descriptive and expected to drift,
+which is precisely why those terms are not carried here.
 
 ## 1. Purpose
 
@@ -917,6 +918,7 @@ Must be resolved before the storage and process model are chosen.
 
 | Version | Date | Change | Rationale |
 | --- | --- | --- | --- |
+| 5 | 2026-09-12 | Renamed the Terminology section to Defined Terms and cut it from twelve entries to five: entity, node, relationship, assertion, fact. Moved `frontend`, `snapshot`, `fingerprint`, `consumer`, `projection`, `symbol`, and `edge` to `GLOSSARY.md`, which also now defines `provenance`, `resolution level`, and `capability matrix` — three terms this document had been using without defining anywhere. Dropped the claim that the section binds `SPEC.md` and the implementation. | Version 3 corrected a real defect but overshot: it carried a general glossary into a document whose Scope section forbids exactly that kind of accumulation. Seven of the twelve entries defined nothing that was not already defined in place by the section using them, and two carried nothing normative at all — `symbol` is a convenience subset, and `edge` appeared exactly once in the whole document outside its own definition. The five that remain are different in kind: each states a distinction that an invariant turns on, so removing them would leave obligations written in undefined words. The dropped binding claim was over-reach in the opposite direction — dictating vocabulary to a document that does not exist yet is precisely the sort of thing that must be free to drift. `GLOSSARY.md` was created first so no term was left without an owner between the two commits. |
 | 4 | 2026-09-12 | Restated all thirteen invariants in four parts — Statement, Rationale, Implications, Detection — and gave each a short name. No invariant's obligation was changed, weakened, or added; this amendment adds justification, consequences, and a means of observing violation to the existing thirteen. | Two gaps. First, the invariants stated obligations without recording why they exist, so a later reader could see a prohibition but not its purpose — and therefore could not judge whether a proposed exception defeated it. That is the mechanism by which principles erode: not a decision to abandon them, but a sequence of exceptions that each look local. Second, no invariant said how a violation would be detected, which left the whole document on an honour system — the same weakness `RULES.md` already admits about its own Code Reading Rules. Most Detection entries need an implementation that does not exist yet; they are written now so each check derives from its invariant rather than being invented afterwards to match whatever was built. Invariants 10 and 12 are detectable today because they are properties of the process, and §18 is now enforced mechanically by `scripts/check-constitution-amendment.sh`. |
 | 3 | 2026-09-12 | Added the Normative Language section (RFC 2119 keywords, `SHOULD` declared unused, discretionary qualifiers banned from normative statements) and the Terminology section. Unified vocabulary across the document: entity vs node, relationship vs edge, and — the substantive one — **assertion** vs **fact**, where a fact is now defined as a fully resolved, frontend-confirmed assertion rather than a synonym. Replaced every remaining `should` with `must` or `must never` (§5, §8, §9, §13, §16). Retermed §3's graph diagram, §4 L1 and L2, §10, §11, Invariants 2 and 3, §15 question 5, and OQ-1. | Two gaps measured against standard practice. First, the version 2 amendment turned on the difference between `must` and `may` without the document ever declaring that those words were normative rather than stylistic, and four `should`s survived in normative positions. Second, the document mixed entity/node/symbol, relationship/edge, and fact/assertion as synonyms — and the version 2 amendment made that worse by introducing `assertion` and `edge` alongside the existing `fact` and `relationship`. For a document whose subject is exactness, and which is read by agents, that is a defect rather than a style question: `fact` and `assertion` differ precisely where §11 draws its line, so using them interchangeably asserts resolution that may not exist. Fixed before `SPEC.md` is written, so the assertion schema does not inherit the ambiguity. |
 | 2 | 2026-09-12 | Added the document's own scope boundary and the constitutional-versus-`SPEC.md` test. Hardened §5 (stable identity is unconditional, with a closed exemption list) and §7 (aspect-separated fingerprints are required, not optional). Extended §11 with partially resolved assertions and the Provenance Rule, and applied it to identity claims in §5. Fixed two observable properties of incrementality in §6. Amended Invariants 3 and 8; added Invariants 11, 12, 13. Added questions 8 and 9 to §15. Added §17, §18, §19. | The document defended strongly against becoming a RAG, grep, or vector-search product, but its positive requirements — the expensive, hard-to-reproduce ones — were written with `may`, `where useful`, and `where practical`. Drift was unlikely to arrive as a proposal to build a vector database; it was likely to arrive as a hundred local "not practical here" decisions, each individually defensible. This amendment converts those qualifiers into obligations with named exemptions, makes the two genuinely undecided forks visible as tracked questions instead of qualifiers, and gives the document an amendment record so it cannot be edited into agreement with the code it is supposed to constrain. |

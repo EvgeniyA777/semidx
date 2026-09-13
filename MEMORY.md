@@ -8,15 +8,16 @@ why. This is not a changelog of what was removed — see `git log` for history.
 - `ARCHITECTURE_CONSTITUTION.md` — the WHY/WHAT layer (purpose, semantic
   layers, invariants, non-goals). Exists so a future implementation has a
   fixed target to conform to, decided before any code exists. It holds only
-  what must not change; it is versioned (currently version 4) with an
+  what must not change; it is versioned (currently version 5) with an
   amendment log in §19, and is amended by standalone commits under §18 rather
   than edited alongside the change it permits. Its Normative Language section
   makes `must`/`may` RFC 2119 keywords, declares `should` unused, and bans
-  discretionary qualifiers from normative statements. Its Terminology section
-  is the canonical vocabulary for the graph and binds `SPEC.md` and the
-  implementation too — in particular **assertion** (anything the graph
-  records) is not a synonym for **fact** (a resolved, frontend-confirmed
-  assertion). Its thirteen invariants each carry Statement, Rationale,
+  discretionary qualifiers from normative statements. Its Defined Terms
+  section holds exactly five terms — entity, node, relationship, assertion,
+  fact — because each states a distinction an invariant turns on; in
+  particular **assertion** (anything the graph records) is not a synonym for
+  **fact** (a resolved, frontend-confirmed assertion). Everything else is in
+  `GLOSSARY.md`. Its thirteen invariants each carry Statement, Rationale,
   Implications, and Detection. The Detection entries are the intended
   conformance checks and mostly presuppose an implementation; derive the real
   checks from them rather than inventing checks to match whatever gets built.
