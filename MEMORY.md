@@ -94,6 +94,11 @@ why. This is not a changelog of removed implementation; see `git log`.
   saying the repository is design rather than implementation, states the
   capabilities as intended behavior, and links to the architecture document set.
   There is nothing to run yet.
+- `docs/plans/001_zig_vertical_slice.md` is the active implementation plan for
+  the first Zig vertical slice. Its companion progress log is
+  `docs/reports/001_zig_vertical_slice_progress.md`. The plan names `zig build`
+  and local tree-sitter grammar sources through the C ABI as first-slice
+  decisions to prove during Stage 1.
 - Git-hygiene scripts under `scripts/` and `scripts/git-hooks/` enforce
   attribution policy, memory freshness, and the constitution freeze seal.
   `.github/workflows/agent-attribution.yml` enforces attribution policy in CI.
@@ -156,10 +161,12 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## Near-Term Priorities
 
-- Complete the remaining stack decisions that block a first vertical slice.
-  Nothing in the document set contradicts itself any more; what remains open is
-  decisions, not text.
-- Specify the Zig build tool, dependency management, source layout,
+- Execute the active first-slice plan in
+  `docs/plans/001_zig_vertical_slice.md`, starting with the Zig scaffold and
+  dependency probe. Nothing in the document set contradicts itself any more;
+  what remains open for this slice is implementation evidence and any blockers
+  discovered during Stage 1, not more pre-planning text.
+- Prove or revise the planned Zig build, dependency management, source layout,
   verification commands, editing tools, and service requirements under the
   local-operation constraint.
 - Resolve candidate admission dependencies in `CORE.md`, choose initial
