@@ -1,5 +1,31 @@
 # semidx — Architecture Constitution
 
+**Constitution version: 2.** Amendment history is recorded in §19.
+
+## Scope Of This Document
+
+This document fixes what must not change. If one of these constraints is
+dropped, the result is a different project, not a later version of this one.
+
+It deliberately contains no numbers, thresholds, field names, formats, language
+coverage, schedules, or priorities. Those are concrete requirements: they are
+expected to change as the project learns, and they belong in the companion
+requirements document (`SPEC.md`), which is versioned and lifecycled
+independently.
+
+The test for whether something belongs here rather than in `SPEC.md` is whether
+at least two of the following hold:
+
+1. **Irreversibility.** Allowing the opposite for a year would require a
+   rewrite, not a refactor.
+2. **Project identity.** A build without it would no longer be `semidx`.
+3. **Consumer visibility.** It is part of a contract a consumer has already
+   relied on and cannot be changed without breaking that consumer.
+
+This document is versioned rather than lifecycled: it has no `status` or
+`lifecycle` state, because it is never superseded by a newer current document —
+it is amended in place under §18.
+
 ## 1. Purpose
 
 `semidx` is an incrementally maintained semantic model of a codebase.
@@ -161,7 +187,7 @@ L3 may be implemented progressively. It must not block delivery of L1 and L2.
 
 Graph nodes must represent semantic entities, not text fragments.
 
-A symbol must retain a stable identity whenever possible across edits.
+A symbol must retain a stable identity across edits.
 
 Example:
 
@@ -174,6 +200,33 @@ should remain conceptually the same graph entity when its body changes.
 Changes must be represented as changes to properties or dependencies of that entity rather than blindly deleting and recreating unrelated chunks.
 
 Stable identity is required for meaningful incremental updates.
+
+### Permitted Identity Breaks
+
+Identity may be broken only when:
+
+* the entity was genuinely removed from the program;
+* no available frontend fact can distinguish the entity from a sibling — for
+  example, two otherwise identical anonymous entities in the same scope;
+* the frontend supplies no identity-bearing fact for that class of entity at
+  its current capability level.
+
+**This list is closed.** An identity break for any other reason — implementation
+convenience, reindexing strategy, or a frontend being awkward to work with — is
+an architectural violation, not an engineering trade-off.
+
+When identity is broken for a permitted reason, the break must be recorded as a
+break. It must not be presented as a deletion plus an unrelated creation.
+
+### Identity Claims Are Graph Assertions
+
+A statement that an entity in a new snapshot is the same entity as one in a
+previous snapshot is itself an assertion about the program, and is therefore
+subject to the Provenance Rule in §11.
+
+Heuristic rename and move detection is permitted. Heuristic rename and move
+detection that is indistinguishable from an identity confirmed by a language
+frontend is not.
 
 ---
 
@@ -199,11 +252,37 @@ propagate invalidation where necessary
 
 Incremental maintenance of the semantic model is part of the architecture, not a future optimization added after the system is complete.
 
+### What Is Constitutional Here
+
+Two properties of this model are fixed. The mechanism that provides them is not.
+
+1. **Consistent observation.** A query is answered against one consistent state
+   of the graph. A consumer never observes a partially updated graph, and
+   "the index is currently rebuilding" must never become a correctness caveat
+   that consumers have to reason about.
+2. **Terminating propagation.** Invalidation propagation must be a terminating
+   computation over a finite set of semantic entities. It must not be a
+   traversal made to terminate by an arbitrary runtime cutoff, because a cutoff
+   silently converts incomplete invalidation into a wrong graph.
+
+Update granularity, the snapshot and versioning mechanism, storage
+representation, and propagation strategy are concrete requirements. They belong
+in `SPEC.md` and are expected to change.
+
 ---
 
 ## 7. Change Awareness
 
-Where useful, semantic entities may maintain independent fingerprints for different aspects of their meaning.
+Semantic entities must maintain independent fingerprints for the aspects of
+their meaning that the system distinguishes when deciding what to invalidate.
+
+A single whole-entity fingerprint is not sufficient. It collapses "implementation
+changed" and "signature changed" into one event, which forces coarse
+invalidation and removes the path required by Invariant 7.
+
+Which aspects are fingerprinted, how each is computed, and how many exist per
+language are concrete requirements and belong in `SPEC.md`. That fingerprints
+are aspect-separated is not negotiable there.
 
 Conceptually:
 
@@ -316,9 +395,10 @@ Frontends translate language-specific information into the common semantic model
 
 ---
 
-## 11. Exact and Approximate Knowledge Must Remain Separate
+## 11. Exact, Partial, and Approximate Knowledge Must Remain Separate
 
-The system must distinguish between exact program facts and approximate semantic similarity.
+The system must distinguish exact program facts, partially resolved assertions,
+and approximate semantic similarity. These are three categories, not two.
 
 Exact:
 
@@ -326,6 +406,14 @@ Exact:
 A CALLS B
 A USES_TYPE C
 D IMPLEMENTS E
+```
+
+Partially resolved:
+
+```text
+A CALLS something named "login" — receiver type unknown
+B IMPORTS a module that could not be located
+C OVERRIDES a parent symbol that was never resolved
 ```
 
 Approximate:
@@ -338,7 +426,39 @@ these two code regions have similar meaning
 
 Approximate relationships must never silently become authoritative graph facts.
 
+A partially resolved assertion is exact in kind but unresolved in target. It is
+neither an exact program fact nor a similarity judgement, and it must not be
+coerced into either.
+
+Coercing it upward — recording an unresolved call as a resolved `CALLS` edge —
+makes the graph state falsehoods. That is the one thing the word *exact* in §16
+forbids outright.
+
+Discarding it — dropping every unresolved assertion — empties the graph exactly
+in the languages where dynamic dispatch dominates, which makes the system
+useless where it is needed most.
+
+Both failures are avoided by the same rule.
+
+### Provenance Rule
+
+Every assertion in the graph — that a relationship exists, what its target is,
+that two entities across snapshots are the same entity — must carry:
+
+* **what produced it** — which frontend, analyzer, or method;
+* **how far it was resolved.**
+
+An assertion produced by heuristic, approximate, or partial analysis must never
+become indistinguishable from one confirmed by a language frontend. A consumer
+must always be able to ask a stronger question than "is this relationship
+present" and get an answer.
+
 This distinction is mandatory.
+
+The concrete vocabulary — field names, resolution levels, confidence encoding,
+how provenance is exposed on each public surface — is a concrete requirement and
+belongs in `SPEC.md`. That every assertion carries source and resolution does
+not.
 
 ---
 
@@ -356,7 +476,7 @@ Graph nodes represent semantic program entities, not arbitrary chunks of text.
 
 ### Invariant 3
 
-Exact dependencies and approximate similarity are separate concepts.
+Exact dependencies, partially resolved assertions, and approximate similarity are three separate concepts, and every assertion carries its source and resolution level (§11).
 
 ### Invariant 4
 
@@ -376,7 +496,9 @@ The architecture must preserve a path toward incremental graph maintenance.
 
 ### Invariant 8
 
-Language-specific analysis must feed a language-independent semantic model where practical.
+Language-specific analysis must feed a shared semantic model rather than define its own private one.
+
+How far that model is unified across languages is an open question (OQ-1, §17). Until OQ-1 is resolved, "where practical" is a tracked decision, not a discretionary exemption an implementation may grant itself.
 
 ### Invariant 9
 
@@ -385,6 +507,18 @@ Architectural shortcuts must not destroy stable semantic identity.
 ### Invariant 10
 
 A feature that does not strengthen the semantic model or consume it must justify why it belongs in `semidx`.
+
+### Invariant 11
+
+A query is answered against one consistent state of the graph. A consumer never observes a partially updated graph.
+
+### Invariant 12
+
+The accuracy of the graph must be measurable. Any claim that `semidx` provides exact program relationships must be backed by a reproducible measurement against known fixtures, per language and per relationship kind.
+
+### Invariant 13
+
+Degradation is a reported property of the system, not an internal detail. Identity breaks, unresolved assertions, and relationship kinds a frontend cannot produce must be observable by consumers rather than hidden behind a uniform-looking graph.
 
 ---
 
@@ -442,8 +576,12 @@ Before introducing a major feature or dependency, ask:
 5. Does it keep exact facts separate from approximate retrieval?
 6. Could this decision cause the product to drift toward RAG, grep, or vector search as the center?
 7. Does it make future dependency and impact analysis easier or harder?
+8. Does every assertion it introduces carry its source and resolution level?
+9. Does it depend on an unresolved open question in §17?
 
-If a change violates the architectural invariants, it must not be merged without explicitly changing this document first.
+A "yes" to question 9 blocks the change until that question is resolved by amendment. An open question must never be settled implicitly by the first implementation that happens to need an answer.
+
+If a change violates the architectural invariants, it must not be merged without amending this document first, under the procedure in §18.
 
 ---
 
@@ -454,3 +592,71 @@ The canonical one-sentence definition of the project is:
 > **semidx is an incrementally maintained semantic graph of a codebase that provides exact program relationships as a foundation for search, AI context, navigation, impact analysis, and future incremental analysis and compilation tooling.**
 
 All architectural decisions should remain compatible with this definition.
+
+---
+
+## 17. Open Constitutional Questions
+
+These are decisions of constitutional weight that are not yet made. They are
+recorded here rather than hidden inside hedged wording, because an unresolved
+question that is visible can be decided deliberately, while one buried in a
+qualifier gets decided by whichever implementation reaches it first.
+
+An open question is resolved only by amendment under §18. Implementation work
+that depends on the answer is blocked until then (§15, question 9).
+
+### OQ-1 — Degree of cross-language model unification
+
+Referenced by Invariant 8.
+
+* **Option A.** One shared vocabulary of node and relationship kinds. Every
+  language frontend maps onto it. Consumers get uniform queries across
+  languages; language-specific constructs are either flattened or lost.
+* **Option B.** Per-language semantic schemas with a shared query layer above
+  them. Language-specific constructs survive intact; uniform cross-language
+  questions require an explicit translation layer.
+
+Why this is constitutional: the answer determines what happens to constructs
+that do not unify cleanly — multimethods and protocols, behaviours and dynamic
+dispatch, generics and ABI, structural typing. Reversing the choice after a
+schema is in use is a rewrite, and the schema is the consumer-visible contract.
+
+Must be resolved before the fact schema is committed to in `SPEC.md`.
+
+### OQ-2 — Deployment shape
+
+* **Option A.** Local-first. `semidx` must remain fully operable as a local
+  process with no required external service.
+* **Option B.** Service-oriented. A shared instance serving multiple consumers
+  may be a required deployment mode.
+
+Why this is constitutional: it decides whether an external database or service
+dependency is permissible at all, which in turn constrains the storage model,
+the process model, and the memory and startup budgets in `SPEC.md`. It also
+changes what the product is from a consumer's perspective.
+
+Must be resolved before the storage and process model are chosen.
+
+---
+
+## 18. Amendment Procedure
+
+* This document changes only by explicit amendment.
+* An amendment is a standalone commit. It must not be combined with the code or
+  documentation change that it permits.
+* Every amendment increments the constitution version and adds an entry to §19.
+* Weakening a constraint is an amendment, not a clarification. Replacing `must`
+  with `may`, adding an exemption, and widening an existing exemption all
+  require a §19 entry stating what is now permitted that was not before.
+* Resolving an entry in §17 is an amendment.
+* Moving a constraint from this document to `SPEC.md` is an amendment, because
+  it makes that constraint subject to drift.
+
+---
+
+## 19. Amendment Log
+
+| Version | Date | Change | Rationale |
+| --- | --- | --- | --- |
+| 2 | 2026-09-12 | Added the document's own scope boundary and the constitutional-versus-`SPEC.md` test. Hardened §5 (stable identity is unconditional, with a closed exemption list) and §7 (aspect-separated fingerprints are required, not optional). Extended §11 with partially resolved assertions and the Provenance Rule, and applied it to identity claims in §5. Fixed two observable properties of incrementality in §6. Amended Invariants 3 and 8; added Invariants 11, 12, 13. Added questions 8 and 9 to §15. Added §17, §18, §19. | The document defended strongly against becoming a RAG, grep, or vector-search product, but its positive requirements — the expensive, hard-to-reproduce ones — were written with `may`, `where useful`, and `where practical`. Drift was unlikely to arrive as a proposal to build a vector database; it was likely to arrive as a hundred local "not practical here" decisions, each individually defensible. This amendment converts those qualifiers into obligations with named exemptions, makes the two genuinely undecided forks visible as tracked questions instead of qualifiers, and gives the document an amendment record so it cannot be edited into agreement with the code it is supposed to constrain. |
+| 1 | 2026-09-12 | Initial document. | Fix the architectural target before any implementation exists, so a from-scratch rebuild has something to conform to. |

@@ -7,7 +7,10 @@ why. This is not a changelog of what was removed — see `git log` for history.
 
 - `ARCHITECTURE_CONSTITUTION.md` — the WHY/WHAT layer (purpose, semantic
   layers, invariants, non-goals). Exists so a future implementation has a
-  fixed target to conform to, decided before any code exists.
+  fixed target to conform to, decided before any code exists. It holds only
+  what must not change; it is versioned (currently version 2) with an
+  amendment log in §19, and is amended by standalone commits under §18 rather
+  than edited alongside the change it permits.
 - `RULES.md` — the single source of truth for agent process rules. Written
   language-agnostic on purpose: no implementation stack is chosen yet, so it
   states process (git workflow, doc lifecycle, tool-usage discipline)
@@ -43,11 +46,33 @@ why. This is not a changelog of what was removed — see `git log` for history.
 - No `contracts/` layer (JSON Schema, examples, runtime mirrors): the public
   interface shape depends on the implementation stack. Do not add contracts
   speculatively before that decision.
+- No `SPEC.md`. The constitution now declares it as the companion layer that
+  owns concrete, drifting requirements (budgets, language coverage, fact
+  schema, snapshot contract, frontend protocol, public surfaces, conformance),
+  but the document itself has not been written yet. Until it exists, those
+  concerns have no canonical owner — do not scatter them into plans or here.
+
+## Active Constraints And Blockers
+
+- `ARCHITECTURE_CONSTITUTION.md` §17 records two open constitutional questions.
+  Per §15 question 9, work depending on either is blocked until the question is
+  resolved by amendment, and neither may be settled implicitly by the first
+  implementation that needs an answer:
+  - **OQ-1** — how far the semantic model is unified across languages (one
+    shared vocabulary vs per-language schemas with a shared query layer).
+    Blocks the fact schema.
+  - **OQ-2** — deployment shape (local-first with no required external service
+    vs a shared service being a supported mode). Blocks the storage and process
+    model, and therefore constrains the stack decision below.
 
 ## Near-Term Priorities
 
-- Decide the implementation stack (language, build/dependency tool, source
-  layout), then fill in `RULES.md`'s Project Context, Repository Shape,
-  Editing Rules, Testing And Verification, and Services And Local
-  Infrastructure sections with the real specifics.
-- Design the contracts/schema layer once the stack is picked.
+- Resolve OQ-2, then decide the implementation stack (language,
+  build/dependency tool, source layout), then fill in `RULES.md`'s Project
+  Context, Repository Shape, Editing Rules, Testing And Verification, and
+  Services And Local Infrastructure sections with the real specifics.
+- Resolve OQ-1, then write `SPEC.md` and design the contracts/schema layer.
+- `scripts/check-memory-freshness.sh` does not list
+  `ARCHITECTURE_CONSTITUTION.md` among its trigger files, so amending the
+  highest-signal document in the repository does not by itself require a
+  memory update. Known gap in the guard, not an intentional exemption.
