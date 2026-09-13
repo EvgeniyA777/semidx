@@ -24,7 +24,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   sentence requiring a viable non-MCP consumer path: it named one protocol in
   the identity document and turned on the undefined word "viable". Consumer
   independence remains protected by §7's authority clause and is checked by
-  `CONFORMANCE.md`.
+  `CONFORMANCE.md`. §7 ¶1 then lost "of the graph" as well, so the constitution
+  carries no remaining construction that could be read to require a projection
+  to be derived from the graph rather than from source text.
 - The constitution still owns exactly five terms whose distinctions are product
   identity: entity, node, relationship, assertion, and fact. Source containers
   are entities; source ingestion can establish facts about source organization;

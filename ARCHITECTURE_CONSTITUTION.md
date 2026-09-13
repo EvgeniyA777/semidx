@@ -144,7 +144,7 @@ this document.
 ## 7. Consumers Do Not Define The Model
 
 Search, RAG, MCP, IDEs, agents, documentation linkage, impact analysis, and
-compilation tooling are consumers or projections of the graph.
+compilation tooling are consumers or projections.
 
 They may shape public interfaces. They must not shape the semantic model around
 their convenience. A semantic answer whose authority comes from a consumer,
