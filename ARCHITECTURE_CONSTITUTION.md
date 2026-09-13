@@ -58,8 +58,13 @@ The semantic graph is the source of truth. Everything else is an index,
 projection, interface, or consumer of that graph.
 
 Search, vector embeddings, RAG, MCP, agent context, navigation, impact analysis,
-and future compilation tooling may exist, but they must exist on top of the
-semantic graph. The graph must never exist merely to improve retrieval.
+and future compilation tooling may exist.
+
+A text-derived or approximate mechanism may discover candidates, rank them, and
+render located source; it must never establish a program relationship. Every
+semantic claim about entities and relationships comes from the graph.
+
+The graph must never exist merely to improve retrieval.
 
 ## 2. Nodes Are Entities, Not Chunks
 
@@ -146,9 +151,6 @@ They may shape public interfaces. They must not shape the semantic model around
 their convenience. A semantic answer whose authority comes from a consumer,
 retrieval pipeline, protocol shape, or embedding index rather than the graph is
 outside the architecture of `semidx`.
-
-At least one non-MCP consumer path must remain viable so the model does not
-become a protocol artifact.
 
 ## 8. Local Operation Is Required
 
