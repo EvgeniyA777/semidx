@@ -43,6 +43,51 @@ does not erase its definition or silently relabel its assertions. Exact version
 encoding and compatibility windows remain requirements to settle before the
 first contract publication.
 
+## Core Admission Criteria
+
+[CORE.md](CORE.md) assesses every candidate against the five criteria below.
+They were constitutional text before the constitution was distilled to product
+identity. Admission mechanics are changeable requirements, so they live here; the
+constitutional boundary they serve is
+[section 6](ARCHITECTURE_CONSTITUTION.md#6-language-frontends-preserve-meaning).
+
+**Adequacy.** The core must be sufficient for a consumer to ask, across
+languages, what entities exist and what refers to what. A core that cannot carry
+existence and reference does not make frontends comparable, which is the only
+reason it exists. This is a floor on the accepted roster, not on any one
+candidate: a candidate carrying it may be replaced by a better definition, but it
+cannot simply be rejected and leave the floor unmet.
+
+**Identical meaning.** A kind may be core only if it means the same thing in
+every supported language. This is a test of meaning, not of presence. A kind may
+satisfy it even where some language has no instances of that kind; it must also
+satisfy the other criteria.
+
+**Honest absence.** A frontend produces a core kind only where its language
+actually has one. Confirmed absence, absence of the construct from the language,
+and inability of the frontend to analyze that construct must remain
+distinguishable to consumers. A frontend must never substitute an approximation
+for a core kind it cannot produce. A language whose frontend cannot produce some
+core kind is supported with that coverage reported unavailable, not excluded.
+
+**Subsidiarity.** A kind may be core only when the cross-language question it
+answers is well-posed for every supported language and belongs to the guaranteed
+common model. A question confined to particular languages is answered by a
+declared mapping between those languages' extensions. The ability to map one
+pair does not disqualify a kind the common model needs. Requiring every language
+to map toward one common target is a core kind in disguise and is governed as
+one.
+
+**Common cost.** Adding a core kind obliges every existing frontend to conform to
+its definition when producing it and to declare its coverage. It does not require
+a frontend to extract an unsupported construct. The core therefore does not grow
+casually: each addition requires a conformance and coverage assessment across
+frontends, with limitations exposed through the capability matrix.
+
+A candidate is accepted only when all five criteria are assessed, its transitive
+dependencies are resolved, its frontend coverage is declared, and its conformance
+fixtures exist.
+
 ## Coverage And Conformance
 
 The capability matrix identifies language, producer version, entity and

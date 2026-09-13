@@ -23,9 +23,15 @@ deprecation, and migration procedures.
 
 Candidates can be edited, replaced, or rejected. An open admission blocks the
 candidate and all definitions depending on it, transitively. Acceptance requires
-a complete assessment against the constitutional shared-core boundary, resolved
+a complete assessment against the
+[core admission criteria](SPEC.md#core-admission-criteria), resolved
 dependencies, and conformance evidence for the declared language/frontend
 coverage. A heading or an example in this file does not constitute acceptance.
+
+Adequacy is a floor on the accepted roster: the constitution requires a core
+sufficient to ask what entities exist and what refers to what. A candidate
+carrying that floor may be replaced by a better definition; rejecting it and
+leaving the floor unmet is not an available outcome.
 
 Concrete membership questions belong here. A question requiring a change to
 constitutional meaning is handled under the constitution's open-question and
@@ -40,7 +46,7 @@ requirement.
 | `file` | Candidate | `repository` | Coverage and conformance evidence |
 | `definition` | Candidate | None | Coverage and conformance evidence |
 | `module` | Blocked candidate | None | Common meaning and frontend coverage |
-| `DEFINES` | Blocked candidate | All proposed container kinds and `definition` | Container admission and containment evidence |
+| `DEFINES` | Candidate | Any admitted container kind, `definition` | Containment evidence for the declared coverage |
 | `REFERENCES` | Candidate | Admitted endpoint kinds | Coverage, resolution, and query evidence |
 | `CALLS` | Candidate | `definition`, `REFERENCES` | Invocation and reference-inclusion evidence |
 | `IMPORTS` | Blocked candidate | `file`, `module` | Module admission and import semantics |
@@ -105,23 +111,26 @@ unresolved across namespaces, packages, and compilation units. Honest absence:
 no language construct and unavailable frontend coverage remain distinguishable.
 Subsidiarity: admission must show why extensions and optional mappings are
 insufficient. Common cost: frontend coverage assessments are pending. These gaps
-block `module`, `IMPORTS`, and the proposed `DEFINES` definition.
+block `module` and `IMPORTS`. They do not block `DEFINES`, whose container
+endpoint ranges over whichever container kinds are admitted.
 
 ## Proposed Relationship Definitions
 
 ### `DEFINES`
 
 Relates a source or program container to a definition introduced directly within
-it. It is direct containment, not transitive reachability. Proposed container
-kinds are `repository`, `file`, `module`, and `definition`; unresolved
-`module` admission blocks this definition as written.
+it. It is direct containment, not transitive reachability. Its container endpoint
+ranges over the admitted container kinds — `repository`, `file`, and `definition`
+today, and `module` if that candidate is ever admitted. Admitting a container
+kind extends this relationship additively rather than redefining it, so an
+unadmitted container candidate does not block it.
 
 **Admission assessment.** Adequacy: answers where an entity is introduced.
 Identical meaning: direct containment needs evidence without replacing language
 scope rules. Honest absence: unknown containment is unresolved or unavailable,
 not invented. Subsidiarity: common containment needs justification independent
 of language-specific organization. Common cost: frontends need containment
-evidence for declared coverage. Admission awaits containers and fixtures.
+evidence for declared coverage. Admission awaits containment fixtures.
 
 ### `REFERENCES`
 
@@ -172,15 +181,17 @@ Subsidiarity: admission must demonstrate a common question beyond pair-specific
 mappings. Common cost: frontend coverage and conformance fixtures are pending.
 
 Availability does not itself establish what becomes invalid after an edit.
-Fine-grained invalidation belongs to L3 and language extensions. Textual inclusion
+Fine-grained invalidation belongs to the invalidation requirements in
+[SPEC.md](SPEC.md) and to language extensions. Textual inclusion
 is not automatically an import or a merge discarding the included file's
 identity. Inclusion assertions retain provenance; whether they establish this
 proposed availability relation remains an admission question.
 
 ## Remaining Admission Questions
 
-1. Establish a common `module` meaning, or reject it and revise its dependent
-   candidates before acceptance. Organization remains expressible in extensions.
+1. Establish a common `module` meaning, or reject it. `IMPORTS` depends on the
+   outcome; `DEFINES` no longer does. Organization remains expressible in
+   extensions either way.
 2. Establish whether textual inclusion satisfies the accepted import meaning.
    This blocks the relevant `IMPORTS` coverage until resolved, not unrelated
    ingestion or reference analysis.
