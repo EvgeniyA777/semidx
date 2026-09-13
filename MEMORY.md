@@ -27,7 +27,9 @@ why. This is not a changelog of what was removed — see `git log` for history.
 - `scripts/` git-hygiene files (`check-agent-attribution.sh`,
   `check-memory-freshness.sh`, `install-git-hooks.sh`, `git-hooks/*`) —
   enforce process rules that hold regardless of implementation language: no
-  AI attribution, this file staying current.
+  AI attribution, this file staying current. The freshness trigger list
+  includes `ARCHITECTURE_CONSTITUTION.md` and `SPEC.md`, so a change to
+  either requires a memory update in the same pushed range.
 - `scripts/` toolchain installers (`setup-jdtls.sh`, `setup-scip-java.sh`,
   `setup-scip-typescript.sh`, `setup-tree-sitter-grammars.sh`,
   `setup-typescript-lsp.sh`, and their pinned `package.json` /
@@ -72,7 +74,3 @@ why. This is not a changelog of what was removed — see `git log` for history.
   Context, Repository Shape, Editing Rules, Testing And Verification, and
   Services And Local Infrastructure sections with the real specifics.
 - Resolve OQ-1, then write `SPEC.md` and design the contracts/schema layer.
-- `scripts/check-memory-freshness.sh` does not list
-  `ARCHITECTURE_CONSTITUTION.md` among its trigger files, so amending the
-  highest-signal document in the repository does not by itself require a
-  memory update. Known gap in the guard, not an intentional exemption.
