@@ -51,11 +51,12 @@
   agents, IDEs, and impact analysis as consumers.
 - The implementation was removed for a from-scratch rebuild. No programming
   language, build tool, or dependency manager is fixed by this file right now.
-- Target language lanes for the semantic model (which source languages semidx
-  can index — for example Clojure, Java, Elixir, Python, TypeScript, Lua) are an
-  architectural direction from `ARCHITECTURE_CONSTITUTION.md`. They say nothing
-  about which language semidx itself will be implemented in, and nothing in
-  `src/` currently backs them.
+- Which source languages semidx can index is an open requirement owned by
+  `SPEC.md` (Initial coverage). The constitution deliberately fixes no language
+  coverage. Language names in documentation or in the toolchain scripts under
+  `scripts/` are examples and available analysis sources, not committed
+  coverage, and they say nothing about which language semidx itself will be
+  implemented in.
 - When an implementation stack is chosen, update this section with the actual
   language, build/dependency tool, and public surfaces instead of assuming a
   previous stack's tooling.
@@ -235,9 +236,8 @@ edit carries a required safety step. The safety step is not optional.
 ## Contracts And Runtime Guarantees
 
 - The `contracts/schemas/` JSON Schema files, `contracts/examples/` fixtures, and their Clojure `malli` mirrors were removed with the legacy codebase and are pending a from-scratch redesign. Do not describe them as existing until that redesign lands.
-- Staged retrieval is the canonical public contract: compact selection first, optional widening, then detail fetch.
-- Keep MCP, library, HTTP, and gRPC behavior aligned when changing shared retrieval contracts, error shapes, or usage metrics semantics.
-- When changing MCP tool schemas, verify both machine-readable `tools/list` output and runtime handler behavior.
+- Public contract shape — surfaces, schemas, resolution encoding, error shapes, ordering, pagination, and transport parity — is an open requirement owned by `SPEC.md`. Do not treat the removed implementation's staged-retrieval contract or its transport set as fixed for the rebuild.
+- When public surfaces exist again, keep their behavior aligned with each other and verify both machine-readable schema output and runtime handler behavior.
 
 ## Testing And Verification
 

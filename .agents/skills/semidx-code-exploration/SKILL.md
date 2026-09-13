@@ -23,7 +23,7 @@ This repository skill adds semidx-specific evidence requirements.
 4. Refine broad results with concrete paths, symbols, modules, tests, and
    `freshness: current_snapshot` before concluding context is thin.
 5. For a change, inspect relevant definitions, callers, callees, related tests,
-   contracts, fixtures, provider descriptors, storage/runtime edges, and
+   contracts, fixtures, frontend coverage, storage/runtime edges, and
    documentation ownership.
 6. Use manual `rg` or file reads only after semantic refinement is insufficient,
    the target is outside indexed source, or an MCP tool returns an explicit
@@ -34,7 +34,7 @@ This repository skill adds semidx-specific evidence requirements.
 - relevant definitions and ownership boundaries;
 - inbound and outbound dependencies;
 - related tests, fixtures, and missing test seam;
-- contract, provider-authority, storage, runtime, and documentation impacts;
+- contract, identity, storage, runtime, and documentation impacts;
 - confidence, limitations, snapshot id, and exact files needing direct
   inspection.
 
