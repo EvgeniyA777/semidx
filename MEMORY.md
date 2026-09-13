@@ -22,6 +22,14 @@ why. This is not a changelog of what was removed — see `git log` for history.
   checks from them rather than inventing checks to match whatever gets built.
   Invariants 10 and 12 are detectable today (process properties), and §18 is
   enforced by `scripts/check-constitution-amendment.sh`.
+- `GLOSSARY.md` — the project vocabulary, explicitly descriptive rather than
+  normative: no version, no amendment procedure, expected to drift. It exists
+  so the constitution can keep only the five terms whose distinctions are
+  themselves constraints (entity, node, relationship, assertion, fact) and
+  hand the rest somewhere with a real owner. It must not restate those five.
+  Schema-level vocabulary (field names, resolution-level values, the
+  catalogue of entity and relationship kinds) moves to `SPEC.md` when that
+  document exists; conceptual vocabulary stays in `GLOSSARY.md`.
 - `RULES.md` — the single source of truth for agent process rules. Written
   language-agnostic on purpose: no implementation stack is chosen yet, so it
   states process (git workflow, doc lifecycle, tool-usage discipline)

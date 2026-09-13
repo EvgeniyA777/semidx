@@ -59,6 +59,9 @@
 - The implementation is currently empty. Do not describe `src/`, `test/`,
   `fixtures/`, or any language-specific directory layout as existing until a
   stack is chosen and this section is updated to match.
+- `GLOSSARY.md` holds the project vocabulary. It is descriptive, not normative;
+  the five terms whose distinctions are architectural constraints stay in
+  `ARCHITECTURE_CONSTITUTION.md` under Defined Terms and are not repeated there.
 - `docs/agent-policy/` contains active cross-cutting engineering policies that
   are too detailed for this always-loaded rule file.
 - `.agents/skills/` contains repository-local task procedures that load only

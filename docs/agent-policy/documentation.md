@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-01"
+updated: "2026-09-12"
 ---
 
 # Documentation Policy
@@ -17,6 +17,11 @@ updated: "2026-09-01"
   detailed for the always-loaded rule kernel.
 - `MEMORY.md` owns current implementation reality, active assumptions, known
   gaps, and near-term priorities.
+- `ARCHITECTURE_CONSTITUTION.md` owns architectural constraints that must not
+  change, including the five terms whose distinctions are themselves
+  constraints (entity, node, relationship, assertion, fact).
+- `GLOSSARY.md` owns the rest of the project vocabulary. It is descriptive, not
+  normative, and must not restate the constitution's Defined Terms.
 - ADRs own durable technical decisions.
 - Plans own future staged execution.
 - Reports own historical progress, evidence, and handoff records.
