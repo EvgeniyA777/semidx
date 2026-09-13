@@ -140,6 +140,14 @@ the task:
 
 ## MCP-First Workflow
 
+- **Scope.** This section and the two MCP sections that follow describe
+  repository-development tooling available to agents today. The `semidx` MCP
+  server they use is configured outside this repository: `.mcp.json` here
+  declares no servers, and nothing in this repository builds, ships, or defines
+  it. The tool names, wire shapes, and error codes below describe that tool as it
+  currently behaves. They do not define or constrain the public API of the
+  rebuilt `semidx`, which is an open requirement owned by `SPEC.md`. Do not carry
+  them into the rebuild as contract.
 - If the `semidx` MCP server is available, do not begin codebase exploration with directory listing, wildcard search, grep, broad file reads, or shell crawling.
 - Use MCP before manual file crawling.
 - When implementation work requires reading code before edits, use semidx retrieval first instead of manual file reads.
