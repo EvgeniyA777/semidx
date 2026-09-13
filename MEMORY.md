@@ -64,8 +64,8 @@ why. This is not a changelog of removed implementation; see `git log`.
   now a kernel under an explicit 200-line budget stated in its first section: a
   rule needing more than a few lines lives in `docs/agent-policy/` or
   `.agents/skills/`, and `RULES.md` keeps one line pointing at it. It currently
-  runs 154 lines. It is language-agnostic because no implementation stack has
-  been selected.
+  runs 156 lines. It records Zig as the selected implementation language while
+  leaving the rest of the stack open.
 - `RULES.md`, `AGENTS.md`, and `CLAUDE.md` do not offer "documented and justified
   deviation" as a route around the constitution: inside the boundary, decisions
   are documented; outside it, §18 requires a fork. Claims left over from the
@@ -83,11 +83,11 @@ why. This is not a changelog of removed implementation; see `git log`.
   retrieval, code reading, and editing probes, and scopes the MCP sections as
   development tooling configured outside this repository rather than the rebuilt
   public API.
-- The ADR procedure is enabled and the sequence starts at `001`. None is written
-  yet; [docs/adr/README.md](docs/adr/README.md) is the index. Records removed
-  before the procedure was enabled do not reserve numbers, so `001` is free, and
-  from the first record onward numbers are never reassigned. Reasoning about the
-  architecture documents themselves stays in
+- The ADR procedure is enabled and the sequence starts at `001`;
+  [docs/adr/README.md](docs/adr/README.md) is the index.
+  [ADR 001](docs/adr/001_choose_zig_implementation_language.md) accepts Zig as
+  the implementation language for the rebuild. Reasoning about the architecture
+  documents themselves stays in
   [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md), and drafting history
   stays in `git log`.
 - `README.md` is a minimal human entry point. It opens with a status line
@@ -104,8 +104,8 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## What Does Not Exist Yet
 
-- No graph implementation, test suite, build/dependency manifest, fixed
-  implementation language, or source layout.
+- No graph implementation, test suite, build/dependency manifest, or source
+  layout.
 - No `contracts/` schemas, runtime mirrors, or executable conformance fixtures.
 - No accepted core roster, published semantic contract, or published capability
   matrix. Language examples in documentation are not claims of implemented
@@ -156,12 +156,12 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## Near-Term Priorities
 
-- Choose the implementation stack and take the decisions that block a first
-  vertical slice. Nothing in the document set contradicts itself any more; what
-  remains open is decisions, not text.
-- Select the implementation stack under the local-operation constraint, then
-  update `RULES.md` with actual build tools, source layout, verification
-  commands, editing tools, and service requirements.
+- Complete the remaining stack decisions that block a first vertical slice.
+  Nothing in the document set contradicts itself any more; what remains open is
+  decisions, not text.
+- Specify the Zig build tool, dependency management, source layout,
+  verification commands, editing tools, and service requirements under the
+  local-operation constraint.
 - Resolve candidate admission dependencies in `CORE.md`, choose initial
   coverage, and supply conformance evidence. Complete the dependent requirements
   and public contracts through `SPEC.md` before publication or an execution

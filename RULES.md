@@ -56,10 +56,12 @@
 - This repository is `semidx`, defined by `ARCHITECTURE_CONSTITUTION.md`: an
   incrementally maintained semantic graph of a codebase, with search, agents,
   IDEs, and impact analysis as consumers.
-- The implementation was removed for a from-scratch rebuild. No implementation
-  language, build tool, dependency manager, test runner, or local service is
-  fixed. There is no source: do not describe `src/`, `test/`, `fixtures/`, or any
-  language-specific layout as existing.
+- The implementation was removed for a from-scratch rebuild. The implementation
+  language is Zig, selected by
+  [ADR 001](docs/adr/001_choose_zig_implementation_language.md). No build tool,
+  dependency manager, test runner, or local service is fixed. There is no source:
+  do not describe `src/`, `test/`, `fixtures/`, or any language-specific layout
+  as existing.
 - Which source languages semidx can index, and the shape of its public contracts,
   are open requirements owned by `SPEC.md`. Language names in documentation or in
   the toolchain scripts under `scripts/` are examples and available analysis
@@ -68,9 +70,9 @@
 - Do not treat the removed implementation's contracts, transports, or storage as
   fixed for the rebuild. `contracts/schemas/`, its fixtures, and their runtime
   mirrors went with it; do not describe them as existing.
-- When a stack is chosen, update this section and the affected policies with the
-  real language, build tool, verification commands, editing tools, and service
-  requirements instead of assuming a previous stack's tooling.
+- When more of the stack is chosen, update this section and the affected
+  policies with the real build tool, verification commands, editing tools, and
+  service requirements instead of assuming a previous stack's tooling.
 - Do not copy project-specific rules, paths, stack assumptions, task names, or
   application-domain guidance from unrelated repositories.
 

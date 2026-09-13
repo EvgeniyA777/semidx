@@ -114,7 +114,7 @@ requirements for later verification, not claims of passing results.
 
 | Area | Work needed before the dependent implementation or publication |
 | --- | --- |
-| Implementation stack | Language, build tool, dependency management, and source layout |
+| Implementation stack | Zig is selected by [ADR 001](docs/adr/001_choose_zig_implementation_language.md); build tool, dependency management, and source layout remain to specify |
 | Initial coverage | Target languages, producer versions, admission fixtures, and measured limitations |
 | Core roster | Resolve the blocked candidates and admission evidence in CORE.md |
 | Extensions and mappings | Per-language definitions, declared mapping semantics, and evidence preservation |

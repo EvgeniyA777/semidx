@@ -15,4 +15,4 @@ ratified constitution.
 
 ## Records
 
-None yet. The first architectural decision of the rebuild becomes `001`.
+- [001: Choose Zig As The Implementation Language](001_choose_zig_implementation_language.md)
