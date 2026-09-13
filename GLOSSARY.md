@@ -21,8 +21,9 @@ them up there.
 ## Terms
 
 **capability matrix** — The published statement of what `semidx` can and cannot
-resolve, per language and per relationship kind. It exists because accuracy must
-be measurable (Invariant 12) and degradation must be visible to consumers rather
+analyze, per language, producer version, and entity or relationship kind,
+including identity limitations of frontends and source ingestion. It exists
+because accuracy must be measurable (Invariant 12) and degradation visible to consumers rather
 than hidden behind a uniform-looking graph (Invariant 13).
 
 **consumer** — Anything that reads the graph rather than producing it: search,
@@ -53,11 +54,10 @@ or discarded without loss (constitution §2, §8).
 analyzer, or method. Carried by every assertion, alongside its resolution level
 (constitution §11, Provenance Rule).
 
-**resolution level** — How far an assertion's target was established. The
-constitution fixes that every assertion carries one and that resolved,
-partially resolved, and approximate are distinct categories (§11). The
-enumerated values and their encoding are schema, and belong in `SPEC.md` when
-it exists.
+**resolution level** — How far an assertion's semantic claim was established.
+The categories and their distinction are owned by constitution §11. The
+enumerated values and their encoding are schema requirements owned by
+[SPEC.md](SPEC.md).
 
 **snapshot** — One consistent state of the graph: the state a query is answered
 against. A consumer never observes a graph assembled from more than one snapshot
@@ -66,11 +66,9 @@ against. A consumer never observes a graph assembled from more than one snapshot
 **symbol** — A named entity, one a frontend can address by a stable name. A
 subset of entities: anonymous constructs are entities but not symbols.
 
-## What Moves Later
+## Document Ownership
 
-When `SPEC.md` exists, schema-level vocabulary moves there, because it is
-versioned together with the schema it describes: field names, the enumerated
-values of a resolution level, the catalogue of entity and relationship kinds,
-wire formats.
-
-Conceptual vocabulary — the terms above — stays here.
+The [documentation policy](docs/agent-policy/documentation.md#canonical-ownership)
+maps the constitutional document roles to their current files. The core roster
+is in [CORE.md](CORE.md); requirements and schema vocabulary are in
+[SPEC.md](SPEC.md). Conceptual vocabulary stays here.

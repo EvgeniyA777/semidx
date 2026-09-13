@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-12"
+updated: "2026-09-13"
 ---
 
 # Documentation Policy
@@ -22,6 +22,14 @@ updated: "2026-09-12"
   constraints (entity, node, relationship, assertion, fact).
 - `GLOSSARY.md` owns the rest of the project vocabulary. It is descriptive, not
   normative, and must not restate the constitution's Defined Terms.
+- `SPEC.md` is the companion requirements document named by role in the
+  constitution. It owns changing requirements, the language-extension catalogue,
+  schema vocabulary, and semantic-contract publication and migration procedures.
+  It may link to subordinate specifications as those areas grow.
+- `CORE.md` is the separately versioned core roster named by role in the
+  constitution. It owns candidate and accepted kind definitions and admission
+  evidence. Its authority is derived from constitution section 4; its lifecycle
+  follows `SPEC.md`. It cannot redefine architectural terms.
 - ADRs own durable technical decisions.
 - Plans own future staged execution.
 - Reports own historical progress, evidence, and handoff records.
@@ -29,6 +37,23 @@ updated: "2026-09-12"
   committed implementation contracts silently.
 - Give each rule or decision one canonical owner and link to it instead of
   copying the same normative text across multiple documents.
+
+## Architectural Decision Records
+
+- Record answers to every question in constitution section 15 in an ADR under
+  `docs/adr/NNN_slug.md`, using the naming and frontmatter rules in `RULES.md`.
+- Each record identifies the feature or dependency, applicable constitutional
+  clauses, decision, rationale, consequences, and verification evidence or
+  planned conformance checks. Use an explicit rationale for any question marked
+  not applicable.
+- Link the ADR from the change's PR or merge description, or from its commit
+  message when there is no PR. A reviewer must be able to locate the answers
+  from the merged change.
+- A narrowly scoped implementation of an existing accepted decision may refer
+  to that ADR when its answers still cover the change. A new major feature,
+  dependency, or changed architectural answer requires a new or revised record.
+- Follow sections 17 and 18 for constitutional questions. An ADR records
+  reasoning; it cannot reinterpret or override the constitution.
 
 ## Plan Readiness Gate
 

@@ -69,6 +69,9 @@
 - `GLOSSARY.md` holds the project vocabulary. It is descriptive, not normative;
   the five terms whose distinctions are architectural constraints stay in
   `ARCHITECTURE_CONSTITUTION.md` under Defined Terms and are not repeated there.
+- `CORE.md` holds core-kind candidates and admission evidence; `SPEC.md` is the
+  companion requirements entry point. Their authority and lifecycle ownership
+  are defined in [Documentation Policy](docs/agent-policy/documentation.md).
 - `docs/agent-policy/` contains active cross-cutting engineering policies that
   are too detailed for this always-loaded rule file.
 - `.agents/skills/` contains repository-local task procedures that load only
@@ -99,6 +102,8 @@
 - `docs/agent-policy/testing.md` owns risk-based test and verification policy.
 - Before executing a staged implementation plan, apply the Plan Readiness Gate
   from `docs/agent-policy/documentation.md`.
+- Record the constitution's architectural decision-test answers using the ADR
+  procedure in `docs/agent-policy/documentation.md` before merging a covered change.
 - A hard fail in that gate blocks execution until the plan is corrected.
 - If only cosmetic wording or small defensive clarifications remain, stop
   reviewing and execute the plan.
