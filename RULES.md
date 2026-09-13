@@ -29,13 +29,20 @@
 - If an implementation decision conflicts with it, the architecture document wins.
 - Do not change the architectural direction implicitly.
 - Any proposed deviation must first be explicitly documented and justified.
-- Amend `ARCHITECTURE_CONSTITUTION.md` only through its own §18 procedure:
-  bump the version, add a §19 log entry, and commit the amendment on its own.
-- The versioned pre-commit hook runs `scripts/check-constitution-amendment.sh`
-  and blocks a commit that changes `ARCHITECTURE_CONSTITUTION.md` together with
-  any file other than `MEMORY.md`.
-- If a combined commit is deliberate, bypass only after rechecking §18:
+- `ARCHITECTURE_CONSTITUTION.md` has no amendment procedure. Its §18 gives it
+  two states, declared on its own status line: DRAFT while it is being written,
+  and RATIFIED, after which it never changes.
+- It is currently a DRAFT. Finishing it means closing the open questions in its
+  §17, which is what ratification requires.
+- Never propose editing a ratified constitution. A constraint that turns out to
+  be wrong means a different product, and the mechanism for a different product
+  is a fork of the repository with its own constitution.
+- Commit constitution changes on their own, plus `MEMORY.md` when the freshness
+  guard needs it. Never bundle a change to the definition of the product into an
+  unrelated change. The versioned pre-commit hook enforces this today; bypass is
   `SCI_SKIP_CONSTITUTION_AMENDMENT=1 git commit`.
+- Mechanical enforcement of the §18 freeze is deliberately deferred until after
+  ratification. Do not add it early.
 
 ## Project Context
 
