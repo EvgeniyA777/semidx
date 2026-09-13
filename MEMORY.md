@@ -8,9 +8,13 @@ why. This is not a changelog of what was removed — see `git log` for history.
 - `ARCHITECTURE_CONSTITUTION.md` — the WHY/WHAT layer (purpose, semantic
   layers, invariants, non-goals). Exists so a future implementation has a
   fixed target to conform to, decided before any code exists. It holds only
-  what must not change; it is versioned (currently version 5) with an
-  amendment log in §19, and is amended by standalone commits under §18 rather
-  than edited alongside the change it permits. Its Normative Language section
+  what must not change. It has exactly two states: DRAFT (now) and RATIFIED.
+  **It is currently a draft and is being finished; once ratified it never
+  changes at all** — no amendments, no versions, no log. A constraint that
+  turns out to be wrong is not a document error to correct but a discovery
+  that a different product needs to exist, and the mechanism for that is a
+  fork of the repository (§18). Ratification requires §17 to be empty, so
+  closing OQ-1 and OQ-2 is what unblocks it. Its Normative Language section
   makes `must`/`may` RFC 2119 keywords, declares `should` unused, and bans
   discretionary qualifiers from normative statements. Its Defined Terms
   section holds exactly five terms — entity, node, relationship, assertion,
@@ -21,8 +25,8 @@ why. This is not a changelog of what was removed — see `git log` for history.
   Implications, and Detection. The Detection entries are the intended
   conformance checks and mostly presuppose an implementation; derive the real
   checks from them rather than inventing checks to match whatever gets built.
-  Invariants 10 and 12 are detectable today (process properties), and §18 is
-  enforced by `scripts/check-constitution-amendment.sh`.
+  Invariants 10 and 12 are detectable today (process properties), and the §18
+  freeze is enforced by `scripts/check-constitution-frozen.sh`.
 - `GLOSSARY.md` — the project vocabulary, explicitly descriptive rather than
   normative: no version, no amendment procedure, expected to drift. It exists
   so the constitution can keep only the five terms whose distinctions are

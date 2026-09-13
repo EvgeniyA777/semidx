@@ -1,6 +1,7 @@
 # semidx — Architecture Constitution
 
-**Constitution version: 5.** Amendment history is recorded in §19.
+**Status: DRAFT — not ratified.** This document is being written. Once ratified
+it is frozen and never changes; see §18.
 
 ## Scope Of This Document
 
@@ -22,9 +23,9 @@ at least two of the following hold:
 3. **Consumer visibility.** It is part of a contract a consumer has already
    relied on and cannot be changed without breaking that consumer.
 
-This document is versioned rather than lifecycled: it has no `status` or
-`lifecycle` state, because it is never superseded by a newer current document —
-it is amended in place under §18.
+This document has two states and no others: draft, while it is being written,
+and ratified, after which it is frozen permanently. It is never superseded,
+never versioned into a series, and never amended. See §18.
 
 ## Normative Language
 
@@ -47,8 +48,8 @@ Qualifiers that soften an obligation at the implementation's discretion — "whe
 practical", "where useful", "whenever possible", "if feasible" — must never
 appear in a normative statement here. An obligation with a discretionary escape
 clause is not an obligation. Where such a qualifier covered a genuine undecided
-question, that question is recorded in §17 instead. Reintroducing one is a
-weakening amendment under §18 and requires a §19 entry.
+question, that question is recorded in §17 instead, to be closed before
+ratification.
 
 ## Defined Terms
 
@@ -532,8 +533,8 @@ Most Detection entries describe a check that requires an implementation, which
 does not exist yet. They are stated now so that the check is derived from the
 invariant rather than invented afterwards to match whatever was built. Two
 invariants (10 and 12) are detectable today, because they are properties of the
-process rather than of code. The amendment procedure in §18 is already enforced
-mechanically by `scripts/check-constitution-amendment.sh`.
+process rather than of code. The freeze in §18 is enforced mechanically by
+`scripts/check-constitution-frozen.sh`.
 
 ### Invariant 1 — The graph is the center
 
@@ -839,9 +840,9 @@ Before introducing a major feature or dependency, ask:
 8. Does every assertion it introduces carry its source and resolution level?
 9. Does it depend on an unresolved open question in §17?
 
-A "yes" to question 9 blocks the change until that question is resolved by amendment. An open question must never be settled implicitly by the first implementation that happens to need an answer.
+A "yes" to question 9 blocks the change until that question is closed in §17. An open question must never be settled implicitly by the first implementation that happens to need an answer.
 
-If a change violates the architectural invariants, it must not be merged without amending this document first, under the procedure in §18.
+A change that violates an invariant must not be merged. There is no procedure for relaxing an invariant to accommodate it — see §18.
 
 ---
 
@@ -862,8 +863,12 @@ recorded here rather than hidden inside hedged wording, because an unresolved
 question that is visible can be decided deliberately, while one buried in a
 qualifier gets decided by whichever implementation reaches it first.
 
-An open question is resolved only by amendment under §18. Implementation work
-that depends on the answer is blocked until then (§15, question 9).
+Every open question must be closed before this document is ratified — an open
+question is the one thing that keeps it in draft. Implementation work that
+depends on an answer is blocked until the question is closed (§15, question 9).
+
+After ratification this section must be empty, because a frozen document cannot
+answer a question later.
 
 ### OQ-1 — Degree of cross-language model unification
 
@@ -899,27 +904,54 @@ Must be resolved before the storage and process model are chosen.
 
 ---
 
-## 18. Amendment Procedure
+## 18. Ratification And Immutability
 
-* This document changes only by explicit amendment.
-* An amendment is a standalone commit. It must not be combined with the code or
-  documentation change that it permits.
-* Every amendment increments the constitution version and adds an entry to §19.
-* Weakening a constraint is an amendment, not a clarification. Replacing `must`
-  with `may`, adding an exemption, and widening an existing exemption all
-  require a §19 entry stating what is now permitted that was not before.
-* Resolving an entry in §17 is an amendment.
-* Moving a constraint from this document to `SPEC.md` is an amendment, because
-  it makes that constraint subject to drift.
+### Draft
 
----
+While the status line at the top of this document reads DRAFT, the document is
+being written. Text may change freely, and §17 must be emptied.
 
-## 19. Amendment Log
+Ratification is the act of setting that status line to RATIFIED with a date. It
+requires §17 to be empty: an unresolved constitutional question is the one thing
+that keeps the document in draft, because a frozen document cannot answer a
+question later.
 
-| Version | Date | Change | Rationale |
-| --- | --- | --- | --- |
-| 5 | 2026-09-12 | Renamed the Terminology section to Defined Terms and cut it from twelve entries to five: entity, node, relationship, assertion, fact. Moved `frontend`, `snapshot`, `fingerprint`, `consumer`, `projection`, `symbol`, and `edge` to `GLOSSARY.md`, which also now defines `provenance`, `resolution level`, and `capability matrix` — three terms this document had been using without defining anywhere. Dropped the claim that the section binds `SPEC.md` and the implementation. | Version 3 corrected a real defect but overshot: it carried a general glossary into a document whose Scope section forbids exactly that kind of accumulation. Seven of the twelve entries defined nothing that was not already defined in place by the section using them, and two carried nothing normative at all — `symbol` is a convenience subset, and `edge` appeared exactly once in the whole document outside its own definition. The five that remain are different in kind: each states a distinction that an invariant turns on, so removing them would leave obligations written in undefined words. The dropped binding claim was over-reach in the opposite direction — dictating vocabulary to a document that does not exist yet is precisely the sort of thing that must be free to drift. `GLOSSARY.md` was created first so no term was left without an owner between the two commits. |
-| 4 | 2026-09-12 | Restated all thirteen invariants in four parts — Statement, Rationale, Implications, Detection — and gave each a short name. No invariant's obligation was changed, weakened, or added; this amendment adds justification, consequences, and a means of observing violation to the existing thirteen. | Two gaps. First, the invariants stated obligations without recording why they exist, so a later reader could see a prohibition but not its purpose — and therefore could not judge whether a proposed exception defeated it. That is the mechanism by which principles erode: not a decision to abandon them, but a sequence of exceptions that each look local. Second, no invariant said how a violation would be detected, which left the whole document on an honour system — the same weakness `RULES.md` already admits about its own Code Reading Rules. Most Detection entries need an implementation that does not exist yet; they are written now so each check derives from its invariant rather than being invented afterwards to match whatever was built. Invariants 10 and 12 are detectable today because they are properties of the process, and §18 is now enforced mechanically by `scripts/check-constitution-amendment.sh`. |
-| 3 | 2026-09-12 | Added the Normative Language section (RFC 2119 keywords, `SHOULD` declared unused, discretionary qualifiers banned from normative statements) and the Terminology section. Unified vocabulary across the document: entity vs node, relationship vs edge, and — the substantive one — **assertion** vs **fact**, where a fact is now defined as a fully resolved, frontend-confirmed assertion rather than a synonym. Replaced every remaining `should` with `must` or `must never` (§5, §8, §9, §13, §16). Retermed §3's graph diagram, §4 L1 and L2, §10, §11, Invariants 2 and 3, §15 question 5, and OQ-1. | Two gaps measured against standard practice. First, the version 2 amendment turned on the difference between `must` and `may` without the document ever declaring that those words were normative rather than stylistic, and four `should`s survived in normative positions. Second, the document mixed entity/node/symbol, relationship/edge, and fact/assertion as synonyms — and the version 2 amendment made that worse by introducing `assertion` and `edge` alongside the existing `fact` and `relationship`. For a document whose subject is exactness, and which is read by agents, that is a defect rather than a style question: `fact` and `assertion` differ precisely where §11 draws its line, so using them interchangeably asserts resolution that may not exist. Fixed before `SPEC.md` is written, so the assertion schema does not inherit the ambiguity. |
-| 2 | 2026-09-12 | Added the document's own scope boundary and the constitutional-versus-`SPEC.md` test. Hardened §5 (stable identity is unconditional, with a closed exemption list) and §7 (aspect-separated fingerprints are required, not optional). Extended §11 with partially resolved assertions and the Provenance Rule, and applied it to identity claims in §5. Fixed two observable properties of incrementality in §6. Amended Invariants 3 and 8; added Invariants 11, 12, 13. Added questions 8 and 9 to §15. Added §17, §18, §19. | The document defended strongly against becoming a RAG, grep, or vector-search product, but its positive requirements — the expensive, hard-to-reproduce ones — were written with `may`, `where useful`, and `where practical`. Drift was unlikely to arrive as a proposal to build a vector database; it was likely to arrive as a hundred local "not practical here" decisions, each individually defensible. This amendment converts those qualifiers into obligations with named exemptions, makes the two genuinely undecided forks visible as tracked questions instead of qualifiers, and gives the document an amendment record so it cannot be edited into agreement with the code it is supposed to constrain. |
-| 1 | 2026-09-12 | Initial document. | Fix the architectural target before any implementation exists, so a from-scratch rebuild has something to conform to. |
+### Ratified
+
+**A ratified document does not change. There is no amendment procedure, and this
+section is not the beginning of one.**
+
+Not "changes rarely", not "changes only with justification", not "changes only
+by a logged amendment". The file is frozen. No clause is rewritten, relaxed,
+strengthened, clarified, renumbered, or reworded. Only a mechanical repair that
+touches no sentence — a broken link, a malformed table — is permitted, and it
+must be visibly that.
+
+The reason is the purpose of the document. These constraints define what the
+product *is*; a build that drops one is a different product. So a constraint
+that turns out to be wrong is not an error in the document to be corrected. It
+is a discovery that a different product needs to exist.
+
+### When A Constraint Turns Out To Be Wrong
+
+The mechanism for a different product is a different repository. Fork it, write
+its own constitution, and let the two projects be what they each are. That is
+deliberately expensive, because the alternative — editing the definition of the
+product to match what was built — is the failure this document exists to
+prevent, and it is cheap enough to happen by accident.
+
+Two consequences follow, and both are intended:
+
+* **Getting it right before ratification matters more than getting it written.**
+  A frozen constraint that is wrong cannot be fixed in place. Review before
+  ratification is the only review there is.
+* **The pressure to reinterpret must be refused, not accommodated.** When a
+  clause becomes inconvenient, the temptation is to reread it rather than to
+  fork — and silent reinterpretation is worse than an edit, because it leaves no
+  trace. A clause that cannot be followed as written is grounds for a fork, not
+  for a generous reading.
+
+No log of changes is kept here, because there are no changes to log. The
+drafting history lives in `git log`, and durable technical decisions belong in
+ADRs.
+
