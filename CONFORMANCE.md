@@ -39,7 +39,7 @@ Checks should remain:
 
 | Constitutional property | Required scenario |
 | --- | --- |
-| Graph authority | Trace semantic answers from public surfaces back to graph facts or attributed assertions. Candidate discovery and rendering may use text or projections, but program relationships must come from the graph. |
+| Graph authority | Trace semantic answers from public surfaces back to graph facts or attributed assertions. Candidate discovery, ranking, and rendering may use text or projections, but program relationships must come from the graph. |
 | Entity nodes | Reflow whitespace, move declarations, and change retrieval window boundaries; node identity must remain tied to entities or source containers, not byte ranges or splitting rules. |
 | Knowledge categories | Attempt to record assertions without source or resolution; construction must reject them. Fixtures with unresolved and approximate evidence must expose non-zero counts without promoting them to facts. |
 | Stable identity | Repeat fixed-input builds and replay edit histories containing body edits, moves, renames, and permitted loss cases; compare semantic identities and recorded identity breaks. |
@@ -49,7 +49,7 @@ Checks should remain:
 | Honest degradation | Query constructs with confirmed absence, unsupported language constructs, unavailable analysis, unresolved targets, and approximate evidence; each must be distinguishable from the others on every public surface. |
 | Optional vectors | Build and query graph answers with embeddings disabled. Candidate discovery from natural-language intent may differ, but graph answers at fixed entity, snapshot, filters, and traversal parameters must not. |
 | Local operation and privacy | From a clean checkout with no service reachable, build and query the graph. With default settings and network available, observe that no source code or source-derived data leaves the machine during indexing, querying, or optional projections. |
-| Consumer independence | Remove or disable one public interface such as MCP; the core graph must remain usable through another surface. Schema concepts must not depend on one consumer protocol's vocabulary. |
+| Consumer independence | Remove or disable one public interface such as MCP; no concept, entity kind, or relationship kind may leave the model with it, and the remaining model must still express the same semantic questions. Schema concepts must not depend on one consumer protocol's vocabulary. |
 | Accuracy claims | Any published claim of exact relationships must have current reproducible evidence against known fixtures, per language and per relationship kind. Planned behavior must be labeled as unmeasured. |
 
 ## Source Of Expected Results
