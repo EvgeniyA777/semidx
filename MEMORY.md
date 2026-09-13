@@ -1,132 +1,106 @@
 # Project Memory
 
 Current implementation reality: what exists in this repository right now and
-why. This is not a changelog of what was removed — see `git log` for history.
+why. This is not a changelog of removed implementation; see `git log`.
 
-## What exists and why
+## What Exists And Why
 
-- `ARCHITECTURE_CONSTITUTION.md` — the WHY/WHAT layer (purpose, semantic
-  layers, invariants, non-goals). Exists so a future implementation has a
-  fixed target to conform to, decided before any code exists. It holds only
-  what must not change. It has exactly two states: DRAFT (now) and RATIFIED.
-  **It is currently a draft and is being finished; once ratified it never
-  changes at all** — no amendments, no versions, no log. A constraint that
-  turns out to be wrong is not a document error to correct but a discovery
-  that a different product needs to exist, and the mechanism for that is a
-  fork of the repository (§18). Ratification requires §17 to be empty, so
-  closing the remaining open question (OQ-2) is what unblocks it. Its
-  Normative Language section
-  makes `must`/`may` RFC 2119 keywords, declares `should` unused, and bans
-  discretionary qualifiers from normative statements. Its Defined Terms
-  section holds exactly five terms — entity, node, relationship, assertion,
-  fact — because each states a distinction an invariant turns on; in
-  particular **assertion** (anything the graph records) is not a synonym for
-  **fact** (a resolved, frontend-confirmed assertion). Everything else is in
-  `GLOSSARY.md`. Its thirteen invariants each carry Statement, Rationale,
-  Implications, and Detection. The Detection entries are the intended
-  conformance checks and mostly presuppose an implementation; derive the real
-  checks from them rather than inventing checks to match whatever gets built.
-  Invariants 10 and 12 are detectable today, being process properties.
-- Enforcement of the §18 freeze is deliberately deferred: the script that
-  blocks changes to a ratified constitution is to be written **after**
-  ratification, not before. Until then §18 holds by discipline. Do not add it
-  early.
-- Known inconsistency, to be cleared when that script is written:
-  `scripts/check-constitution-amendment.sh` still exists and is wired into
-  `pre-commit`. What it does is useful and still true — it stops a
-  constitution change from being bundled with unrelated files — but its name
-  and its message describe a §18 "amendment procedure" that the constitution
-  no longer has. Leave it working; fix the wording as part of the post-freeze
-  script work.
-- `GLOSSARY.md` — the project vocabulary, explicitly descriptive rather than
-  normative: no version, no amendment procedure, expected to drift. It exists
-  so the constitution can keep only the five terms whose distinctions are
-  themselves constraints (entity, node, relationship, assertion, fact) and
-  hand the rest somewhere with a real owner. It must not restate those five.
-  Schema-level vocabulary (field names, resolution-level values, the
-  catalogue of entity and relationship kinds) moves to `SPEC.md` when that
-  document exists; conceptual vocabulary stays in `GLOSSARY.md`.
-- `RULES.md` — the single source of truth for agent process rules. Written
-  language-agnostic on purpose: no implementation stack is chosen yet, so it
-  states process (git workflow, doc lifecycle, tool-usage discipline)
-  without assuming Clojure or any other language.
-- `docs/agent-policy/{documentation,git,testing}.md` — the detailed policies
-  `RULES.md` is too short to hold directly: doc lifecycle and the Plan
-  Readiness Gate, git workflow specifics, risk-based test-level selection.
-- `.agents/skills/` — repository-local task procedures (plan delivery,
-  progress logs, code exploration, test design, code review, git delivery,
-  rules maintenance), loaded only when their task matches.
-- `README.md` — minimal human entry point: what semidx is, in one paragraph
-  pointing at the constitution, plus the license. Deliberately not a status
-  page or getting-started guide, since there is nothing to run yet.
-- `scripts/` git-hygiene files (`check-agent-attribution.sh`,
-  `check-memory-freshness.sh`, `check-constitution-amendment.sh`,
-  `install-git-hooks.sh`, `git-hooks/*`) — enforce process rules that hold
-  regardless of implementation language: no AI attribution, this file staying
-  current, and constitutional amendments staying standalone. The freshness
-  trigger list includes `ARCHITECTURE_CONSTITUTION.md` and `SPEC.md`, so a
-  change to either requires a memory update in the same pushed range. The
-  pre-commit amendment check blocks any commit touching
-  `ARCHITECTURE_CONSTITUTION.md` alongside a file other than `MEMORY.md`;
-  that pairing is allowed precisely because the freshness guard demands it.
-- `scripts/` toolchain installers (`setup-jdtls.sh`, `setup-scip-java.sh`,
-  `setup-scip-typescript.sh`, `setup-tree-sitter-grammars.sh`,
-  `setup-typescript-lsp.sh`, and their pinned `package.json` /
-  `ScipJavaIndexer.java`) — install pinned external tools (Java LSP, SCIP
-  indexers, tree-sitter grammars) that back the Language Frontends direction
-  in `ARCHITECTURE_CONSTITUTION.md` §10. They install sources semidx will
-  read, not semidx's own implementation, so they hold regardless of which
-  language semidx itself ends up written in.
-- `.github/workflows/agent-attribution.yml` — CI enforcement of the same
-  no-attribution rule, independent of implementation language.
+- `ARCHITECTURE_CONSTITUTION.md` remains **DRAFT, not ratified**. It defines
+  product constraints and has fourteen invariants, each with Statement,
+  Rationale, Implications, and Detection. Most checks require a future
+  implementation; process records can be inspected now. An empty section 17
+  records the absence of unresolved constitutional questions, not approval to
+  ratify. Ratification is a separate deliberate act under section 18.
+- The draft's Defined Terms still owns exactly five terms: entity, node,
+  relationship, assertion, and fact. Source containers now fall within entity;
+  source ingestion is their evidence source. Facts may be established by source
+  ingestion about source organization, frontend analysis about program meaning,
+  or exact system resolution with preserved evidence. Heuristics and unresolved
+  assertions do not acquire fact status through confidence or specificity.
+- The shared core is governed by requirements in constitution section 4, not a
+  frozen list. Published meaning is protected by explicit contract versions and
+  migrations; draft candidates remain editable. Coverage can differ across
+  frontends without changing the common model. Pairwise extension mappings are
+  applied at query time and preserve attribution.
+- `CORE.md` is a **draft candidate roster**. No kind or roster version is
+  accepted or published yet. Open `module` semantics block dependent
+  `IMPORTS` and the current `DEFINES` candidate. Textual-inclusion coverage
+  and admission fixtures also remain unresolved. Container/entity status is
+  settled constitutionally; the proposed reference-query contract counts a call
+  occurrence once even if storage records both general and specialized relations.
+- `SPEC.md` now exists as a **draft requirements entry point**, including core
+  contract lifecycle, conformance scenarios, outstanding specification work, and
+  proposed delivery direction. It is not a complete implementation plan or a
+  published runtime contract.
+- `GLOSSARY.md` holds descriptive vocabulary and points to the canonical
+  [document ownership policy](docs/agent-policy/documentation.md).
+- `RULES.md` remains the single source of truth for agent process rules. It is
+  language-agnostic because no implementation stack has been selected.
+- `docs/agent-policy/{documentation,git,testing}.md` owns detailed cross-cutting
+  process. Documentation policy now locates architectural decision-test answers
+  in repository ADRs and requires a link from the change.
+- [ADR 001](docs/adr/001_pre_ratification_semantic_contracts.md) records the
+  rationale and section 15 answers for the pre-ratification corrections,
+  including the deliberate revision of former OQ-1 and the source-container
+  decision. It does not ratify the constitution or accept the candidate roster.
+- `.agents/skills/` holds task procedures for exploration, review, delivery,
+  testing, documentation rules, and progress logs.
+- `README.md` remains a minimal human entry point describing semidx and
+  pointing to the constitution, plus the license. There is nothing to run yet.
+- Git-hygiene scripts under `scripts/` and `scripts/git-hooks/` enforce
+  attribution policy, memory freshness, and isolated constitution commits.
+  `.github/workflows/agent-attribution.yml` enforces attribution policy in CI.
+- Toolchain installers under `scripts/` set up pinned language-analysis tools:
+  JDT LS, SCIP Java/TypeScript, tree-sitter grammars, and TypeScript LSP, with
+  their package manifest and Java helper. These are sources a future frontend
+  can consume, not semidx's implementation stack.
 
-## What does not exist yet, and why that is expected
+## What Does Not Exist Yet
 
-- No implementation (`src/`, `test/`, a build/dependency manifest): this is a
-  from-scratch rebuild and no language or build tool is chosen yet.
-- No `contracts/` layer (JSON Schema, examples, runtime mirrors): the public
-  interface shape depends on the implementation stack. Do not add contracts
-  speculatively before that decision.
-- No `SPEC.md`. The constitution now declares it as the companion layer that
-  owns concrete, drifting requirements (budgets, language coverage, fact
-  schema, snapshot contract, frontend protocol, public surfaces, conformance),
-  but the document itself has not been written yet. Until it exists, those
-  concerns have no canonical owner — do not scatter them into plans or here.
+- No graph implementation, test suite, build/dependency manifest, or fixed
+  implementation language and source layout.
+- No `contracts/` schemas, runtime mirrors, or executable conformance fixtures.
+  The draft specifications name the work needed before publication.
+- No accepted core roster or published capability matrix. Language examples in
+  documentation are not claims of implemented support.
 
-## Active Constraints And Blockers
+## Active Constraints And Known Gaps
 
-- `ARCHITECTURE_CONSTITUTION.md` §17 is **empty**: every constitutional
-  question is closed, which is the precondition §18 sets for ratification. The
-  constitution is ready to be ratified; ratification is a deliberate act and
-  has not been performed.
-- Deployment shape is **decided** (was OQ-2). semidx must remain fully
-  operable as a local process with no required external service (§6,
-  Deployment Shape; Invariant 14). A shared service is allowed in exactly one
-  role — supplying a baseline snapshot the local process could have built
-  itself. The guard against erosion, which must not be argued away: a baseline
-  that cannot be regenerated locally from source is a required dependency in
-  disguise. Consequences that bind the stack decision below: memory and
-  startup are real budgets, a server-resident database is unavailable to the
-  core, and indexing cost is per developer.
-- Cross-language unification is **decided** (was OQ-1). The model is a small
-  mandatory shared core plus per-language extensions above it, with
-  cross-language queries answered on the core alone. The core is fixed in §4:
-  entities repository/file/module/definition, relationships `DEFINES`,
-  `REFERENCES`, `CALLS`, `IMPORTS`. Everything else — definition kind, types,
-  dispatch, protocols, behaviours, inheritance, generics, macros, ABI — is an
-  extension catalogued in `SPEC.md`. Rationale that matters for future work:
-  a single universal vocabulary loses information at write time and
-  irreversibly, while a missing cross-language translation only costs work
-  later. Do not add to the core casually — each addition is a bar every
-  present and future frontend must clear.
+- The reviewed corrections are incorporated in the DRAFT. Section 17 is empty;
+  ratification has not been performed. Remaining roster and specification work
+  is explicit and must not be mistaken for completed implementation.
+- Local graph operation remains independent of external services. A shared
+  graph service is restricted to a locally reproducible baseline. Source-derived
+  outbound data is disabled by default and requires explicit destination/data
+  opt-in, including for projections and diagnostics (constitution section 6).
+- Reproducibility is defined for fixed analysis inputs, including dependencies,
+  producer/contract versions, and incremental history. Ordered graph results
+  have deterministic order. Producer identity incapacity is declared before
+  analysis; a runtime failure cannot excuse identity churn (section 5).
+- Interface and implementation fingerprints are independent when both aspects
+  exist. Vector-removal checks compare graph answers at fixed inputs, while
+  candidate discovery may differ (section 7 and Invariant 4).
+- Freeze enforcement is deliberately deferred until after ratification.
+  `scripts/check-constitution-amendment.sh` still enforces the useful boundary
+  that constitution changes may share a commit only with `MEMORY.md`. Its
+  obsolete amendment terminology is to be corrected with post-ratification
+  freeze enforcement, not by disabling the existing check.
+- Memory freshness currently watches `ARCHITECTURE_CONSTITUTION.md` and
+  `SPEC.md`, but not `CORE.md`. Updates to core definitions still fall under
+  the memory update rule in `RULES.md`; extending mechanical coverage remains
+  process work.
+- No runtime conformance is claimed. The specifications describe future checks;
+  the current verification is documentation consistency, references, and diff
+  hygiene.
 
 ## Near-Term Priorities
 
-- Ratify the constitution — §17 is empty, so nothing blocks it — then write the
-  freeze-enforcement script.
-- Decide the implementation stack (language, build/dependency tool, source
-  layout) under the local-first constraint, then fill in `RULES.md`'s Project
-  Context, Repository Shape, Editing Rules, Testing And Verification, and
-  Services And Local Infrastructure sections with the real specifics.
-- Write `SPEC.md` and design the contracts/schema layer, starting from the
-  extension catalogue above the now-fixed core.
+- Assess the corrected draft for a separate, explicit ratification decision;
+  after ratification, implement freeze enforcement as required by `RULES.md`.
+- Select the implementation stack under the local-operation constraint, then
+  update `RULES.md` with actual build tools, source layout, verification
+  commands, editing tools, and service requirements.
+- Resolve candidate admission dependencies in `CORE.md`, choose initial
+  coverage, and supply conformance evidence. Complete the dependent requirements
+  and public contracts through `SPEC.md` before publication or an execution
+  plan that relies on them.

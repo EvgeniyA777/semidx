@@ -1,7 +1,6 @@
 # semidx — Architecture Constitution
 
-**Status: DRAFT — not ratified.** This document is being written. Once ratified
-it is frozen and never changes; see §18.
+**Status: DRAFT — not ratified.** See §18 for ratification and immutability.
 
 ## Scope Of This Document
 
@@ -11,11 +10,14 @@ dropped, the result is a different project, not a later version of this one.
 It deliberately contains no numbers, thresholds, field names, formats, language
 coverage, schedules, or priorities. Those are concrete requirements: they are
 expected to change as the project learns, and they belong in the companion
-requirements document (`SPEC.md`), which is versioned and lifecycled
-independently.
+requirements document, which is versioned and lifecycled independently. That
+document is deliberately not named here. A filename is itself a concrete
+requirement: documents get renamed, split, and merged, and this document cannot
+be corrected when one is. The names of the documents around this one are kept
+where they can be corrected.
 
-The test for whether something belongs here rather than in `SPEC.md` is whether
-at least two of the following hold:
+The test for whether something belongs here rather than there is whether at
+least two of the following hold:
 
 1. **Irreversibility.** Allowing the opposite for a year would require a
    rewrite, not a refactor.
@@ -23,26 +25,21 @@ at least two of the following hold:
 3. **Consumer visibility.** It is part of a contract a consumer has already
    relied on and cannot be changed without breaking that consumer.
 
-This document has two states and no others: draft, while it is being written,
-and ratified, after which it is frozen permanently. It is never superseded,
-never versioned into a series, and never amended. See §18.
+Its lifecycle and freeze rules are defined in §18.
 
 ## Normative Language
 
-This document uses normative keywords in the sense of RFC 2119. They are used
-deliberately, not stylistically.
+The words **must**, **must never**, and **may** express obligations,
+prohibitions, and permissions, including when capitalized.
 
-* **MUST**, **MUST NEVER** — an obligation or a prohibition. A violation is an
+* **must**, **must never** — an obligation or a prohibition. A violation is an
   architectural defect, not a trade-off. Exceptions exist only where this
   document names them in a closed list.
-* **MAY** — a permission genuinely granted to the implementation. It never means
+* **may** — a permission granted to the implementation. It never means
   that an obligation applies only when convenient.
 * **SHOULD** is not used anywhere in this document. A constitution states
   obligations and permissions; it does not give advice. Anything that would be a
-  recommendation belongs in `SPEC.md`.
-
-Lower-case `must` and `may` in running prose carry the same force as the
-upper-case forms. The document does not distinguish them.
+  recommendation belongs in the companion requirements document.
 
 Qualifiers that soften an obligation at the implementation's discretion — "where
 practical", "where useful", "whenever possible", "if feasible" — must never
@@ -60,11 +57,11 @@ undefined words is ambiguous, so these definitions are part of the obligations.
 
 | Term | Meaning |
 | --- | --- |
-| **semantic entity**, **entity** | A program construct the model represents: a module, a function, a type, a parameter. The canonical word for the modeled thing. |
+| **semantic entity**, **entity** | A program construct or source container the model represents: a function, a type, a parameter, a repository, a file. A source container represents source organization, not an arbitrary text segment selected for retrieval. The canonical word for the modeled thing. |
 | **node** | The graph's *representation* of an entity. Used only where representation itself is the subject. |
 | **relationship** | A semantic connection between entities: `CALLS`, `USES_TYPE`, `IMPLEMENTS`. The canonical word for the connection. |
 | **assertion** | Anything the graph records: that an entity exists, that a relationship exists, what a relationship's target is, that two entities across snapshots are the same entity. Every assertion carries its source and resolution level (§11). |
-| **fact** | An assertion that is fully resolved and confirmed by a language frontend. A fact is a kind of assertion. **Not every assertion is a fact** — this is the distinction §11 exists to protect, and the reason the two words are not interchangeable. |
+| **fact** | An assertion fully established by source ingestion about source organization, by a language frontend about program meaning, or by exact system resolution over such assertions. Exact resolution preserves its supporting evidence and method (§11). A fact is a kind of assertion. **Not every assertion is a fact** — this is the distinction §11 exists to protect, and the reason the two words are not interchangeable. |
 
 Using **fact** where **assertion** is meant is not a wording slip. It asserts
 that something was resolved and confirmed when it may not have been, which is
@@ -81,6 +78,9 @@ which is precisely why those terms are not carried here.
 `semidx` is an incrementally maintained semantic model of a codebase.
 
 Its primary purpose is to build and maintain an exact, machine-readable semantic graph of source code and its relationships.
+
+Exact means that only established assertions are presented as facts (§11). It
+does not promise complete coverage of every construct or relationship.
 
 The semantic graph is the core product.
 
@@ -138,7 +138,7 @@ Semantic Extraction
  Search    Agents       IDE       Impact Analysis
     │        │                         │
  Vectors    MCP                        ▼
-   /RAG                         Incremental Engine
+   /RAG                      Incremental Compilation
 ```
 
 The arrows below the semantic graph point outward.
@@ -239,40 +239,77 @@ This split cuts across L1, L2, and L3 rather than sitting between them. It fixes
 what "shared model" means in Invariant 8.
 
 **The shared core is mandatory.** Every frontend for every supported language
-must produce it, and must produce it without flattening anything. The core
-therefore contains only what genuinely means the same thing in every supported
-language.
+conforms to its definitions and reports its coverage. Core assertions use the
+core's vocabulary; source ingestion follows the same rule for source containers.
 
-Core entity kinds:
+This document does not enumerate the core. A roster of kinds is a concrete
+requirement: it is expected to be extended as languages are added, and a
+membership mistake frozen here could never be repaired. What is fixed here are
+the requirements the core must satisfy for as long as the project exists. The
+roster, and the definition of each kind in it, are governed by those requirements
+and versioned separately.
 
-* repository
-* file
-* module
-* definition — a named entity, whatever kind of thing it is
+**Adequacy.** The core must be sufficient for a consumer to ask, across
+languages, what entities exist and what refers to what. A core that cannot carry
+existence and reference does not make frontends comparable, which is the only
+reason it exists.
 
-Core relationship kinds:
+**Identical meaning.** A kind may be core only if it means the same thing in
+every supported language. This is a test of meaning, not of presence. A kind
+may satisfy this test even where some language has no instances of it; it must
+also satisfy the other admission requirements.
 
-* `DEFINES`
-* `REFERENCES`
-* `CALLS`
-* `IMPORTS`
+**Honest absence.** A frontend produces a core kind only where its language
+actually has one. Confirmed absence, lack of a construct in the language, and
+inability of the frontend to analyze that construct must remain distinguishable
+to consumers. A frontend must never substitute an approximation for a core kind
+it cannot produce. A language whose frontend cannot produce some core kind is
+supported with that coverage reported unavailable (Invariant 13), not excluded.
 
-The core is small on purpose. A kind belongs in it only if every supported
-language's frontend can produce it honestly, so each addition raises a bar that
-every present and future frontend must clear. A language whose frontend cannot
-produce the core is a language `semidx` does not support.
+**No flattening.** Language-specific meaning must never be reduced to a core
+approximation. What a language actually means — what kind of definition
+something is, types and signatures, dispatch, protocols, behaviours,
+inheritance, generics, macro expansion, ABI — belongs in extensions above the
+core, in that language's own terms. The catalogue of extensions belongs in the
+companion requirements document and is expected to grow.
 
-**Language extensions sit above the core and are not shared.** They carry what a
-language actually means, and must never be reduced to a core approximation: what
-kind of definition something is, types and signatures, dispatch, protocols,
-behaviours, inheritance, generics, macro expansion, ABI. Several examples listed
-under L2 — `USES_TYPE`, `RETURNS_TYPE`, `IMPLEMENTS`, `OVERRIDES`,
-`INSTANTIATES`, `READS`, `WRITES` — are extensions, not core. The catalogue of
-extensions belongs in `SPEC.md` and is expected to grow.
+**Closed shared layer.** The shared layer carries core kinds and nothing else.
+An extension must never be written as though it were shared.
 
-**Cross-language queries are answered on the core alone.** A question asked
-across languages gets a core answer. A question asked within one language may
-use that language's extensions and get a more precise one.
+**Subsidiarity.** A kind may be core only when the cross-language question it
+answers is well-posed for every supported language and belongs to the guaranteed
+common model. A question confined to particular languages is answered by a
+declared mapping between their extensions. The ability to map one pair does not
+disqualify a kind needed for the common model. Requiring every language to map
+toward one common target is a core kind in disguise and is governed as one.
+
+**Published meaning is protected.** A core kind's meaning or membership must
+never change silently for consumers. Corrections to published contracts require
+explicit versioning and migration, and assertions must remain interpretable
+under the contract that produced them. Admission candidates are editable until
+accepted. The companion requirements document owns the publication, deprecation,
+and migration procedures; none may waive the requirements in this section.
+
+**Common cost of admission.** Adding a core kind obliges every existing frontend
+to conform to its definition when producing it and to declare its coverage.
+It does not require a frontend to extract an unsupported construct. The core
+therefore does not grow casually: each addition requires conformance and
+coverage assessment across frontends, with limitations exposed under Invariant 13.
+
+**Definition before use.** No core kind exists without a written definition of
+its meaning, in one place every frontend is checked against. A named kind with no
+definition cannot be produced consistently by two frontends and cannot be
+verified in either.
+
+**Cross-language queries are answered on the core.** A question asked across
+languages about existence or reference has a common representation and query
+contract on the core, including explicit coverage limitations. More specific
+questions may use a declared mapping between extensions where one exists; an
+unavailable mapping is reported as unavailable, never as absence. A question
+within one language may use that language's extensions. No extension mapping
+changes what is stored: it is applied when a query is answered, never when an
+assertion is written. Its results retain the supporting assertions, mapping
+method, and resolution level required by §11.
 
 The reason for this shape is *where information is lost*. One universal
 vocabulary for all languages loses information at write time: once a frontend
@@ -310,10 +347,12 @@ Stable identity is required for meaningful incremental updates.
 Identity may be broken only when:
 
 * the entity was genuinely removed from the program;
-* no available frontend assertion can distinguish the entity from a sibling —
+* no available source-ingestion or frontend assertion can distinguish the entity
+  from a sibling —
   for example, two otherwise identical anonymous entities in the same scope;
-* the frontend supplies no identity-bearing assertion for that class of entity
-  at its current capability level.
+* the published capability matrix for the producer version (frontend or source
+  ingestion) declares, before analysis runs, that it cannot supply
+  identity-bearing assertions for that class of entity.
 
 **This list is closed.** An identity break for any other reason — implementation
 convenience, reindexing strategy, or a frontend being awkward to work with — is
@@ -322,6 +361,9 @@ an architectural violation, not an engineering trade-off.
 When identity is broken for a permitted reason, the break must be recorded as a
 break. It must not be presented as a deletion plus an unrelated creation.
 
+An analysis failure or missing output at runtime is not evidence that one of
+these exceptions applies. Source-container identities obey the same rules.
+
 ### Identity Claims Are Graph Assertions
 
 A statement that an entity in a new snapshot is the same entity as one in a
@@ -329,8 +371,21 @@ previous snapshot is itself an assertion about the program, and is therefore
 subject to the Provenance Rule in §11.
 
 Heuristic rename and move detection is permitted. Heuristic rename and move
-detection that is indistinguishable from an identity confirmed by a language
-frontend is not.
+detection that is indistinguishable from an identity established as a fact under
+§11 is not.
+
+### Reproducibility
+
+The same analysis inputs must produce the same semantic assertions and entity
+identities. Inputs include source, dependencies, analysis configuration, and
+versions of the producers and semantic contracts. Incremental analysis also
+includes the starting snapshot and edit sequence. Operational metadata does not
+form part of this equality.
+
+For the same snapshot and query inputs, ordered graph results must have a
+deterministic order, including ties. Unordered results must contain the same
+members. A rebuild's reproducibility does not waive identity preservation across
+edits or invent a confirmed correspondence between unrelated histories.
 
 ---
 
@@ -371,37 +426,31 @@ Two properties of this model are fixed. The mechanism that provides them is not.
 
 Update granularity, the snapshot and versioning mechanism, storage
 representation, and propagation strategy are concrete requirements. They belong
-in `SPEC.md` and are expected to change.
+in the companion requirements document and are expected to change.
 
 ### Deployment Shape
 
 `semidx` must remain fully operable as a local process, with no required
 external service.
 
-This is stated here rather than in a section of its own because the argument for
-it is an incrementality argument. Every consumer in §3 works against one
-developer's working copy, and the question §6 and §7 exist to answer — what
-becomes invalid if this changes — is asked about code that is being edited right
-now. A shared service cannot see uncommitted local edits. Making one mandatory
-would reduce the graph to knowledge about committed history, which is the
-opposite of an incrementally maintained model.
+This is constitutional because incrementality is local: consumers ask about a
+developer's working copy, including uncommitted edits. A mandatory shared service
+would turn the graph into a remote history index, not a live semantic model.
 
-A shared service is permitted in exactly one role: supplying a precomputed
-baseline snapshot that a local process then brings up to date with local
-changes. Indexing is expensive, and sharing that cost is legitimate.
+For graph construction and maintenance, a shared service may supply only a
+precomputed baseline snapshot that the local process can regenerate from source
+and then update with local changes. If the graph cannot be built locally with
+the service absent, the external service has become required regardless of how
+it is described.
 
-One line keeps this a constraint rather than a preference:
+Building, updating, and querying the graph must not require transmitting source
+code or source-derived data outside the local machine. Such transmission,
+including by optional consumers and projections, requires explicit user opt-in
+for the destination and data involved. It is disabled by default. This includes
+embeddings and diagnostics derived from source, not only source text.
 
-> A baseline that cannot be regenerated locally from source is a required
-> external dependency wearing a disguise.
-
-If a local process cannot build the graph by itself, with the service absent,
-the constraint is broken however the deployment is described.
-
-The consequences are intended: memory and startup are real budgets rather than
-implementation details, a server-resident database is not available to the core,
-and indexing cost is paid per developer. The budgets themselves are `SPEC.md`
-concerns. That they bind is not.
+Memory, startup, and per-developer indexing cost are therefore real budgets. The
+budgets themselves are a concrete requirement.
 
 ---
 
@@ -410,13 +459,18 @@ concerns. That they bind is not.
 Semantic entities must maintain independent fingerprints for the aspects of
 their meaning that the system distinguishes when deciding what to invalidate.
 
-A single whole-entity fingerprint is not sufficient. It collapses "implementation
-changed" and "signature changed" into one event, which forces coarse
+For an entity that has both an interface and an implementation, their
+fingerprints must be independent. An implementation-only change must leave its
+unchanged interface fingerprint unchanged. Languages need not invent an aspect
+their constructs do not have.
+
+For such entities, a single whole-entity fingerprint is not sufficient. It
+collapses "implementation changed" and "signature changed" into one event, which forces coarse
 invalidation and removes the path required by Invariant 7.
 
 Which aspects are fingerprinted, how each is computed, and how many exist per
-language are concrete requirements and belong in `SPEC.md`. That fingerprints
-are aspect-separated is not negotiable there.
+language are concrete requirements and belong in the companion requirements
+document. That fingerprints are aspect-separated is not negotiable there.
 
 Conceptually:
 
@@ -510,8 +564,9 @@ MCP is not the core architecture.
 ## 10. Language Frontends
 
 Language-specific tools may provide assertions to the semantic model. They
-provide facts only where they actually resolved what they asserted; the
-distinction is governed by §11.
+provide facts only where they actually established what they asserted. Source
+ingestion establishes source-container assertions. Exact system resolution may
+derive further facts from these inputs; the distinction is governed by §11.
 
 Possible sources include:
 
@@ -527,19 +582,20 @@ No single frontend defines the internal semantic model.
 
 The internal graph must remain conceptually independent from a specific parser or protocol.
 
-Each frontend produces the shared core defined in §4, plus whatever language
-extensions it can support. It does not translate everything it knows into a
-common vocabulary — that would discard what it knows. The core is the part that
+Each frontend conforms to the shared core requirements in §4, reports its
+coverage, and produces whatever language extensions it can support. It does not
+translate everything it knows into a common vocabulary — that would discard
+what it knows. The core is the part that
 must be common; the rest stays in the language's own terms.
 
 ---
 
-## 11. Exact, Partial, and Approximate Knowledge Must Remain Separate
+## 11. Facts, Partially Resolved Assertions, And Approximate Assertions
 
 Every assertion in the graph falls into exactly one of three categories, and the
 system must keep them distinct. These are three categories, not two.
 
-Resolved — these, and only these, are **facts**:
+**Facts** — fully established assertions as defined in Defined Terms:
 
 ```text
 A CALLS B
@@ -547,7 +603,7 @@ A USES_TYPE C
 D IMPLEMENTS E
 ```
 
-Partially resolved:
+**Partially resolved assertions**:
 
 ```text
 A CALLS something named "login" — receiver type unknown
@@ -555,7 +611,7 @@ B IMPORTS a module that could not be located
 C OVERRIDES a parent symbol that was never resolved
 ```
 
-Approximate:
+**Approximate assertions**:
 
 ```text
 A is semantically similar to B
@@ -565,9 +621,12 @@ these two code regions have similar meaning
 
 Approximate assertions must never silently become facts.
 
-A partially resolved assertion names a real relationship kind but does not
-establish its target. It is neither a fact nor a similarity judgement, and it
-must not be coerced into either.
+A partially resolved assertion establishes part of a semantic claim but leaves
+a required part unresolved, such as a relationship's target or an identity
+correspondence. It is neither a fact nor a similarity judgement, and it must not
+be coerced into either. A fully established general relationship is a fact even
+when a more specific relationship is unknown: specificity and resolution are
+different properties.
 
 Coercing it upward — recording an unresolved call as a resolved `CALLS`
 relationship — makes the graph state falsehoods. That is the one thing the word
@@ -588,17 +647,22 @@ entity — must carry:
 * **what produced it** — which frontend, analyzer, or method;
 * **how far it was resolved.**
 
-An assertion produced by heuristic, approximate, or partial analysis must never
-become indistinguishable from one confirmed by a language frontend. A consumer
-must always be able to ask a stronger question than "is this relationship
-present" and get an answer.
+An assertion established by exact system resolution must also retain its
+supporting assertions and the resolution method. The evidence must establish
+the asserted conclusion; selecting a plausible target or increasing confidence
+is not exact resolution. A derived fact requires established premises for every
+part of its claim, even when the inputs also contain unresolved information.
+
+An assertion whose claim remains heuristic, approximate, or partially resolved
+must never become indistinguishable from a fact. A consumer must always be able
+to ask a stronger question than "is this relationship present" and get an answer.
 
 This distinction is mandatory.
 
 The concrete vocabulary — field names, resolution levels, confidence encoding,
 how provenance is exposed on each public surface — is a concrete requirement and
-belongs in `SPEC.md`. That every assertion carries source and resolution does
-not.
+belongs in the companion requirements document. That every assertion carries
+source and resolution does not.
 
 ---
 
@@ -647,13 +711,15 @@ parsers or raw source readers.
 **Statement.** Nodes represent semantic entities, not arbitrary chunks of text.
 
 **Rationale.** A chunk is defined by where the text was cut; an entity is
-defined by what the program declares. Chunks cannot hold stable identity (§5),
+defined by a program construct or source organization. Chunks cannot hold stable identity (§5),
 cannot carry aspect-separated fingerprints (§7), and cannot be the endpoint of a
 resolved relationship. Admitting chunk nodes does not cost one property — §5,
 §6, §7, and §11 become unsatisfiable together.
 
-**Implications.** Every node originates in a frontend assertion about a declared
-construct. Text offsets are properties of an entity, never its identity.
+**Implications.** Every node originates in an attributed assertion about a program
+construct or source container. Program constructs are grounded in frontend
+evidence; source containers are grounded in source-ingestion evidence. Text
+offsets are properties of an entity, never its identity.
 Embedding windows, retrieval chunks, and display snippets are projections
 attached to entities, not nodes in their own right.
 
@@ -697,9 +763,12 @@ disabled. No graph construction step waits on an embedding model. Embeddings
 live in a component that can be removed without touching graph code.
 
 **Detection.** Run the full pipeline with vector features disabled. Indexing
-must complete and every graph query must return the same answers. Degraded
-recall in the discovery step is expected and permitted; a failure, an error, or
-a changed graph answer is a violation.
+must complete. Compare graph queries against the same semantic snapshot with
+the same entity identities, filters, and traversal parameters: their semantic
+answers must be unchanged. Candidate discovery from natural-language intent may
+have different recall, so a composite retrieval result may differ. Failure to
+build or query the graph, or a changed graph answer at fixed inputs, is a
+violation.
 
 ### Invariant 5 — RAG consumes, it does not define
 
@@ -752,32 +821,39 @@ answer. Storage must be able to update a region without rewriting the whole
 graph. The two properties in §6 hold from the first working version, not from a
 later hardening pass.
 
-**Detection.** Reindex after a one-line change and measure the work performed.
-Work proportional to repository size rather than to change size means the path
-is already gone, whatever the code claims. The measurement is cheap, and it must
-exist from the first version precisely because the regression is silent.
+**Detection.** Reindex a fixture after a local edit with a known affected region,
+including transitive dependents, and measure the work performed. Enlarging
+unrelated source must not force whole-repository reanalysis or rewriting. An
+edit with repository-wide semantic effects may affect the entire graph. This
+check must exist from the first version because the regression is silent.
 
 ### Invariant 8 — Frontends feed the shared core
 
-**Statement.** Every frontend must produce the shared core defined in §4, and must never flatten language-specific meaning into it. Language-specific meaning belongs in extensions above the core. Cross-language queries are answered on the core alone.
+**Statement.** Every frontend must conform to the shared core requirements in §4 and report its coverage. Language-specific meaning must remain in extensions without flattening. Cross-language existence and reference queries have a common core contract; declared extension mappings may enrich queries under §4.
 
 **Rationale.** A frontend with a private model makes cross-language questions
 impossible and makes its own output unreviewable, because there is no common
 definition to check it against. A single universal vocabulary fails in the
 opposite direction: it destroys at write time whatever it cannot express, and it
 is inevitably shaped by whichever language was implemented first. The core is the
-smallest thing that makes frontends comparable without making them lie.
+smallest thing that makes frontends comparable without making them lie, and §4
+fixes what "smallest" means so that it survives without being enumerated.
 
-**Implications.** No frontend writes to storage in its own vocabulary. Coverage
-and resolution level may differ between frontends; the core they produce may not.
-Adding a core kind raises the bar for every existing frontend, so the core does
-not grow casually.
+**Implications.** No frontend writes core assertions in a private vocabulary.
+Extensions retain their language-specific vocabulary. Coverage and resolution
+level may differ between frontends; the meaning of a core kind may not.
+A core kind a frontend cannot produce is reported unavailable, never approximated
+and never grounds for dropping the language. Every candidate core kind is
+admitted by the requirements in §4, and the answers are recorded with the kind's
+definition.
 
 **Detection.** Frontends must be replaceable: swapping one frontend for another
-covering the same language must change resolution levels and coverage, never the
-core shape. Separately, a core relationship kind that some supported language's
-frontend cannot produce is a defect in the core's definition, not a gap in that
-frontend.
+covering the same language may change resolution levels and coverage, never the
+core contract. Separately, audit the roster against §4. A kind that fails
+identical meaning or serves only a question confined to particular languages is
+in the core wrongly. A cross-language existence or reference question that the
+core cannot represent exposes an adequacy defect, distinct from unavailable
+frontend coverage. Roster corrections must follow §4's published-meaning rule.
 
 ### Invariant 9 — Shortcuts must not damage identity
 
@@ -792,11 +868,12 @@ other kind of shortcut in this system can be paid back; this one cannot.
 shortcut that breaks identity must either fit a permitted break in §5 and be
 recorded as a break, or be rejected.
 
-**Detection.** Measure identity churn across consecutive snapshots of a fixture
-repository with a known edit sequence: entities that neither changed nor moved
-must retain identity across every snapshot. Any unexplained churn is a
-violation, and the measurement must be routine, because this failure is
-invisible by inspection.
+**Detection.** Repeat analysis with fixed inputs as specified in §5 and compare
+semantic assertions and identities. Replay a fixture edit sequence containing
+body edits and declaration moves: entities must retain identity except for
+recorded permitted breaks. An undeclared capability limitation or an analysis
+failure must not excuse churn. These checks must be routine because identity
+damage is invisible by inspection.
 
 ### Invariant 10 — Features carry the burden of proof
 
@@ -807,9 +884,10 @@ sequence of individually attractive features, each defensible on its own. Withou
 a standing burden of proof, the centre dissolves by accretion rather than by
 decision, and no single commit is identifiable as the mistake.
 
-**Implications.** The test in §15 is applied and its answers are recorded, not
-merely considered in passing. A section of `SPEC.md` that cannot name the
-constitutional clause justifying it is a candidate for removal.
+**Implications.** The test in §15 is applied and its answers are recorded in a
+repository architecture decision record (ADR), linked to the change. A
+requirement that cannot name the constitutional clause justifying it is a
+candidate for removal.
 
 **Detection.** Process-level and active today. A merged feature with no recorded
 §15 answers violates this invariant even when the feature itself is sound,
@@ -831,8 +909,10 @@ index is rebuilding" is never part of a correctness explanation given to a
 consumer.
 
 **Detection.** Query a fixture repository concurrently with a reindex. Every
-result must be identical to the result taken strictly before or strictly after
-the reindex. A mixture of the two is a violation.
+semantic result must equal the result at a complete published snapshot; for a
+single snapshot transition, that is the state before or after the update.
+Compare unordered results by membership and ordered results by the deterministic
+order required in §5. A mixture of snapshots is a violation.
 
 ### Invariant 12 — Accuracy is measured, not claimed
 
@@ -847,9 +927,11 @@ deliverable, not an internal detail of a test suite. Measurements are per
 language and per relationship kind, and they are published alongside the
 capability matrix rather than kept internal.
 
-**Detection.** Self-detecting and active today: the absence of a current
-measurement is itself the violation. No implementation is required to observe
-it.
+**Detection.** Process-level and active today: a published accuracy claim with
+no current supporting measurement violates this invariant. A statement of
+intended behavior must not be presented as a measured result. The presence of
+evidence is checkable without running the implementation; reproducing the
+measurement requires its implementation and fixtures.
 
 ### Invariant 13 — Degradation is reported
 
@@ -871,7 +953,7 @@ that returns an empty result for both is a violation.
 
 ### Invariant 14 — Operable locally, always
 
-**Statement.** `semidx` must remain fully operable as a local process, with no required external service. A shared service may only supply a baseline that the local process could have built itself (§6).
+**Statement.** `semidx` must remain fully operable as a local process, with no required external service. A shared service participating in graph construction or maintenance may only supply a locally reproducible baseline. Source-data transmission requires explicit opt-in (§6).
 
 **Rationale.** The graph must answer questions about code as it is now,
 including edits that exist only in a working copy. No shared service can see
@@ -882,11 +964,16 @@ pointless.
 **Implications.** Memory and startup are real budgets rather than
 implementation details, and a server-resident database is not available to the
 core. A remote baseline is an optimisation and never a prerequisite.
+Optional network consumers and projections obey the same source-data opt-in
+rule as the core.
 
 **Detection.** From a clean checkout with no service reachable, build the graph
-and run every query. Both must succeed. A baseline that cannot be regenerated
-locally from source is a required dependency in disguise, and a deployment that
-needs one violates this invariant whatever it is called.
+and run graph queries. Both must succeed. With network access available and
+default settings, exercise indexing, querying, and optional projections while
+observing outbound traffic: no source code or source-derived data may leave the
+machine. A baseline that cannot be regenerated locally from source is a required
+dependency in disguise, and a deployment that needs one violates this invariant
+whatever it is called.
 
 ---
 
@@ -908,28 +995,12 @@ It must never become them.
 
 ---
 
-## 14. Long-Term Direction
+## 14. Evolution Of Consumers
 
-The intended evolution is:
-
-```text
-Phase 1
-Structural semantic index
-        ↓
-Phase 2
-Exact semantic dependency graph
-        ↓
-Phase 3
-Incrementally maintained graph
-        ↓
-Phase 4
-Fine-grained change and impact analysis
-        ↓
-Phase 5
-Compiler-grade dependency/invalidation capabilities
-```
-
-AI retrieval, MCP, vector search, documentation linkage, and IDE integration may evolve alongside these phases but must remain consumers of the same semantic foundation.
+AI retrieval, MCP, vector search, documentation linkage, IDE integration, and
+future compilation tooling must remain consumers of the same semantic
+foundation as they evolve. Delivery order belongs in the companion requirements
+document and must not postpone the invariants required of a working graph.
 
 ---
 
@@ -945,9 +1016,12 @@ Before introducing a major feature or dependency, ask:
 6. Could this decision cause the product to drift toward RAG, grep, or vector search as the center?
 7. Does it make future dependency and impact analysis easier or harder?
 8. Does every assertion it introduces carry its source and resolution level?
-9. Does it depend on an unresolved open question in §17?
+9. While the constitution is DRAFT, does it depend on an unresolved constitutional question that must be recorded in §17?
 
-A "yes" to question 9 blocks the change until that question is closed in §17. An open question must never be settled implicitly by the first implementation that happens to need an answer.
+A "yes" to question 9 blocks the dependent change until that question is
+recorded and closed in §17. After ratification, record question 9 as not
+applicable and apply the remaining questions and the rule in §17. An open
+constitutional question must never be settled implicitly by implementation.
 
 A change that violates an invariant must not be merged. There is no procedure for relaxing an invariant to accommodate it — see §18.
 
@@ -965,21 +1039,18 @@ All architectural decisions must remain compatible with this definition.
 
 ## 17. Open Constitutional Questions
 
-**None. Every constitutional question is closed.**
+**None.**
 
-This section exists so that a question of constitutional weight has somewhere to
-be recorded rather than being hidden inside hedged wording. A question that is
-visible can be decided deliberately; one buried in a qualifier gets decided by
-whichever implementation reaches it first.
+While this document is DRAFT, any constitutional question is recorded here and
+blocks dependent work (§15, question 9) and ratification until closed.
 
-While this document is a draft, a newly discovered constitutional question is
-recorded here, blocks any work that depends on its answer (§15, question 9), and
-blocks ratification until it is closed. An empty section is therefore the
-precondition for ratification in §18.
+After ratification this section stays empty.
 
-After ratification this section stays empty permanently. A frozen document
-cannot answer a question later, so a constitutional question that arises then is
-grounds for a fork, not for reopening the document.
+A question not settled by this constitution is then resolved in the companion
+requirements document, with its reasoning recorded in an ADR, only if the
+resolution complies with every clause as written. Neither document may add an
+exception to, reinterpret, or override a constitutional constraint. A resolution
+that conflicts with a clause requires the fork described in §18.
 
 ---
 
@@ -987,13 +1058,9 @@ grounds for a fork, not for reopening the document.
 
 ### Draft
 
-While the status line at the top of this document reads DRAFT, the document is
-being written. Text may change freely, and §17 must be emptied.
-
-Ratification is the act of setting that status line to RATIFIED with a date. It
-requires §17 to be empty: an unresolved constitutional question is the one thing
-that keeps the document in draft, because a frozen document cannot answer a
-question later.
+While the status line reads DRAFT, text may change freely. Ratification is the
+act of setting that status line to RATIFIED with a date. It requires §17 to be
+empty.
 
 ### Ratified
 
@@ -1033,4 +1100,3 @@ Two consequences follow, and both are intended:
 No log of changes is kept here, because there are no changes to log. The
 drafting history lives in `git log`, and durable technical decisions belong in
 ADRs.
-
