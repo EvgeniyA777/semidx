@@ -14,7 +14,8 @@ why. This is not a changelog of what was removed — see `git log` for history.
   turns out to be wrong is not a document error to correct but a discovery
   that a different product needs to exist, and the mechanism for that is a
   fork of the repository (§18). Ratification requires §17 to be empty, so
-  closing OQ-1 and OQ-2 is what unblocks it. Its Normative Language section
+  closing the remaining open question (OQ-2) is what unblocks it. Its
+  Normative Language section
   makes `must`/`may` RFC 2119 keywords, declares `should` unused, and bans
   discretionary qualifiers from normative statements. Its Defined Terms
   section holds exactly five terms — entity, node, relationship, assertion,
@@ -94,16 +95,25 @@ why. This is not a changelog of what was removed — see `git log` for history.
 
 ## Active Constraints And Blockers
 
-- `ARCHITECTURE_CONSTITUTION.md` §17 records two open constitutional questions.
-  Per §15 question 9, work depending on either is blocked until the question is
-  resolved by amendment, and neither may be settled implicitly by the first
-  implementation that needs an answer:
-  - **OQ-1** — how far the semantic model is unified across languages (one
-    shared vocabulary vs per-language schemas with a shared query layer).
-    Blocks the fact schema.
+- `ARCHITECTURE_CONSTITUTION.md` §17 records one remaining open constitutional
+  question. Per §15 question 9, work depending on it is blocked until it is
+  closed, and it must not be settled implicitly by the first implementation
+  that needs an answer:
   - **OQ-2** — deployment shape (local-first with no required external service
     vs a shared service being a supported mode). Blocks the storage and process
-    model, and therefore constrains the stack decision below.
+    model, and therefore constrains the stack decision below. It is the last
+    thing standing between the constitution and ratification.
+- Cross-language unification is **decided** (was OQ-1). The model is a small
+  mandatory shared core plus per-language extensions above it, with
+  cross-language queries answered on the core alone. The core is fixed in §4:
+  entities repository/file/module/definition, relationships `DEFINES`,
+  `REFERENCES`, `CALLS`, `IMPORTS`. Everything else — definition kind, types,
+  dispatch, protocols, behaviours, inheritance, generics, macros, ABI — is an
+  extension catalogued in `SPEC.md`. Rationale that matters for future work:
+  a single universal vocabulary loses information at write time and
+  irreversibly, while a missing cross-language translation only costs work
+  later. Do not add to the core casually — each addition is a bar every
+  present and future frontend must clear.
 
 ## Near-Term Priorities
 
@@ -111,4 +121,7 @@ why. This is not a changelog of what was removed — see `git log` for history.
   build/dependency tool, source layout), then fill in `RULES.md`'s Project
   Context, Repository Shape, Editing Rules, Testing And Verification, and
   Services And Local Infrastructure sections with the real specifics.
-- Resolve OQ-1, then write `SPEC.md` and design the contracts/schema layer.
+- Ratify the constitution once §17 is empty, then write the freeze-enforcement
+  script.
+- Write `SPEC.md` and design the contracts/schema layer, starting from the
+  extension catalogue above the now-fixed core.

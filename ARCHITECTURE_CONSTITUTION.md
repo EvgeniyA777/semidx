@@ -233,6 +233,60 @@ L3 may be implemented progressively. It must not block delivery of L1 and L2.
 
 ---
 
+### Shared Core And Language Extensions
+
+This split cuts across L1, L2, and L3 rather than sitting between them. It fixes
+what "shared model" means in Invariant 8.
+
+**The shared core is mandatory.** Every frontend for every supported language
+must produce it, and must produce it without flattening anything. The core
+therefore contains only what genuinely means the same thing in every supported
+language.
+
+Core entity kinds:
+
+* repository
+* file
+* module
+* definition — a named entity, whatever kind of thing it is
+
+Core relationship kinds:
+
+* `DEFINES`
+* `REFERENCES`
+* `CALLS`
+* `IMPORTS`
+
+The core is small on purpose. A kind belongs in it only if every supported
+language's frontend can produce it honestly, so each addition raises a bar that
+every present and future frontend must clear. A language whose frontend cannot
+produce the core is a language `semidx` does not support.
+
+**Language extensions sit above the core and are not shared.** They carry what a
+language actually means, and must never be reduced to a core approximation: what
+kind of definition something is, types and signatures, dispatch, protocols,
+behaviours, inheritance, generics, macro expansion, ABI. Several examples listed
+under L2 — `USES_TYPE`, `RETURNS_TYPE`, `IMPLEMENTS`, `OVERRIDES`,
+`INSTANTIATES`, `READS`, `WRITES` — are extensions, not core. The catalogue of
+extensions belongs in `SPEC.md` and is expected to grow.
+
+**Cross-language queries are answered on the core alone.** A question asked
+across languages gets a core answer. A question asked within one language may
+use that language's extensions and get a more precise one.
+
+The reason for this shape is *where information is lost*. One universal
+vocabulary for all languages loses information at write time: once a frontend
+has flattened a multimethod into a generic dispatch relationship, the original is
+gone from the graph permanently, and such a vocabulary is inevitably shaped by
+whichever language was implemented first. Per-language extensions lose only
+convenience at read time: a translation nobody has written yet can be written
+later. The first loss is irreversible and contradicts §16. The second is
+deferred work.
+
+The core carries the question. Extensions carry the precision.
+
+---
+
 ## 5. Stable Semantic Identity
 
 Nodes must represent semantic entities, not text fragments.
@@ -443,7 +497,10 @@ No single frontend defines the internal semantic model.
 
 The internal graph must remain conceptually independent from a specific parser or protocol.
 
-Frontends translate language-specific information into the common semantic model.
+Each frontend produces the shared core defined in §4, plus whatever language
+extensions it can support. It does not translate everything it knows into a
+common vocabulary — that would discard what it knows. The core is the part that
+must be common; the rest stays in the language's own terms.
 
 ---
 
@@ -670,25 +727,27 @@ Work proportional to repository size rather than to change size means the path
 is already gone, whatever the code claims. The measurement is cheap, and it must
 exist from the first version precisely because the regression is silent.
 
-### Invariant 8 — Frontends feed a shared model
+### Invariant 8 — Frontends feed the shared core
 
-**Statement.** Language-specific analysis must feed a shared semantic model rather than define its own private one.
+**Statement.** Every frontend must produce the shared core defined in §4, and must never flatten language-specific meaning into it. Language-specific meaning belongs in extensions above the core. Cross-language queries are answered on the core alone.
 
-How far that model is unified across languages is an open question (OQ-1, §17). Until OQ-1 is resolved, "where practical" is a tracked decision, not a discretionary exemption an implementation may grant itself.
+**Rationale.** A frontend with a private model makes cross-language questions
+impossible and makes its own output unreviewable, because there is no common
+definition to check it against. A single universal vocabulary fails in the
+opposite direction: it destroys at write time whatever it cannot express, and it
+is inevitably shaped by whichever language was implemented first. The core is the
+smallest thing that makes frontends comparable without making them lie.
 
-**Rationale.** A frontend that writes its own private model makes cross-language
-questions impossible and makes its own output unreviewable, because there is no
-common definition to check it against. Coverage differences between languages
-are legitimate; private vocabularies are not.
+**Implications.** No frontend writes to storage in its own vocabulary. Coverage
+and resolution level may differ between frontends; the core they produce may not.
+Adding a core kind raises the bar for every existing frontend, so the core does
+not grow casually.
 
-**Implications.** No frontend writes to storage in its own vocabulary.
-Translation happens at a named boundary (§10). Until OQ-1 is resolved, no
-schema commitment may be made that presupposes either answer.
-
-**Detection.** Frontends must be replaceable. Swapping one frontend for another
+**Detection.** Frontends must be replaceable: swapping one frontend for another
 covering the same language must change resolution levels and coverage, never the
-shape of the graph. If it changes the shape, the frontend was defining the
-model.
+core shape. Separately, a core relationship kind that some supported language's
+frontend cannot produce is a defect in the core's definition, not a gap in that
+frontend.
 
 ### Invariant 9 — Shortcuts must not damage identity
 
@@ -868,24 +927,6 @@ depends on an answer is blocked until the question is closed (§15, question 9).
 
 After ratification this section must be empty, because a frozen document cannot
 answer a question later.
-
-### OQ-1 — Degree of cross-language model unification
-
-Referenced by Invariant 8.
-
-* **Option A.** One shared vocabulary of entity and relationship kinds. Every
-  language frontend maps onto it. Consumers get uniform queries across
-  languages; language-specific constructs are either flattened or lost.
-* **Option B.** Per-language semantic schemas with a shared query layer above
-  them. Language-specific constructs survive intact; uniform cross-language
-  questions require an explicit translation layer.
-
-Why this is constitutional: the answer determines what happens to constructs
-that do not unify cleanly — multimethods and protocols, behaviours and dynamic
-dispatch, generics and ABI, structural typing. Reversing the choice after a
-schema is in use is a rewrite, and the schema is the consumer-visible contract.
-
-Must be resolved before the assertion schema is committed to in `SPEC.md`.
 
 ### OQ-2 — Deployment shape
 
