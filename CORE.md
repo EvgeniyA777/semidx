@@ -120,10 +120,10 @@ endpoint ranges over whichever container kinds are admitted.
 
 Relates a source or program container to a definition introduced directly within
 it. It is direct containment, not transitive reachability. Its container endpoint
-ranges over the admitted container kinds — `repository`, `file`, and `definition`
-today, and `module` if that candidate is ever admitted. Admitting a container
-kind extends this relationship additively rather than redefining it, so an
-unadmitted container candidate does not block it.
+ranges over whichever container kinds are admitted. None is admitted yet; the
+current container candidates are `repository`, `file`, `definition`, and
+`module`. Admitting a container kind extends this relationship additively rather
+than redefining it, so an unadmitted container candidate does not block it.
 
 **Admission assessment.** Adequacy: answers where an entity is introduced.
 Identical meaning: direct containment needs evidence without replacing language
