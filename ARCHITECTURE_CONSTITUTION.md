@@ -533,8 +533,7 @@ Most Detection entries describe a check that requires an implementation, which
 does not exist yet. They are stated now so that the check is derived from the
 invariant rather than invented afterwards to match whatever was built. Two
 invariants (10 and 12) are detectable today, because they are properties of the
-process rather than of code. The freeze in §18 is enforced mechanically by
-`scripts/check-constitution-frozen.sh`.
+process rather than of code.
 
 ### Invariant 1 — The graph is the center
 

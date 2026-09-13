@@ -25,8 +25,18 @@ why. This is not a changelog of what was removed — see `git log` for history.
   Implications, and Detection. The Detection entries are the intended
   conformance checks and mostly presuppose an implementation; derive the real
   checks from them rather than inventing checks to match whatever gets built.
-  Invariants 10 and 12 are detectable today (process properties), and the §18
-  freeze is enforced by `scripts/check-constitution-frozen.sh`.
+  Invariants 10 and 12 are detectable today, being process properties.
+- Enforcement of the §18 freeze is deliberately deferred: the script that
+  blocks changes to a ratified constitution is to be written **after**
+  ratification, not before. Until then §18 holds by discipline. Do not add it
+  early.
+- Known inconsistency, to be cleared when that script is written:
+  `scripts/check-constitution-amendment.sh` still exists and is wired into
+  `pre-commit`. What it does is useful and still true — it stops a
+  constitution change from being bundled with unrelated files — but its name
+  and its message describe a §18 "amendment procedure" that the constitution
+  no longer has. Leave it working; fix the wording as part of the post-freeze
+  script work.
 - `GLOSSARY.md` — the project vocabulary, explicitly descriptive rather than
   normative: no version, no amendment procedure, expected to drift. It exists
   so the constitution can keep only the five terms whose distinctions are
