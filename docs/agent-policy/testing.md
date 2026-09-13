@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-12"
+updated: "2026-09-13"
 ---
 
 # Testing and Verification Policy
@@ -14,7 +14,7 @@ updated: "2026-09-12"
 Before implementing or executing a non-trivial staged plan, record a compact
 risk matrix in the plan, progress log, or handoff:
 
-| Requirement / invariant | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
+| Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | Source document or code contract | What could fail | Unit / integration / contract / fixture / runtime smoke | Boundary uniquely proved here | Invalid, stale, unavailable, forbidden, divergent, or fallback case | Named test or command |
 
@@ -68,7 +68,7 @@ Common lanes include:
 | --- | --- | --- |
 | Focused unit | One namespace or pure function set | Fast proof for local behavior |
 | Runtime integration | Multiple runtime namespaces, storage, providers, or adapters | Cross-module behavior and degradation |
-| Contract validation | Schemas and examples under `contracts/`, once that layer is redesigned (see `RULES.md` → Contracts And Runtime Invariants) | Public contract compatibility |
+| Contract validation | Schemas and examples under `contracts/`, once that layer is redesigned (see `RULES.md` -> Contracts And Runtime Guarantees) | Public contract compatibility |
 | Language onboarding | Command TBD until the language-lane onboarding tooling is rebuilt | Language-lane parser and fixture confidence |
 | Release gates | Command TBD until staged gate tooling is rebuilt | Release-facing regression confidence |
 | Runtime smoke | MCP, HTTP, gRPC, CLI, or provider process commands | Startup and operational boundary proof |

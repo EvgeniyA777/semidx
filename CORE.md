@@ -15,20 +15,22 @@ available runtime capability or an immutable contract.
 
 ## Authority And Lifecycle
 
-[ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md) section 4 owns the
-requirements for admission. This file owns definitions and admission evidence.
+[ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md#6-language-frontends-preserve-meaning)
+owns the constitutional boundary for the shared core and language extensions.
+This file owns definitions and admission evidence.
 [SPEC.md](SPEC.md#core-contract-lifecycle) owns publication, versioning,
 deprecation, and migration procedures.
 
 Candidates can be edited, replaced, or rejected. An open admission blocks the
 candidate and all definitions depending on it, transitively. Acceptance requires
-a complete assessment against section 4, resolved dependencies, and conformance
-evidence for the declared language/frontend coverage. A heading or an example
-in this file does not constitute acceptance.
+a complete assessment against the constitutional shared-core boundary, resolved
+dependencies, and conformance evidence for the declared language/frontend
+coverage. A heading or an example in this file does not constitute acceptance.
 
 Concrete membership questions belong here. A question requiring a change to
-constitutional meaning is handled under sections 17 and 18; calling it an
-admission question does not change that requirement.
+constitutional meaning is handled under the constitution's open-question and
+ratification rules; calling it an admission question does not change that
+requirement.
 
 ## Candidate Status
 

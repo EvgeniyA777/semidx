@@ -33,7 +33,7 @@
   two states, declared on its own status line: DRAFT while it is being written,
   and RATIFIED, after which it never changes.
 - It is currently a DRAFT. Finishing it means closing the open questions in its
-  §17, which is what ratification requires.
+  `Open Constitutional Questions` section, which is what ratification requires.
 - Never propose editing a ratified constitution. A constraint that turns out to
   be wrong means a different product, and the mechanism for a different product
   is a fork of the repository with its own constitution.
@@ -70,8 +70,10 @@
   the five terms whose distinctions are architectural constraints stay in
   `ARCHITECTURE_CONSTITUTION.md` under Defined Terms and are not repeated there.
 - `CORE.md` holds core-kind candidates and admission evidence; `SPEC.md` is the
-  companion requirements entry point. Their authority and lifecycle ownership
-  are defined in [Documentation Policy](docs/agent-policy/documentation.md).
+  companion requirements entry point; `ARCHITECTURE_RATIONALE.md` holds
+  explanatory reasoning; `CONFORMANCE.md` holds verification scenario families.
+  Their authority and lifecycle ownership are defined in
+  [Documentation Policy](docs/agent-policy/documentation.md).
 - `docs/agent-policy/` contains active cross-cutting engineering policies that
   are too detailed for this always-loaded rule file.
 - `.agents/skills/` contains repository-local task procedures that load only
@@ -87,7 +89,9 @@
 ## Project Memory Freshness
 
 - `MEMORY.md` is the lightweight operational memory for current implementation reality, key non-ADR decisions, active assumptions, constraints, known gaps, and near-term priorities.
-- Update `MEMORY.md` when runtime behavior materially changes, new invariants are introduced, priorities or known gaps change, or integration assumptions change.
+- Update `MEMORY.md` when runtime behavior materially changes, constitutional
+  properties or conformance requirements change, priorities or known gaps
+  change, or integration assumptions change.
 - The versioned pre-push hook runs `scripts/check-memory-freshness.sh` and blocks pushes that change high-signal project files without a `MEMORY.md` update.
 - If a high-signal change is intentionally memory-neutral, bypass the hook only after checking the update rule: `SCI_SKIP_MEMORY_FRESHNESS=1 git push`.
 - Install versioned hooks with `./scripts/install-git-hooks.sh`; the tracked hook source lives under `scripts/git-hooks/`.
@@ -228,7 +232,7 @@ edit carries a required safety step. The safety step is not optional.
   here or in `docs/agent-policy/` naming the exact probe command, the
   structure-aware editor, and the REPL/eval workflow for that language.
 
-## Contracts And Runtime Invariants
+## Contracts And Runtime Guarantees
 
 - The `contracts/schemas/` JSON Schema files, `contracts/examples/` fixtures, and their Clojure `malli` mirrors were removed with the legacy codebase and are pending a from-scratch redesign. Do not describe them as existing until that redesign lands.
 - Staged retrieval is the canonical public contract: compact selection first, optional widening, then detail fetch.
@@ -239,7 +243,7 @@ edit carries a required safety step. The safety step is not optional.
 
 - Verify changes with the narrowest meaningful command first.
 - For non-trivial staged plans, use the risk-based matrix in
-  `docs/agent-policy/testing.md` to map requirements and invariants to the
+  `docs/agent-policy/testing.md` to map requirements and guarantees to the
   lowest sufficient verification level.
 - No implementation language, test runner, or verification script is fixed
   yet. Once a stack is chosen, record the actual commands here (test runner

@@ -20,16 +20,21 @@ updated: "2026-09-13"
 - `ARCHITECTURE_CONSTITUTION.md` owns architectural constraints that must not
   change, including the five terms whose distinctions are themselves
   constraints (entity, node, relationship, assertion, fact).
+- `ARCHITECTURE_RATIONALE.md` owns explanatory design reasoning behind the
+  constitutional constraints. It is not independently normative.
+- `CONFORMANCE.md` owns reviewable and executable scenario families used to
+  verify constitutional properties. It is strict when adopted by requirements,
+  but its check mechanics are not immutable constitutional text.
 - `GLOSSARY.md` owns the rest of the project vocabulary. It is descriptive, not
   normative, and must not restate the constitution's Defined Terms.
 - `SPEC.md` is the companion requirements document named by role in the
   constitution. It owns changing requirements, the language-extension catalogue,
   schema vocabulary, and semantic-contract publication and migration procedures.
   It may link to subordinate specifications as those areas grow.
-- `CORE.md` is the separately versioned core roster named by role in the
-  constitution. It owns candidate and accepted kind definitions and admission
-  evidence. Its authority is derived from constitution section 4; its lifecycle
-  follows `SPEC.md`. It cannot redefine architectural terms.
+- `CORE.md` owns the core roster named by role in the constitution. It owns
+  candidate and accepted kind definitions and admission evidence. Its authority
+  is derived from the constitution's shared-core boundary; its lifecycle follows
+  `SPEC.md`. It cannot redefine architectural terms.
 - ADRs own durable technical decisions.
 - Plans own future staged execution.
 - Reports own historical progress, evidence, and handoff records.
@@ -40,7 +45,7 @@ updated: "2026-09-13"
 
 ## Architectural Decision Records
 
-- Record answers to every question in constitution section 15 in an ADR under
+- Record answers to every question in constitution section 11 in an ADR under
   `docs/adr/NNN_slug.md`, using the naming and frontmatter rules in `RULES.md`.
 - Each record identifies the feature or dependency, applicable constitutional
   clauses, decision, rationale, consequences, and verification evidence or
@@ -52,8 +57,9 @@ updated: "2026-09-13"
 - A narrowly scoped implementation of an existing accepted decision may refer
   to that ADR when its answers still cover the change. A new major feature,
   dependency, or changed architectural answer requires a new or revised record.
-- Follow sections 17 and 18 for constitutional questions. An ADR records
-  reasoning; it cannot reinterpret or override the constitution.
+- Follow the constitution's open-question and ratification rules for
+  constitutional questions. An ADR records reasoning; it cannot reinterpret or
+  override the constitution.
 
 ## Plan Readiness Gate
 

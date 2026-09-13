@@ -13,7 +13,9 @@ The companion requirements document named by role in
 [ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md). This is a draft
 requirements entry point, not a complete implementation specification or a
 published runtime contract. Document ownership is recorded in the
-[documentation policy](docs/agent-policy/documentation.md).
+[documentation policy](docs/agent-policy/documentation.md). The architecture
+rationale lives in [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md), and
+reviewable checks live in [CONFORMANCE.md](CONFORMANCE.md).
 
 ## Core Contract Lifecycle
 
@@ -55,20 +57,10 @@ query fixtures include specialized relationships such as calls without counting
 the same occurrence twice. Resolution evidence and mapping provenance remain
 visible through every public surface.
 
-Conformance must also cover the following constitutional guarantees:
-
-| Guarantee | Required scenario |
-| --- | --- |
-| Published meaning | Read or explicitly reject an old contract version; never reinterpret it as the new version |
-| Identity and reproducibility | Repeat fixed-input builds and replay the same edit history; compare semantic identities and assertions |
-| Identity exceptions | A declared limitation records a break; runtime failure does not excuse identity churn |
-| Snapshot consistency | Concurrent queries see complete published snapshots; ordered results have stable tie handling |
-| Fingerprint separation | Change implementation with interface unchanged, then change interface; observe the separate fingerprints |
-| Incremental work | Enlarge unrelated source around a fixed edit and affected region; it must not force whole-repository work |
-| Optional vectors | Compare graph answers at fixed snapshot, entities, and parameters with vectors enabled and disabled |
-| Locality and privacy | Build and query without services; observe no outbound source-derived data at default settings |
-| Extension mappings | Preserve original assertions and attribution; missing mappings report unavailable coverage |
-| Accuracy claims | Published measurements accompany accuracy claims; planned behavior is identified as unmeasured |
+Conformance scenario families are owned by
+[CONFORMANCE.md](CONFORMANCE.md#required-scenario-families). Requirements that
+adopt one of those checks specify concrete fixtures, commands, expected results,
+and publication gates here or in subordinate specifications.
 
 There is no implementation or executable conformance suite yet. These are
 requirements for later verification, not claims of passing results.
@@ -84,7 +76,7 @@ requirements for later verification, not claims of passing results.
 | Source identity | Source roots, dependencies, generated-source origins, and identity correspondence |
 | Storage and snapshots | Representation, atomic publication, persistence, and contract-version encoding |
 | Public contracts | Schemas, resolution encoding, errors, ordering, pagination, and transport parity |
-| Invalidation | Language-specific aspects, fingerprint algorithms, and affected-region tracking |
+| Invalidation | Language-specific change aspects, revision/fingerprint algorithms, and affected-region tracking |
 | Local budgets | Memory, startup, indexing costs, and benchmark repositories |
 | Optional outbound data | Destination/data consent settings and verification for projections and diagnostics |
 
@@ -93,8 +85,9 @@ requirements for later verification, not claims of passing results.
 Delivery can progress from structural entities and program relationships to
 finer dependency and impact analysis, then compilation-related consumers. This
 is a proposal, not a mandated sequence or an authorization to implement it.
-Incremental maintenance, consistent snapshots, identity, and other constitutional
-invariants apply to the first working graph; they are not a later phase.
+Incremental maintenance, consistent snapshots, identity, and the other
+constitutional properties apply to the first working graph; they are not a later
+phase.
 
 Search, agents, MCP, documentation linkage, and IDE integrations may develop
 alongside that work. A concrete execution plan must first satisfy the repository
