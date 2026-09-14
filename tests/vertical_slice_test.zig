@@ -651,7 +651,7 @@ test "a scan of the fixture root discovers its units without a manual list" {
 
     var index = try semidx.Index.init(gpa, build_options.fixtures_dir);
     defer index.deinit();
-    try index.addScan(found);
+    _ = try index.applyScan(found);
 
     var snapshot = try index.publish();
     defer snapshot.deinit();
@@ -690,14 +690,17 @@ test "renaming a java fixture keeps every identity inside it" {
     try testing.expectEqual(file, after.unit(fixture.java_unit).?.entity);
     try testing.expectEqual(calls_before, after.countRelationships(.{ .source = announce.id }));
 
-    // A rename is not an edit. Nothing went stale, and no identity broke.
+    // A rename is not an edit. Nothing went stale, and no identity broke: the
+    // only event is the container's own preserved correspondence.
     try testing.expectEqual(
         semidx.core.graph.UnitAnalysis.current,
         after.unitAnalysis(fixture.java_unit).?,
     );
     const events = try after.identityEventsAt(after.revision, testing.allocator);
     defer testing.allocator.free(events);
-    try testing.expectEqual(@as(usize, 0), events.len);
+    try testing.expectEqual(@as(usize, 1), events.len);
+    try testing.expectEqual(model.IdentityEventKind.preserved, events[0].kind);
+    try testing.expectEqual(file, events[0].entity);
 
     // The Clojure unit did not move.
     try testing.expect(after.findDefinition(clojure_path, "greet") != null);
@@ -710,6 +713,355 @@ test "renaming a java fixture keeps every identity inside it" {
     var edited = try fixture.index.publish();
     defer edited.deinit();
     try testing.expectEqual(greet.id, edited.findDefinition("java/Renamed.java", "greet").?.id);
+}
+
+// -- Stage 3: scan reconciliation -------------------------------------------
+
+/// A source tree on disk that can be rescanned, so that what the indexer is
+/// told about a change is only ever what a scan can see.
+const Tree = struct {
+    tmp: std.testing.TmpDir,
+    index: semidx.Index,
+
+    fn init(gpa: std.mem.Allocator) !Tree {
+        return .{
+            .tmp = testing.tmpDir(.{ .iterate = true }),
+            .index = try semidx.Index.init(gpa, "tree"),
+        };
+    }
+
+    fn deinit(self: *Tree) void {
+        self.index.deinit();
+        self.tmp.cleanup();
+    }
+
+    fn write(self: *Tree, path: []const u8, bytes: []const u8) !void {
+        if (std.fs.path.dirname(path)) |parent| {
+            try self.tmp.dir.createDirPath(testing.io, parent);
+        }
+        try self.tmp.dir.writeFile(testing.io, .{ .sub_path = path, .data = bytes });
+    }
+
+    fn remove(self: *Tree, path: []const u8) !void {
+        try self.tmp.dir.deleteFile(testing.io, path);
+    }
+
+    fn move(self: *Tree, from: []const u8, to: []const u8) !void {
+        if (std.fs.path.dirname(to)) |parent| {
+            try self.tmp.dir.createDirPath(testing.io, parent);
+        }
+        try self.tmp.dir.rename(from, self.tmp.dir, to, testing.io);
+    }
+
+    fn rescan(self: *Tree) !semidx.Index.ScanOutcome {
+        var found = try semidx.source.discovery.scanDir(
+            self.index.graph.gpa,
+            testing.io,
+            self.tmp.dir,
+            "tree",
+            .{},
+        );
+        defer found.deinit();
+        return self.index.applyScan(found);
+    }
+
+    fn invocations(self: *const Tree) usize {
+        return self.index.analyzer.invocations;
+    }
+};
+
+const greeter_java =
+    \\class Greeter {
+    \\    String greet() {
+    \\        return greeting();
+    \\    }
+    \\
+    \\    String greeting() {
+    \\        return "hello";
+    \\    }
+    \\}
+    \\
+;
+
+test "rescanning an unchanged tree asks no frontend anything" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("Greeter.java", greeter_java);
+    try tree.write("demo/greeter.clj", "(ns demo.greeter)\n(defn greet [] \"hi\")\n");
+
+    const first = try tree.rescan();
+    try testing.expectEqual(@as(usize, 2), first.added);
+    try testing.expectEqual(@as(usize, 2), first.analyzed);
+    const after_first = tree.invocations();
+    try testing.expectEqual(@as(usize, 2), after_first);
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const greet = before.findDefinition("Greeter.java", "greet").?;
+    const revision_before = before.revision;
+
+    const second = try tree.rescan();
+    try testing.expectEqual(@as(usize, 2), second.unchanged);
+    try testing.expectEqual(@as(usize, 0), second.analyzed);
+    try testing.expectEqual(@as(usize, 0), second.changed);
+
+    // Measured, not assumed: no frontend was asked to read anything.
+    try testing.expectEqual(after_first, tree.invocations());
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(greet.id, after.findDefinition("Greeter.java", "greet").?.id);
+
+    // No revision opened and no identity event was recorded, because nothing
+    // about the graph changed.
+    try testing.expectEqual(revision_before, after.revision);
+    try testing.expectEqual(before.identity_events.len, after.identity_events.len);
+}
+
+test "editing one file in a tree reanalyzes exactly that file" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("Greeter.java", greeter_java);
+    for (0..12) |index| {
+        const path = try std.fmt.allocPrint(testing.allocator, "bulk/Filler{d}.java", .{index});
+        defer testing.allocator.free(path);
+        const body = try std.fmt.allocPrint(
+            testing.allocator,
+            "class Filler{d} {{ void run() {{}} }}\n",
+            .{index},
+        );
+        defer testing.allocator.free(body);
+        try tree.write(path, body);
+    }
+
+    const first = try tree.rescan();
+    try testing.expectEqual(@as(usize, 13), first.added);
+    const baseline = tree.invocations();
+    try testing.expectEqual(@as(usize, 13), baseline);
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const filler = before.findDefinition("bulk/Filler7.java", "run").?;
+
+    try tree.write("Greeter.java", greeter_java ++ "// edited\n");
+    const second = try tree.rescan();
+
+    try testing.expectEqual(@as(usize, 1), second.changed);
+    try testing.expectEqual(@as(usize, 12), second.unchanged);
+    try testing.expectEqual(@as(usize, 1), second.analyzed);
+
+    // One frontend invocation for thirteen units. This is the whole point of
+    // the stage: the work tracks the change, not the repository.
+    try testing.expectEqual(baseline + 1, tree.invocations());
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(filler.id, after.findDefinition("bulk/Filler7.java", "run").?.id);
+    try testing.expectEqual(
+        filler.evidence.?.range.start_byte,
+        after.findDefinition("bulk/Filler7.java", "run").?.evidence.?.range.start_byte,
+    );
+}
+
+test "adding a file leaves every existing unit alone" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("Greeter.java", greeter_java);
+    _ = try tree.rescan();
+    const baseline = tree.invocations();
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const greet = before.findDefinition("Greeter.java", "greet").?;
+
+    try tree.write("Other.java", "class Other { void run() {} }\n");
+    const outcome = try tree.rescan();
+
+    try testing.expectEqual(@as(usize, 1), outcome.added);
+    try testing.expectEqual(@as(usize, 1), outcome.unchanged);
+    try testing.expectEqual(baseline + 1, tree.invocations());
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(greet.id, after.findDefinition("Greeter.java", "greet").?.id);
+    try testing.expect(after.findDefinition("Other.java", "run") != null);
+}
+
+test "moving a file preserves the unit and everything inside it" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("old/Greeter.java", greeter_java);
+    try tree.write("Keep.java", "class Keep { void run() {} }\n");
+    _ = try tree.rescan();
+    const baseline = tree.invocations();
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const unit = before.unitByPath("old/Greeter.java").?;
+    const greet = before.findDefinition("old/Greeter.java", "greet").?;
+    const greeting = before.findDefinition("old/Greeter.java", "greeting").?;
+    const calls = before.countRelationships(.{ .source = greet.id });
+
+    try tree.move("old/Greeter.java", "new/Greeter.java");
+    const outcome = try tree.rescan();
+
+    try testing.expectEqual(@as(usize, 1), outcome.renamed);
+    try testing.expectEqual(@as(usize, 1), outcome.unchanged);
+    try testing.expectEqual(@as(usize, 0), outcome.removed);
+    try testing.expectEqual(@as(usize, 0), outcome.added);
+
+    // Nothing inside the file moved, so nothing was re-read.
+    try testing.expectEqual(@as(usize, 0), outcome.analyzed);
+    try testing.expectEqual(baseline, tree.invocations());
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(unit.id, after.unitByPath("new/Greeter.java").?.id);
+    try testing.expectEqual(unit.entity, after.unitByPath("new/Greeter.java").?.entity);
+    try testing.expectEqual(greet.id, after.findDefinition("new/Greeter.java", "greet").?.id);
+    try testing.expectEqual(greeting.id, after.findDefinition("new/Greeter.java", "greeting").?.id);
+    try testing.expectEqual(calls, after.countRelationships(.{ .source = greet.id }));
+    try testing.expectEqual(
+        semidx.core.graph.UnitAnalysis.current,
+        after.unitAnalysis(unit.id).?,
+    );
+
+    // The move is recorded as an established correspondence, and it is a fact:
+    // identical bytes is exact resolution of "the same unit", not a guess.
+    const event = after.lastIdentityEvent(unit.entity).?;
+    try testing.expectEqual(model.IdentityEventKind.preserved, event.kind);
+}
+
+test "moving a file while editing it is a break, and the break is visible" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("old/Greeter.java", greeter_java);
+    _ = try tree.rescan();
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const unit = before.unitByPath("old/Greeter.java").?;
+    const greet = before.findDefinition("old/Greeter.java", "greet").?;
+
+    try tree.remove("old/Greeter.java");
+    try tree.write("new/Greeter.java", greeter_java ++ "// moved and edited\n");
+    const outcome = try tree.rescan();
+
+    // Nothing establishes that the new unit is the old one, so the graph does
+    // not claim it. The old unit leaves and a new one arrives.
+    try testing.expectEqual(@as(usize, 1), outcome.removed);
+    try testing.expectEqual(@as(usize, 1), outcome.added);
+    try testing.expectEqual(@as(usize, 0), outcome.renamed);
+    try testing.expectEqual(@as(usize, 0), outcome.ambiguous_renames);
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expect(after.unitByPath("old/Greeter.java") == null);
+    try testing.expect(after.entityById(greet.id) == null);
+    try testing.expect(after.entityById(unit.entity) == null);
+
+    // The departure is recorded, not merely absent.
+    try testing.expectEqual(
+        model.IdentityEventKind.removed,
+        after.lastIdentityEvent(greet.id).?.kind,
+    );
+
+    const arrived = after.findDefinition("new/Greeter.java", "greet").?;
+    try testing.expect(arrived.id != greet.id);
+}
+
+test "deleting a file removes what it introduced and leaves the rest" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("Greeter.java", greeter_java);
+    try tree.write("Keep.java", "class Keep { void run() {} }\n");
+    _ = try tree.rescan();
+    const baseline = tree.invocations();
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const greet = before.findDefinition("Greeter.java", "greet").?;
+    const keep = before.findDefinition("Keep.java", "run").?;
+
+    try tree.remove("Greeter.java");
+    const outcome = try tree.rescan();
+
+    try testing.expectEqual(@as(usize, 1), outcome.removed);
+    try testing.expectEqual(@as(usize, 1), outcome.unchanged);
+
+    // A deletion is not a reason to re-read anything that survived.
+    try testing.expectEqual(@as(usize, 0), outcome.analyzed);
+    try testing.expectEqual(baseline, tree.invocations());
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expect(after.entityById(greet.id) == null);
+    try testing.expectEqual(
+        model.IdentityEventKind.removed,
+        after.lastIdentityEvent(greet.id).?.kind,
+    );
+    try testing.expectEqual(keep.id, after.findDefinition("Keep.java", "run").?.id);
+    try testing.expectEqual(@as(usize, 1), after.countEntities(.{ .kind = .file }));
+}
+
+test "an unresolvable move is reported rather than guessed" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("old/Twin.java", "class Twin { void run() {} }\n");
+    _ = try tree.rescan();
+
+    try tree.remove("old/Twin.java");
+    try tree.write("one/Twin.java", "class Twin { void run() {} }\n");
+    try tree.write("two/Twin.java", "class Twin { void run() {} }\n");
+    const outcome = try tree.rescan();
+
+    try testing.expectEqual(@as(usize, 0), outcome.renamed);
+    try testing.expectEqual(@as(usize, 1), outcome.removed);
+    try testing.expectEqual(@as(usize, 2), outcome.added);
+    try testing.expectEqual(@as(usize, 1), outcome.ambiguous_renames);
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    const diagnostic = after.findDiagnostic(.unsupported_construct).?;
+    try testing.expect(std.mem.indexOf(u8, diagnostic.message, "no move could be established") != null);
+}
+
+test "a file edited into unparsable source stays stale across a rescan" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("Greeter.java", greeter_java);
+    try tree.write("Keep.java", "class Keep { void run() {} }\n");
+    _ = try tree.rescan();
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const unit = before.unitByPath("Greeter.java").?;
+    const greet = before.findDefinition("Greeter.java", "greet").?;
+
+    try tree.write("Greeter.java", "class Greeter { String greet( \n");
+    _ = try tree.rescan();
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(
+        semidx.core.graph.UnitAnalysis.stale,
+        after.unitAnalysis(unit.id).?,
+    );
+    try testing.expect(after.findDefinition("Greeter.java", "greet") == null);
+    try testing.expect(after.entityById(greet.id) != null);
+    try testing.expect(after.findDefinition("Keep.java", "run") != null);
+
+    // Repairing it brings the same entities back.
+    try tree.write("Greeter.java", greeter_java);
+    _ = try tree.rescan();
+
+    var repaired = try tree.index.publish();
+    defer repaired.deinit();
+    try testing.expectEqual(
+        semidx.core.graph.UnitAnalysis.current,
+        repaired.unitAnalysis(unit.id).?,
+    );
+    try testing.expectEqual(greet.id, repaired.findDefinition("Greeter.java", "greet").?.id);
 }
 
 test "a snapshot taken before an edit keeps observing the state it was published from" {

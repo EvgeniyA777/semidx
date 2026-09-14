@@ -10,23 +10,12 @@ const Allocator = std.mem.Allocator;
 const core = @import("semidx_core");
 const model = core.model;
 
-/// A source unit's content identity.
-///
-/// SHA-256 rather than a fast 64-bit hash on purpose. This value decides "this
-/// unit did not change, do not reanalyze it" and "this is the same unit under a
-/// new path". A collision there is not a slow answer, it is a wrong graph with
-/// a heuristic wearing the face of a fact.
-pub const ContentId = [32]u8;
-
-pub fn contentId(bytes: []const u8) ContentId {
-    var out: ContentId = undefined;
-    std.crypto.hash.sha2.Sha256.hash(bytes, &out, .{});
-    return out;
-}
-
-pub fn sameContent(a: ContentId, b: ContentId) bool {
-    return std.mem.eql(u8, &a, &b);
-}
+/// Content identity is defined once, in the shared model, because both the
+/// registry deciding correspondence and the graph storing what it already holds
+/// have to agree on it exactly.
+pub const ContentId = model.ContentId;
+pub const contentId = model.contentId;
+pub const sameContent = model.sameContent;
 
 pub const ScannedUnit = struct {
     /// Root-relative and `/`-separated, whatever the host separator is.

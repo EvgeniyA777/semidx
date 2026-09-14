@@ -72,28 +72,120 @@ pub const Index = struct {
         return self.analyzer.indexUnit(&self.graph, unit);
     }
 
-    /// Registers every unit a scan found and analyzes it, and records what the
-    /// scan declined so a file that was not ingested is visible rather than
-    /// absent.
+    /// What one scan did to the graph.
+    pub const ScanOutcome = struct {
+        unchanged: usize = 0,
+        changed: usize = 0,
+        renamed: usize = 0,
+        added: usize = 0,
+        removed: usize = 0,
+        /// Units a frontend was asked to read. The number that matters: it must
+        /// track what changed, not how large the repository is.
+        analyzed: usize = 0,
+        /// Moves the scan declined to claim because the content did not
+        /// identify one unit. Those units appear as removals and additions.
+        ambiguous_renames: usize = 0,
+    };
+
+    /// Applies a scan of the source tree to the graph.
     ///
-    /// This is first-pass ingestion. Reconciling a rescan against an existing
-    /// registry — unchanged, changed, added, removed, renamed — is Stage 3 of
-    /// [plan 002](../docs/plans/002_repository_scale_ingestion.md) and does not
-    /// exist yet; calling this twice on the same index will reject the repeated
-    /// paths.
-    pub fn addScan(self: *Index, found: source.SourceScan) !void {
-        for (found.units) |unit| {
-            _ = try self.addUnit(unit.path, unit.language, unit.bytes);
+    /// The first scan against an empty index is all additions; every later one
+    /// is reconciled against what the index already holds. Only units whose
+    /// contents changed are reanalyzed — a move is not a change, and an
+    /// untouched file is not re-read.
+    ///
+    /// Order matters. Removals go first so that a unit renamed onto a path a
+    /// departing unit still occupies has somewhere to land.
+    pub fn applyScan(self: *Index, found: source.SourceScan) !ScanOutcome {
+        const gpa = self.graph.gpa;
+
+        var known_records: std.ArrayList(core.graph.SourceUnitRecord) = .empty;
+        defer known_records.deinit(gpa);
+        try self.graph.knownUnits(&known_records, gpa);
+
+        var known: std.ArrayList(source.registry.KnownUnit) = .empty;
+        defer known.deinit(gpa);
+        try known.ensureTotalCapacity(gpa, known_records.items.len);
+        for (known_records.items) |record| {
+            known.appendAssumeCapacity(.{ .id = record.id, .identity = record.identity() });
         }
+
+        var correspondence = try source.registry.reconcile(gpa, known.items, found.units);
+        defer correspondence.deinit();
+
+        var outcome: ScanOutcome = .{ .ambiguous_renames = correspondence.ambiguous.len };
+
+        for (correspondence.decisions) |decision| {
+            switch (decision) {
+                .removed => |id| {
+                    try self.graph.removeSourceUnit(id);
+                    outcome.removed += 1;
+                },
+                else => {},
+            }
+        }
+        for (correspondence.decisions) |decision| {
+            switch (decision) {
+                .renamed => |match| {
+                    _ = try self.graph.setSourceUnitPath(match.id, found.units[match.scan_index].path);
+                    outcome.renamed += 1;
+                },
+                else => {},
+            }
+        }
+        for (correspondence.decisions) |decision| {
+            switch (decision) {
+                .unchanged => outcome.unchanged += 1,
+                .changed => |match| {
+                    const unit = found.units[match.scan_index];
+                    _ = try self.applyEdit(match.id, unit.bytes);
+                    outcome.changed += 1;
+                    outcome.analyzed += 1;
+                },
+                .added => |scan_index| {
+                    const unit = found.units[scan_index];
+                    _ = try self.addUnit(unit.path, unit.language, unit.bytes);
+                    outcome.added += 1;
+                    outcome.analyzed += 1;
+                },
+                else => {},
+            }
+        }
+
+        try self.recordScanDiagnostics(found, correspondence);
+        return outcome;
+    }
+
+    /// Records what the scan declined to ingest and what it declined to decide,
+    /// replacing the previous scan's account rather than accumulating beside it.
+    fn recordScanDiagnostics(
+        self: *Index,
+        found: source.SourceScan,
+        correspondence: source.registry.Correspondence,
+    ) !void {
+        const gpa = self.graph.gpa;
+        self.graph.dropScanDiagnostics();
+
         for (found.diagnostics) |diagnostic| {
             const message = try std.fmt.allocPrint(
-                self.graph.gpa,
+                gpa,
                 "{s}: {s}",
                 .{ diagnostic.path, diagnostic.message },
             );
-            defer self.graph.gpa.free(message);
+            defer gpa.free(message);
+            try self.graph.addDiagnostic(diagnostic.kind, null, core.graph.ingestion, message);
+        }
+
+        for (correspondence.ambiguous) |ambiguity| {
+            const message = try std.fmt.allocPrint(
+                gpa,
+                "{d} removed and {d} added source units share identical contents, " ++
+                    "so no move could be established between them",
+                .{ ambiguity.removed_units, ambiguity.added_units },
+            );
+            defer gpa.free(message);
             try self.graph.addDiagnostic(
-                diagnostic.kind,
+                .unsupported_construct,
                 null,
                 core.graph.ingestion,
                 message,

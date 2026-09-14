@@ -37,7 +37,7 @@ pub fn main(init: std.process.Init) !void {
                 continue;
             };
             defer found.deinit();
-            try index.addScan(found);
+            _ = try index.applyScan(found);
             indexed += found.units.len;
             continue;
         } else |_| {}

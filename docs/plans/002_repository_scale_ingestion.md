@@ -331,8 +331,13 @@ Tasks:
 
 - Compare a new scan against the registry: unchanged, changed, added, removed,
   and renamed with identical content.
-- Preserve unit identity where correspondence is established; record `lost` where
-  a unit was replaced without it; record `removed` where nothing replaced it.
+- Preserve unit identity where correspondence is established, and record
+  `removed` where it is not. There is no unit-level `lost`: `lost` means a
+  replacement was identified but correspondence to it could not be established,
+  and for units no such case exists. A path present in both scans always
+  corresponds, whatever the contents; a path that disappeared has no slot for
+  anything to take. Claiming `lost` for a file that moved and changed would name
+  a replacement the graph did not identify.
 - Remove the entities of a removed unit and withdraw its assertions, recording
   entity identity events for each.
 - Count frontend invocations, and reanalyze only changed, added, and renamed
@@ -345,8 +350,10 @@ DoD:
   event.
 - Renaming a file with identical content preserves the unit id and every entity
   id inside it, and records `preserved`.
-- Renaming a file while changing it records `lost` for the old unit and
-  `created` for the new one, and the break is visible as a break.
+- Renaming a file while changing it records `removed` for the old unit and
+  `added` for the new one, with a `removed` identity event for every definition
+  that left, so the break is visible as a break rather than as a silent
+  substitution.
 - Deleting a file removes its entities with recorded events and leaves other
   units untouched.
 - A test asserts the frontend invocation count directly, so "only the affected

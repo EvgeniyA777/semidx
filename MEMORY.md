@@ -129,6 +129,21 @@ why. This is not a changelog of removed implementation; see `git log`.
   contract. `zig build test-core` builds and runs the core alone, and passes with
   `-Dgrammars-dir=/nonexistent`, which is the mechanical proof that the core does
   not depend on a parser.
+- **A rescan is reconciled against what the graph already holds.**
+  `source/registry.zig` decides correspondence as a pure function over unit
+  identity evidence — path, language, content identity — with no filesystem,
+  graph, or frontend involved. The rule in order: a path present in both scans
+  is the same unit whatever its contents; a unit whose path disappeared
+  corresponds to a new unit with identical content and the same language, and
+  only when exactly one of each exists for that content; everything else is a
+  removal or an addition. A path swap is therefore two content changes rather
+  than two renames, and a file that moved *and* changed is a break, because
+  nothing establishes that the new unit is the old one. An ambiguous move is
+  reported rather than resolved by picking one. There is no unit-level `lost`:
+  a path that disappeared leaves no slot for a replacement to take, so claiming
+  one would name a replacement the graph did not identify.
+  `Analyzer.invocations` counts frontend reads, which is what makes "only the
+  affected region was reanalyzed" a measured claim.
 - **A source unit's identity is not its path.** `model.Scope` is `repository` or
   `unit: SourceUnitId`, and `IdentityEvidence.scope` carries it, so renaming a
   file moves one property and leaves the unit, its contents, and every entity
@@ -203,11 +218,13 @@ why. This is not a changelog of removed implementation; see `git log`.
 - No public surface: no MCP, HTTP, gRPC, CLI contract, `contracts/` schemas, or
   runtime mirrors. `semidx-dev` is a developer inspection command and nothing
   asserts against its output.
-- No rescan reconciliation. Discovery exists and renames are survivable
-  (plan 002 Stages 1 and 2), but nothing yet decides what changed between two
-  scans: `Index.addScan` is first-pass only, and nothing detects that a removed
-  path and an added path are the same unit. No cross-unit assertions, no
-  invalidation across units, no file watching, no concurrency.
+- No cross-unit assertions, so no invalidation across units: every reference
+  still resolves inside its own unit or stays a designator. Reanalysis is decided
+  by a unit's own content identity alone, which is correct only while that
+  remains true. No file watching, no concurrency.
+- No measurement at scale. Reconciliation is proved on a thirteen-unit tree; no
+  tree large enough to expose accidental quadratic behavior exists yet, and
+  nothing records what `publish` costs.
 - No executable conformance suite and no capability matrix. The fixture evidence
   is scoped to two small files per language.
 - No published semantic contract. The current core admission results accept
@@ -276,10 +293,11 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 - **The active plan is `docs/plans/002_repository_scale_ingestion.md`**, with
   companion log `docs/reports/005_repository_scale_ingestion_progress.md`. Stage
-  Stages 1 and 2 are done. `src/source/` owns discovery, the one
-  extension-to-language table, and the only filesystem access in the ingestion
-  path; it has no parser dependency, so it runs in the `test-core` lane, whose
-  meaning is now "every lane that needs no parser". Stage 3 is next.
+  Stages 1 through 3 are done: a tree can be scanned, rescanned, and reconciled.
+  `src/source/` owns discovery, the one extension-to-language table, the
+  correspondence rule, and the only filesystem access in the ingestion path; it
+  has no parser dependency, so it runs in the `test-core` lane, whose meaning is
+  now "every lane that needs no parser". Stage 4 is next: the proof at scale.
   It takes the implementation to repository scale: source discovery, a
   source-unit registry whose identity is not a path, rename-surviving identity,
   measured affected-region reanalysis, and a dependency mechanism invalidation

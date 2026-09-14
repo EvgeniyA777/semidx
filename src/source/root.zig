@@ -8,6 +8,7 @@
 pub const languages = @import("languages.zig");
 pub const scan = @import("scan.zig");
 pub const discovery = @import("discovery.zig");
+pub const registry = @import("registry.zig");
 
 pub const SourceScan = scan.SourceScan;
 pub const ScannedUnit = scan.ScannedUnit;
@@ -22,4 +23,5 @@ test {
     _ = languages;
     _ = scan;
     _ = discovery;
+    _ = registry;
 }

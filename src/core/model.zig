@@ -177,6 +177,38 @@ pub const Assertion = struct {
     }
 };
 
+/// A source unit's content identity.
+///
+/// SHA-256 rather than a fast 64-bit hash on purpose. This value decides "this
+/// unit did not change, do not reanalyze it" and "this is the same unit under a
+/// new path". A collision there is not a slow answer; it is a wrong graph with a
+/// heuristic wearing the face of a fact.
+pub const ContentId = [32]u8;
+
+pub fn contentId(bytes: []const u8) ContentId {
+    var out: ContentId = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &out, .{});
+    return out;
+}
+
+pub fn sameContent(a: ContentId, b: ContentId) bool {
+    return std.mem.eql(u8, &a, &b);
+}
+
+/// Evidence that a unit seen in one scan of a source tree is the unit seen in
+/// the next. Like `IdentityEvidence`, it is evidence for correspondence and not
+/// the identity itself: the graph allocates unit identity, and consults this to
+/// decide whether a unit in the new scan continues one it already knows.
+pub const UnitIdentityEvidence = struct {
+    /// Where the unit is found. Strong evidence, because a path that survives a
+    /// scan almost always belongs to the same unit — and weak on its own,
+    /// because a unit that moved has a different one.
+    path: []const u8,
+    language: Language,
+    /// What the unit contains. The evidence that survives a move.
+    content: ContentId,
+};
+
 /// Where an entity belongs.
 ///
 /// A source unit appears here by the identity the graph allocated for it, never

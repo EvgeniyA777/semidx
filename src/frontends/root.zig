@@ -37,6 +37,13 @@ pub const Analyzer = struct {
     /// A local guard against pathological input. Exceeding it is reported as
     /// failed analysis of that unit and leaves the rest of the graph alone.
     budget: ?ts.Budget,
+    /// How many times a frontend has been asked to read a source unit.
+    ///
+    /// This is what makes "only the affected region was reanalyzed" a measured
+    /// claim rather than an assumed one: a rescan of a repository with one
+    /// changed file must move this by exactly one, whatever the repository's
+    /// size.
+    invocations: usize,
 
     pub const default_budget: ts.Budget = .{ .max_bytes = 8 << 20 };
 
@@ -45,6 +52,7 @@ pub const Analyzer = struct {
             .gpa = gpa,
             .parsers = @splat(null),
             .budget = budget,
+            .invocations = 0,
         };
     }
 
@@ -74,6 +82,7 @@ pub const Analyzer = struct {
         builder: *contract.BatchBuilder,
     ) !void {
         const language = input.unit.language;
+        self.invocations += 1;
 
         const parser = self.parserFor(language) catch {
             try builder.addDiagnostic(.analysis_unavailable, try builder.print(

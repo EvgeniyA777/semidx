@@ -14,10 +14,10 @@ Companion log for
 
 ## Current Status
 
-Stages 1 and 2 are implemented and verified. Discovery walks a root, and a unit's
-identity no longer depends on where it is found, so a rename preserves everything
-inside the renamed file. Nothing reconciles a rescan yet: the registry has the
-primitives, but deciding what changed between two scans is Stage 3.
+Stages 1 through 3 are implemented and verified. A tree can be scanned, rescanned,
+and reconciled: unchanged units are not re-read, a moved file keeps everything
+inside it, a deleted file's definitions leave visibly, and the work a rescan does
+is measured rather than assumed. Stage 4 is the proof at scale.
 
 ## Stage Log
 
@@ -26,7 +26,7 @@ primitives, but deciding what changed between two scans is Stage 3.
 | Plan creation | Completed | Created the staged plan and this log. Gate applied; findings below. |
 | Stage 1: Source discovery | Completed | `src/source/{root,languages,scan,discovery}.zig`, the `semidx_source` module, `Index.addScan`, and a developer command that takes a root. |
 | Stage 2: Unit identity independent of path | Completed | `model.Scope`, unit tombstones, `setSourceUnitPath`, `removeSourceUnit`, and both frontends scoping entities to the unit. |
-| Stage 3: Scan reconciliation | Not started | Awaiting Stage 2. |
+| Stage 3: Scan reconciliation | Completed | `src/source/registry.zig` decides correspondence as a pure function; `Index.applyScan` applies it; `Analyzer.invocations` measures what was re-read. |
 | Stage 4: Affected-region proof at scale | Not started | Awaiting Stage 3. |
 | Stage 5: Cross-unit dependency tracking | Not started | Awaiting Stage 3. Opens with an ADR. |
 | Stage 6: Closure and documentation | Not started | Awaiting Stage 5. |
@@ -276,6 +276,134 @@ Stage 2 DoD, item by item:
   removed path and an added path are the same unit is Stage 3's correspondence
   rule, using the content identity Stage 1 already produces.
 
+## Stage 3 Record
+
+### What Was Built
+
+- `src/source/registry.zig` decides what happened between two scans, as a pure
+  function over unit identity evidence. No filesystem, no graph, no frontend —
+  which is what lets a swap, an ambiguous move, and a cross-language content
+  collision be tested directly instead of through a whole indexing run.
+- `model.ContentId`, `model.contentId`, and `model.UnitIdentityEvidence` moved
+  into the shared model, so the registry deciding correspondence and the graph
+  storing what it already holds agree on content identity exactly rather than
+  approximately.
+- `Graph.setSourceUnitPath` now records the move as a `preserved` identity event
+  and an `identity_correspondence` assertion resolved as a fact. Identical bytes
+  under a new path is exact resolution of "the same unit", not a similarity
+  score, so it is recorded as established rather than heuristic.
+- `Index.applyScan` replaces `addScan`. The first scan against an empty index is
+  all additions; every later one is reconciled.
+- `Analyzer.invocations` counts how many times a frontend was asked to read a
+  unit. This is the stage's load-bearing number.
+- `Snapshot.lastIdentityEvent` answers "what most recently happened to this
+  entity's identity" without the caller having to know which revision of a
+  multi-step operation recorded it.
+
+### The Correspondence Rule
+
+In order:
+
+1. A path present in both scans is the same unit. Path is unambiguous — a scan
+   holds each path once — and it is the strongest evidence available. Whether
+   the contents changed decides only whether reanalysis is owed.
+2. A unit whose path disappeared corresponds to a new unit with identical content
+   and the same language, and only when exactly one of each exists for that
+   content.
+3. Everything else is a removal or an addition.
+
+Two consequences worth stating, because both were open questions going in:
+
+- **The path-swap problem predicted after Stage 2 does not exist.** If two files
+  exchange contents, both paths are present in both scans, so path correspondence
+  places both units where they already are and both are reanalyzed. No rename is
+  claimed, so no rename has to be applied through a path another unit still
+  occupies. Removals are still applied before renames, because a unit can be
+  renamed onto a path a *departing* unit held.
+- **A file that moved and changed is a removal and an addition.** Nothing
+  establishes that the new unit is the old one, and inferring it from similarity
+  is exactly what the constitution's identity clause forbids presenting as
+  established.
+
+### Plan Correction
+
+The Stage 3 DoD asked for `lost` for a unit that was renamed while being edited.
+That is wrong, and the plan now says so. `lost` means a replacement was
+identified but correspondence to it could not be established. For units no such
+case exists: a path present in both scans always corresponds, and a path that
+disappeared leaves no slot for anything to take. Recording `lost` would name a
+replacement the graph did not identify — the precise dishonesty the event exists
+to prevent. The DoD now asks for `removed` plus `added`, with a `removed`
+identity event for every definition that left, which is what the implementation
+does and what the test asserts.
+
+### Decisions Taken During Stage 3
+
+- **An ambiguous move is reported, not resolved by picking one.** One removed
+  unit whose content matches two added units produces no rename, and a diagnostic
+  saying why. Choosing arbitrarily would produce a stable-looking identity that
+  is stable by luck.
+- **A rename requires the same language.** Identical bytes read as two different
+  languages are two different units, whatever the byte comparison says.
+- **A move owes no reanalysis.** Nothing inside the file changed, so nothing is
+  re-read, and the unit does not go stale.
+- **Scan-level diagnostics are replaced, not accumulated.** `dropScanDiagnostics`
+  withdraws the previous scan's account of the tree before recording this one's,
+  the same way per-unit diagnostics already describe only the latest attempt.
+- **Lookups are keyed, not scanned.** The registry builds a path map and a
+  content map rather than nesting loops, and orphaned units carry their evidence
+  with them rather than being looked back up by id. Stage 4 will guard this; it
+  was cheaper to not introduce the problem.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core --summary all` | 67/67 passed, up from 56: core 44, source 23. |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | 67/67 passed. |
+| `zig build test --summary all` | 106/106 passed, after deleting `.zig-cache/` and `zig-out/`. |
+| `zig build run -- fixtures/vertical-slice` | Walked and reconciled the fixture tree; the two unparsable fixtures still report `pending`. |
+| `zig fmt --check build.zig src tests` | Clean. |
+| `./scripts/check-agent-attribution.sh --all` | Passed. |
+
+Stage 3 DoD, item by item:
+
+- Rescanning an unchanged tree invokes no frontend, opens no revision, and
+  records no identity event. The test compares the invocation counter and the
+  event count across two publishes.
+- Moving a file with identical content preserves the unit id, its container
+  entity, every definition id inside it, and their relationship counts, records
+  `preserved`, and re-reads nothing.
+- Moving a file while editing it records `removed` for the old unit with a
+  `removed` event for each definition, and `added` for the new one, whose
+  definitions are different entities. See the plan correction above.
+- Deleting a file removes its entities with recorded events, leaves the other
+  unit's entity ids and analysis state untouched, and re-reads nothing.
+- The invocation count is asserted directly: a tree of thirteen units with one
+  edited file moves the counter by exactly one.
+
+Beyond the DoD, the pure registry has twelve tests of its own covering the first
+scan, an unchanged tree, a content change, a move, a move-and-edit, a path swap,
+an ambiguous move, a cross-language content collision, unrelated churn beside a
+move, and an emptied tree.
+
+### Residual Risk From Stage 3
+
+- **`applyScan` publishes nothing between its phases, but it does open several
+  revisions.** A scan with removals, renames, and edits walks the graph through
+  intermediate revisions. No consumer can observe them, because observation is
+  `publish`, but a future concurrent reader would need the whole scan to be one
+  revision.
+- **Reanalysis is decided by content identity alone.** A unit whose own bytes did
+  not change is never re-read, which is correct today only because no assertion
+  depends on another unit. The moment cross-unit resolution exists, this becomes
+  the thing invalidation has to override, which is Stage 5.
+- **The unit table still never compacts**, and a churning tree now grows it on
+  every rescan rather than only on explicit removal.
+- **Nothing measures cost yet.** The thirteen-unit test proves the shape of the
+  work; Stage 4 is where a tree large enough to expose an accidental quadratic
+  gets built.
+
 ## Open Questions Carried Into Execution
 
 These are decided inside the plan but are the ones most likely to need revisiting
@@ -304,14 +432,20 @@ Neither anticipated Stage 2 blocker materialized. The `scope` change touched
 both frontends and three test filters and nothing else, and the stop condition
 did not apply.
 
-Potential Stage 3 blockers:
+The first anticipated Stage 3 blocker dissolved on contact: a path swap is not a
+rename under the correspondence rule, so it never needs to be applied as one. The
+second stands as a decision rather than a blocker — exact-content moves are
+claimed, everything else is a removal and an addition.
 
-- A scan that swaps two units' paths cannot be applied as two renames in either
-  order, because a move onto an occupied path is rejected. Reconciliation has to
-  order removals before renames, or stage the moves.
-- Rename correspondence is exact-content only by decision. If a rescan of a real
-  tree shows it almost never fires, the answer is a stronger evidence rule, not a
-  similarity guess presented as a fact.
+Potential Stage 4 blockers:
+
+- A fixture tree large enough to expose accidental quadratic behavior has to be
+  generated rather than committed, or the repository grows by a few dozen
+  near-identical files. Generating it in the test is the likely answer, and
+  `std.testing.tmpDir` already supports it.
+- Asserting "work proportional to change" needs a countable proxy for work.
+  `Analyzer.invocations` covers reanalysis; graph-level work — `publish` copying
+  the observable state — has no counter yet.
 
 ## Residual Risk
 
@@ -324,9 +458,7 @@ requirements change rather than proceeding.
 
 ## Next Handoff
 
-Start with Stage 3: scan reconciliation. Both halves it needs now exist —
-discovery produces content identity, and the registry can rename and remove
-units without breaking what is inside them. Stage 3 decides which of unchanged,
-changed, added, removed, or renamed applies to each unit between two scans, and
-counts frontend invocations so "only the affected region was reanalyzed" is
-measured rather than asserted.
+Start with Stage 4: the affected-region proof at scale. The mechanism exists and
+is measured on thirteen units; what is missing is a tree large enough for the
+claim to be falsifiable, a guard that fails if a keyed lookup regresses into a
+scan, and a recorded measurement of what `publish` costs over such a tree.

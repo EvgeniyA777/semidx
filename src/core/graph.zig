@@ -46,6 +46,9 @@ pub const SourceUnitRecord = struct {
     language: model.Language,
     /// Current contents. Owned by the graph and replaced on each edit.
     bytes: []u8,
+    /// Content identity of those contents, so the next scan can be reconciled
+    /// against this one without rereading what the graph already holds.
+    content: model.ContentId,
     /// The `file` entity for this unit.
     entity: EntityId,
     /// The revision at which these contents were established.
@@ -64,6 +67,12 @@ pub const SourceUnitRecord = struct {
     pub fn analysis(self: SourceUnitRecord) UnitAnalysis {
         if (self.analysis_revision == 0) return .pending;
         return if (self.analysis_revision >= self.content_revision) .current else .stale;
+    }
+
+    /// What a later scan compares against to decide whether it is seeing this
+    /// same unit.
+    pub fn identity(self: SourceUnitRecord) model.UnitIdentityEvidence {
+        return .{ .path = self.path, .language = self.language, .content = self.content };
     }
 
     pub fn view(self: SourceUnitRecord) SourceUnitView {
@@ -211,6 +220,7 @@ pub const Graph = struct {
             .path = interned_path,
             .language = language,
             .bytes = owned_bytes,
+            .content = model.contentId(owned_bytes),
             .entity = file_entity,
             .content_revision = self.revision,
             .analysis_revision = 0,
@@ -221,6 +231,12 @@ pub const Graph = struct {
         };
 
         try self.recordUnitIngestion(self.units.items[id.index()]);
+        try self.addIdentityEvent(
+            .created,
+            file_entity,
+            null,
+            "a source unit appeared that no known unit corresponded to",
+        );
         return id;
     }
 
@@ -246,6 +262,7 @@ pub const Graph = struct {
             const record = &self.units.items[index];
             self.gpa.free(record.bytes);
             record.bytes = owned;
+            record.content = model.contentId(owned);
             record.content_revision = revision;
         }
 
@@ -315,6 +332,27 @@ pub const Graph = struct {
 
         self.dropIngestionAssertionsForUnit(id);
         try self.recordUnitIngestion(record);
+
+        // A move is a correspondence claim, and it is an established one:
+        // identical contents under a new path is exact resolution of "the same
+        // unit", not a similarity score. It is recorded so a consumer can see
+        // that the graph decided a file moved rather than inferring it.
+        try self.addIdentityEvent(
+            .preserved,
+            record.entity,
+            null,
+            "the same contents appeared under a new path",
+        );
+        _ = try self.addAssertion(
+            .{ .identity_correspondence = .{ .current = record.entity, .previous = record.entity } },
+            reconciler,
+            .{
+                .unit = record.id,
+                .range = wholeUnitRange(record.bytes),
+                .text = interned,
+            },
+            .{ .fact = .{ .method = "identical content under a new path" } },
+        );
         return revision;
     }
 
@@ -372,6 +410,17 @@ pub const Graph = struct {
             if (std.mem.eql(u8, record.path, path)) return record.id;
         }
         return null;
+    }
+
+    /// Live units, in identity order, as correspondence evidence for a scan.
+    pub fn knownUnits(
+        self: *const Graph,
+        out: *std.ArrayList(SourceUnitRecord),
+        gpa: Allocator,
+    ) Allocator.Error!void {
+        for (self.units.items) |record| {
+            if (record.isLive()) try out.append(gpa, record);
+        }
     }
 
     pub fn unit(self: *const Graph, id: SourceUnitId) ?SourceUnitRecord {
@@ -554,6 +603,21 @@ pub const Graph = struct {
             }
         }
         self.assertions.shrinkRetainingCapacity(write);
+    }
+
+    /// Drops what source ingestion said about the tree as a whole, so a rescan
+    /// replaces the previous scan's account rather than accumulating beside it.
+    pub fn dropScanDiagnostics(self: *Graph) void {
+        var write: usize = 0;
+        for (self.diagnostics.items) |diagnostic| {
+            const keep = diagnostic.unit != null or
+                !std.mem.eql(u8, diagnostic.producer.name, ingestion.name);
+            if (keep) {
+                self.diagnostics.items[write] = diagnostic;
+                write += 1;
+            }
+        }
+        self.diagnostics.shrinkRetainingCapacity(write);
     }
 
     pub fn dropDiagnosticsForUnit(self: *Graph, id: SourceUnitId) void {
@@ -1050,6 +1114,19 @@ pub const Snapshot = struct {
             if (event.revision == revision) try out.append(gpa, event);
         }
         return out.toOwnedSlice(gpa);
+    }
+
+    /// The most recent thing that happened to an entity's identity, whenever it
+    /// happened. Asking by revision requires the caller to know which revision a
+    /// multi-step operation recorded it in, which is exactly the kind of
+    /// coupling a query should not need.
+    pub fn lastIdentityEvent(self: Snapshot, id: EntityId) ?model.IdentityEvent {
+        var found: ?model.IdentityEvent = null;
+        for (self.identity_events) |event| {
+            if (event.entity != id) continue;
+            if (found == null or event.revision >= found.?.revision) found = event;
+        }
+        return found;
     }
 
     pub fn identityEventFor(self: Snapshot, id: EntityId, revision: u64) ?model.IdentityEvent {
