@@ -349,10 +349,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   unit at repository scale, and dependency propagation has a tested mechanism.
   Stage 5 deliberately took the ADR 003 rejected branch: no name-match
   assertions were added, so cross-unit references remain unresolved designators.
-- **Plan 003 is implemented; its final findings-first review is pending.**
-  Stages 1–4 are committed and Stage 5's documentation is synchronized; the
-  plan stays `in_progress` until that review is recorded in
-  [report 003](docs/reports/003_java_package_type_resolution_progress.md). It
+- **Plan 003 is closed.** Java same-package top-level type resolution is
+  implemented, documented, verified, and reviewed with no confirmed findings
+  ([report 003](docs/reports/003_java_package_type_resolution_progress.md)). It
   admitted no `module` or `IMPORTS` and widened no Clojure or general Java
   coverage. It did produce evidence those admission questions can use: a Java
   package was expressible as extension vocabulary plus an analyzer projection,

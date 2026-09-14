@@ -1,9 +1,9 @@
 ---
 title: "Java package type resolution progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "continue_from_next_stage"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-14"
 ---
 
@@ -14,11 +14,8 @@ Companion log for
 
 ## Current Status
 
-Stages 1 to 4 are complete, and Stage 5's documentation synchronization and
-closure checks are done. The findings-first review of the final diff with
-`semidx-code-review` has not run yet: it is assigned to a separate reviewing
-agent. The plan and this log stay `in_progress` until that review and the
-disposition of its findings are recorded here.
+Plan 003 is complete. Stages 1 to 4 are implemented, Stage 5 synchronized the
+documentation, and the final findings-first review found no confirmed defects.
 
 ## Stage Log
 
@@ -29,7 +26,7 @@ disposition of its findings are recorded here.
 | Stage 2: Java package binding context | Completed | The analyzer builds a per-package binding table from current Java class facts and hands it to the Java frontend; duplicate names arrive as ambiguous. The frontend does not use it yet. |
 | Stage 3: Java cross-unit type resolution | Completed | A simple type name in an explicit package resolves to the one current top-level class another unit declares in that package, as a `REFERENCES` fact with a dependency on the provider. Every other case stays unresolved with its reason. The repository-scale fixture expectation moved to Stage 4 (see below). |
 | Stage 4: Package export invalidation | Completed | Every index mutation (scan, add, edit, remove) reanalyzes dependents of changed providers and the other Java units of every package whose exported classes changed, ordered so a unit read before the last change is read again. The repository-scale `Helper` reference is now a fact. |
-| Stage 5: Documentation, review, and closure | In progress | `MEMORY.md`, `SPEC.md`, and `CONFORMANCE.md` synchronized; closure commands pass. Final review pending (separate reviewer). |
+| Stage 5: Documentation, review, and closure | Completed | `MEMORY.md`, `SPEC.md`, and `CONFORMANCE.md` synchronized; closure commands pass; final review recorded below with no confirmed defects. |
 
 ## Plan Readiness Gate
 
@@ -230,7 +227,50 @@ Closure verification:
 | `git diff --check` | Passed. |
 | `./scripts/check-memory-freshness.sh` | Passed. |
 | `zig build run -- fixtures/repository-scale` | Observational only; see Stage 4. |
-| `semidx-code-review` findings-first review | Not run in this session; assigned to a separate reviewer. |
+| `semidx-code-review` findings-first review | Completed; no confirmed findings. |
+
+## Review
+
+Final findings-first review completed on 2026-09-14 over the five implementation
+commits from `926a8f1` through `fa7a4a0`, against
+[ADR 004](../adr/004_allow_java_same_package_type_resolution.md) and
+[plan 003](../plans/003_java_package_type_resolution.md).
+
+Semantic Code Indexing was required by repository policy, but no callable
+`create_index` tool was exposed through tool discovery in the reviewing
+environment. The review therefore used targeted direct inspection of the final
+diff and the changed files named in this log.
+
+Findings:
+
+| Severity | Classification | Finding | Disposition |
+| --- | --- | --- | --- |
+| — | Review result | No confirmed defects in semantic identity, provenance and resolution, incremental maintenance, frontend coverage boundaries, runtime behavior, documentation synchronization, or test coverage. | Closed. |
+
+Notes reviewed but not filed as defects:
+
+- `Index.renameUnit` remains a path-only operation. Java package membership is
+  read from source text, not from paths, so a path rename does not change package
+  exports and does not owe package upkeep.
+- The Java type-parameter and supertype checks are intentionally conservative:
+  they may leave real references unresolved, but they do not create false facts.
+  This is recorded as residual risk.
+- `java_packages.Packages` keeps stale hints until analyzer release, but every
+  hint is re-read from graph state before use. This is recorded as residual
+  risk.
+
+Reviewer verification:
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | 84/84 passed. |
+| `zig build test-core --summary all` | 84/84 passed. |
+| `zig build test --summary all` | 140/140 passed. |
+| `zig fmt --check build.zig src tests` | Passed. |
+| `./scripts/check-agent-attribution.sh --all` | Passed. |
+| `./scripts/check-memory-freshness.sh` | Passed. |
+| `git diff --check` | Passed. |
+| `zig build run -- fixtures/repository-scale` | Observational: `Helper` is no longer unresolved; `decorate` still is; 0 approximate assertions; 0 stale assertions. |
 
 ## Residual Risk
 
@@ -303,22 +343,10 @@ Documentation-only planning checks run during plan creation:
 
 ## Next Handoff
 
-For the reviewing agent: run `semidx-code-review` findings-first over the plan's
-commits on `dev`, from `926a8f1` (Stage 1) through the Stage 5 documentation
-commit, against [ADR 004](../adr/004_allow_java_same_package_type_resolution.md)
-and [plan 003](../plans/003_java_package_type_resolution.md). Record each
-finding and its disposition in a Review section of this log. After the review
-closes, mark the plan `completed` and this log `completed` with historical
-`agent_action` values, and update the plan-003 bullet in `MEMORY.md`.
-
-Places most worth a reviewer's attention:
-
-- `src/frontends/java.zig` `resolveType`: completeness of the JLS 6.4.1 shadowing
-  checks for field and return-type positions.
-- `src/root.zig` `Upkeep`: step ordering within a scan, and the pre-batch
-  dependency reading.
-- `src/core/graph.zig` `checkAssertions`: the stale-claim tolerance.
-- The residual risk that the repository is treated as one Java classpath.
+Plan 003 is closed. Future work should start from the residual risks above,
+especially build-module/classpath boundaries for Java package scope, or from a
+new narrow language-correct producer such as Java single-type imports. Either
+requires its own decision record and plan.
 
 Semantic Code Indexing (semidx MCP) failed to connect in the implementing
 session (connection timeout), so code was located by targeted direct reads.

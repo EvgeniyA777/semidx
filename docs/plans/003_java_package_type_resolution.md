@@ -1,9 +1,9 @@
 ---
 title: "Java package type resolution"
 doc_type: "plan"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "execute_when_requested"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-14"
 ---
 
