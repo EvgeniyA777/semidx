@@ -64,23 +64,34 @@ defects.
 Use the narrowest meaningful command first, then the required regression lane.
 Common lanes include:
 
-| Lane | Boundary | Purpose |
+| Lane | Command | Purpose |
 | --- | --- | --- |
-| Focused unit | One namespace or pure function set | Fast proof for local behavior |
-| Runtime integration | Multiple runtime namespaces, storage, providers, or adapters | Cross-module behavior and degradation |
-| Contract validation | Schemas and examples under `contracts/`, once that layer is redesigned (see `RULES.md` -> Contracts And Runtime Guarantees) | Public contract compatibility |
-| Language onboarding | Command TBD until the language-lane onboarding tooling is rebuilt | Language-lane parser and fixture confidence |
-| Release gates | Command TBD until staged gate tooling is rebuilt | Release-facing regression confidence |
-| Runtime smoke | MCP, HTTP, gRPC, CLI, or provider process commands | Startup and operational boundary proof |
+| Shared core | `zig build test-core` | The model, graph, and reconciliation with no parser dependency. The cheapest probe, and the only lane that runs without the tree-sitter prerequisites. |
+| Full test lane | `zig build test` | Core plus the tree-sitter adapter, the language frontends, and the fixture and edit-history tests. |
+| Formatting | `zig fmt --check build.zig src tests` | Instant, and it catches a broken edit before a compile does. |
+| Runtime smoke | `zig build run -- <source files>` | Indexing and querying end to end with no service and no network. Its output is developer-only and nothing asserts against it. |
+| Contract validation | No command. There is no public contract and no `contracts/` directory. | Record one here when a contract is published. |
+| Release gates | No command. Nothing is released. | Record one here when release tooling exists. |
+
+Run the narrowest lane that can fail on the change: `zig build test-core` for
+shared-core edits, `zig build test` before any commit that touches a frontend,
+the adapter, the build, or a fixture.
 
 Coverage reports are diagnostic. An arbitrary percentage does not replace
 requirement and risk analysis.
 
 ## Local Services
 
-- No local service dependency (database or otherwise) is fixed yet. When one is
+- No local service dependency (database or otherwise) exists, and the first
+  slice requires none: the tests run with nothing else present. When one is
   chosen, record it here with how tests should detect and reuse a running
   instance instead of restarting it needlessly.
+- The build-time prerequisites are not services but local files: pinned
+  tree-sitter grammar sources from `./scripts/setup-tree-sitter-grammars.sh`, and
+  a tree-sitter runtime providing `tree_sitter/api.h` and `libtree-sitter.a`. A
+  missing one fails `zig build` with a message naming the fix; it never degrades
+  a lane silently. See
+  [ADR 002](../adr/002_local_tree_sitter_parser_dependency.md).
 - Before running integration tests that depend on a local service, check whether
   an instance is already running.
 - If a local service must be restarted for a test, stop the existing instance

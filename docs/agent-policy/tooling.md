@@ -126,10 +126,9 @@ edit carries a required safety step. The safety step is not optional.
 | Narrow edit inside a large existing file | `Edit` | Compile/typecheck/lint probe |
 | Markdown, scripts, and other non-code files | `Edit` | Normal review |
 
-- **A verification probe after any code edit is mandatory, not advisory.** What
-  counts as a probe (compile, typecheck, lint, or a REPL/eval smoke) is
-  determined by the implementation language chosen for the affected code; no
-  language is fixed right now.
+- **A verification probe after any code edit is mandatory, not advisory.** For
+  Zig, the probe is the build; the Zig addendum below names which command for
+  which edit.
 - Prefer a structure-aware editor whenever one is configured for the active
   language and the unit of change is a whole function or definition — such tools
   typically validate syntax on the way in, so a rewrite cannot land unbalanced or
@@ -137,6 +136,25 @@ edit carries a required safety step. The safety step is not optional.
 - Keep patches scoped to one logical unit (function, definition, form) where
   possible, and avoid large rewrites of deeply nested code when a narrower edit
   will work.
-- Once an implementation language is chosen, add a language-specific addendum
-  here naming the exact probe command, the structure-aware editor, and the
-  REPL/eval workflow for that language.
+- The Zig addendum below names the probe commands for the implementation
+  language. Add a comparable addendum when another language enters the build.
+
+## Zig Addendum
+
+The implementation language is Zig
+([ADR 001](../adr/001_choose_zig_implementation_language.md)).
+
+| Need | What to use |
+| --- | --- |
+| Probe after a shared-core edit | `zig build test-core` — compiles and runs `src/core/` alone, with no parser dependency, so it is the fastest signal. |
+| Probe after any other code edit | `zig build test` — the full lane. Required before committing a change to a frontend, the adapter, `build.zig`, or a fixture. |
+| Syntax and formatting check | `zig fmt --check build.zig src tests`; drop `--check` to fix. |
+| Structure-aware editor | None is configured for Zig. Use `Read` with `offset`/`limit` to see the exact lines, then `Edit`. |
+| REPL or eval | Zig has none. The equivalent smoke check is `zig build run -- <source files>`, which indexes the named files and prints a graph summary. |
+
+- The probe after a Zig edit is required, not optional. A compile error is cheap
+  to find now and expensive to leave.
+- `zig build` fails loudly when the tree-sitter prerequisites are missing and
+  names both override flags. Do not work around that message by editing
+  `build.zig`; run `./scripts/setup-tree-sitter-grammars.sh` or point the flags
+  at the right paths.

@@ -107,14 +107,18 @@ Conformance scenario families are owned by
 adopt one of those checks specify concrete fixtures, commands, expected results,
 and publication gates here or in subordinate specifications.
 
-There is no implementation or executable conformance suite yet. These are
+A first in-memory implementation slice exists
+([plan](docs/plans/001_zig_vertical_slice.md),
+[evidence](docs/reports/001_zig_vertical_slice_progress.md)), with fixture
+coverage for two languages. There is still no capability matrix, no executable
+conformance suite, and no published coverage. The requirements above remain
 requirements for later verification, not claims of passing results.
 
 ## Requirements Still To Specify
 
 | Area | Work needed before the dependent implementation or publication |
 | --- | --- |
-| Implementation stack | Zig is selected by [ADR 001](docs/adr/001_choose_zig_implementation_language.md); build tool, dependency management, and source layout remain to specify |
+| Implementation stack | Settled for the first slice: Zig ([ADR 001](docs/adr/001_choose_zig_implementation_language.md)), `zig build`, and local tree-sitter C sources ([ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md)). Packaging, distribution, and any long-running process mode remain to specify |
 | Initial coverage | Target languages, producer versions, admission fixtures, and measured limitations |
 | Core roster | Resolve the blocked candidates and admission evidence in CORE.md |
 | Extensions and mappings | Per-language definitions, declared mapping semantics, and evidence preservation |

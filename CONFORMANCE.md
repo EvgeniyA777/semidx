@@ -14,8 +14,9 @@ into reviewable and eventually executable checks. It is not immutable. Better
 checks may replace weaker checks when they verify the same constitutional
 property more directly.
 
-There is no implementation or executable conformance suite yet. Every scenario
-below is a requirement for future verification, not a claim of passing behavior.
+There is no executable conformance suite. Every scenario below is a requirement
+for future verification, not a claim of passing behavior. The first
+implementation slice provides evidence for some of them; see Current Status.
 
 ## Conformance Principles
 
@@ -81,13 +82,31 @@ the same public result shape.
 
 ## Current Status
 
-No conformance evidence exists yet because the graph implementation, fixtures,
-schemas, and public surfaces do not exist yet.
+No scenario family above is adopted as an executable gate, and no schema or
+public surface exists to check one against.
 
-The first useful implementation slice should produce enough evidence for:
+The first implementation slice
+([plan](docs/plans/001_zig_vertical_slice.md),
+[evidence](docs/reports/001_zig_vertical_slice_progress.md)) produces evidence
+for the five properties this section asked of it:
 
-* entity nodes rather than chunks;
-* facts versus unresolved assertions;
-* identity across a simple edit;
-* one incremental update against one consistent observable state;
-* local indexing and querying with no external service.
+* **entity nodes rather than chunks** — ids are allocated by the graph and never
+  derived from a range; definitions sharing a range stay distinct entities, and
+  moving a definition changes only its projection;
+* **facts versus unresolved assertions** — construction rejects an unresolved
+  target presented as a fact and a resolved target claiming its target is
+  missing; the fixtures carry unresolved targets in both languages and none of
+  them is a fact;
+* **identity across a simple edit** — a body edit preserves every entity id, and
+  a rename is recorded as identity loss naming its replacement rather than as an
+  unrelated deletion and creation;
+* **one incremental update against one consistent observable state** — a
+  snapshot published before an edit keeps observing that state while only the
+  changed source unit is reanalyzed;
+* **local indexing and querying with no external service** — the build declares
+  no dependencies, reads only local paths, and the slice indexes and queries
+  with nothing else running.
+
+That evidence is fixture-scoped. It is not a capability matrix, not a
+per-language accuracy claim, and not a substitute for adopting these families as
+gates.

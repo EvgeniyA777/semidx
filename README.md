@@ -1,9 +1,9 @@
 # semidx
 
-**Status: design, not implementation.** There is no graph implementation, no
-public surface, and no conformance evidence yet; this repository holds the
-architecture an implementation will have to satisfy. Read every capability below
-as intended behavior, not as measured behavior.
+**Status: first vertical slice.** A small in-memory semantic graph exists and is
+tested against Java and Clojure fixtures. There is no persistence, no public
+surface, no published language coverage, and no conformance suite. Read every
+capability below as intended behavior, not as measured behavior.
 
 semidx is designed to be an incrementally maintained semantic graph of a
 codebase that provides exact program relationships as a foundation for search,
@@ -18,6 +18,29 @@ located source; it never establishes a program relationship. See
 identity it freezes (ratified 2026-09-13), [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md) for
 the reasoning, [SPEC.md](SPEC.md) and [CORE.md](CORE.md) for changing
 requirements, and [CONFORMANCE.md](CONFORMANCE.md) for verification scenarios.
+
+## Running it
+
+The slice needs [Zig](https://ziglang.org) 0.16 or newer. Its shared core needs
+nothing else:
+
+```sh
+zig build test-core
+```
+
+The language frontends additionally need pinned tree-sitter grammar sources and
+a local tree-sitter runtime providing `tree_sitter/api.h` and
+`libtree-sitter.a`. Nothing is fetched during a build or an index run:
+
+```sh
+./scripts/setup-tree-sitter-grammars.sh
+zig build test
+zig build run -- fixtures/vertical-slice/java/Greeter.java
+```
+
+`zig build` reports precisely what is missing and how to point it elsewhere
+(`-Dgrammars-dir=`, `-Dtree-sitter-prefix=`). The `run` command is a developer
+inspection tool, not a public interface.
 
 ## License
 

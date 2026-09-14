@@ -64,8 +64,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   now a kernel under an explicit 200-line budget stated in its first section: a
   rule needing more than a few lines lives in `docs/agent-policy/` or
   `.agents/skills/`, and `RULES.md` keeps one line pointing at it. It currently
-  runs 156 lines. It records Zig as the selected implementation language while
-  leaving the rest of the stack open.
+  runs 161 lines. Its Project Context section now records the real build
+  commands, the tree-sitter prerequisites, and what does and does not exist in
+  the source tree.
 - `RULES.md`, `AGENTS.md`, and `CLAUDE.md` do not offer "documented and justified
   deviation" as a route around the constitution: inside the boundary, decisions
   are documented; outside it, §18 requires a fork. Claims left over from the
@@ -75,7 +76,10 @@ why. This is not a changelog of removed implementation; see `git log`.
   language lanes, MCP wire shape, a named PostgreSQL path). Language coverage and
   public contracts are open `SPEC.md` requirements.
 - `docs/agent-policy/{documentation,git,testing,tooling}.md` owns detailed
-  cross-cutting process. Documentation policy owns ownership, filenames,
+  cross-cutting process. Testing policy now names the real verification lanes
+  (`zig build test-core`, `zig build test`, `zig fmt --check`,
+  `zig build run`), and tooling policy carries a Zig addendum naming which probe
+  belongs to which edit. Documentation policy owns ownership, filenames,
   frontmatter, lifecycle, the ADR procedure, progress logs, and the Plan
   Readiness Gate; git policy owns hooks, command ordering, commit and push rules,
   and both the attribution and constitution-freeze enforcement; testing policy
@@ -86,19 +90,65 @@ why. This is not a changelog of removed implementation; see `git log`.
 - The ADR procedure is enabled and the sequence starts at `001`;
   [docs/adr/README.md](docs/adr/README.md) is the index.
   [ADR 001](docs/adr/001_choose_zig_implementation_language.md) accepts Zig as
-  the implementation language for the rebuild. Reasoning about the architecture
+  the implementation language for the rebuild, and
+  [ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md) fixes how
+  parsing enters the build: local tree-sitter C sources behind one adapter, with
+  grammar sources pinned by `scripts/setup-tree-sitter-grammars.sh` and the
+  runtime linked from a local install prefix. Reasoning about the architecture
   documents themselves stays in
   [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md), and drafting history
   stays in `git log`.
-- `README.md` is a minimal human entry point. It opens with a status line
-  saying the repository is design rather than implementation, states the
-  capabilities as intended behavior, and links to the architecture document set.
-  There is nothing to run yet.
-- `docs/plans/001_zig_vertical_slice.md` is the active implementation plan for
-  the first Zig vertical slice. Its companion progress log is
-  `docs/reports/001_zig_vertical_slice_progress.md`. The plan names `zig build`
-  and local tree-sitter grammar sources through the C ABI as first-slice
-  decisions to prove during Stage 1.
+- `README.md` is a minimal human entry point. Its status line says "first
+  vertical slice", it still states the capabilities as intended rather than
+  measured behavior, it links to the architecture document set, and it names the
+  three commands that run the slice.
+- **The first Zig vertical slice is implemented.** `docs/plans/001_zig_vertical_slice.md`
+  is executed and closed; `docs/reports/001_zig_vertical_slice_progress.md`
+  carries the stage outcomes, exact verification commands, review findings,
+  skipped checks, and residual risk. Read the progress log before extending the
+  implementation.
+- What the slice is: an in-memory semantic graph over Java and Clojure fixtures,
+  built on Zig 0.16 and tree-sitter through the C ABI
+  ([ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md)). Source lives
+  in `src/`, tests in `tests/` and alongside each module, fixtures and their edit
+  histories in `fixtures/vertical-slice/`.
+- Module boundaries, and the dependency direction they enforce:
+  `src/core/` (model, strings, frontend contract, graph, reconcile) is pure Zig
+  with no parser dependency; `src/frontend/tree_sitter.zig` is the only module
+  that sees the C ABI; `src/frontends/{java,clojure}.zig` translate parse nodes
+  into shared-core assertions; `src/root.zig` assembles them as `Index`;
+  `src/main.zig` is a developer-only inspection command whose output is not a
+  contract. `zig build test-core` builds and runs the core alone, and passes with
+  `-Dgrammars-dir=/nonexistent`, which is the mechanical proof that the core does
+  not depend on a parser.
+- How the model holds the constitutional distinctions. Entity ids are allocated
+  by the graph and never derived from a range; ranges are `SourceEvidence` only.
+  Every assertion carries a producer and a `Resolution` of `fact`, `unresolved`,
+  or `approximate`, and construction rejects an unresolved target presented as a
+  fact as well as a resolved target claiming its target is missing. `calls`
+  specializes `references`: one occurrence is recorded once and answers a
+  reference query once. Language vocabulary stays in `ExtensionPayload`
+  (`java.construct`, `clojure.form`); no Clojure or Java construct became a
+  shared-core kind. `Graph` is mutable and `Snapshot` is the immutable published
+  state a consumer observes; a snapshot taken before an edit keeps observing that
+  state.
+- Reconciliation is the only write path, on a first build and on every edit
+  alike, so incrementality cannot quietly stop being exercised. Correspondence
+  comes from `IdentityEvidence` (scope, language, role, name, signature,
+  containment) and never from a frontend identifier or a position. A body edit
+  preserves ids; a rename produces a `lost` identity event naming its replacement
+  plus an unresolved identity-correspondence assertion, never a silent delete and
+  create.
+- Degradation stays distinguishable: `analysis_unavailable` (parser could not
+  run, previous state left in place), `analysis_failed` (source does not parse),
+  `unsupported_construct` (outside the frontend's declared coverage, such as a
+  Java field), and `confirmed_absence` (parsed, covered, nothing there).
+- Build prerequisites are local files, not services: pinned grammar sources from
+  `./scripts/setup-tree-sitter-grammars.sh` and a tree-sitter runtime providing
+  `tree_sitter/api.h` and `libtree-sitter.a`. `build.zig.zon` declares no
+  dependencies; nothing is fetched at build or index time. A missing prerequisite
+  fails `zig build` with a message naming the script and both override flags
+  (`-Dgrammars-dir=`, `-Dtree-sitter-prefix=`).
 - Git-hygiene scripts under `scripts/` and `scripts/git-hooks/` enforce
   attribution policy, memory freshness, and the constitution freeze seal.
   `.github/workflows/agent-attribution.yml` enforces attribution policy in CI.
@@ -109,12 +159,20 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## What Does Not Exist Yet
 
-- No graph implementation, test suite, build/dependency manifest, or source
-  layout.
-- No `contracts/` schemas, runtime mirrors, or executable conformance fixtures.
-- No accepted core roster, published semantic contract, or published capability
-  matrix. Language examples in documentation are not claims of implemented
-  support.
+- No persistence. The graph is in memory and is rebuilt from source on every
+  process start.
+- No public surface: no MCP, HTTP, gRPC, CLI contract, `contracts/` schemas, or
+  runtime mirrors. `semidx-dev` is a developer inspection command and nothing
+  asserts against its output.
+- No repository-scale ingestion: no source discovery, no cross-unit assertions,
+  no invalidation across units, no file watching, no concurrency.
+- No executable conformance suite and no capability matrix. The fixture evidence
+  is scoped to two small files per language.
+- No accepted core roster and no published semantic contract. `CORE.md`
+  candidates are unchanged: the slice deliberately admitted none, and exercising
+  a candidate is not admission evidence. Java and Clojure fixture coverage is not
+  a claim of supported languages.
+- No vectors, embeddings, RAG, or retrieval of any kind.
 
 ## Active Constraints And Known Gaps
 
@@ -151,9 +209,16 @@ why. This is not a changelog of removed implementation; see `git log`.
   `ARCHITECTURE_RATIONALE.md`, `CONFORMANCE.md`, `CORE.md`, `SPEC.md`,
   `GLOSSARY.md`, the root entry points, `docs/agent-policy/`, `scripts/`, and the
   working-document directories.
-- No runtime conformance is claimed. The specifications describe future checks;
-  the current verification is documentation consistency, references, and diff
-  hygiene.
+- No runtime conformance is claimed as a gate. `CONFORMANCE.md` now records which
+  of its five first-slice properties the implementation supplies evidence for;
+  none of its scenario families is adopted as an executable check.
+- Known implementation limitations, in full, are in the progress log's Residual
+  Risk section. The load-bearing ones: both frontends resolve by name within one
+  source unit, with no imports, inheritance, overloads, macros, or local
+  bindings; a rename and a file rename are both identity loss because the scope
+  is the unit path; interned strings of removed entities are not reclaimed until
+  the graph is released; and a `Snapshot` borrows strings from its graph, so it
+  must be released first — documented, not enforced by the type.
 - The constitution's §1 boundary is now stated once and consistently across
   `CONFORMANCE.md`, `GLOSSARY.md`, and `README.md`: approximate and text-derived
   mechanisms discover, rank, and render; only the graph establishes a program
@@ -161,18 +226,18 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## Near-Term Priorities
 
-- Execute the active first-slice plan in
-  `docs/plans/001_zig_vertical_slice.md`, starting with the Zig scaffold and
-  dependency probe. Nothing in the document set contradicts itself any more;
-  what remains open for this slice is implementation evidence and any blockers
-  discovered during Stage 1, not more pre-planning text.
-- Prove or revise the planned Zig build, dependency management, source layout,
-  verification commands, editing tools, and service requirements under the
-  local-operation constraint.
-- Resolve candidate admission dependencies in `CORE.md`, choose initial
-  coverage, and supply conformance evidence. Complete the dependent requirements
-  and public contracts through `SPEC.md` before publication or an execution
-  plan that relies on them.
+- Decide whether the slice's fixture evidence supports admitting any `CORE.md`
+  candidate. The plan forbade admitting one as part of the implementation, so
+  that question is open and the `SPEC.md` admission criteria still apply in full.
+- Settle storage and snapshot representation, which `SPEC.md` still lists as
+  unspecified. The current `Snapshot` is a value that borrows from a live graph;
+  persistence would change that contract, and so would a long-running process.
+- Take the implementation to repository scale: source discovery, a source-unit
+  registry that survives renames, cross-unit assertions, and invalidation of the
+  units an edit actually affects. The slice reconciles one unit at a time and has
+  no cross-unit assertions to invalidate.
+- Deepen frontend coverage only against stated risk, and report coverage through
+  a capability matrix rather than by widening the fixtures quietly.
 - `scripts/git-hooks/pre-push` still carries an inert block that refreshes
   `docs/code-context.md` through a Clojure alias when `deps.edn` exists. Both
   files went with the removed implementation, so the block never runs; remove it

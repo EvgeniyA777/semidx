@@ -1,13 +1,18 @@
 ---
 title: "Zig semantic graph vertical slice"
 doc_type: "plan"
-lifecycle: "active"
-status: "planned"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-13"
 ---
 
 # 001: Zig Semantic Graph Vertical Slice
+
+**Executed and closed on 2026-09-13.** Every stage below is implemented and
+verified; the outcomes, evidence, limitations, and residual risk are in
+[docs/reports/001_zig_vertical_slice_progress.md](../reports/001_zig_vertical_slice_progress.md).
+This document is kept as the record of what was planned, not as a work queue.
 
 ## Goal
 
