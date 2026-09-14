@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-Stages 1 and 2 are complete. Stage 3 is next.
+Stages 1 to 3 are complete. Stage 4 is next.
 
 ## Stage Log
 
@@ -23,8 +23,8 @@ Stages 1 and 2 are complete. Stage 3 is next.
 | Plan creation | Completed | Created [ADR 004](../adr/004_allow_java_same_package_type_resolution.md) and [plan 003](../plans/003_java_package_type_resolution.md). Applied the Plan Readiness Gate; result: ready for execution. |
 | Stage 1: Context and external target contract | Completed | `DraftTarget.external` names a graph-established definition together with its provider unit. Integration checks every external target before touching the graph. A stale claim may outlive a withdrawn cross-unit target; a current one may not. |
 | Stage 2: Java package binding context | Completed | The analyzer builds a per-package binding table from current Java class facts and hands it to the Java frontend; duplicate names arrive as ambiguous. The frontend does not use it yet. |
-| Stage 3: Java cross-unit type resolution | Not started | Next. |
-| Stage 4: Package export invalidation | Not started | Blocked by Stage 3. |
+| Stage 3: Java cross-unit type resolution | Completed | A simple type name in an explicit package resolves to the one current top-level class another unit declares in that package, as a `REFERENCES` fact with a dependency on the provider. Every other case stays unresolved with its reason. The repository-scale fixture expectation moved to Stage 4 (see below). |
+| Stage 4: Package export invalidation | Not started | Next. |
 | Stage 5: Documentation, review, and closure | Not started | Closure stage after implementation. |
 
 ## Plan Readiness Gate
@@ -108,6 +108,47 @@ Verification:
 | --- | --- |
 | `zig build test --summary all` | 131/131 passed (4 new frontend tests). |
 
+## Stage 3: Java Cross-Unit Type Resolution
+
+Changed files: `src/frontends/java.zig`, `tests/vertical_slice_test.zig`.
+
+Decisions taken inside the plan's boundary:
+
+- Resolution order for a field type or method return type: a class declared in
+  the unit stays a local fact, exactly as before. Otherwise the name must be a
+  `type_identifier` in a unit with an explicit package, and the frontend must
+  rule out every Java scope that takes precedence over a same-package type
+  (JLS 6.4.1): a type parameter of the enclosing method or class, a member type
+  declared in the enclosing class, a member type the class may inherit (any
+  `extends` or `implements` clause), a single-type or single static import of
+  that simple name, and a top-level interface, enum, record, or annotation type
+  of that name in the unit. Wildcard imports and `java.lang` rank below the
+  package and do not block. If one of these cannot be ruled out, the reference
+  stays unresolved with an explanation naming it. This is the plan's stop
+  condition applied: without these checks the producer could not distinguish
+  scoping from a string match.
+- A unique binding becomes a `DraftTarget.external` fact; an ambiguous one is
+  unresolved and names the count; a missing one is unresolved and names the
+  package, which covers both "declared nowhere" and "declared in another
+  package" without looking at other packages.
+- One dependency is declared per provider unit, however many references read
+  it. Unresolved names declare nothing; Stage 4's package invalidation is what
+  keeps them current.
+- The Java capabilities `coverage_note` states the new rule and its exclusions.
+
+Deviation from the plan's Stage 3 DoD: the repository-scale Java `Helper`
+expectation could not flip in this stage. Discovery analyzes
+`java/demo/Greeter.java` before `java/demo/Helper.java`, so at the time
+`Greeter` is read no `Helper` fact exists; only Stage 4's package-export
+invalidation reanalyzes it. The fixture test is therefore updated in Stage 4.
+Stage 3's own acceptance is proved with units added provider-first.
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `zig build test --summary all` | 134/134 passed (3 new integration tests); the repository-scale test still passes with its pre-Stage-4 expectation, confirming the ordering analysis above. |
+
 ## Risk Matrix
 
 | Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
@@ -117,6 +158,9 @@ Verification:
 | Publication never hands out a dangling current fact | Provider removal breaks publish or leaks | Unit (reconcile/graph) | `checkInvariants` | Stale claim tolerated; current claim refused | `only a stale claim may outlive ...`, `a current claim naming a withdrawn definition is refused at publication` |
 | Package context is language scoping, not name matching | Other package, default package, or stale class offered as a candidate | Integration (analyzer + parser) | `Analyzer.javaContext` | Other package, default package, nested package, self, stale provider, annotated package | `a java context leaves out other packages, ...` |
 | Ambiguity is never resolved silently | One duplicate picked | Integration | `Packages.context` | Two providers of one name | `a class name declared twice in a package reaches the context as ambiguous` |
+| Same-package names become facts only under ADR 004 | Name matching sneaks back in | Integration (Index) | `java.resolveType` | Qualified, other package, missing, default package, ambiguous, class and method type parameter, member type, supertypes, import, non-class type | `java type names outside the same-package rule stay unresolved and say why` |
+| Same-unit behavior preserved | Local class displaced by a package binding | Integration | `java.resolveType` | Same name in unit and package | `a type declared in the unit still resolves locally ...` |
+| Cross-unit fact attributable, dependency recorded, roster unchanged | Fact without dependency or with a new entity kind | Integration | Snapshot + `graph.dependencies` | — | `a java type name resolves to the one class its package declares in another unit` |
 
 ## Verification History
 
@@ -132,6 +176,6 @@ Documentation-only planning checks run during plan creation:
 ## Next Handoff
 
 Continue with
-[Stage 3](../plans/003_java_package_type_resolution.md#stage-3-java-cross-unit-type-resolution).
+[Stage 4](../plans/003_java_package_type_resolution.md#stage-4-package-export-invalidation).
 Semantic Code Indexing (semidx MCP) failed to connect in the implementing
 session (connection timeout), so code was located by targeted direct reads.

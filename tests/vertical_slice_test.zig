@@ -1263,6 +1263,178 @@ test "the repository-scale fixtures keep cross-unit references unresolved" {
     try testing.expect(snapshot.findDefinition("clojure/demo/helper.clj", "decorate") != null);
 }
 
+// -- Plan 003: Java same-package type resolution ------------------------------
+
+fn referenceFrom(
+    snapshot: *const semidx.Snapshot,
+    source: model.EntityId,
+    designator: []const u8,
+) !model.Assertion {
+    const found = snapshot.firstRelationship(.{
+        .kind = .references,
+        .source = source,
+        .designator = designator,
+    }) orelse {
+        std.debug.print("no reference to `{s}` was recorded\n", .{designator});
+        return error.TestExpectedReference;
+    };
+    try testing.expectEqual(model.ResolutionCategory.unresolved, found.resolution.category());
+    return found;
+}
+
+fn expectExplanation(assertion: model.Assertion, fragment: []const u8) !void {
+    const explanation = assertion.resolution.unresolved.explanation;
+    if (std.mem.indexOf(u8, explanation, fragment) == null) {
+        std.debug.print("explanation `{s}` does not mention `{s}`\n", .{ explanation, fragment });
+        return error.TestUnexpectedExplanation;
+    }
+}
+
+test "a java type name resolves to the one class its package declares in another unit" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    const helper = try index.addUnit("demo/Helper.java", .java, "package demo;\n\nclass Helper {}\n");
+    const greeter = try index.addUnit(
+        "demo/Greeter.java",
+        .java,
+        "package demo;\n\nclass Greeter {\n    Helper helper;\n    Helper make() { return null; }\n}\n",
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    const helper_class = snapshot.findDefinition("demo/Helper.java", "Helper").?;
+    const greeter_class = snapshot.findDefinition("demo/Greeter.java", "Greeter").?;
+    const make = snapshot.findDefinition("demo/Greeter.java", "make").?;
+
+    // Both the field type and the return type are facts about the entity the
+    // other unit introduced, not about a copy or a name.
+    for ([_]model.EntityId{ greeter_class.id, make.id }) |source| {
+        const reference = snapshot.firstRelationship(.{
+            .kind = .references,
+            .source = source,
+            .target = helper_class.id,
+        }).?;
+        try testing.expectEqual(model.ResolutionCategory.fact, reference.resolution.category());
+        try testing.expectEqualStrings(semidx.frontends.java.capabilities.producer.name, reference.producer.name);
+        try testing.expectEqual(greeter, reference.evidence.?.unit);
+    }
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .designator = "Helper" }));
+
+    // The dependent says what it read, once, and nothing else declares anything.
+    try testing.expectEqual(@as(usize, 1), index.graph.dependencies.count());
+    const declared = index.graph.dependencies.declarations.items[0];
+    try testing.expectEqual(greeter, declared.dependent);
+    try testing.expectEqual(helper, declared.provider);
+
+    // No approximate assertion, and no entity that is not a repository, a file,
+    // or a definition: the package stayed Java vocabulary.
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+    try testing.expectEqual(
+        snapshot.entities.len,
+        snapshot.countEntities(.{ .kind = .repository }) +
+            snapshot.countEntities(.{ .kind = .file }) +
+            snapshot.countEntities(.{ .kind = .definition }),
+    );
+}
+
+test "java type names outside the same-package rule stay unresolved and say why" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/Helper.java", .java, "package demo;\nclass Helper {}\n");
+    _ = try index.addUnit("demo/T.java", .java, "package demo;\nclass T {}\n");
+    _ = try index.addUnit("demo/Inner.java", .java, "package demo;\nclass Inner {}\n");
+    _ = try index.addUnit("demo/Imported.java", .java, "package demo;\nclass Imported {}\n");
+    _ = try index.addUnit("demo/Shape.java", .java, "package demo;\nclass Shape {}\n");
+    _ = try index.addUnit("one/Twin.java", .java, "package demo;\nclass Twin {}\n");
+    _ = try index.addUnit("two/Twin.java", .java, "package demo;\nclass Twin {}\n");
+    _ = try index.addUnit("other/Elsewhere.java", .java, "package other;\nclass Elsewhere {}\n");
+    _ = try index.addUnit("Loose.java", .java, "class Loose {}\n");
+
+    const greeter = try index.addUnit("demo/Greeter.java", .java,
+        \\package demo;
+        \\
+        \\import other.Imported;
+        \\
+        \\interface Shape {}
+        \\
+        \\class Greeter<T> {
+        \\    Helper helper;
+        \\    other.Elsewhere qualified;
+        \\    Elsewhere elsewhere;
+        \\    Missing missing;
+        \\    Twin twin;
+        \\    T typed;
+        \\    Inner inner;
+        \\    Imported imported;
+        \\    Shape shape;
+        \\    Loose loose;
+        \\
+        \\    class Inner {}
+        \\
+        \\    <Helper> Helper shadowed() { return null; }
+        \\}
+        \\
+    );
+    _ = try index.addUnit("DefaultUser.java", .java, "class DefaultUser { Loose loose; }\n");
+    _ = try index.addUnit("demo/Child.java", .java, "package demo;\nclass Child extends Base { Helper helper; }\n");
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    const class = snapshot.findDefinition("demo/Greeter.java", "Greeter").?;
+    const shadowed = snapshot.findDefinition("demo/Greeter.java", "shadowed").?;
+    const default_user = snapshot.findDefinition("DefaultUser.java", "DefaultUser").?;
+    const child = snapshot.findDefinition("demo/Child.java", "Child").?;
+
+    // The one name the rule covers resolves.
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = class.id,
+        .target = snapshot.findDefinition("demo/Helper.java", "Helper").?.id,
+        .resolution = .fact,
+    }));
+
+    try expectExplanation(try referenceFrom(&snapshot, class.id, "other.Elsewhere"), "qualified");
+    // Declared, but in another package: not a candidate, and not matched.
+    try expectExplanation(try referenceFrom(&snapshot, class.id, "Elsewhere"), "package `demo`");
+    try expectExplanation(try referenceFrom(&snapshot, class.id, "Missing"), "package `demo`");
+    try expectExplanation(try referenceFrom(&snapshot, class.id, "Loose"), "package `demo`");
+    try expectExplanation(try referenceFrom(&snapshot, class.id, "Twin"), "ambiguous");
+    try expectExplanation(try referenceFrom(&snapshot, class.id, "T"), "type parameter of the enclosing class");
+    try expectExplanation(try referenceFrom(&snapshot, class.id, "Inner"), "member type");
+    try expectExplanation(try referenceFrom(&snapshot, class.id, "Imported"), "import");
+    try expectExplanation(try referenceFrom(&snapshot, class.id, "Shape"), "non-class type");
+    try expectExplanation(try referenceFrom(&snapshot, shadowed.id, "Helper"), "type parameter of the enclosing method");
+    try expectExplanation(try referenceFrom(&snapshot, default_user.id, "Loose"), "package declaration");
+    try expectExplanation(try referenceFrom(&snapshot, child.id, "Helper"), "supertypes");
+
+    // Exactly one dependency: the unit that resolved something, on the unit it
+    // resolved it to. Ambiguous and shadowed names read nothing they rely on.
+    try testing.expectEqual(@as(usize, 1), index.graph.dependencies.count());
+    try testing.expectEqual(greeter, index.graph.dependencies.declarations.items[0].dependent);
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "a type declared in the unit still resolves locally when its package declares it elsewhere" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/Helper.java", .java, "package demo;\nclass Helper {}\n");
+    _ = try index.addUnit("demo/Greeter.java", .java, "package demo;\nclass Greeter { Helper helper; }\nclass Helper {}\n");
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    const class = snapshot.findDefinition("demo/Greeter.java", "Greeter").?;
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = class.id,
+        .target = snapshot.findDefinition("demo/Greeter.java", "Helper").?.id,
+        .resolution = .fact,
+    }));
+    try testing.expectEqual(@as(usize, 0), index.graph.dependencies.count());
+}
+
 test "a snapshot taken before an edit keeps observing the state it was published from" {
     var fixture = try Fixture.init(testing.allocator);
     defer fixture.deinit();

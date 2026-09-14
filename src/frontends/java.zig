@@ -24,7 +24,11 @@ pub const capabilities: contract.Capabilities = .{
     .entity_roles = &.{ "class", "method" },
     .relationship_kinds = &.{ .defines, .references, .calls },
     .coverage_note = "top-level classes, their methods, method return types, " ++
-        "field types, and invocations inside method bodies",
+        "field types, and invocations inside method bodies; a simple type name " ++
+        "not declared in the unit resolves to the one current top-level class " ++
+        "another unit declares in the same explicit package, unless a type " ++
+        "parameter, member type, supertype, import, or non-class type could " ++
+        "give the name another meaning",
 };
 
 /// Guards against unbounded recursion on pathological input. Exceeding it is
@@ -139,7 +143,6 @@ pub fn analyze(
     tree: ts.Tree,
     context: Context,
 ) !void {
-    _ = context;
     const source = input.unit.bytes;
     const root = tree.root();
     if (root.hasError()) {
@@ -161,6 +164,13 @@ pub fn analyze(
 
     const package = (try declaredPackage(builder.allocator(), root, source)) orelse "";
 
+    // Names something other than this unit's classes may give a meaning to,
+    // before the same package's other units are consulted.
+    var imported: std.ArrayList([]const u8) = .empty;
+    defer imported.deinit(gpa);
+    var other_types: std.ArrayList([]const u8) = .empty;
+    defer other_types.deinit(gpa);
+
     // Pass 1: definitions. A relationship can only be expressed once every
     // definition in the unit has a batch-local index.
     var top_level = root.namedChildren();
@@ -168,6 +178,13 @@ pub fn analyze(
         const kind = node.kind();
 
         if (std.mem.eql(u8, kind, "package_declaration")) continue;
+        if (std.mem.eql(u8, kind, "import_declaration")) {
+            if (importedName(node, source)) |name| try imported.append(gpa, name);
+        } else if (isTypeDeclaration(kind)) {
+            if (node.childByFieldName("name")) |name_node| {
+                if (!std.mem.eql(u8, kind, "class_declaration")) try other_types.append(gpa, name_node.text(source));
+            }
+        }
         if (!std.mem.eql(u8, kind, "class_declaration")) {
             try builder.addDiagnostic(.unsupported_construct, try builder.print(
                 "`{s}` at the top level is outside this frontend's coverage",
@@ -272,6 +289,14 @@ pub fn analyze(
         );
     }
 
+    const unit_scope: UnitScope = .{
+        .package = package,
+        .classes = classes.items,
+        .imported = imported.items,
+        .other_types = other_types.items,
+        .context = context,
+    };
+
     // Pass 2: relationships.
     for (classes.items) |class| {
         try builder.addRelationship(.{
@@ -289,7 +314,11 @@ pub fn analyze(
         while (members.next()) |member| {
             if (!std.mem.eql(u8, member.kind(), "field_declaration")) continue;
             const type_node = member.childByFieldName("type") orelse continue;
-            try emitTypeReference(builder, source, class.index, type_node, classes.items);
+            try emitTypeReference(builder, source, class.index, type_node, .{
+                .unit = unit_scope,
+                .class = class,
+                .method = null,
+            });
         }
     }
 
@@ -305,7 +334,11 @@ pub fn analyze(
         });
 
         if (method.node.childByFieldName("type")) |type_node| {
-            try emitTypeReference(builder, source, method.index, type_node, classes.items);
+            try emitTypeReference(builder, source, method.index, type_node, .{
+                .unit = unit_scope,
+                .class = classByIndex(classes.items, method.class_index),
+                .method = method.node,
+            });
         }
 
         const body = method.node.childByFieldName("body") orelse continue;
@@ -356,29 +389,221 @@ fn methodSignature(
     return builder.print("{s}({s})", .{ name, types.items });
 }
 
+/// What a type reference can be resolved against, for the whole unit.
+const UnitScope = struct {
+    /// Empty for the default package.
+    package: []const u8,
+    classes: []const ClassInfo,
+    /// Simple names brought in by single-type and single static imports.
+    imported: []const []const u8,
+    /// Top-level interfaces, enums, records, and annotation types. This
+    /// frontend does not cover them, but they still claim their names.
+    other_types: []const []const u8,
+    context: Context,
+};
+
+/// Where one type reference sits.
+const TypeScope = struct {
+    unit: UnitScope,
+    class: ClassInfo,
+    /// The method whose return type is being read, if any.
+    method: ?ts.Node,
+};
+
+const TypeResolution = struct {
+    target: contract.DraftTarget,
+    resolution: model.Resolution,
+    /// Set when the target was read from another unit.
+    provider: ?model.SourceUnitId = null,
+};
+
 fn emitTypeReference(
     builder: *contract.BatchBuilder,
     source: []const u8,
     from: u32,
     type_node: ts.Node,
-    classes: []const ClassInfo,
+    scope: TypeScope,
 ) !void {
     if (std.mem.eql(u8, type_node.kind(), "void_type")) return;
     const name = try builder.dupe(type_node.text(source));
-    const resolved = findClass(classes, name);
+    const resolved = try resolveType(builder, source, type_node, name, scope);
     try builder.addRelationship(.{
         .kind = .references,
         .source = .{ .entity = from },
-        .target = if (resolved) |index| .{ .local = index } else .{ .designator = name },
+        .target = resolved.target,
         .evidence = evidenceOf(builder, type_node, name),
-        .resolution = if (resolved != null)
-            .{ .fact = .{ .method = "type name declared in the analyzed source unit" } }
-        else
-            .{ .unresolved = .{
-                .missing = .target_entity,
-                .explanation = "the type is not declared in the analyzed source unit",
-            } },
+        .resolution = resolved.resolution,
     });
+    if (resolved.provider) |provider| try declareProvider(builder, provider);
+}
+
+/// Resolves a type name the way ADR 004 permits and no further.
+///
+/// A name declared in the unit is a local fact, as before. Otherwise only a
+/// simple name in a unit with an explicit package may reach another unit, and
+/// only after ruling out everything Java would let take precedence over a type
+/// of the same package: a type parameter, a member type (declared or
+/// inherited), a single-type or static import, and a type declared in this
+/// unit. When one of those cannot be ruled out the name stays unresolved and
+/// says why, because a same-package match that ignored them would be a string
+/// match wearing the face of a fact.
+fn resolveType(
+    builder: *contract.BatchBuilder,
+    source: []const u8,
+    type_node: ts.Node,
+    name: []const u8,
+    scope: TypeScope,
+) !TypeResolution {
+    const unit = scope.unit;
+    if (findClass(unit.classes, name)) |index| return .{
+        .target = .{ .local = index },
+        .resolution = .{ .fact = .{ .method = "type name declared in the analyzed source unit" } },
+    };
+
+    const kind = type_node.kind();
+    if (std.mem.eql(u8, kind, "scoped_type_identifier")) {
+        return unresolvedType(name, "a qualified type name is not resolved beyond the analyzed source unit");
+    }
+    if (!std.mem.eql(u8, kind, "type_identifier")) {
+        return unresolvedType(name, "the type is not declared in the analyzed source unit");
+    }
+    if (unit.package.len == 0) {
+        return unresolvedType(name, "the type is not declared in the analyzed source unit, " ++
+            "and a unit without a package declaration resolves nothing beyond itself");
+    }
+    if (scope.method) |method| {
+        if (declaresTypeParameter(method, source, name)) {
+            return unresolvedType(name, "the name is a type parameter of the enclosing method");
+        }
+    }
+    if (declaresTypeParameter(scope.class.node, source, name)) {
+        return unresolvedType(name, "the name is a type parameter of the enclosing class");
+    }
+    if (declaresMemberType(scope.class.body, source, name)) {
+        return unresolvedType(name, "the enclosing class declares a member type of this name, " ++
+            "which this frontend does not cover");
+    }
+    if (scope.class.node.childByFieldName("superclass") != null or
+        scope.class.node.childByFieldName("interfaces") != null)
+    {
+        return unresolvedType(name, "the enclosing class has supertypes, and a member type " ++
+            "it may inherit under this name is not resolved");
+    }
+    if (containsName(unit.imported, name)) {
+        return unresolvedType(name, "an import names this type, and imports are not resolved");
+    }
+    if (containsName(unit.other_types, name)) {
+        return unresolvedType(name, "the analyzed source unit declares a non-class type of this name, " ++
+            "which this frontend does not cover");
+    }
+
+    const binding = unit.context.lookup(unit.package, name) orelse
+        return unresolvedType(name, try builder.print(
+            "no current top-level class of this name is declared in package `{s}`; " ++
+                "imports and other packages are not resolved",
+            .{unit.package},
+        ));
+    return switch (binding) {
+        .unique => |target| .{
+            .target = .{ .external = target },
+            .resolution = .{ .fact = .{
+                .method = "the only current top-level class of this simple name in the same explicit package",
+            } },
+            .provider = target.provider,
+        },
+        .ambiguous => |count| unresolvedType(name, try builder.print(
+            "{d} current top-level classes of this name are declared in package `{s}`, " ++
+                "so the name is ambiguous",
+            .{ count, unit.package },
+        )),
+    };
+}
+
+fn unresolvedType(name: []const u8, explanation: []const u8) TypeResolution {
+    return .{
+        .target = .{ .designator = name },
+        .resolution = .{ .unresolved = .{ .missing = .target_entity, .explanation = explanation } },
+    };
+}
+
+fn declareProvider(builder: *contract.BatchBuilder, provider: model.SourceUnitId) !void {
+    for (builder.dependencies.items) |declared| {
+        if (declared.provider == provider) return;
+    }
+    try builder.addDependency(
+        provider,
+        "resolved a simple type name to a top-level class declared in the same Java package",
+    );
+}
+
+fn isTypeDeclaration(kind: []const u8) bool {
+    const kinds = [_][]const u8{
+        "class_declaration",
+        "interface_declaration",
+        "enum_declaration",
+        "record_declaration",
+        "annotation_type_declaration",
+    };
+    for (kinds) |candidate| {
+        if (std.mem.eql(u8, kind, candidate)) return true;
+    }
+    return false;
+}
+
+/// The simple name a non-wildcard import brings into scope. Static imports
+/// count: a single static import can import a member type.
+fn importedName(node: ts.Node, source: []const u8) ?[]const u8 {
+    var name: ?ts.Node = null;
+    var children = node.namedChildren();
+    while (children.next()) |child| {
+        const kind = child.kind();
+        if (std.mem.eql(u8, kind, "asterisk")) return null;
+        if (isName(kind)) name = child;
+    }
+    const found = name orelse return null;
+    if (std.mem.eql(u8, found.kind(), "scoped_identifier")) {
+        const last = found.childByFieldName("name") orelse return null;
+        return last.text(source);
+    }
+    return found.text(source);
+}
+
+fn declaresTypeParameter(declaration: ts.Node, source: []const u8, name: []const u8) bool {
+    const parameters = declaration.childByFieldName("type_parameters") orelse return false;
+    var children = parameters.namedChildren();
+    while (children.next()) |parameter| {
+        var parts = parameter.namedChildren();
+        while (parts.next()) |part| {
+            if (!std.mem.eql(u8, part.kind(), "type_identifier")) continue;
+            if (std.mem.eql(u8, part.text(source), name)) return true;
+        }
+    }
+    return false;
+}
+
+fn declaresMemberType(body: ?ts.Node, source: []const u8, name: []const u8) bool {
+    const class_body = body orelse return false;
+    var members = class_body.namedChildren();
+    while (members.next()) |member| {
+        if (!isTypeDeclaration(member.kind())) continue;
+        const member_name = member.childByFieldName("name") orelse continue;
+        if (std.mem.eql(u8, member_name.text(source), name)) return true;
+    }
+    return false;
+}
+
+fn containsName(names: []const []const u8, name: []const u8) bool {
+    for (names) |candidate| {
+        if (std.mem.eql(u8, candidate, name)) return true;
+    }
+    return false;
+}
+
+fn classByIndex(classes: []const ClassInfo, index: u32) ClassInfo {
+    for (classes) |class| {
+        if (class.index == index) return class;
+    }
+    unreachable;
 }
 
 fn emitInvocations(
