@@ -121,6 +121,7 @@ the task:
 | Execute or prepare a staged implementation plan | `semidx-plan-delivery` |
 | Maintain a staged-plan progress log or handoff | `semidx-progress-log` |
 | Locate code, callers, tests, or blast radius | `semidx-code-exploration` |
+| Modify Zig implementation, build, tests, or frontend/core boundaries | `semidx-zig-implementation` |
 | Design risk-based verification coverage | `semidx-test-design` |
 | Review a diff, plan output, or verification coverage | `semidx-code-review` |
 | Commit, branch, push, or recover git state | `semidx-git-delivery` |

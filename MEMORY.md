@@ -67,7 +67,7 @@ why. This is not a changelog of removed implementation; see `git log`.
   now a kernel under an explicit 200-line budget stated in its first section: a
   rule needing more than a few lines lives in `docs/agent-policy/` or
   `.agents/skills/`, and `RULES.md` keeps one line pointing at it. It currently
-  runs 161 lines. Its Project Context section now records the real build
+  runs 162 lines. Its Project Context section now records the real build
   commands, the tree-sitter prerequisites, and what does and does not exist in
   the source tree.
 - `RULES.md`, `AGENTS.md`, and `CLAUDE.md` do not offer "documented and justified
