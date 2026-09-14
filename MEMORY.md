@@ -397,11 +397,12 @@ why. This is not a changelog of removed implementation; see `git log`.
 - Current open follow-ups are indexed in
   [docs/followups/README.md](docs/followups/README.md): Zig logical-negation
   calls, Zig empty-container grammar behavior, Java classpath boundaries, and
-  release discipline for the local MCP preview.
-- **Plan 004 is in progress: Stages 1–3 (the Zig frontend) are implemented and
+  release discipline plus hosted-client consent wording for the local MCP
+  preview.
+- **Plan 004 is complete: Stages 1–3 (the Zig frontend) are implemented and
   reviewed; Stage 3.5 fixed the review blocker; Stages 4–5 (the local MCP stdio
-  preview, its dogfood run, and its documentation) are implemented and await
-  review.** It onboards Zig as the next language
+  preview, its dogfood run, and its documentation) were accepted by final review.**
+  It onboards Zig as the next language
   frontend for dogfooding and then adds a local stdio MCP preview over published
   graph snapshots ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md),
   [plan 004](docs/plans/004_zig_frontend_and_mcp_preview.md),
@@ -465,6 +466,11 @@ why. This is not a changelog of removed implementation; see `git log`.
   the sessions, Claude Opus 5 for Stages 1–4, one-time network access for the
   grammar fetch, and reading the `2026-07-28` MCP specification rather than
   relying on model memory.
+  The final review accepted returning graph values to the launching local client
+  as non-blocking for the local preview, while tracking hosted-client onward
+  transmission and consent wording as
+  [follow-up 005](docs/followups/005_mcp_source_derived_consent_boundary.md)
+  before a preview release.
 - `scripts/git-hooks/pre-push` still carries an inert block that refreshes
   `docs/code-context.md` through a Clojure alias when `deps.edn` exists. Both
   files went with the removed implementation, so the block never runs; remove it

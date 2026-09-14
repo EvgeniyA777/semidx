@@ -1,9 +1,9 @@
 ---
 title: "Zig frontend and MCP preview progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-14"
 ---
 
@@ -14,11 +14,11 @@ Companion log for
 
 ## Current Status
 
-Session A (Stages 1–3, the Zig frontend) is complete and reviewed, and Stage
-3.5 fixed the review blocker. Session B implemented Stage 4 (the local MCP
-stdio preview) and Stage 5 (dogfood, documentation, and handoff). Stages 4–5
-await review; the plan is not closed until that review is recorded here. See
-[Session B Handoff](#session-b-handoff).
+Plan 004 is complete. Session A (Stages 1–3, the Zig frontend) was reviewed,
+Stage 3.5 fixed the review blocker, and Session B implemented Stages 4–5. The
+final review of Stages 4–5 found no blocking defects for the local MCP preview
+boundary; the remaining source-derived-data consent question is tracked as
+[follow-up 005](../followups/005_mcp_source_derived_consent_boundary.md).
 
 ## Stage Log
 
@@ -28,8 +28,8 @@ await review; the plan is not closed until that review is recorded here. See
 | Stage 2: Zig definition facts | Completed (`575bf92`) | Named top-level `fn` declarations and top-level `const` declarations bound directly to a struct/enum/union/opaque expression are current `definition` facts with `DEFINES` from the file. Container members and every other declaration are reported as unsupported. A body edit preserves identity; a rename is identity loss. |
 | Stage 3: Zig same-unit simple calls | Completed (`50d68c4`) | Every call expression in a covered function body is recorded as `CALLS`. A bare callee is a fact only when the unit's top level declares that name exactly once, as a covered function, and no parameter, local binding, capture, or `usingnamespace` could give it another meaning; every other callee stays unresolved with its reason. No `REFERENCES` are emitted. |
 | Stage 3.5: Graph-owned relationship designators | Completed (`211a529`) | Fixes the review blocker: `Graph.addAssertion` now interns an unresolved target's designator, so no relationship keeps a slice of the frontend batch that produced it. `zig build run -- src` completes. |
-| Stage 4: Local MCP stdio preview | Implemented (`effbbb7`), awaiting review | `semidx-mcp` scans a root, publishes a snapshot, and serves six graph-backed tools over stdio to both `2026-07-28` (per-request `_meta`, `server/discover`) and `2025-06-18` (`initialize`) clients through one dispatcher. Evidence text is off by default; refresh swaps in a fully published snapshot or keeps the old one. |
-| Stage 5: Dogfood, documentation, and handoff | Implemented, awaiting review | `docs/mcp/local_preview.md` documents building, starting, client configuration, both protocol versions, tools, result fields, source-text rules, errors, and limits; `README.md`, `SPEC.md`, `MEMORY.md`, and the roadmap describe what now exists. A client following the document found Zig definitions in `src/` under both protocol versions. |
+| Stage 4: Local MCP stdio preview | Completed (`effbbb7`) | `semidx-mcp` scans a root, publishes a snapshot, and serves six graph-backed tools over stdio to both `2026-07-28` (per-request `_meta`, `server/discover`) and `2025-06-18` (`initialize`) clients through one dispatcher. Evidence text is off by default; refresh swaps in a fully published snapshot or keeps the old one. |
+| Stage 5: Dogfood, documentation, and handoff | Completed (`cf04f95`) | `docs/mcp/local_preview.md` documents building, starting, client configuration, both protocol versions, tools, result fields, source-text rules, errors, and limits; `README.md`, `SPEC.md`, `MEMORY.md`, and the roadmap describe what now exists. A client following the document found Zig definitions in `src/` under both protocol versions. |
 
 ## Plan Readiness Gate
 
@@ -576,6 +576,55 @@ Verification:
 No code changed in Stage 5, so the build and test lanes recorded for Stage 4
 stand; they were not rerun.
 
+## Final Review
+
+Reviewer: Codex, 2026-09-14.
+
+Reviewed scope: Stage 4 commit `effbbb7` and Stage 5 commit `cf04f95`, with the
+already-reviewed Zig frontend and Stage 3.5 blocker fix as context.
+
+Semantic Code Indexing (semidx MCP) was not available in the review environment
+through tool discovery, so the review used the policy fallback: targeted source
+reads plus runtime checks. The review also re-read `RULES.md`,
+`ARCHITECTURE_CONSTITUTION.md`, ADR 005, this plan, the progress log, and the
+official MCP `2026-07-28` markdown pages for versioning, discovery, stdio, tools,
+and schema fields.
+
+Findings:
+
+- **No blocking defects found for the local MCP preview boundary.** The MCP layer
+  reads published snapshots and renders graph values; it does not establish,
+  resolve, or relabel assertions. Tool results preserve resolution, freshness,
+  producer, diagnostics, snapshot revision, and `semantic_contract_version: null`.
+  stdout/stderr separation, newline stdio framing, modern per-request `_meta`,
+  legacy initialization, and structured tool results match the plan's preview
+  requirements.
+- **The source-derived-data question is accepted as non-blocking for this local
+  preview and tracked before release.** `semidx-mcp` itself is local stdio and
+  performs no outbound transmission; source text remains disabled by default.
+  Paths, names, designators, ranges, and diagnostics are graph values returned to
+  the launching client, but hosted-client onward transmission still needs an
+  explicit product consent story before a preview release. Tracked as
+  [follow-up 005](../followups/005_mcp_source_derived_consent_boundary.md).
+
+Review verification:
+
+| Command | Result |
+| --- | --- |
+| `zig build test-mcp --summary all` | Pass, 14/14 |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | Pass, 87/87 |
+| `zig build test --summary all` | Pass, 179/179 |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build run -- src` | Exit 0, full output consumed: 1487 lines, no non-printable bytes |
+| `./scripts/check-agent-attribution.sh --all` | Pass |
+| `./scripts/check-memory-freshness.sh` | Pass |
+| `git diff --check` | Pass |
+| `zig build` plus two real `semidx-mcp --root .` modern requests | Exit 0, two JSON-RPC stdout lines, stderr startup and exit lines only |
+
+Plan 004 is accepted and closed. Future work should start from the residual risks
+above and the open follow-ups, especially release discipline, hosted-client
+consent wording, and Zig frontend coverage gaps.
+
 ## Session B Handoff
 
 Commits: Stage 4 `effbbb7`; Stage 5 is the commit that adds this section.
@@ -610,6 +659,4 @@ Open question for review:
 
 Residual risk: see [Stage 4 Residual Risk](#residual-risk). Stage 5 adds none.
 
-Next: review Stages 4–5 and record the result here; on acceptance mark the plan
-and this log completed and historical. Follow-up 004 (release discipline) is
-the planned next input once the review is accepted.
+This handoff was consumed by the final review above.
