@@ -549,7 +549,7 @@ test "an edit whose analysis fails stops answering current-state queries" {
     }));
     const file = after.findEntity(.{ .kind = .file }).?;
     try testing.expectEqual(@as(usize, 1), after.countRelationships(.{
-        .kind = .defines,
+        .kind = .contains,
         .target = file.id,
     }));
 }

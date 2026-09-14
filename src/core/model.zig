@@ -108,7 +108,11 @@ pub const Resolution = union(ResolutionCategory) {
 };
 
 pub const RelationshipKind = enum {
-    /// Direct containment: a container introduces a definition.
+    /// Direct containment: one source or program container immediately contains
+    /// another entity. This does not by itself introduce a program definition.
+    contains,
+    /// Definition introduction: a container directly introduces a program
+    /// definition.
     defines,
     /// One entity names or otherwise designates another.
     references,
@@ -121,7 +125,7 @@ pub const RelationshipKind = enum {
     pub fn satisfiesReferenceQuery(self: RelationshipKind) bool {
         return switch (self) {
             .references, .calls => true,
-            .defines => false,
+            .contains, .defines => false,
         };
     }
 };
@@ -489,9 +493,10 @@ test "an approximate assertion is neither a fact nor unresolved" {
     try testing.expect(!resolution.isFact());
 }
 
-test "calls answer a reference query and defines does not" {
+test "calls answer a reference query and containment does not" {
     try testing.expect(RelationshipKind.calls.satisfiesReferenceQuery());
     try testing.expect(RelationshipKind.references.satisfiesReferenceQuery());
+    try testing.expect(!RelationshipKind.contains.satisfiesReferenceQuery());
     try testing.expect(!RelationshipKind.defines.satisfiesReferenceQuery());
 }
 

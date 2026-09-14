@@ -18,6 +18,7 @@ pub const GraphError = error{
     UnknownEntity,
     RemovedEntity,
     UnresolvedContainment,
+    DefinitionIntroductionTargetMustBeDefinition,
     DuplicateSourceUnitPath,
     UnknownSourceUnit,
     DanglingAssertionEndpoint,
@@ -255,7 +256,7 @@ pub const Graph = struct {
             .{ .fact = .{ .method = "source unit presented to analysis" } },
         );
         _ = try self.addRelationship(
-            .{ .kind = .defines, .source = self.repository, .target = .{ .entity = record.entity } },
+            .{ .kind = .contains, .source = self.repository, .target = .{ .entity = record.entity } },
             ingestion,
             evidence,
             .{ .fact = .{ .method = "source unit belongs to the indexed source tree" } },
@@ -570,8 +571,13 @@ pub const Graph = struct {
                     .entity => |id| {
                         const target = self.entity(id) orelse return error.UnknownEntity;
                         if (!target.isLive()) return error.RemovedEntity;
+                        if (rel.kind == .defines and target.kind != .definition) {
+                            return error.DefinitionIntroductionTargetMustBeDefinition;
+                        }
                     },
-                    .designator => if (rel.kind == .defines) return error.UnresolvedContainment,
+                    .designator => if (rel.kind == .contains or rel.kind == .defines) {
+                        return error.UnresolvedContainment;
+                    },
                 }
             },
             .identity_correspondence => |corr| {
@@ -1030,6 +1036,14 @@ test "a graph is built and queried without any language frontend" {
     try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .repository }));
     try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .file }));
     try testing.expectEqual(@as(usize, 2), snapshot.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .source = graph.repository,
+        .kind = .contains,
+    }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{
+        .source = graph.repository,
+        .kind = .defines,
+    }));
     try testing.expectEqual(@as(usize, 1), snapshot.countUnresolvedAssertions());
     try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
 
@@ -1093,10 +1107,24 @@ test "containment cannot point at an unresolved designator" {
     const greet = try addDefinition(&graph, unit, "a/A.java", "greet", testRange(0, 5));
 
     try testing.expectError(error.UnresolvedContainment, graph.addRelationship(
-        .{ .kind = .defines, .source = greet, .target = .{ .designator = "somewhere" } },
+        .{ .kind = .contains, .source = greet, .target = .{ .designator = "somewhere" } },
         frontend,
         .{ .unit = unit, .range = testRange(0, 5), .text = "somewhere" },
         .{ .unresolved = .{ .missing = .container_entity, .explanation = "unknown container" } },
+    ));
+}
+
+test "definition introduction cannot target a source container" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
+    const file = graph.unit(unit).?.entity;
+
+    try testing.expectError(error.DefinitionIntroductionTargetMustBeDefinition, graph.addRelationship(
+        .{ .kind = .defines, .source = graph.repository, .target = .{ .entity = file } },
+        frontend,
+        .{ .unit = unit, .range = testRange(0, 5), .text = "a/A.java" },
+        .{ .fact = .{ .method = "invalid mixed containment claim" } },
     ));
 }
 
@@ -1193,7 +1221,7 @@ test "the source container's extent follows an edit" {
     const file_before = before.findEntity(.{ .kind = .file }).?;
     try testing.expectEqual(@as(u32, 11), file_before.evidence.?.range.end_byte);
     try testing.expectEqual(@as(u32, 11), before.firstRelationship(.{
-        .kind = .defines,
+        .kind = .contains,
         .target = file_before.id,
     }).?.evidence.?.range.end_byte);
 
@@ -1211,11 +1239,11 @@ test "the source container's extent follows an edit" {
     // What source ingestion claims about the unit moved with it, rather than
     // continuing to describe the previous contents.
     try testing.expectEqual(@as(usize, 1), after.countRelationships(.{
-        .kind = .defines,
+        .kind = .contains,
         .target = file_after.id,
     }));
     try testing.expectEqual(@as(u32, 26), after.firstRelationship(.{
-        .kind = .defines,
+        .kind = .contains,
         .target = file_after.id,
     }).?.evidence.?.range.end_byte);
 }

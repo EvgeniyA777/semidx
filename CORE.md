@@ -11,7 +11,9 @@ updated: "2026-09-14"
 
 The shared-core kinds and their admission assessments. The first admission
 review accepted an initial unversioned roster, recorded in
-[report 003](docs/reports/003_core_admission_review.md). That is not a
+[report 003](docs/reports/003_core_admission_review.md), and the
+definition/containment split admitted `CONTAINS` and `DEFINES`, recorded in
+[report 004](docs/reports/004_defines_contains_split.md). That is not a
 published semantic contract version, not a runtime support claim, and not an
 immutable API. Accepted definitions can be used by the implementation; publishing
 them to consumers still requires the lifecycle work in [SPEC.md](SPEC.md).
@@ -49,7 +51,8 @@ requirement.
 | `file` | Accepted | `repository` | Publication version, origin coverage, and coverage matrix |
 | `definition` | Accepted | None | Publication version, anonymous-construct coverage, and coverage matrix |
 | `module` | Blocked candidate | None | Common meaning and frontend coverage |
-| `DEFINES` | Blocked candidate | Any admitted container kind, admitted target kind | Resolve whether this is definition-introduction only or general direct containment, then provide matching fixtures |
+| `CONTAINS` | Accepted | Admitted entity kinds | Publication version, endpoint expansion rules, and coverage matrix |
+| `DEFINES` | Accepted | `CONTAINS`, `definition` | Publication version, endpoint expansion rules, and coverage matrix |
 | `REFERENCES` | Accepted | `definition` for the initial endpoint set | Publication version, endpoint expansion rules, and coverage matrix |
 | `CALLS` | Accepted | `definition`, `REFERENCES` | Publication version, dispatch coverage, and coverage matrix |
 | `IMPORTS` | Blocked candidate | `file`, `module` | Module admission and import semantics |
@@ -126,34 +129,46 @@ unresolved across namespaces, packages, and compilation units. Honest absence:
 no language construct and unavailable frontend coverage remain distinguishable.
 Subsidiarity: admission must show why extensions and optional mappings are
 insufficient. Common cost: frontend coverage assessments are pending. These gaps
-block `module` and `IMPORTS`. They are independent of the separate `DEFINES`
-admission question, which is about direct-containment meaning rather than module
-semantics.
+block `module` and `IMPORTS`. They are independent of the settled `CONTAINS` /
+`DEFINES` split, which is about direct containment and definition introduction
+rather than module semantics.
 
 ## Relationship Definitions
 
+### `CONTAINS`
+
+Relates a source or program container to an entity directly contained in it. It
+is direct containment, not transitive reachability, and it does not by itself
+assert that the target is a program definition. The initial admitted evidence is
+source ingestion asserting that a repository contains a file.
+
+**Admission result.** Accepted by
+[report 004](docs/reports/004_defines_contains_split.md). Adequacy: answers
+where source and program entities sit without forcing every contained entity to
+be a definition. Identical meaning: direct containment is the same source
+organization claim for Java and Clojure fixtures, and future program-containment
+uses must supply their own evidence. Honest absence: unknown containment remains
+unavailable or unresolved rather than invented. Subsidiarity: source-tree
+membership is a common graph question and cannot live in a language extension.
+Common cost: source ingestion supplies the initial repository-to-file evidence.
+
 ### `DEFINES`
 
-Relates a source or program container to an entity introduced directly within
-it. It is direct containment, not transitive reachability. Its container endpoint
-ranges over whichever container kinds are admitted. The current container
-candidates are `repository`, `file`, `definition`, and `module`; the admitted
-ones are `repository`, `file`, and `definition`.
+Relates a source or program container to a program definition introduced
+directly within it. It is definition introduction, not general containment and
+not transitive reachability. A repository containing a file is `CONTAINS`, not
+`DEFINES`, because a file is a source container rather than a program definition.
 
-**Admission result.** Not admitted. The original candidate text limited the
-target to `definition`, while the implementation also uses `DEFINES` for
-source-tree containment from `repository` to `file`. That may be the right common
-meaning, but accepting it requires deliberately choosing whether `DEFINES` means
-definition-introduction only or general direct containment across source
-containers and program entities. Admission awaits that decision and matching
-fixtures.
-
-**Admission assessment.** Adequacy: answers where an entity is introduced.
-Identical meaning: direct containment needs evidence without replacing language
-scope rules. Honest absence: unknown containment is unresolved or unavailable,
-not invented. Subsidiarity: common containment needs justification independent
-of language-specific organization. Common cost: frontends need containment
-evidence for declared coverage.
+**Admission result.** Accepted by
+[report 004](docs/reports/004_defines_contains_split.md). Adequacy: answers
+where a program definition is introduced. Identical meaning: the shared relation
+does not encode Java class membership, Clojure namespace forms, or language
+scope rules; those details remain in frontend extensions and evidence. Honest
+absence: an unsupported or unresolved introduction cannot be presented as a
+fact. Subsidiarity: consumers need the common question "which definitions are
+introduced directly by this container" without knowing the language family.
+Common cost: the current Java and Clojure frontends already supply direct
+introduction evidence for fixture-scoped definitions.
 
 ### `REFERENCES`
 
@@ -216,19 +231,16 @@ proposed availability relation remains an admission question.
 
 ## Remaining Admission Questions
 
-1. Decide whether `DEFINES` means definition-introduction only or general direct
-   containment across source containers and program entities. The current
-   implementation uses it for both, so the core definition must choose explicitly
-   before admission.
-2. Establish a common `module` meaning, or reject it. `IMPORTS` depends on the
+1. Establish a common `module` meaning, or reject it. `IMPORTS` depends on the
    outcome. Organization remains expressible in extensions either way.
-3. Establish whether textual inclusion satisfies the accepted import meaning.
+2. Establish whether textual inclusion satisfies the accepted import meaning.
    This blocks the relevant `IMPORTS` coverage until resolved, not unrelated
    ingestion or reference analysis.
-4. Publish an explicit semantic contract version and coverage matrix when a
+3. Publish an explicit semantic contract version and coverage matrix when a
    consumer-facing contract exists. The initial accepted roster is unversioned
    implementation guidance until then.
 
 The former container/entity question is settled in Defined Terms. The former
-call/reference overlap question is settled by the proposed occurrence-counting
-contract above; its physical encoding remains schema work.
+`DEFINES` ambiguity is settled by the `CONTAINS` / `DEFINES` split above. The
+former call/reference overlap question is settled by the proposed
+occurrence-counting contract above; its physical encoding remains schema work.

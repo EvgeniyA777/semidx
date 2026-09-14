@@ -76,8 +76,13 @@ test "the java fixture yields the expected entities and relationships" {
     try testing.expectEqualStrings("demo", greet.extension.get("java.package").?);
     try testing.expectEqualStrings("String", greet.extension.get("java.return_type").?);
 
-    // One file source container, established by source ingestion, defines the
-    // class; the class defines its methods.
+    // Source ingestion says the repository contains the file. The frontend says
+    // the file introduces the class, and the class introduces its methods.
+    const java_file = snapshot.findEntity(.{ .kind = .file, .scope = java_path }).?;
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .contains,
+        .target = java_file.id,
+    }));
     try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
         .kind = .defines,
         .target = greeter.id,
@@ -603,7 +608,7 @@ test "the source container's extent tracks the file it stands for" {
     );
     try testing.expectEqual(
         file_after.evidence.?.range.end_byte,
-        after.firstRelationship(.{ .kind = .defines, .target = file_after.id }).?
+        after.firstRelationship(.{ .kind = .contains, .target = file_after.id }).?
             .evidence.?.range.end_byte,
     );
 }
