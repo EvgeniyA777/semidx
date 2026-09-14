@@ -70,6 +70,7 @@ Common lanes include:
 | Full test lane | `zig build test` | Core plus the tree-sitter adapter, the language frontends, and the fixture and edit-history tests. |
 | Formatting | `zig fmt --check build.zig src tests` | Instant, and it catches a broken edit before a compile does. |
 | Runtime smoke | `zig build run -- <source files>` | Indexing and querying end to end with no service and no network. Its output is developer-only and nothing asserts against it. |
+| MCP preview | `zig build test-mcp` | The MCP preview's unit tests and a stdio smoke test that runs `semidx-mcp` as a subprocess and fails on any non-protocol stdout, trailing stdout, or non-zero exit. Also part of `zig build test`. |
 | Contract validation | No command. There is no public contract and no `contracts/` directory. | Record one here when a contract is published. |
 | Release gates | No command. Nothing is released. | Record one here when release tooling exists. |
 

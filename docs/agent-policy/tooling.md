@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-13"
+updated: "2026-09-14"
 ---
 
 # Tooling Policy
@@ -17,7 +17,9 @@ always-loaded summary and points here.
 The MCP sections below describe repository-development tooling available to
 agents today. The `semidx` MCP server they use is configured outside this
 repository: `.mcp.json` here declares no servers, and nothing in this repository
-builds, ships, or defines it.
+builds, ships, or defines it. The experimental `semidx-mcp` preview this
+repository builds ([ADR 005](../adr/005_add_zig_frontend_and_local_mcp_preview.md))
+is a different server; the sections below do not describe it.
 
 The tool names, wire shapes, and error codes below describe that tool as it
 currently behaves. They do not define or constrain the public API of the rebuilt

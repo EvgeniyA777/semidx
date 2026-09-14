@@ -67,7 +67,7 @@ why. This is not a changelog of removed implementation; see `git log`.
   now a kernel under an explicit 200-line budget stated in its first section: a
   rule needing more than a few lines lives in `docs/agent-policy/` or
   `.agents/skills/`, and `RULES.md` keeps one line pointing at it. It currently
-  runs 162 lines. Its Project Context section now records the real build
+  runs 168 lines. Its Project Context section now records the real build
   commands, the tree-sitter prerequisites, and what does and does not exist in
   the source tree.
 - `RULES.md`, `AGENTS.md`, and `CLAUDE.md` do not offer "documented and justified
@@ -278,9 +278,12 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 - No persistence. The graph is in memory and is rebuilt from source on every
   process start.
-- No public surface: no MCP, HTTP, gRPC, CLI contract, `contracts/` schemas, or
-  runtime mirrors. `semidx-dev` is a developer inspection command and nothing
-  asserts against its output.
+- No public contract surface: no HTTP, gRPC, CLI contract, `contracts/`
+  schemas, or runtime mirrors. `semidx-dev` is a developer inspection command
+  and nothing asserts against its output. `semidx-mcp` is an experimental local
+  stdio consumer ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md))
+  whose tool schemas may change; it publishes no semantic contract version and
+  has no resources, prompts, pagination, subscriptions, or file watching.
 - Cross-unit resolution beyond Java same-package top-level types: no Java
   imports, qualified names, nested classes, inheritance, classpath symbols, or
   interface/enum/record targets, and no Clojure namespace resolution. Those
@@ -394,8 +397,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   calls, Zig empty-container grammar behavior, Java classpath boundaries, and
   release discipline for the local MCP preview.
 - **Plan 004 is in progress: Stages 1–3 (the Zig frontend) are implemented and
-  reviewed; Stage 3.5 fixed the review blocker; Stages 4–5 (the MCP preview
-  and documentation) have not started.** It onboards Zig as the next language
+  reviewed; Stage 3.5 fixed the review blocker; Stage 4 (the local MCP stdio
+  preview) is implemented and awaits review; Stage 5 (documentation and
+  handoff) is next.** It onboards Zig as the next language
   frontend for dogfooding and then adds a local stdio MCP preview over published
   graph snapshots ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md),
   [plan 004](docs/plans/004_zig_frontend_and_mcp_preview.md),
@@ -425,6 +429,31 @@ why. This is not a changelog of removed implementation; see `git log`.
   dogfood run). The graph now interns it like every other assertion string, so
   a stored assertion borrows nothing from its producer; Stage 3.5 in report 004
   records the fix and its regression tests. Stage 4 was held until then.
+  **The MCP preview exists** (`src/mcp/`, executable `semidx-mcp`,
+  `zig build mcp -- --root <dir>`, `zig build test-mcp`). It scans the root at
+  startup, publishes one snapshot, and answers every tool call from the snapshot
+  published when the call arrives; `semidx_refresh` rescans, reconciles through
+  `Index.applyScan`, and swaps in the next snapshot only after it is published,
+  keeping the previous one on any failure. One dispatcher serves two eras: a
+  request carrying `io.modelcontextprotocol/protocolVersion` = `2026-07-28` in
+  `_meta` is served statelessly (`server/discover`, `tools/list`, `tools/call`;
+  other versions get `-32022`), and a request without it is served under the
+  `2025-06-18` lifecycle only after `initialize`. Modern responses advertise
+  only `2026-07-28`; the legacy version is reachable only through
+  `initialize`. Six tools — `semidx_health`, `semidx_repo_map`,
+  `semidx_find_definitions`, `semidx_references`, `semidx_context`,
+  `semidx_refresh` — render graph values only: ids, paths, ranges, kinds,
+  relationships, and per claim its resolution, freshness, and producer, with
+  `semantic_contract_version: null` and truncation markers on bounded lists.
+  Names and designators are graph values and are returned; the only
+  source-text field a snapshot carries, `SourceEvidence.text`, is rendered only
+  under `--allow-evidence-text`, capped at 400 bytes per claim, and the server
+  never reads unit contents into a result. Today every frontend records a name
+  or designator as evidence text, not a body. stdout carries only protocol
+  lines; the stdio smoke test fails on any other line, on trailing stdout, or
+  on a non-zero exit, and was checked by mutation. Cross-file Zig calls such as
+  `protocol.writeString(...)` stay unresolved designators, so `semidx_references`
+  shows only same-unit Zig callers.
   It explicitly excludes a published semantic contract, persistence, HTTP,
   remote services, resources/prompts, source text by default, Zig imports,
   namespace/container lookup, comptime semantics, methods, fields, local

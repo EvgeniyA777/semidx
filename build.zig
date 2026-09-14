@@ -158,6 +158,62 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_exe.addArgs(args);
     const run_step = b.step("run", "Run the developer-only graph inspection command");
     run_step.dependOn(&run_exe.step);
+
+    // The local MCP stdio preview. A consumer of published snapshots: it
+    // imports the assembled index and nothing below it.
+    const mcp = b.addModule("semidx_mcp", .{
+        .root_source_file = b.path("src/mcp/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .imports = &.{
+            .{ .name = "semidx", .module = semidx },
+        },
+    });
+    const mcp_tests = b.addTest(.{ .root_module = mcp });
+    const run_mcp_tests = b.addRunArtifact(mcp_tests);
+    test_step.dependOn(&run_mcp_tests.step);
+
+    const mcp_exe = b.addExecutable(.{
+        .name = "semidx-mcp",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/mcp/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "semidx_mcp", .module = mcp },
+            },
+        }),
+    });
+    b.installArtifact(mcp_exe);
+
+    const run_mcp = b.addRunArtifact(mcp_exe);
+    if (b.args) |args| run_mcp.addArgs(args);
+    const mcp_step = b.step("mcp", "Run the local MCP stdio preview server (pass --root <dir>)");
+    mcp_step.dependOn(&run_mcp.step);
+
+    // The smoke test drives the built executable as a subprocess, so it
+    // observes the real stdout, stderr, and exit status.
+    const smoke_options = b.addOptions();
+    smoke_options.addOptionPath("mcp_exe", mcp_exe.getEmittedBin());
+    smoke_options.addOption([]const u8, "fixtures_dir", b.pathFromRoot("fixtures/vertical-slice"));
+    const mcp_smoke = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/mcp_smoke_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "build_options", .module = smoke_options.createModule() },
+            },
+        }),
+    });
+    const run_mcp_smoke = b.addRunArtifact(mcp_smoke);
+    test_step.dependOn(&run_mcp_smoke.step);
+
+    const mcp_test_step = b.step("test-mcp", "Run the MCP preview's unit tests and stdio smoke test");
+    mcp_test_step.dependOn(&run_mcp_tests.step);
+    mcp_test_step.dependOn(&run_mcp_smoke.step);
 }
 
 fn addParserDeps(b: *std.Build, module: *std.Build.Module, deps: ParserDeps) void {

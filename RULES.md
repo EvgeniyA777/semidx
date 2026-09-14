@@ -60,15 +60,20 @@
   ([ADR 001](docs/adr/001_choose_zig_implementation_language.md)) and the build
   tool is Zig's own. `zig build test-core` runs the shared core, `zig build test`
   runs the full lane, `zig build run -- <files>` runs the developer-only
-  inspection command. Frontends parse through local tree-sitter C sources
+  inspection command, `zig build mcp -- --root <dir>` starts the local MCP stdio
+  preview, and `zig build test-mcp` runs its tests and stdio smoke test.
+  Frontends parse through local tree-sitter C sources
   ([ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md)):
   `./scripts/setup-tree-sitter-grammars.sh` and a local tree-sitter runtime are
   prerequisites for everything except `test-core`. No local service is required,
   and no build or index step uses the network.
-- What exists is the first vertical slice: an in-memory graph over Java and
-  Clojure fixtures, under `src/`, `tests/`, and `fixtures/`. There is no
-  persistence, no public contract, no MCP or HTTP surface, and no
-  `contracts/schemas/`. Do not describe any of those as existing, and do not
+- What exists is the first vertical slice: an in-memory graph over Java,
+  Clojure, and Zig source, under `src/`, `tests/`, and `fixtures/`, plus an
+  experimental local MCP stdio preview in `src/mcp/`
+  ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md)) that is a
+  consumer, not a contract. There is no persistence, no public contract, no
+  HTTP surface, and no `contracts/schemas/`. Do not describe any of those as
+  existing, and do not
   treat the removed implementation's contracts, transports, or storage as fixed
   for the rebuild.
 - Which source languages semidx can index, and the shape of its public contracts,

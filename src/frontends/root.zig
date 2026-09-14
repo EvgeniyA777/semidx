@@ -80,6 +80,13 @@ pub const Analyzer = struct {
         return &slot.*.?;
     }
 
+    /// Whether a parser for `language` can be created in this build, without
+    /// analyzing anything. A consumer reporting parser availability asks here
+    /// rather than reaching past the frontends to the parser adapter.
+    pub fn probeParser(self: *Analyzer, language: model.Language) ts.Error!void {
+        _ = try self.parserFor(language);
+    }
+
     /// Runs the frontend for one source unit into `builder`.
     ///
     /// A changed unit is reparsed in full. Incrementality here is graph-level:

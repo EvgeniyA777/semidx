@@ -14,10 +14,10 @@ Companion log for
 
 ## Current Status
 
-Session A (Stages 1–3, the Zig frontend) is complete. Following the plan's
-Execution Recommendations, execution stops here for a separate review of
-Stages 1–3 before Session B (Stages 4–5, the MCP preview and documentation).
-See [Session A Handoff](#session-a-handoff).
+Session A (Stages 1–3, the Zig frontend) is complete and reviewed, and Stage
+3.5 fixed the review blocker. Session B implemented Stage 4 (the local MCP
+stdio preview); Stage 5 (documentation and handoff) follows in the same
+session. See [Stage 4](#stage-4-local-mcp-stdio-preview).
 
 ## Stage Log
 
@@ -27,7 +27,7 @@ See [Session A Handoff](#session-a-handoff).
 | Stage 2: Zig definition facts | Completed (`575bf92`) | Named top-level `fn` declarations and top-level `const` declarations bound directly to a struct/enum/union/opaque expression are current `definition` facts with `DEFINES` from the file. Container members and every other declaration are reported as unsupported. A body edit preserves identity; a rename is identity loss. |
 | Stage 3: Zig same-unit simple calls | Completed (`50d68c4`) | Every call expression in a covered function body is recorded as `CALLS`. A bare callee is a fact only when the unit's top level declares that name exactly once, as a covered function, and no parameter, local binding, capture, or `usingnamespace` could give it another meaning; every other callee stays unresolved with its reason. No `REFERENCES` are emitted. |
 | Stage 3.5: Graph-owned relationship designators | Completed (`211a529`) | Fixes the review blocker: `Graph.addAssertion` now interns an unresolved target's designator, so no relationship keeps a slice of the frontend batch that produced it. `zig build run -- src` completes. |
-| Stage 4: Local MCP stdio preview | Pending (Session B) | |
+| Stage 4: Local MCP stdio preview | Implemented, awaiting review | `semidx-mcp` scans a root, publishes a snapshot, and serves six graph-backed tools over stdio to both `2026-07-28` (per-request `_meta`, `server/discover`) and `2025-06-18` (`initialize`) clients through one dispatcher. Evidence text is off by default; refresh swaps in a fully published snapshot or keeps the old one. |
 | Stage 5: Dogfood, documentation, and handoff | Pending (Session B) | |
 
 ## Plan Readiness Gate
@@ -376,3 +376,156 @@ Verification:
 | Mutation: `addAssertion` stores `.claim = claim` again | Both regression tests fail; restored |
 | `./scripts/check-agent-attribution.sh --all` | Pass (exit 0) |
 | `git diff --check` | Pass |
+
+## Stage 4: Local MCP Stdio Preview
+
+Changed files: `build.zig`, `src/frontends/root.zig` (`Analyzer.probeParser`),
+new `src/mcp/{root,protocol,stdio,tools,main}.zig`, new
+`tests/mcp_smoke_test.zig`; documentation: `RULES.md` Project Context,
+`MEMORY.md`, `docs/agent-policy/testing.md` (MCP lane),
+`docs/agent-policy/tooling.md` (the development-tooling MCP sections do not
+describe `semidx-mcp`).
+
+### Environment
+
+- The semidx MCP server again failed to connect (connection timeout), so its
+  tools were unavailable. Per
+  [tooling policy](../agent-policy/tooling.md#mcp-failure-protocol), code was
+  located by targeted direct reads of the files the plan names.
+- Plan Readiness Gate re-checked before Stage 4: no hard fail.
+- The MCP specification was read from its source repository
+  (`modelcontextprotocol/modelcontextprotocol`, `main` at `2997f33b`, fetched
+  2026-09-14), not from model memory: for `2026-07-28` the base protocol,
+  versioning, stdio transport, `server/discover`, tools, changelog, and the
+  `schema.ts` definitions and examples for discovery, tool listing and calls,
+  and errors; for `2025-06-18` the lifecycle, transports, and tools pages.
+- Zig 0.16 standard-library APIs used here (`std.json.Stringify`,
+  `std.Io.Reader.takeDelimiter`, `std.process.spawn`) were checked against the
+  installed library sources rather than assumed.
+- During the session two unrelated commits landed on `dev` (`05383a4` follow-up
+  004, `e59552c` roadmap). They touch no file this stage changes.
+
+### Decisions taken inside the plan's boundary
+
+- **Both protocol shapes share one dispatcher, so no stop condition applied.**
+  The era is decided per request: a request whose `params._meta` carries
+  `io.modelcontextprotocol/protocolVersion` is modern and served statelessly;
+  one without it is legacy. A modern version other than `2026-07-28` gets
+  `-32022` with `data.supported` and `data.requested`; a modern request missing
+  `io.modelcontextprotocol/clientCapabilities` gets `-32602`. A legacy
+  `tools/list` or `tools/call` before `initialize` gets `-32602` naming both
+  ways in. This matches the `2026-07-28` dual-era server rules: modern `_meta`
+  selects stateless handling, `initialize` selects legacy semantics scoped to
+  the stdio process.
+- **Modern responses advertise only `2026-07-28`** in
+  `DiscoverResult.supportedVersions` and in `-32022` data. Listing
+  `2025-06-18` there would invite a per-request `_meta` of `2025-06-18`, which
+  is not how that version works; it is reachable through `initialize`, which
+  answers `2025-06-18` whatever version the client proposed, as the
+  `2025-06-18` lifecycle prescribes.
+- Modern results carry `resultType: "complete"` and
+  `_meta["io.modelcontextprotocol/serverInfo"]`; `server/discover` and
+  `tools/list` carry `ttlMs` and `cacheScope: "public"` (the tool set is fixed
+  per binary). Legacy results carry none of these. `ping` is answered only for
+  legacy clients; `2026-07-28` removed it.
+- Tool results return `structuredContent` plus a text block holding the same
+  JSON serialized, which both versions recommend. No `outputSchema` is
+  declared, so no unverified schema promise is made.
+- Unknown tool, missing `name`, and non-object `arguments` are protocol errors
+  (`-32602`); invalid argument values and unknown argument names are tool
+  execution errors (`isError: true`), which the `2026-07-28` tools page assigns
+  to input validation.
+- JSON-RPC batches are refused (`-32600`); invalid JSON gets `-32700` without an
+  id, as the `2026-07-28` schema allows. A notification is never answered, even
+  with malformed params. A line over 1 MiB is refused with `-32600` and the next
+  line is still served. No `cursor` is ever issued, so any cursor is `-32602`.
+- Strings rendered from paths, names, and designators are written as UTF-8 with
+  invalid sequences replaced by U+FFFD: `std.json.Stringify` would otherwise
+  render non-UTF-8 bytes as a number array, changing the field's type.
+- **The source-text opt-in names its data shape: `--allow-evidence-text`.** The
+  plan and ADR 005 speak of snippets; reading the snapshot showed that its only
+  source-text field is `SourceEvidence.text`, and that every current frontend
+  records a name or designator there, not a body. The server therefore never
+  reads unit contents into a result, and the opt-in adds exactly the recorded
+  evidence text, capped at 400 bytes per claim with a `truncated` flag. A
+  range-based snippet reader would be a new data path and was not added.
+- Tools render graph values and select by exact name, path, language, and role;
+  nothing resolves a name, and an unresolved relationship is shown with its
+  designator and no target entity. `semidx_references` lists `REFERENCES`/`CALLS`
+  by the snapshot's reference query, so a call is listed once, and a recursive
+  call that is both incoming and outgoing is listed once. Every structured
+  result carries `snapshot.revision` and `semantic_contract_version: null`.
+- `semidx_health` reports parser availability through the new
+  `Analyzer.probeParser`, so the MCP layer never reaches past the frontends to
+  the tree-sitter adapter.
+- `semidx_refresh` rescans, calls `Index.applyScan`, publishes, and only then
+  replaces the published snapshot; a scan, reconcile, or publish failure returns
+  a tool execution error and the previous snapshot stays published. Requests
+  are answered one at a time, so no response can observe two snapshots.
+  `semidx_refresh` is annotated `readOnlyHint: false`, `destructiveHint: false`,
+  `idempotentHint: true`; the schema's default `destructiveHint` is `true`.
+
+### Risk Matrix (Stage 4)
+
+| Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| stdout carries only MCP messages (stdio spec, plan Stage 4) | A log line or late write corrupts the stream | Runtime smoke | Real subprocess stdout | Log line before serving; write after end of input | `mcp_smoke_test`; mutations below |
+| Message classification (JSON-RPC, both eras) | Wrong error code, answering a notification, null id accepted | Unit | `protocol.parse`, `checkMeta` | Invalid JSON, batch, null id, wrong `jsonrpc`, non-object params, malformed notification | `protocol.zig` tests |
+| Era selection per request (`2026-07-28` versioning) | Modern request depends on connection state; legacy served without `initialize` | Integration | `Server.handleLine` | Modern request before and after `initialize`; unsupported version; missing capabilities; legacy call before `initialize`; modern `ping` | `one dispatcher serves ...`, smoke |
+| Framing bounds | Unbounded buffering or desynchronized stream after a long line | Unit | `stdio.serve` | Oversized line then a valid one; oversized final line | `stdio.zig` tests |
+| Graph authority and knowledge categories (constitution §1, §3, §7) | A tool relabels or resolves a claim | Integration | `tools.zig` rendering | Unresolved designators, facts, and existence claims read back with resolution, producer, freshness | `tool results carry ...`, smoke `semidx_context` |
+| No source text by default (ADR 005, constitution §8) | Evidence text or unit contents reach a result | Integration | `writeEvidence` is the only reader of `SourceEvidence.text` | All read tools with the opt-in off and on; 600-byte evidence text | `no tool result carries source text ...`; mutation below; smoke transcript check |
+| Bounded output | Unbounded lists | Integration | Limits and truncation markers | `limit: 1` of 2; invalid limit | `tool results carry ...`, `one dispatcher ...` |
+| Refresh consistency (constitution §5) | A response mixes states, or a failed refresh loses the snapshot | Integration + runtime smoke | `Server.refresh` swap | Calls before refresh still see the old snapshot; added and edited units after; root deleted | `refresh publishes ...`; smoke refresh; mutation below |
+| Invalid UTF-8 in graph strings | Non-UTF-8 stdout or a type change | Unit | `protocol.writeString` | Invalid and truncated sequences | `invalid utf-8 is replaced ...` |
+| Startup and exit | Silent failure or protocol output on a failed start | Runtime | `main.zig` | `--help`, unknown argument, missing `--root` value, nonexistent root | Manual runs below |
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | Pass (exit 0) |
+| `zig build test-core --summary all` | Pass (exit 0) |
+| `zig build test --summary all` | Pass, 179/179 (165 before the stage), exit 0 |
+| `zig build test-mcp --summary all` | Pass, 14/14 (13 module tests, 1 stdio smoke), exit 0 |
+| `zig build run -- src` | Exit 0, full output consumed (1483 lines, no non-printable bytes): 25 units, 248 definitions |
+| `./scripts/check-agent-attribution.sh --all` | Pass (exit 0) |
+| `git diff --check` | Pass |
+| `./scripts/check-memory-freshness.sh` | Failed before `MEMORY.md` was updated in this stage (trigger: `src/frontends/root.zig`); `MEMORY.md` is updated in the same commit |
+| Mutation: write `semidx-mcp: serving` to stdout before serving | Smoke fails: "non-protocol stdout line"; restored |
+| Mutation: write `bye` to stdout after end of input | Smoke fails on trailing stdout; restored |
+| Mutation: render evidence text regardless of the opt-in | `no tool result carries source text ...` fails; restored |
+| Mutation: refresh publishes but does not swap the snapshot | In-process refresh test and smoke fail; restored |
+| `semidx-mcp --help` / `--bogus` / `--root` / `--root /nonexistent/...` | Exit 0 / 2 / 2 / 1; stdout empty in every case; message on stderr |
+
+Dogfood run (`zig build mcp -- --root .`, driven by a local script over
+stdio, all streams read to the end): `server/discover`, `tools/list`, and all
+six tools answered with valid JSON-RPC; exit 0; no trailing stdout; stderr was
+the startup and exit lines only. The graph held 54 units (35 Zig, 10 Java, 9
+Clojure; 3 `analysis_failed` fixtures), 363 definitions, 1061 current facts, and
+1339 unresolved assertions. `semidx_find_definitions` over
+`src/mcp/protocol.zig` returned its 18 top-level definitions, all facts;
+`semidx_references` for `writeString` returned its three same-unit callers. The
+largest response, `semidx_repo_map` over `src/mcp/`, was 42 KB.
+
+### Residual Risk
+
+- The preview is only as deep as the frontends. Zig coverage stops at the file
+  namespace: methods such as `Server.handleLine` are not definitions, and calls
+  through a namespace (`protocol.writeString(...)`) stay unresolved designators,
+  so `semidx_references` undercounts callers in container-organized Zig. The
+  results say so through resolution and diagnostics, not through omission.
+- `semidx_refresh` without source changes publishes the same revision, because
+  nothing mutated the graph.
+- `Index.applyScan` is not transactional: an allocation failure part-way through
+  a refresh leaves the graph partly updated while the previous snapshot stays
+  published, and a later successful refresh publishes whatever the graph then
+  holds.
+- Output is bounded per list but not per response; a `semidx_context` focus of
+  10 entities with 500 relationships each can produce a large message.
+- The smoke test has no timeout: a server that stops answering hangs the test
+  rather than failing it.
+- `serverInfo.version` is `0.0.0`; follow-up 004 owns runtime product
+  versioning.
+- Client configuration and use are documented in Stage 5.
