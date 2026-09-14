@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "completed"
 status: "completed"
 agent_action: "historical_reference_only"
-updated: "2026-09-13"
+updated: "2026-09-14"
 ---
 
 # 001: Zig Semantic Graph Vertical Slice Progress
@@ -156,6 +156,34 @@ Findings raised and resolved during implementation:
 | The Clojure frontend first collected a form's values into a fixed 512-node stack array inside a function that recurses to depth 64, which would have overflowed the stack. | Fixed: values are iterated lazily; nothing large is held on the stack. |
 | Feeding the previous parse tree back for a changed unit would have been wrong, because tree-sitter requires the edit ranges that produced it and this pipeline receives replacement contents. | Accepted as a limitation: a changed unit is reparsed in full, incrementality is graph-level, and `contract.PreviousParse` marks where an edit-tracking adapter would supply the tree. |
 
+## Post-Implementation Review
+
+Review recorded on 2026-09-14 after the completed slice, against the range
+`1fe359f..HEAD`.
+
+Semantic Code Indexing was requested by repository policy, but no semidx MCP
+tools were available through tool discovery in this environment. The review
+therefore used direct targeted inspection of the changed Zig modules, tests,
+fixtures, ADRs, and progress documentation.
+
+| Finding | Severity | Disposition |
+| --- | --- | --- |
+| After `Index.applyEdit` replaces a source unit's bytes, `reconcile.integrate` returns early for `analysis_unavailable` and `analysis_failed` batches without dropping, marking stale, or otherwise qualifying the previous assertions for that unit. Snapshot queries can therefore still return facts derived from the prior contents as if they were current. | High | Unresolved. Fix before widening scope: add tests for an edit to unparsable or unavailable source and decide whether stale assertions are withdrawn, retained with explicit stale status, or hidden from current-fact queries. |
+| `Graph.setSourceUnitBytes` swaps the stored source bytes but does not refresh the `file` entity evidence or the repository-to-file ingestion assertion evidence that were created from the original `wholeUnitRange`. | Medium | Unresolved. Add a successful-edit test proving source-container projections update, then refresh the file entity and source-ingestion assertion evidence when unit bytes change. |
+| `tree_sitter.Parser.parse` accepts a previous tree and has a reuse test even though production analysis deliberately passes `null` because edit ranges are not available. Without `ts_tree_edit`, this API is easy to misuse later as if parser-level incrementality were already valid for replacement contents. | Low | Unresolved. Narrow the adapter API or make the previous-tree path impossible to call without edit-range metadata. |
+
+Review verification:
+
+- `zig build test-core --summary all`: 32/32 passed.
+- `zig build test --summary all`: 58/58 passed.
+- `zig build test -Dgrammars-dir=/nonexistent`: expected failure with setup
+  message; the core lane still passed 32/32 inside the run.
+- `zig fmt --check build.zig src tests`: passed.
+- `zig build run -- fixtures/vertical-slice/java/Greeter.java fixtures/vertical-slice/clojure/greeter.clj`:
+  passed outside the sandbox after the sandbox denied read access to Zig's
+  Homebrew standard-library/compiler runtime paths.
+- `./scripts/check-agent-attribution.sh --all`: passed.
+
 ## Skipped Checks
 
 - No benchmark, memory budget, or performance measurement was run. The plan puts
@@ -196,20 +224,32 @@ None.
 - **The runtime dependency is a setup prerequisite.** A clean machine needs a
   tree-sitter runtime installed and the grammar setup script run. The build says
   so precisely when either is missing, but it cannot produce them.
+- **Current-fact freshness after failed reanalysis is not settled.** A failed or
+  unavailable reanalysis leaves the prior state in place, but assertions from
+  that prior state are not marked stale or hidden from current snapshot queries.
+- **Source-container evidence after edits is stale.** Definition projections
+  refresh during reconciliation, but file/source-unit evidence created by source
+  ingestion is not refreshed when source bytes change.
 
 ## Next Handoff
 
 The slice is a working in-memory graph, not a product surface. The obvious next
 decisions, none of which this slice makes:
 
-1. Whether the fixture evidence here supports admitting any `CORE.md` candidate.
+1. Fix freshness semantics for failed or unavailable reanalysis, including tests
+   that edit a previously indexed unit into unparsable or unavailable input and
+   prove old facts are not exposed as current without qualification.
+2. Refresh source-container evidence on successful source edits, including a
+   test that observes the file entity or source-ingestion assertion after a size
+   or range-changing edit.
+3. Whether the fixture evidence here supports admitting any `CORE.md` candidate.
    The plan explicitly forbade admitting one as part of this work, so the
    candidates are unchanged and the admission criteria in `SPEC.md` still apply.
-2. Storage and snapshot representation, which `SPEC.md` still lists as
+4. Storage and snapshot representation, which `SPEC.md` still lists as
    unspecified. The current snapshot is a value that borrows from a live graph;
    persistence would change that contract.
-3. Repository-scale ingestion: source discovery, a source-unit registry that
+5. Repository-scale ingestion: source discovery, a source-unit registry that
    survives renames, and invalidation across units. The slice reconciles one
    unit at a time and has no cross-unit assertions to invalidate.
-4. A public surface. There is none, deliberately. Any consumer decision is bound
+6. A public surface. There is none, deliberately. Any consumer decision is bound
    by constitution §7 and by the contract-lifecycle rules in `SPEC.md`.
