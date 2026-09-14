@@ -137,6 +137,8 @@ Future planning should draw from these current inputs:
 
 - [SPEC.md](../../SPEC.md), especially requirements still to specify.
 - [CORE.md](../../CORE.md), especially blocked candidates and publication work.
+- [Product adoption strategy](002_product_adoption_strategy.md), especially
+  agent habit loops, preview adoption requirements, and release positioning.
 - [docs/followups/README.md](../followups/README.md), the accepted deferred
   finding register.
 - Active plan progress logs under [docs/reports](../reports/).

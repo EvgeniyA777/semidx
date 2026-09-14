@@ -99,6 +99,10 @@ why. This is not a changelog of removed implementation; see `git log`.
 - `docs/design/001_project_roadmap.md` is the orientation layer for project
   direction. It records the current milestone, next product steps, and
   anti-drift checks; it is not an implementation plan.
+- `docs/design/002_product_adoption_strategy.md` owns product positioning and
+  adoption strategy: the first audience is developers already using coding
+  agents, and the first promise is local, bounded, honest semantic context rather
+  than broad code search or complete language understanding.
 - The ADR procedure is enabled and the sequence starts at `001`;
   [docs/adr/README.md](docs/adr/README.md) is the index.
   [ADR 001](docs/adr/001_choose_zig_implementation_language.md) accepts Zig as
