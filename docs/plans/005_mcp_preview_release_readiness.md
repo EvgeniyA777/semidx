@@ -54,7 +54,8 @@ Do not widen language semantics merely to make the preview look better. Zig
 logical-negation calls, Zig container/member coverage, Java classpath
 boundaries, imports, namespace resolution, method dispatch, fields, and
 cross-unit Zig calls remain follow-up work unless a planned proof cannot run
-without a narrow fix.
+without a narrow fix. Zig cross-unit and member calls are tracked in
+[follow-up 006](../followups/006_zig_cross_unit_and_member_calls.md).
 
 Do not make MCP define graph semantics. MCP remains a consumer over published
 snapshots.
@@ -87,6 +88,10 @@ release after the release gate passes.
   release-discipline input.
 - [Follow-up 005](../followups/005_mcp_source_derived_consent_boundary.md), the
   hosted-client consent-boundary input.
+- [Follow-up 006](../followups/006_zig_cross_unit_and_member_calls.md), the Zig
+  call coverage gap the capability matrix must state.
+- [Plan 004 Stage 4 residual risk](../reports/004_zig_frontend_and_mcp_preview_progress.md#residual-risk),
+  the source of the refresh-recovery and smoke-timeout requirements.
 
 ## Current Implementation Context
 
@@ -102,6 +107,16 @@ release after the release gate passes.
 - Source evidence text is excluded unless `--allow-evidence-text` is used.
 - There is no persistence, no public schema set, no stable semantic contract,
   and no release procedure.
+- `semidx_refresh` replaces the published snapshot only after a successful
+  publish, but `Index.applyScan` is not transactional: a failure part-way
+  through leaves the in-memory graph partly mutated. Whether a later refresh
+  converges or keeps wrong state is not verified. A plausible poisoning path is
+  lost invalidation: dependency seeds are computed before mutation, so a retry
+  over an already partly applied graph may not reanalyze dependents, and a later
+  publish may refuse or misreport state.
+- The MCP stdio smoke test reads the child's stdout with no timeout: a server
+  that stops answering hangs the test instead of failing it.
+- Zig `semidx_references` results are same-unit only; see follow-up 006.
 
 Semantic Code Indexing is required by repository policy when available. If
 callable semidx MCP tools are unavailable in the implementation environment,
@@ -131,6 +146,19 @@ Default MCP output excludes source text, but graph values such as paths, names,
 designators, ranges, diagnostics, and ids are still derived from local source.
 Hosted-client examples must say that those values may be forwarded by the
 client after the user configures that client.
+
+**A failed refresh must not poison later answers. This is a release blocker.**
+`semidx_refresh` is part of the agent habit loop, so trust in it is part of the
+preview's promise, not a later improvement. Stage 3.5 chooses the smallest
+recovery strategy that makes the guarantee testable; it does not require a
+transactional storage layer.
+
+**The release gate must not be able to hang.** The MCP smoke test gets a
+bounded timeout and kills its child on expiry.
+
+**Known coverage gaps ship visible, not fixed.** Same-unit-only Zig references
+and calls do not block the preview; the capability matrix and release notes
+must name them.
 
 ## Stages
 
@@ -228,6 +256,11 @@ Required behavior:
   - unsupported or unavailable coverage;
   - identity limitations;
   - major known false-negative or overbroad cases.
+- The Zig row must state that references and calls are same-unit only: calls
+  through a namespace, a value, or an `@import` binding stay unresolved
+  designators, container members are not definitions and their bodies are not
+  walked, so `semidx_references` never lists a caller from another unit. Link
+  follow-up 006.
 - Link the matrix from `SPEC.md`, README or MCP docs where appropriate.
 - Add hosted-client consent wording near MCP configuration examples:
   - semidx itself is local and does not contact the network;
@@ -241,9 +274,63 @@ Required behavior:
 Done when:
 
 - Capability claims in README and MCP docs are backed by the matrix.
+- The matrix names same-unit-only Zig references and calls.
 - The matrix avoids stable-contract wording.
 - Consent wording names both source text and source-derived graph values.
 - Default no-source-text tests still pass.
+
+### Stage 3.5: Refresh Failure Recovery
+
+Purpose: make a failed `semidx_refresh` unable to poison later MCP answers or
+later refreshes. Release blocker.
+
+Likely files:
+
+- `src/root.zig` (`Index.applyScan` and its upkeep)
+- `src/mcp/root.zig` (`Server.refresh`)
+- `src/core/graph.zig` only if the chosen strategy needs a graph-level boundary
+- focused tests beside the changed modules
+- `docs/mcp/local_preview.md` (replace the partial-update limit)
+- `docs/reports/005_mcp_preview_release_readiness_progress.md`
+
+Required behavior:
+
+- Before choosing a strategy, read `Index.applyScan`, `Upkeep`, and
+  `Graph.publish` and record in the progress log where a failure can leave
+  partial state and what that state does to a later refresh and publish. Confirm
+  or refute the lost-invalidation hypothesis above with a test, not by argument.
+- Choose the smallest local strategy that establishes the guarantee, for
+  example staging the scan into a separate index and swapping on success,
+  rebuilding the index from a fresh scan after a failure, or another bounded
+  rollback boundary. Record the choice and rejected alternatives in the progress
+  log. Persistence, a transactional storage layer, and a change to what a
+  snapshot is are out of scope.
+- After any failed refresh:
+  - the published snapshot and every answer from it are unchanged;
+  - the next successful refresh publishes a graph equal in facts, unresolved
+    assertions, diagnostics, freshness, and unit analysis states to a fresh
+    index built from the same tree;
+  - no claim about contents the failed refresh half-applied is reported as
+    current.
+- Identity preservation across a successful refresh keeps its current behavior.
+  If the strategy cannot preserve entity identities across a failed-then-retried
+  refresh, the result must be observable identity loss, never silent
+  reassignment, and the limit must be documented.
+- `semidx_refresh` reports the failure as a tool execution error that says
+  whether recovery completed.
+
+Done when:
+
+- A failure-injection test fails allocation or analysis at several points inside
+  refresh (for example with `std.testing.FailingAllocator` over each allocation
+  index, or an injected analyzer error) and, for each point, proves the three
+  guarantees above against a fresh-index oracle.
+- The test fails when the recovery is disabled (recorded as a mutation in the
+  progress log).
+- Existing refresh, incrementality, and repository-scale tests still pass,
+  including affected-region work bounds on the success path.
+- `docs/mcp/local_preview.md` describes the recovery behavior instead of the
+  partial-update limit.
 
 ### Stage 4: Dogfood Proofs And Release Gate
 
@@ -254,9 +341,15 @@ Likely files:
 - `docs/reports/005_mcp_preview_release_readiness_progress.md`
 - optional script under `scripts/` if repeated manual JSON-RPC commands become
   fragile
+- `tests/mcp_smoke_test.zig` (timeout)
 - MCP tests only if a proof exposes an untested runtime invariant
 
 Required behavior:
+
+- Give the MCP stdio smoke test a bounded timeout for each response and for
+  process exit. On expiry it must kill the child, fail with a message naming the
+  request it was waiting for, and still report captured stderr. The bound must
+  be generous enough not to flake on a cold Debug build; record the chosen value.
 
 - Record reproducible commands and observed results for:
   - `semidx_health`;
@@ -276,6 +369,11 @@ Done when:
 - The progress log contains enough evidence for a reviewer to reproduce the
   preview's agent habit loop.
 - The proof uses this repository, not only tiny fixtures.
+- A mutation that makes the server stop answering (for example, never writing
+  one response) makes the smoke test fail within its timeout instead of hanging,
+  and the child process is gone afterwards.
+- The dogfood proof includes a refresh after an injected or induced failure,
+  showing the Stage 3.5 guarantee on this repository.
 - Any found semantic gap is either fixed by a focused change covered by this
   plan or filed as a follow-up.
 
@@ -299,11 +397,13 @@ Required behavior:
   - it does not promise a stable semantic contract;
   - the current install path is source-built;
   - source text is off by default;
-  - known limitations are expected and visible.
+  - known limitations are expected and visible, including same-unit-only Zig
+    references and calls (follow-up 006).
 - Run the full release gate from a clean worktree:
   - `zig build test-core -Dgrammars-dir=/nonexistent --summary all`;
   - `zig build test --summary all`;
-  - `zig build test-mcp --summary all`;
+  - `zig build test-mcp --summary all`, with the smoke timeout in place;
+  - the Stage 3.5 failure-injection test (part of `zig build test`);
   - `zig fmt --check build.zig src tests`;
   - `zig build run -- src`;
   - full-output MCP dogfood smoke over `--root .`;
@@ -328,6 +428,9 @@ Done when:
 
 - Use narrow tests for version reporting, health output, and source-text
   opt-in behavior.
+- Use failure injection against a fresh-index oracle for refresh recovery.
+- Use a bounded timeout in the stdio smoke test so the gate fails rather than
+  hangs.
 - Use existing MCP smoke tests for stdio protocol discipline.
 - Use dogfood commands over this repository for adoption proof.
 - Use parser-free core tests to preserve the local dependency boundary.
@@ -346,14 +449,22 @@ Stop and update the progress log before continuing if:
 - hosted-client consent wording would imply semidx controls a third-party
   client's onward transmission;
 - release packaging requires platform-specific artifacts, installers, signing,
-  package-manager publication, or CI automation.
+  package-manager publication, or CI automation;
+- refresh recovery can be established only by persistence, a transactional
+  storage layer, or a change to what a snapshot is (owned by `SPEC.md`), or it
+  would break affected-region work bounds on the success path. Record the
+  finding; the preview release stays blocked until a decision is recorded;
+- the smoke timeout cannot be implemented without flakiness on the supported
+  toolchain.
 
 ## Execution Recommendations
 
 - Use Claude Opus 5 or an equivalently strong code-review-capable model for the
   whole plan.
-- Keep the stages in order. Stages 1-3 make the preview legible; Stage 4 proves
-  it; Stage 5 packages the release-candidate handoff.
+- Keep the stages in order. Stages 1-3 make the preview legible; Stage 3.5 makes
+  refresh trustworthy; Stage 4 proves it; Stage 5 packages the release-candidate
+  handoff.
 - Review after Stage 3 if the capability matrix or consent language changes
   public claims substantially.
+- Review after Stage 3.5: it is the only stage that changes ingestion code.
 - Review again before any release tag is created.

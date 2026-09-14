@@ -398,14 +398,19 @@ why. This is not a changelog of removed implementation; see `git log`.
   product-adoption path into MCP preview release readiness for
   `v0.1.0-preview.1`: product version reporting, local setup, capability matrix,
   hosted-client consent wording for source-derived graph values, dogfood proofs,
-  release notes, and a release-candidate handoff. It keeps
+  release notes, and a release-candidate handoff. Two Plan 004 residual risks
+  are release requirements there: a failed `semidx_refresh` must not poison
+  later answers or refreshes (Stage 3.5, a release blocker proven by failure
+  injection, because `Index.applyScan` is not transactional), and the MCP smoke
+  test must time out and kill its child instead of hanging the gate (Stage 4).
+  Same-unit-only Zig references ship as a visible matrix limitation. It keeps
   `semantic_contract_version: null` and does not authorize persistence, HTTP,
   stable schemas, package-manager distribution, or wider language semantics.
 - Current open follow-ups are indexed in
   [docs/followups/README.md](docs/followups/README.md): Zig logical-negation
-  calls, Zig empty-container grammar behavior, Java classpath boundaries, and
+  calls, Zig empty-container grammar behavior, Java classpath boundaries,
   release discipline plus hosted-client consent wording for the local MCP
-  preview.
+  preview, and Zig cross-unit and member call resolution.
 - **Plan 004 is complete: Stages 1–3 (the Zig frontend) are implemented and
   reviewed; Stage 3.5 fixed the review blocker; Stages 4–5 (the local MCP stdio
   preview, its dogfood run, and its documentation) were accepted by final review.**
