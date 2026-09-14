@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-13"
+updated: "2026-09-14"
 ---
 
 # semidx Glossary
@@ -38,6 +38,18 @@ uniform-looking graph.
 AI agents, IDE integration, impact analysis, documentation linkage, or future
 compilation tooling. The direction is the point: consumers depend on the graph,
 never the reverse.
+
+**containment** — A direct parent-child claim that one entity is immediately
+inside another source or program container. It describes source organization or
+program nesting, not by itself the introduction of a program definition. For
+example, a repository containing a file is containment.
+
+**definition introduction** — A narrower claim that a container directly
+introduces a program definition. For example, a file may introduce a class,
+namespace, function, or variable definition, and a class may introduce a method.
+This is intentionally distinct from containment: a repository containing a file
+does not by itself introduce the file as a program definition. Relationship
+names and admission status are owned by [CORE.md](CORE.md).
 
 **edge** — The graph's representation of a relationship. Use it only where the
 representation itself is the subject; the relationship is the thing being
