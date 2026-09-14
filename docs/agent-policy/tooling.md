@@ -15,16 +15,14 @@ always-loaded summary and points here.
 ## Scope Of The MCP Sections
 
 The MCP sections below describe repository-development tooling available to
-agents today. The `semidx` MCP server they use is configured outside this
-repository: `.mcp.json` here declares no servers, and nothing in this repository
-builds, ships, or defines it. The experimental `semidx-mcp` preview this
-repository builds ([ADR 005](../adr/005_add_zig_frontend_and_local_mcp_preview.md))
-is a different server; the sections below do not describe it.
+agents today. This repository's `.mcp.json` registers the experimental local
+`semidx-mcp` preview built by this repository
+([ADR 005](../adr/005_add_zig_frontend_and_local_mcp_preview.md)). It is a local
+consumer over published graph snapshots, not a public semantic contract.
 
-The tool names, wire shapes, and error codes below describe that tool as it
-currently behaves. They do not define or constrain the public API of the rebuilt
-`semidx`, which is an open requirement owned by [SPEC.md](../../SPEC.md). Do not
-carry them into the rebuild as contract.
+The tool names, wire shapes, and error codes below describe the preview as it
+currently behaves. They do not define or constrain the future stable public API,
+which is an open requirement owned by [SPEC.md](../../SPEC.md).
 
 ## MCP-First Workflow
 
@@ -33,15 +31,15 @@ carry them into the rebuild as contract.
 - Use MCP before manual file crawling. When implementation work requires reading
   code before edits, use semidx retrieval first.
 - First-pass flow is strict:
-  1. `create_index`
-  2. `repo_map`
-  3. `resolve_context`
-  4. optional `expand_context`
-  5. optional `fetch_context_detail`
-- A successful `create_index` is not a reason to switch to filesystem browsing.
-  Continue with `repo_map` and semantic retrieval.
-- Use `resolve_context`, `expand_context`, `fetch_context_detail`, and
-  `skeletons` to read code shape and detail before patching source files.
+  1. `semidx_health`
+  2. `semidx_repo_map`
+  3. `semidx_find_definitions`
+  4. `semidx_references` or `semidx_context`
+  5. `semidx_refresh` after edits
+- A successful `semidx_health` is not a reason to switch to filesystem browsing.
+  Continue with `semidx_repo_map` and graph-backed lookup.
+- Use `semidx_context` to read the focused graph neighborhood before patching
+  source files.
 - Use manual file reads only as a fallback when semidx MCP fails, when the target
   is outside indexed source files, or when exact patch-safe line context is still
   needed after MCP retrieval.
@@ -50,26 +48,28 @@ carry them into the rebuild as contract.
 
 ## MCP Query And Wire Shape
 
-- `initialize.params.clientInfo` must be an object, not a string.
-- `tools/call.arguments` must be a JSON object, not a JSON-encoded string.
-- `resolve_context` accepts a flat top-level `intent` string, a `query.intent`
-  shorthand, or the full structured `query` object.
-- The simplest `resolve_context` shape is
-  `{"index_id": "...", "intent": "your task"}`.
-- After a successful `resolve_context`, keep context compact by continuing with
-  `selection_id` and `snapshot_id` for `expand_context` or
-  `fetch_context_detail`.
-- Do not expand prompts manually when a selection artifact is available.
-- Canonical MCP client prompts, once documented, belong in `docs/`; no such
-  document exists yet.
+- The configured server is `semidx` and exposes:
+  `semidx_health`, `semidx_repo_map`, `semidx_find_definitions`,
+  `semidx_references`, `semidx_context`, and `semidx_refresh`.
+- The server indexes one root at startup. In this repository `.mcp.json` passes
+  the repository root explicitly. For other repositories, register
+  `/Users/ae/workspaces/semidx/scripts/semidx-mcp.sh` with that repository's
+  absolute path as `--root`.
+- Prefer `semidx_context` for focused orientation around an entity, name, or
+  path. It returns graph values, diagnostics, freshness, and relationship
+  context, not source bodies.
+- Entity ids are process-local. After reconnecting or restarting the MCP server,
+  look up targets again by name/path before using an old id.
+- Source text is off by default. Do not add `--allow-evidence-text` unless the
+  task explicitly needs recorded evidence text and the user has opted in.
 
 ## MCP Failure Protocol
 
-- Treat `no_supported_languages_found` as a user-guidance path: ask for the core
-  language and suggest activating other languages later.
-- Treat `language_refresh_required` as a signal to rerun `create_index`.
-- Treat `language_activation_in_progress` as a wait-and-retry signal for the same
-  request.
+- Treat parser or analysis diagnostics from `semidx_health` and
+  `semidx_context` as part of the answer, not as noise to hide.
+- Treat missing, unresolved, unsupported, stale, approximate, and unavailable
+  results as distinct outcomes. Do not convert one into another in prose.
+- Use `semidx_refresh` after edits before trusting later graph answers.
 - If MCP returns an error or timeout after two attempts, say
   `SCI MCP unavailable, switching to manual` and proceed with filesystem tools.
 
@@ -92,19 +92,19 @@ already been identified.
 
 | Question | Tool |
 | --- | --- |
-| Which code is relevant? Who calls this? What is the blast radius? | semidx (`resolve_context`, `impact_analysis`) — always first |
+| Which code is relevant? Who calls this? What is the nearby graph context? | semidx (`semidx_context`, `semidx_references`) — always first |
 | What is the shape of one already-identified file? | A structure-aware reader for the active language (collapsed view), if one is configured |
 | Which exact lines am I about to patch? | `Read` with `offset`/`limit` |
-| What is the body of one symbol from an existing selection? | semidx `fetch_context_detail` with `selection_id` |
+| What is the body of one symbol already located? | `Read` with `offset`/`limit` on the known file |
 
 - **A language-specific reader never substitutes for the first semidx call.** If
   it is not yet known which file is needed, that is semidx's job. Opening files
   one after another to get oriented is prohibited, however cheap each individual
   read looks. This is the failure mode semidx exists to prevent.
-- Do not route narrow reads through semidx. `fetch_context_detail` wraps the code
-  in a full retrieval envelope (stage events, capabilities, guardrails,
-  diagnostics), so it is the wrong tool for "show me the lines I am about to
-  edit". Use `Read` with `offset`/`limit` there.
+- Do not route narrow source reads through semidx. The local preview deliberately
+  returns graph context, paths, ranges, and diagnostics rather than source
+  bodies by default. Use `Read` with `offset`/`limit` for exact patch context
+  after semidx has located the relevant entity or file.
 - Prefer a language-specific structure-aware reader over a full `Read` when
   orienting inside a single large known file: a collapsed, structure-aware view
   costs less than dumping the whole file and is more reliable than guessing line

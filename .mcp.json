@@ -1,3 +1,9 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "semidx": {
+      "type": "stdio",
+      "command": "/Users/ae/workspaces/semidx/scripts/semidx-mcp.sh",
+      "args": ["--root", "/Users/ae/workspaces/semidx"]
+    }
+  }
 }

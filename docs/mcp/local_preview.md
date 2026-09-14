@@ -81,6 +81,7 @@ prerequisite and the flags that point at it (`-Dgrammars-dir=`,
 
 ```sh
 zig-out/bin/semidx-mcp --root /path/to/repository
+scripts/semidx-mcp.sh --root /path/to/repository # stable launcher for MCP clients
 zig build mcp -- --root .                  # same, through the build system
 ```
 
@@ -111,22 +112,30 @@ start it. For clients that read an `mcpServers` map, such as a project
 {
   "mcpServers": {
     "semidx": {
-      "command": "/path/to/semidx/zig-out/bin/semidx-mcp",
+      "type": "stdio",
+      "command": "/path/to/semidx/scripts/semidx-mcp.sh",
       "args": ["--root", "/path/to/repository"]
     }
   }
 }
 ```
 
-Use absolute paths: a client may start the server from any working directory.
-Other clients have their own configuration format; the command and arguments
-are the same.
+Use absolute paths for committed or shared project configuration: a client may
+start the server from any working directory. Other clients have their own
+configuration format; the command and arguments are the same.
 
 `--root` names a local working copy on this machine: the repository your agent
 works on, not the semidx checkout that built the binary. One binary serves any
 number of repositories. Register it once per repository with a different
 `--root`, or run separate processes; each process indexes one root and shares
 nothing with the others.
+
+For local personal configuration, `scripts/semidx-mcp.sh` may be registered
+without `args`. In that mode it indexes `SEMIDX_ROOT` when that environment
+variable is set, otherwise the Git root of the process working directory. If
+neither exists, it exits with a usage error instead of indexing an arbitrary
+directory. Prefer explicit `--root` in project `.mcp.json` files because client
+working directories are not universal.
 
 ### First Calls
 

@@ -11,23 +11,25 @@ This repository skill adds semidx-specific evidence requirements.
 ## Workflow
 
 1. Read `RULES.md`.
-2. Run the semantic flow with an absolute root:
+2. Run the semantic flow:
 
    ```text
-   create_index -> repo_map -> resolve_context
-   -> expand_context -> fetch_context_detail
+   semidx_health -> semidx_repo_map -> semidx_find_definitions
+   -> semidx_references or semidx_context
    ```
 
-3. Verify reported root path, snapshot id, active languages, lifecycle state,
-   confidence, and diagnostics.
-4. Refine broad results with concrete paths, symbols, modules, tests, and
-   `freshness: current_snapshot` before concluding context is thin.
+3. Verify reported root path, snapshot revision, language counts, parser
+   availability, analysis state, and diagnostics.
+4. Refine broad results with concrete `path`, `path_prefix`, `language`, `role`,
+   `name`, or `entity_id` filters before concluding context is thin.
 5. For a change, inspect relevant definitions, callers, callees, related tests,
    contracts, fixtures, frontend coverage, storage/runtime edges, and
    documentation ownership.
 6. Use manual `rg` or file reads only after semantic refinement is insufficient,
    the target is outside indexed source, or an MCP tool returns an explicit
    error. Record the fallback reason.
+7. After editing indexed source, call `semidx_refresh` before relying on later
+   graph answers.
 
 ## Required Output Before Non-Trivial Edits
 
@@ -35,8 +37,10 @@ This repository skill adds semidx-specific evidence requirements.
 - inbound and outbound dependencies;
 - related tests, fixtures, and missing test seam;
 - contract, identity, storage, runtime, and documentation impacts;
-- confidence, limitations, snapshot id, and exact files needing direct
+- resolution, freshness, limitations, snapshot revision, and exact files needing direct
   inspection.
 
-Do not stop after only `create_index` or `resolve_context`. Low confidence for a
-language with a low ceiling is not a tool failure.
+Do not stop after only `semidx_health` or `semidx_repo_map`. The preview is
+exact when it knows and honest when it does not; unresolved, unsupported,
+stale, approximate, and unavailable results are useful signals, not permission
+to present guesses as facts.

@@ -63,7 +63,8 @@ rather than source text. It is built from source; there are no binary packages.
    {
      "mcpServers": {
        "semidx": {
-         "command": "/path/to/semidx/zig-out/bin/semidx-mcp",
+         "type": "stdio",
+         "command": "/path/to/semidx/scripts/semidx-mcp.sh",
          "args": ["--root", "/path/to/your/repository"]
        }
      }
@@ -72,7 +73,9 @@ rather than source text. It is built from source; there are no binary packages.
 
 `--root` is a local working copy on your machine — the repository you want your
 agent to work on, not this one. One built binary serves any number of
-repositories: register it once per repository with a different `--root`.
+repositories: register it once per repository with a different `--root`. The
+launcher also supports `SEMIDX_ROOT=/path/to/repository` or, when the MCP client
+starts servers from inside the repository, automatic Git-root detection.
 
 See [docs/mcp/local_preview.md](docs/mcp/local_preview.md) for the first calls
 to make, tools, result fields, source-text rules, and limits.

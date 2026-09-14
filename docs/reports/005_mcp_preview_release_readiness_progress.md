@@ -141,4 +141,36 @@ Verification:
 | `./scripts/check-agent-attribution.sh --all` | Pass (exit 0) |
 | `git diff --check` | Pass |
 
-No code changed in Stage 2.
+No Zig product code changed in Stage 2 before the addendum.
+
+Stage 2 addendum:
+
+- Added `scripts/semidx-mcp.sh` as the stable local MCP launcher for agent
+  configuration. It locates the built `zig-out/bin/semidx-mcp`, passes explicit
+  `--root`, `--help`, and `--version` through, and otherwise chooses
+  `SEMIDX_ROOT` or the current Git root. If neither is available, it exits with
+  a usage error instead of indexing an arbitrary directory.
+- Added compatibility aliases `scripts/start-mcp-server.sh` and
+  `scripts/mcp-stdio.sh` so older local configs that named those paths stop
+  failing at process startup and now launch the preview server.
+- `.mcp.json` in this repository now registers `semidx` with the launcher and
+  an explicit `/Users/ae/workspaces/semidx` root.
+- `README.md`, `docs/mcp/local_preview.md`, `docs/agent-policy/tooling.md`, and
+  `.agents/skills/semidx-code-exploration/SKILL.md` now use the current preview
+  tool flow: `semidx_health`, `semidx_repo_map`, `semidx_find_definitions`,
+  `semidx_references`, `semidx_context`, and `semidx_refresh`.
+
+Addendum verification:
+
+| Command | Result |
+| --- | --- |
+| `sh -n scripts/semidx-mcp.sh && sh -n scripts/start-mcp-server.sh && sh -n scripts/mcp-stdio.sh` | Pass |
+| `jq . .mcp.json /Users/ae/workspace/UniPlan/.mcp.json /Users/ae/workspace/JobApplicationTracker/.mcp.json /Users/ae/workspaces/Fleetix/.mcp.json /Users/ae/.claude.json >/dev/null` | Pass |
+| TOML parse of `/Users/ae/.codex/config.toml` with Python `tomllib` | Pass |
+| `semidx-mcp.sh --version` from `/Users/ae/workspace/UniPlan` | Exit 0; `semidx-mcp 0.1.0-preview.1` |
+| Modern `semidx_health` through `semidx-mcp.sh` from `/Users/ae/workspace/UniPlan` without `--root` | Exit 0; root `/Users/ae/workspace/UniPlan`, 263 Java units, evidence text disabled |
+| Modern `semidx_health` through `semidx-mcp.sh --root /Users/ae/workspaces/semidx` from `/Users/ae` | Exit 0; root `/Users/ae/workspaces/semidx`, product version `0.1.0-preview.1`, evidence text disabled |
+| `semidx-mcp.sh` from `/tmp` with no `--root`, no `SEMIDX_ROOT`, and no Git root | Exit 2 with a usage error; no arbitrary directory indexed |
+| `./scripts/check-agent-attribution.sh --all` | Pass |
+| `./scripts/check-memory-freshness.sh` | Pass |
+| `git diff --check` on the addendum-owned files | Pass |

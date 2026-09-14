@@ -406,6 +406,13 @@ why. This is not a changelog of removed implementation; see `git log`.
   Same-unit-only Zig references ship as a visible matrix limitation. It keeps
   `semantic_contract_version: null` and does not authorize persistence, HTTP,
   stable schemas, package-manager distribution, or wider language semantics.
+- `scripts/semidx-mcp.sh` is the stable local launcher for agents. It execs the
+  built `zig-out/bin/semidx-mcp`, passes through explicit `--root`, `--help`,
+  and `--version`, and otherwise indexes `SEMIDX_ROOT`, the current Git root, or
+  fails with a usage error instead of indexing an arbitrary directory.
+  `scripts/start-mcp-server.sh` and `scripts/mcp-stdio.sh` are compatibility
+  aliases for older local MCP configs. This repository's `.mcp.json` uses the
+  launcher with an explicit `/Users/ae/workspaces/semidx` root.
 - Current open follow-ups are indexed in
   [docs/followups/README.md](docs/followups/README.md): Zig logical-negation
   calls, Zig empty-container grammar behavior, Java classpath boundaries,
