@@ -36,10 +36,19 @@ pub fn integrate(graph: *Graph, batch: contract.FrontendBatch) Error!Outcome {
     const revision = graph.beginRevision();
     const producer = batch.capabilities.producer;
 
+    // Diagnostics describe the latest analysis attempt for this unit, so the
+    // previous attempt's are withdrawn whether this one succeeds or not.
+    graph.dropDiagnosticsForUnit(batch.unit);
+
     if (batch.hasBlockingDiagnostic()) {
         for (batch.diagnostics) |diagnostic| {
             try graph.addDiagnostic(diagnostic.kind, batch.unit, producer, diagnostic.message);
         }
+        // The unit's existing assertions are neither withdrawn nor refreshed.
+        // Withdrawing them would assert an absence nothing observed; refreshing
+        // them would claim they describe contents nobody read. `markAnalyzed`
+        // is deliberately not called, so the unit reports itself stale and its
+        // assertions stop answering current-state queries.
         return .{ .revision = revision, .applied = false };
     }
 
@@ -61,7 +70,6 @@ pub fn integrate(graph: *Graph, batch: contract.FrontendBatch) Error!Outcome {
     // the new ones are recorded. Other units keep their entities and their
     // assertions: an edit here is not a reason to reanalyze them.
     graph.dropAssertionsForUnit(batch.unit);
-    graph.dropDiagnosticsForUnit(batch.unit);
 
     var outcome: Outcome = .{ .revision = revision, .applied = true };
 
@@ -99,8 +107,6 @@ pub fn integrate(graph: *Graph, batch: contract.FrontendBatch) Error!Outcome {
             .identity = draft.identity,
             .evidence = draft.evidence,
             .extension = draft.extension,
-            .producer = producer,
-            .resolution = draft.resolution,
         });
         local_ids[index] = id;
         try graph.addIdentityEvent(.created, id, null, "no previous entity corresponded");
@@ -162,13 +168,13 @@ pub fn integrate(graph: *Graph, batch: contract.FrontendBatch) Error!Outcome {
         try graph.removeEntity(candidate);
     }
 
-    // Existence assertions are re-recorded for preserved entities too: the old
-    // ones were withdrawn with the rest of the unit's analysis.
+    // Allocating an entity does not claim it exists; the frontend that saw it
+    // does. Preserved entities need this as much as created ones, because the
+    // previous revision's existence assertions were withdrawn with the rest of
+    // the unit's analysis.
     for (batch.entities, 0..) |draft, index| {
-        const id = local_ids[index].?;
-        if (graph.entity(id).?.created_revision == revision) continue;
         _ = try graph.addAssertion(
-            .{ .entity_exists = id },
+            .{ .entity_exists = local_ids[index].? },
             producer,
             draft.evidence,
             draft.resolution,
@@ -196,6 +202,7 @@ pub fn integrate(graph: *Graph, batch: contract.FrontendBatch) Error!Outcome {
         try graph.addDiagnostic(diagnostic.kind, batch.unit, producer, diagnostic.message);
     }
 
+    try graph.markAnalyzed(batch.unit);
     return outcome;
 }
 
@@ -316,7 +323,7 @@ test "a body-only edit preserves every entity id" {
     const greet_before = before.findDefinition("a/A.java", "greet").?;
     const greeting_before = before.findDefinition("a/A.java", "greeting").?;
 
-    try graph.setSourceUnitBytes(unit, "v2");
+    _ = try graph.setSourceUnitBytes(unit, "v2");
     const second = try integrateNames(&graph, unit, &.{ "greet", "greeting" }, "v2");
     try testing.expectEqual(@as(usize, 2), second.preserved);
     try testing.expectEqual(@as(usize, 0), second.created);
@@ -351,7 +358,7 @@ test "an added definition leaves the other entities alone" {
     var after = try graph.publish();
     defer after.deinit();
     try testing.expectEqual(greet_before.id, after.findDefinition("a/A.java", "greet").?.id);
-    try testing.expectEqual(@as(usize, 3), after.countEntities(.definition));
+    try testing.expectEqual(@as(usize, 3), after.countEntities(.{ .kind = .definition }));
 }
 
 test "a rename is observable as identity loss, not as an unrelated delete and create" {
@@ -457,7 +464,14 @@ test "a reference target moves between unresolved and resolved" {
     }));
 }
 
-test "unavailable analysis leaves the previous state in place" {
+fn failAnalysis(graph: *Graph, unit: model.SourceUnitId) !Outcome {
+    var builder = contract.BatchBuilder.init(graph.gpa, unit, test_capabilities);
+    defer builder.deinit();
+    try builder.addDiagnostic(.analysis_unavailable, "parser could not run for this unit");
+    return integrate(graph, builder.batch());
+}
+
+test "failed analysis of unchanged contents leaves the unit current" {
     var graph = try Graph.init(testing.allocator, "fixtures");
     defer graph.deinit();
     const unit = try graph.addSourceUnit("a/A.java", .java, "v1");
@@ -467,17 +481,129 @@ test "unavailable analysis leaves the previous state in place" {
     defer before.deinit();
     const greet_before = before.findDefinition("a/A.java", "greet").?;
 
-    var builder = contract.BatchBuilder.init(testing.allocator, unit, test_capabilities);
-    defer builder.deinit();
-    try builder.addDiagnostic(.analysis_unavailable, "parser could not run for this unit");
-    const outcome = try integrate(&graph, builder.batch());
+    const outcome = try failAnalysis(&graph, unit);
     try testing.expect(!outcome.applied);
 
     var after = try graph.publish();
     defer after.deinit();
-    try testing.expectEqual(@as(usize, 2), after.countEntities(.definition));
+
+    // Nothing was withdrawn, and nothing went stale: the contents these
+    // assertions describe are still the contents the unit has.
+    try testing.expectEqual(graph_mod.UnitAnalysis.current, after.unitAnalysis(unit).?);
+    try testing.expectEqual(@as(usize, 2), after.countEntities(.{ .kind = .definition }));
     try testing.expectEqual(greet_before.id, after.findDefinition("a/A.java", "greet").?.id);
     try testing.expectEqual(@as(usize, 1), after.countDiagnostics(.analysis_unavailable));
+}
+
+test "an edit whose analysis fails stops answering current-state queries" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const unit = try graph.addSourceUnit("a/A.java", .java, "v1");
+    _ = try integrateNames(&graph, unit, &.{ "greet", "greeting" }, "v1");
+
+    var before = try graph.publish();
+    defer before.deinit();
+    const greet_before = before.findDefinition("a/A.java", "greet").?;
+    const current_before = before.countRelationships(.{});
+    try testing.expect(current_before > 0);
+
+    _ = try graph.setSourceUnitBytes(unit, "v2 which nothing could parse");
+    const outcome = try failAnalysis(&graph, unit);
+    try testing.expect(!outcome.applied);
+
+    var after = try graph.publish();
+    defer after.deinit();
+
+    // The unit says what happened to it.
+    try testing.expectEqual(graph_mod.UnitAnalysis.stale, after.unitAnalysis(unit).?);
+    try testing.expectEqual(@as(usize, 1), after.countUnits(.stale));
+    try testing.expectEqual(@as(usize, 1), after.countDiagnostics(.analysis_unavailable));
+
+    // Claims about contents the unit no longer has do not answer a query that
+    // did not ask for them.
+    try testing.expectEqual(@as(usize, 0), after.countEntities(.{ .kind = .definition }));
+    try testing.expect(after.findDefinition("a/A.java", "greet") == null);
+    try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .source = greet_before.id }));
+    try testing.expectEqual(@as(usize, 0), after.countAssertions(.{
+        .unit = unit,
+        .producer = test_producer.name,
+    }));
+
+    // They are not withdrawn either, because nothing observed their absence.
+    // Identity survives, so a later successful analysis can correspond to them.
+    try testing.expectEqual(@as(usize, 2), after.countEntities(.{
+        .kind = .definition,
+        .freshness = .stale,
+    }));
+    try testing.expect(after.entityById(greet_before.id) != null);
+    try testing.expect(after.countRelationships(.{
+        .source = greet_before.id,
+        .freshness = .stale,
+    }) > 0);
+
+    // What source ingestion establishes about the unit itself is current: it
+    // read the new contents even though no frontend could analyze them.
+    try testing.expectEqual(@as(usize, 2), after.countAssertions(.{
+        .unit = unit,
+        .producer = graph_mod.ingestion.name,
+    }));
+    const file = after.findEntity(.{ .kind = .file }).?;
+    try testing.expectEqual(@as(usize, 1), after.countRelationships(.{
+        .kind = .defines,
+        .target = file.id,
+    }));
+}
+
+test "a stale unit becomes current again, with identity preserved across the gap" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const unit = try graph.addSourceUnit("a/A.java", .java, "v1");
+    _ = try integrateNames(&graph, unit, &.{ "greet", "greeting" }, "v1");
+
+    var before = try graph.publish();
+    defer before.deinit();
+    const greet_before = before.findDefinition("a/A.java", "greet").?;
+    const greeting_before = before.findDefinition("a/A.java", "greeting").?;
+
+    _ = try graph.setSourceUnitBytes(unit, "v2 which nothing could parse");
+    _ = try failAnalysis(&graph, unit);
+
+    _ = try graph.setSourceUnitBytes(unit, "v3");
+    const repaired = try integrateNames(&graph, unit, &.{ "greet", "greeting" }, "v3");
+    try testing.expect(repaired.applied);
+    try testing.expectEqual(@as(usize, 2), repaired.preserved);
+    try testing.expectEqual(@as(usize, 0), repaired.created);
+    try testing.expectEqual(@as(usize, 0), repaired.lost);
+
+    var after = try graph.publish();
+    defer after.deinit();
+    try testing.expectEqual(graph_mod.UnitAnalysis.current, after.unitAnalysis(unit).?);
+    try testing.expectEqual(@as(usize, 0), after.countUnits(.stale));
+    try testing.expectEqual(greet_before.id, after.findDefinition("a/A.java", "greet").?.id);
+    try testing.expectEqual(greeting_before.id, after.findDefinition("a/A.java", "greeting").?.id);
+
+    // The failed attempt's diagnostic is gone: diagnostics describe the latest
+    // analysis, not every attempt ever made.
+    try testing.expectEqual(@as(usize, 0), after.countDiagnostics(.analysis_unavailable));
+}
+
+test "one unit going stale does not make another unit stale" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const a = try graph.addSourceUnit("a/A.java", .java, "v1");
+    const b = try graph.addSourceUnit("b/B.java", .java, "v1");
+    _ = try integrateNames(&graph, a, &.{ "greet", "greeting" }, "v1");
+    _ = try integrateNames(&graph, b, &.{"other"}, "v1");
+
+    _ = try graph.setSourceUnitBytes(a, "v2 which nothing could parse");
+    _ = try failAnalysis(&graph, a);
+
+    var after = try graph.publish();
+    defer after.deinit();
+    try testing.expectEqual(graph_mod.UnitAnalysis.stale, after.unitAnalysis(a).?);
+    try testing.expectEqual(graph_mod.UnitAnalysis.current, after.unitAnalysis(b).?);
+    try testing.expectEqual(@as(usize, 1), after.countEntities(.{ .kind = .definition }));
+    try testing.expect(after.findDefinition("b/B.java", "other") != null);
 }
 
 test "an edit to one unit does not disturb another unit" {

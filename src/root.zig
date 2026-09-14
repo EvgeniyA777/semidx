@@ -59,12 +59,18 @@ pub const Index = struct {
 
     /// Applies an edit to one unit and reconciles only that unit's semantic
     /// region against the existing graph.
+    ///
+    /// The two steps are separate revisions on purpose. Ingestion establishes
+    /// the unit's new contents first, which marks the unit's existing analysis
+    /// stale; analysis then either makes it current again or leaves it stale.
+    /// An edit whose analysis fails therefore cannot leave earlier facts
+    /// answering questions about source that no longer exists.
     pub fn applyEdit(
         self: *Index,
         unit: model.SourceUnitId,
         bytes: []const u8,
     ) !reconcile.Outcome {
-        try self.graph.setSourceUnitBytes(unit, bytes);
+        _ = try self.graph.setSourceUnitBytes(unit, bytes);
         return self.analyzer.indexUnit(&self.graph, unit);
     }
 

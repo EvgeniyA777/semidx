@@ -80,24 +80,31 @@ pub const Parser = struct {
         self.* = undefined;
     }
 
-    /// Parses `source`, optionally reusing the previous tree for the same unit
-    /// so that an edit reparses only what changed.
-    pub fn parse(self: *Parser, source: []const u8, previous: ?Tree, budget: ?Budget) Error!Tree {
-        const old: ?*const c.TSTree = if (previous) |tree| tree.ptr else null;
-
+    /// Parses `source` from scratch.
+    ///
+    /// There is deliberately no previous-tree parameter. tree-sitter can reuse
+    /// a tree only if that tree has been told, through `ts_tree_edit`, exactly
+    /// which byte ranges changed; handing it an unedited tree makes it conclude
+    /// the text is unchanged and return the old parse. Nothing upstream tracks
+    /// edit ranges — this pipeline receives replacement contents — so the
+    /// parameter could only ever be misused. `contract.PreviousParse` is where
+    /// an adapter that does track edits would carry one, and adding it here is
+    /// that adapter's job, together with the `ts_tree_edit` calls that make it
+    /// correct.
+    pub fn parse(self: *Parser, source: []const u8, budget: ?Budget) Error!Tree {
         const tree = blk: {
             if (budget) |limit| {
                 var state: ProgressState = .{ .max_bytes = limit.max_bytes };
                 break :blk c.ts_parser_parse_with_options(
                     self.ptr,
-                    old,
+                    null,
                     sliceInput(&source),
                     .{ .payload = &state, .progress_callback = progressCallback },
                 );
             }
             break :blk c.ts_parser_parse_string(
                 self.ptr,
-                old,
+                null,
                 source.ptr,
                 @intCast(source.len),
             );
@@ -244,7 +251,7 @@ test "the local java grammar parses through the adapter" {
     defer parser.deinit();
 
     const source = "class Greeter { String greet() { return greeting(); } }";
-    var tree = try parser.parse(source, null, null);
+    var tree = try parser.parse(source, null);
     defer tree.deinit();
 
     const root = tree.root();
@@ -261,7 +268,7 @@ test "the local clojure grammar parses through the adapter" {
     defer parser.deinit();
 
     const source = "(ns demo.greeter)\n(defn greet [] (str \"hi\"))\n";
-    var tree = try parser.parse(source, null, null);
+    var tree = try parser.parse(source, null);
     defer tree.deinit();
 
     const root = tree.root();
@@ -277,7 +284,7 @@ test "a syntax error is visible on the tree rather than silently dropped" {
     var parser = try Parser.init(.java);
     defer parser.deinit();
 
-    var tree = try parser.parse("class Greeter { String greet( ", null, null);
+    var tree = try parser.parse("class Greeter { String greet( ", null);
     defer tree.deinit();
     try testing.expect(tree.root().hasError());
 }
@@ -298,26 +305,41 @@ test "an exceeded byte budget fails the parse instead of returning a short tree"
 
     try testing.expectError(
         error.ParseFailed,
-        parser.parse(source.items, null, .{ .max_bytes = 0 }),
+        parser.parse(source.items, .{ .max_bytes = 0 }),
     );
 
     // The same parser still works once the budget is large enough, so the
     // failure is the budget and not a broken parser.
-    var tree = try parser.parse(source.items, null, .{ .max_bytes = 1 << 30 });
+    var tree = try parser.parse(source.items, .{ .max_bytes = 1 << 30 });
     defer tree.deinit();
     try testing.expect(!tree.root().hasError());
 }
 
-test "a previous tree can be reused for the next parse of the same unit" {
+test "one parser parses successive contents of the same unit independently" {
     var parser = try Parser.init(.java);
     defer parser.deinit();
 
-    var first = try parser.parse("class Greeter { String greet() { return \"a\"; } }", null, null);
+    var first = try parser.parse("class Greeter { String greet() { return \"a\"; } }", null);
     defer first.deinit();
-    var second = try parser.parse("class Greeter { String greet() { return \"b\"; } }", first, null);
+    var second = try parser.parse("class Greeter { String salute() { return \"b\"; } }", null);
     defer second.deinit();
-    try testing.expect(!second.root().hasError());
-    try testing.expectEqualStrings("program", second.root().kind());
+
+    // The second parse reflects the second source, not the first. This is the
+    // property that reusing an unedited tree would quietly break.
+    const first_name = first.root().namedChild(0).?
+        .childByFieldName("body").?.namedChild(0).?
+        .childByFieldName("name").?;
+    const second_name = second.root().namedChild(0).?
+        .childByFieldName("body").?.namedChild(0).?
+        .childByFieldName("name").?;
+    try testing.expectEqualStrings(
+        "greet",
+        first_name.text("class Greeter { String greet() { return \"a\"; } }"),
+    );
+    try testing.expectEqualStrings(
+        "salute",
+        second_name.text("class Greeter { String salute() { return \"b\"; } }"),
+    );
 }
 
 test "the grammars and the runtime agree on the parser ABI" {

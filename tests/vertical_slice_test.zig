@@ -223,9 +223,9 @@ test "both languages contribute to one graph without flattening each other" {
     var snapshot = try fixture.index.publish();
     defer snapshot.deinit();
 
-    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.repository));
-    try testing.expectEqual(@as(usize, 2), snapshot.countEntities(.file));
-    try testing.expectEqual(@as(usize, 8), snapshot.countEntities(.definition));
+    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .repository }));
+    try testing.expectEqual(@as(usize, 2), snapshot.countEntities(.{ .kind = .file }));
+    try testing.expectEqual(@as(usize, 8), snapshot.countEntities(.{ .kind = .definition }));
 
     // The same shared-core question is answerable across both languages, and
     // each entity still reports which language produced it.
@@ -277,7 +277,7 @@ test "a java body edit preserves every entity id" {
 
     // A body edit introduces and retires nothing.
     try testing.expect(before.revision < after.revision);
-    try testing.expectEqual(before.countEntities(.definition), after.countEntities(.definition));
+    try testing.expectEqual(before.countEntities(.{ .kind = .definition }), after.countEntities(.{ .kind = .definition }));
 }
 
 test "an added java definition leaves the others untouched" {
@@ -491,7 +491,121 @@ test "editing one language's unit does not disturb the other's semantic region" 
         clojure_relationships,
         after.countRelationships(.{ .source = clojure_greet_before.id }),
     );
-    try testing.expectEqual(@as(usize, 2), after.countEntities(.file));
+    try testing.expectEqual(@as(usize, 2), after.countEntities(.{ .kind = .file }));
+}
+
+test "editing a java fixture into unparsable source stops its facts being current" {
+    var fixture = try Fixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const greet_before = before.findDefinition(java_path, "greet").?;
+    const java_unit = before.unitByPath(java_path).?;
+    try testing.expectEqual(semidx.core.graph.UnitAnalysis.current, java_unit.analysis());
+
+    const outcome = try fixture.edit(fixture.java_unit, "java/edits/05_unparsable.java");
+    try testing.expect(!outcome.applied);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+
+    // The unit reports what happened, and its earlier facts no longer answer
+    // questions about what is in the file now.
+    try testing.expectEqual(
+        semidx.core.graph.UnitAnalysis.stale,
+        after.unitAnalysis(fixture.java_unit).?,
+    );
+    try testing.expectEqual(@as(usize, 1), after.countDiagnostics(.analysis_failed));
+    try testing.expect(after.findDefinition(java_path, "greet") == null);
+    try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .source = greet_before.id }));
+
+    // The Clojure unit is untouched: one file failing to parse is not a reason
+    // to stop answering about another.
+    try testing.expectEqual(
+        semidx.core.graph.UnitAnalysis.current,
+        after.unitAnalysis(fixture.clojure_unit).?,
+    );
+    try testing.expectEqual(@as(usize, 4), after.countEntities(.{
+        .kind = .definition,
+        .language = .clojure,
+    }));
+    try testing.expectEqual(@as(usize, 0), after.countEntities(.{
+        .kind = .definition,
+        .language = .java,
+    }));
+
+    // Nothing was deleted, so repairing the source restores the same entities.
+    const repaired = try fixture.edit(fixture.java_unit, "java/edits/01_body_edit.java");
+    try testing.expect(repaired.applied);
+    try testing.expectEqual(@as(usize, 4), repaired.preserved);
+    try testing.expectEqual(@as(usize, 0), repaired.created);
+    try testing.expectEqual(@as(usize, 0), repaired.lost);
+
+    var repaired_snapshot = try fixture.index.publish();
+    defer repaired_snapshot.deinit();
+    try testing.expectEqual(
+        semidx.core.graph.UnitAnalysis.current,
+        repaired_snapshot.unitAnalysis(fixture.java_unit).?,
+    );
+    try testing.expectEqual(
+        greet_before.id,
+        repaired_snapshot.findDefinition(java_path, "greet").?.id,
+    );
+    try testing.expectEqual(@as(usize, 0), repaired_snapshot.countDiagnostics(.analysis_failed));
+}
+
+test "editing a clojure fixture into unparsable source stops its facts being current" {
+    var fixture = try Fixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const greet_before = before.findDefinition(clojure_path, "greet").?;
+
+    const outcome = try fixture.edit(fixture.clojure_unit, "clojure/edits/05_unparsable.clj");
+    try testing.expect(!outcome.applied);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(
+        semidx.core.graph.UnitAnalysis.stale,
+        after.unitAnalysis(fixture.clojure_unit).?,
+    );
+    try testing.expect(after.findDefinition(clojure_path, "greet") == null);
+
+    // Still recorded, still attributed, just not current.
+    try testing.expectEqual(greet_before.id, after.findEntity(.{
+        .kind = .definition,
+        .scope = clojure_path,
+        .name = "greet",
+        .freshness = .stale,
+    }).?.id);
+}
+
+test "the source container's extent tracks the file it stands for" {
+    var fixture = try Fixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const file_before = before.findEntity(.{ .kind = .file, .scope = java_path }).?;
+
+    _ = try fixture.edit(fixture.java_unit, "java/edits/02_added_definition.java");
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    const file_after = after.findEntity(.{ .kind = .file, .scope = java_path }).?;
+
+    try testing.expectEqual(file_before.id, file_after.id);
+    try testing.expect(
+        file_after.evidence.?.range.end_byte > file_before.evidence.?.range.end_byte,
+    );
+    try testing.expectEqual(
+        file_after.evidence.?.range.end_byte,
+        after.firstRelationship(.{ .kind = .defines, .target = file_after.id }).?
+            .evidence.?.range.end_byte,
+    );
 }
 
 test "a snapshot taken before an edit keeps observing the state it was published from" {
@@ -508,6 +622,6 @@ test "a snapshot taken before an edit keeps observing the state it was published
 
     try testing.expect(before.findDefinition(java_path, "farewell") == null);
     try testing.expect(after.findDefinition(java_path, "farewell") != null);
-    try testing.expectEqual(@as(usize, 8), before.countEntities(.definition));
-    try testing.expectEqual(@as(usize, 9), after.countEntities(.definition));
+    try testing.expectEqual(@as(usize, 8), before.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 9), after.countEntities(.{ .kind = .definition }));
 }

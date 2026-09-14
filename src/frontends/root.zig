@@ -64,12 +64,10 @@ pub const Analyzer = struct {
 
     /// Runs the frontend for one source unit into `builder`.
     ///
-    /// The slice reparses a changed unit in full rather than feeding the
-    /// previous tree back: reusing a tree requires the edit ranges that
-    /// produced it, and this pipeline receives replacement contents rather than
-    /// edits. Incrementality here is graph-level — only the changed unit is
-    /// reanalyzed — and `contract.PreviousParse` is where a future adapter that
-    /// does track edits would supply the tree.
+    /// A changed unit is reparsed in full. Incrementality here is graph-level:
+    /// only the changed unit is reanalyzed, and its entities keep their
+    /// identities. Parser-level reuse would need the edit ranges this pipeline
+    /// does not receive; see `tree_sitter.Parser.parse`.
     pub fn analyze(
         self: *Analyzer,
         input: contract.FrontendInput,
@@ -85,7 +83,7 @@ pub const Analyzer = struct {
             return;
         };
 
-        var tree = parser.parse(input.unit.bytes, null, self.budget) catch {
+        var tree = parser.parse(input.unit.bytes, self.budget) catch {
             try builder.addDiagnostic(.analysis_unavailable, try builder.print(
                 "the {s} parser produced no tree for this source unit, so it was not analyzed",
                 .{language.tag()},
@@ -210,7 +208,7 @@ test "a parse failure is reported as unavailable analysis, not as no entities" {
 
     var snapshot = try graph.publish();
     defer snapshot.deinit();
-    try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.definition));
+    try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.{ .kind = .definition }));
     try testing.expectEqual(@as(usize, 1), snapshot.countDiagnostics(.analysis_unavailable));
     try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.confirmed_absence));
 }
@@ -227,7 +225,7 @@ test "a source unit with no definitions reports confirmed absence" {
 
     var snapshot = try graph.publish();
     defer snapshot.deinit();
-    try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.definition));
+    try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.{ .kind = .definition }));
     try testing.expectEqual(@as(usize, 1), snapshot.countDiagnostics(.confirmed_absence));
     try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.analysis_unavailable));
 }
@@ -245,5 +243,5 @@ test "source that does not parse is reported as failed analysis" {
     var snapshot = try graph.publish();
     defer snapshot.deinit();
     try testing.expectEqual(@as(usize, 1), snapshot.countDiagnostics(.analysis_failed));
-    try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.definition));
+    try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.{ .kind = .definition }));
 }

@@ -249,6 +249,16 @@ pub const ExtensionPayload = struct {
     }
 };
 
+/// Whether a claim was established about the current contents of the source
+/// unit it was observed in.
+///
+/// This is a different axis from `Resolution`, and collapsing the two would be
+/// a lie in both directions. A fully resolved fact about source that has since
+/// changed is still a fact about what its producer read, and it is still not
+/// current. An unresolved assertion about the contents on disk right now is
+/// current, and still unresolved.
+pub const Freshness = enum { current, stale };
+
 pub const EntityKind = enum { repository, file, definition };
 
 pub const Entity = struct {
@@ -260,6 +270,10 @@ pub const Entity = struct {
     evidence: ?SourceEvidence,
     extension: ExtensionPayload,
     created_revision: u64,
+    /// The revision at which this entity's source evidence was last
+    /// established. A later analysis that establishes correspondence moves it;
+    /// `created_revision` never moves, because the entity is the same entity.
+    observed_revision: u64,
     removed_revision: ?u64,
 
     pub fn isLive(self: Entity) bool {

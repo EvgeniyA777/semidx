@@ -48,19 +48,29 @@ pub fn main(init: std.process.Init) !void {
     var snapshot = try index.publish();
     defer snapshot.deinit();
 
-    try printSummary(out, snapshot);
+    try printSummary(out, &snapshot);
     try out.flush();
 }
 
-fn printSummary(out: *std.Io.Writer, snapshot: semidx.Snapshot) !void {
+fn printSummary(out: *std.Io.Writer, snapshot: *const semidx.Snapshot) !void {
     try out.print("revision {d}\n", .{snapshot.revision});
-    try out.print("  repositories {d}\n", .{snapshot.countEntities(.repository)});
-    try out.print("  files        {d}\n", .{snapshot.countEntities(.file)});
-    try out.print("  definitions  {d}\n", .{snapshot.countEntities(.definition)});
-    try out.print("  assertions   {d}\n", .{snapshot.assertions.len});
-    try out.print("    facts       {d}\n", .{countResolution(snapshot, .fact)});
+    try out.print("  repositories {d}\n", .{snapshot.countEntities(.{ .kind = .repository })});
+    try out.print("  files        {d}\n", .{snapshot.countEntities(.{ .kind = .file })});
+    try out.print("  definitions  {d}\n", .{snapshot.countEntities(.{ .kind = .definition })});
+    try out.print("  assertions   {d} recorded\n", .{snapshot.assertions.len});
+    try out.print("    facts       {d}\n", .{snapshot.countAssertions(.{ .resolution = .fact })});
     try out.print("    unresolved  {d}\n", .{snapshot.countUnresolvedAssertions()});
     try out.print("    approximate {d}\n", .{snapshot.countApproximateAssertions()});
+    try out.print("    stale       {d}\n", .{snapshot.countAssertions(.{ .freshness = .stale })});
+
+    try out.print("\nsource units\n", .{});
+    for (snapshot.units) |unit| {
+        try out.print("  {s} {s} ({s})\n", .{
+            @tagName(unit.analysis()),
+            unit.path,
+            @tagName(unit.language),
+        });
+    }
 
     try out.print("\ndefinitions\n", .{});
     for (snapshot.entities) |entity| {
@@ -97,12 +107,4 @@ fn printSummary(out: *std.Io.Writer, snapshot: semidx.Snapshot) !void {
             try out.print("  {s}: {s}\n", .{ @tagName(diagnostic.kind), diagnostic.message });
         }
     }
-}
-
-fn countResolution(snapshot: semidx.Snapshot, category: semidx.model.ResolutionCategory) usize {
-    var count: usize = 0;
-    for (snapshot.assertions) |assertion| {
-        if (assertion.resolution.category() == category) count += 1;
-    }
-    return count;
 }

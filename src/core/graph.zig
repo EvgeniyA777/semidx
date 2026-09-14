@@ -30,6 +30,14 @@ pub const ingestion: model.Producer = .{ .name = "source-ingestion", .version = 
 /// The reconciler establishes identity correspondence between revisions.
 pub const reconciler: model.Producer = .{ .name = "reconciler", .version = "slice-001" };
 
+/// What the graph currently knows about a source unit's contents.
+///
+/// A unit whose contents changed without a successful reanalysis is `stale`,
+/// not empty. Withdrawing its assertions would assert an absence nothing
+/// observed; presenting them as current would claim they describe source that
+/// is no longer there. Neither is honest, so the state is reported instead.
+pub const UnitAnalysis = enum { pending, current, stale };
+
 pub const SourceUnitRecord = struct {
     id: SourceUnitId,
     path: []const u8,
@@ -38,6 +46,41 @@ pub const SourceUnitRecord = struct {
     bytes: []u8,
     /// The `file` entity for this unit.
     entity: EntityId,
+    /// The revision at which these contents were established.
+    content_revision: u64,
+    /// The revision at which a frontend last analyzed this unit successfully,
+    /// or 0 if it never has.
+    analysis_revision: u64,
+
+    pub fn analysis(self: SourceUnitRecord) UnitAnalysis {
+        if (self.analysis_revision == 0) return .pending;
+        return if (self.analysis_revision >= self.content_revision) .current else .stale;
+    }
+
+    pub fn view(self: SourceUnitRecord) SourceUnitView {
+        return .{
+            .id = self.id,
+            .path = self.path,
+            .language = self.language,
+            .content_revision = self.content_revision,
+            .analysis_revision = self.analysis_revision,
+        };
+    }
+};
+
+/// The part of a source unit a consumer observes. It carries no contents: a
+/// snapshot answers questions about the graph, not about source text.
+pub const SourceUnitView = struct {
+    id: SourceUnitId,
+    path: []const u8,
+    language: model.Language,
+    content_revision: u64,
+    analysis_revision: u64,
+
+    pub fn analysis(self: SourceUnitView) UnitAnalysis {
+        if (self.analysis_revision == 0) return .pending;
+        return if (self.analysis_revision >= self.content_revision) .current else .stale;
+    }
 };
 
 pub const Graph = struct {
@@ -79,9 +122,13 @@ pub const Graph = struct {
             },
             .evidence = null,
             .extension = model.ExtensionPayload.empty,
-            .producer = ingestion,
-            .resolution = .{ .fact = .{ .method = "indexed source tree root" } },
         });
+        _ = try self.addAssertion(
+            .{ .entity_exists = self.repository },
+            ingestion,
+            null,
+            .{ .fact = .{ .method = "indexed source tree root" } },
+        );
         return self;
     }
 
@@ -133,8 +180,6 @@ pub const Graph = struct {
                 .text = interned_path,
             },
             .extension = model.ExtensionPayload.empty,
-            .producer = ingestion,
-            .resolution = .{ .fact = .{ .method = "source unit presented to analysis" } },
         }) catch |err| {
             self.gpa.free(owned_bytes);
             return err;
@@ -146,35 +191,81 @@ pub const Graph = struct {
             .language = language,
             .bytes = owned_bytes,
             .entity = file_entity,
+            .content_revision = self.revision,
+            .analysis_revision = 0,
         }) catch |err| {
             self.gpa.free(owned_bytes);
             return err;
         };
 
-        _ = try self.addRelationship(.{
-            .kind = .defines,
-            .source = self.repository,
-            .target = .{ .entity = file_entity },
-        }, ingestion, .{
-            .unit = id,
-            .range = wholeUnitRange(bytes),
-            .text = interned_path,
-        }, .{ .fact = .{ .method = "source unit belongs to the indexed source tree" } });
-
+        try self.recordUnitIngestion(self.units.items[id.index()]);
         return id;
     }
 
-    /// Applies an edit: replaces one unit's contents and leaves every other
-    /// unit, entity, and assertion untouched.
+    /// Applies an edit in its own revision: replaces one unit's contents and
+    /// re-establishes what source ingestion claims about it, so the source
+    /// container's extent describes the new contents rather than the old.
+    ///
+    /// The unit's frontend assertions are left exactly as they were and become
+    /// stale, because nothing has yet read the new contents. A successful
+    /// `Graph.markAnalyzed` for a later revision is what makes them current
+    /// again. Every other unit is untouched.
     pub fn setSourceUnitBytes(
         self: *Graph,
         id: SourceUnitId,
         bytes: []const u8,
-    ) GraphError!void {
-        const record = self.unitMut(id) orelse return error.UnknownSourceUnit;
+    ) GraphError!u64 {
+        const index = id.index();
+        if (index >= self.units.items.len) return error.UnknownSourceUnit;
+
+        const revision = self.beginRevision();
         const owned = try self.gpa.dupe(u8, bytes);
-        self.gpa.free(record.bytes);
-        record.bytes = owned;
+        {
+            const record = &self.units.items[index];
+            self.gpa.free(record.bytes);
+            record.bytes = owned;
+            record.content_revision = revision;
+        }
+
+        const record = self.units.items[index];
+        try self.refreshEntity(record.entity, .{
+            .unit = record.id,
+            .range = wholeUnitRange(record.bytes),
+            .text = record.path,
+        }, model.ExtensionPayload.empty);
+
+        self.dropIngestionAssertionsForUnit(id);
+        try self.recordUnitIngestion(record);
+        return revision;
+    }
+
+    /// Records what source ingestion establishes about a unit's current
+    /// contents: that the source container exists, and that the indexed source
+    /// tree contains it. Both carry the unit's current extent.
+    fn recordUnitIngestion(self: *Graph, record: SourceUnitRecord) GraphError!void {
+        const evidence: model.SourceEvidence = .{
+            .unit = record.id,
+            .range = wholeUnitRange(record.bytes),
+            .text = record.path,
+        };
+        _ = try self.addAssertion(
+            .{ .entity_exists = record.entity },
+            ingestion,
+            evidence,
+            .{ .fact = .{ .method = "source unit presented to analysis" } },
+        );
+        _ = try self.addRelationship(
+            .{ .kind = .defines, .source = self.repository, .target = .{ .entity = record.entity } },
+            ingestion,
+            evidence,
+            .{ .fact = .{ .method = "source unit belongs to the indexed source tree" } },
+        );
+    }
+
+    /// Records that a frontend has analyzed this unit's current contents.
+    pub fn markAnalyzed(self: *Graph, id: SourceUnitId) GraphError!void {
+        const record = self.unitMut(id) orelse return error.UnknownSourceUnit;
+        record.analysis_revision = self.revision;
     }
 
     pub fn unitByPath(self: *const Graph, path: []const u8) ?SourceUnitId {
@@ -208,13 +299,14 @@ pub const Graph = struct {
 
     // -- entities -----------------------------------------------------------
 
+    /// Allocating an entity does not assert that it exists. The producer that
+    /// observed it records that separately, with its own provenance and
+    /// resolution, so an existence claim is never manufactured by the store.
     pub const NewEntity = struct {
         kind: model.EntityKind,
         identity: model.IdentityEvidence,
         evidence: ?model.SourceEvidence,
         extension: model.ExtensionPayload,
-        producer: model.Producer,
-        resolution: model.Resolution,
     };
 
     pub fn addEntity(self: *Graph, spec: NewEntity) GraphError!EntityId {
@@ -232,16 +324,9 @@ pub const Graph = struct {
             .evidence = evidence,
             .extension = extension,
             .created_revision = self.revision,
+            .observed_revision = self.revision,
             .removed_revision = null,
         });
-        errdefer _ = self.entities.pop();
-
-        _ = try self.addAssertion(
-            .{ .entity_exists = id },
-            spec.producer,
-            evidence,
-            spec.resolution,
-        );
         return id;
     }
 
@@ -257,6 +342,7 @@ pub const Graph = struct {
         if (!record.isLive()) return error.RemovedEntity;
         record.evidence = try self.internEvidence(evidence);
         record.extension = try self.internExtension(extension);
+        record.observed_revision = self.revision;
     }
 
     pub fn removeEntity(self: *Graph, id: EntityId) GraphError!void {
@@ -352,6 +438,24 @@ pub const Graph = struct {
         self.assertions.shrinkRetainingCapacity(write);
     }
 
+    /// Drops what source ingestion previously claimed about one unit, so the
+    /// claims can be re-established against its new contents.
+    pub fn dropIngestionAssertionsForUnit(self: *Graph, id: SourceUnitId) void {
+        var write: usize = 0;
+        for (self.assertions.items) |assertion| {
+            const keep = blk: {
+                const evidence = assertion.evidence orelse break :blk true;
+                if (evidence.unit != id) break :blk true;
+                break :blk !std.mem.eql(u8, assertion.producer.name, ingestion.name);
+            };
+            if (keep) {
+                self.assertions.items[write] = assertion;
+                write += 1;
+            }
+        }
+        self.assertions.shrinkRetainingCapacity(write);
+    }
+
     pub fn dropDiagnosticsForUnit(self: *Graph, id: SourceUnitId) void {
         var write: usize = 0;
         for (self.diagnostics.items) |diagnostic| {
@@ -415,6 +519,10 @@ pub const Graph = struct {
             if (item.isLive()) try entities.append(self.gpa, item);
         }
 
+        var units: std.ArrayList(SourceUnitView) = .empty;
+        errdefer units.deinit(self.gpa);
+        for (self.units.items) |record| try units.append(self.gpa, record.view());
+
         return .{
             .gpa = self.gpa,
             .revision = self.revision,
@@ -422,6 +530,7 @@ pub const Graph = struct {
             .assertions = try self.gpa.dupe(model.Assertion, self.assertions.items),
             .diagnostics = try self.gpa.dupe(model.Diagnostic, self.diagnostics.items),
             .identity_events = try self.gpa.dupe(model.IdentityEvent, self.identity_events.items),
+            .units = try units.toOwnedSlice(self.gpa),
         };
     }
 
@@ -544,6 +653,11 @@ fn wholeUnitRange(bytes: []const u8) model.SourceRange {
 }
 
 /// What a consumer observes: one complete graph state.
+///
+/// Queries default to current claims only. A claim recorded before its source
+/// unit's contents last changed is stale: it is still here, still attributed,
+/// and still reachable by asking for it, but a query that did not ask for stale
+/// claims is never answered with one.
 pub const Snapshot = struct {
     gpa: Allocator,
     revision: u64,
@@ -551,15 +665,134 @@ pub const Snapshot = struct {
     assertions: []const model.Assertion,
     diagnostics: []const model.Diagnostic,
     identity_events: []const model.IdentityEvent,
+    units: []const SourceUnitView,
 
     pub fn deinit(self: *Snapshot) void {
         self.gpa.free(self.entities);
         self.gpa.free(self.assertions);
         self.gpa.free(self.diagnostics);
         self.gpa.free(self.identity_events);
+        self.gpa.free(self.units);
         self.* = undefined;
     }
 
+    // -- freshness ----------------------------------------------------------
+
+    pub fn unit(self: Snapshot, id: SourceUnitId) ?SourceUnitView {
+        for (self.units) |view| {
+            if (view.id == id) return view;
+        }
+        return null;
+    }
+
+    pub fn unitByPath(self: Snapshot, path: []const u8) ?SourceUnitView {
+        for (self.units) |view| {
+            if (std.mem.eql(u8, view.path, path)) return view;
+        }
+        return null;
+    }
+
+    pub fn unitAnalysis(self: Snapshot, id: SourceUnitId) ?UnitAnalysis {
+        const view = self.unit(id) orelse return null;
+        return view.analysis();
+    }
+
+    pub fn countUnits(self: Snapshot, analysis: UnitAnalysis) usize {
+        var count: usize = 0;
+        for (self.units) |view| {
+            if (view.analysis() == analysis) count += 1;
+        }
+        return count;
+    }
+
+    /// A claim observed in a source unit is current when it was recorded at or
+    /// after the revision that established the unit's contents. A claim with no
+    /// source unit behind it cannot go stale this way.
+    fn freshnessAt(
+        self: Snapshot,
+        evidence: ?model.SourceEvidence,
+        revision: u64,
+    ) model.Freshness {
+        const observed = evidence orelse return .current;
+        const view = self.unit(observed.unit) orelse return .current;
+        return if (revision >= view.content_revision) .current else .stale;
+    }
+
+    pub fn entityFreshness(self: Snapshot, entity: model.Entity) model.Freshness {
+        return self.freshnessAt(entity.evidence, entity.observed_revision);
+    }
+
+    pub fn assertionFreshness(self: Snapshot, assertion: model.Assertion) model.Freshness {
+        return self.freshnessAt(assertion.evidence, assertion.revision);
+    }
+
+    // -- entities -----------------------------------------------------------
+
+    pub const EntityFilter = struct {
+        kind: ?model.EntityKind = null,
+        scope: ?[]const u8 = null,
+        name: ?[]const u8 = null,
+        role: ?[]const u8 = null,
+        language: ?model.Language = null,
+        /// `null` matches regardless of freshness. The default is deliberately
+        /// not that: a caller who did not ask for stale entities must not be
+        /// handed one.
+        freshness: ?model.Freshness = .current,
+    };
+
+    pub const EntityIterator = struct {
+        snapshot: *const Snapshot,
+        index: usize,
+        filter: EntityFilter,
+
+        pub fn next(self: *EntityIterator) ?model.Entity {
+            while (self.index < self.snapshot.entities.len) {
+                const entity = self.snapshot.entities[self.index];
+                self.index += 1;
+                if (self.filter.kind) |kind| {
+                    if (entity.kind != kind) continue;
+                }
+                if (self.filter.scope) |scope| {
+                    if (!std.mem.eql(u8, entity.identity.scope, scope)) continue;
+                }
+                if (self.filter.name) |name| {
+                    const entity_name = entity.identity.name orelse continue;
+                    if (!std.mem.eql(u8, entity_name, name)) continue;
+                }
+                if (self.filter.role) |role| {
+                    if (!std.mem.eql(u8, entity.identity.role, role)) continue;
+                }
+                if (self.filter.language) |language| {
+                    const entity_language = entity.identity.language orelse continue;
+                    if (entity_language != language) continue;
+                }
+                if (self.filter.freshness) |freshness| {
+                    if (self.snapshot.entityFreshness(entity) != freshness) continue;
+                }
+                return entity;
+            }
+            return null;
+        }
+    };
+
+    pub fn entitiesMatching(self: *const Snapshot, filter: EntityFilter) EntityIterator {
+        return .{ .snapshot = self, .index = 0, .filter = filter };
+    }
+
+    pub fn countEntities(self: *const Snapshot, filter: EntityFilter) usize {
+        var iterator = self.entitiesMatching(filter);
+        var count: usize = 0;
+        while (iterator.next()) |_| count += 1;
+        return count;
+    }
+
+    pub fn findEntity(self: *const Snapshot, filter: EntityFilter) ?model.Entity {
+        var iterator = self.entitiesMatching(filter);
+        return iterator.next();
+    }
+
+    /// Entities are looked up by their id; this looks one up by the id it
+    /// carries, not by anything derived from its evidence.
     pub fn entityById(self: Snapshot, id: EntityId) ?model.Entity {
         for (self.entities) |item| {
             if (item.id == id) return item;
@@ -567,26 +800,14 @@ pub const Snapshot = struct {
         return null;
     }
 
-    pub fn countEntities(self: Snapshot, kind: model.EntityKind) usize {
-        var count: usize = 0;
-        for (self.entities) |item| {
-            if (item.kind == kind) count += 1;
-        }
-        return count;
+    /// Looks a definition up by identity evidence a consumer can name. It is a
+    /// query convenience, not an identity: the answer is an entity that carries
+    /// its own id. Stale definitions are excluded, like every other query.
+    pub fn findDefinition(self: *const Snapshot, scope: []const u8, name: []const u8) ?model.Entity {
+        return self.findEntity(.{ .kind = .definition, .scope = scope, .name = name });
     }
 
-    /// Looks a definition up by the identity evidence a consumer can name. It
-    /// is a query convenience, not an identity: the answer is an entity that
-    /// carries its own id.
-    pub fn findDefinition(self: Snapshot, scope: []const u8, name: []const u8) ?model.Entity {
-        for (self.entities) |item| {
-            if (item.kind != .definition) continue;
-            if (!std.mem.eql(u8, item.identity.scope, scope)) continue;
-            const item_name = item.identity.name orelse continue;
-            if (std.mem.eql(u8, item_name, name)) return item;
-        }
-        return null;
-    }
+    // -- relationships ------------------------------------------------------
 
     pub const RelationshipFilter = struct {
         source: ?EntityId = null,
@@ -597,9 +818,13 @@ pub const Snapshot = struct {
         reference_query: bool = false,
         resolution: ?model.ResolutionCategory = null,
         designator: ?[]const u8 = null,
+        /// `null` matches regardless of freshness. The default excludes claims
+        /// recorded against contents the unit no longer has.
+        freshness: ?model.Freshness = .current,
     };
 
     pub const RelationshipIterator = struct {
+        snapshot: *const Snapshot,
         assertions: []const model.Assertion,
         index: usize,
         filter: RelationshipFilter,
@@ -608,6 +833,9 @@ pub const Snapshot = struct {
             while (self.index < self.assertions.len) {
                 const assertion = self.assertions[self.index];
                 self.index += 1;
+                if (self.filter.freshness) |freshness| {
+                    if (self.snapshot.assertionFreshness(assertion) != freshness) continue;
+                }
                 const rel = assertion.relationship() orelse continue;
                 if (self.filter.reference_query) {
                     if (!rel.kind.satisfiesReferenceQuery()) continue;
@@ -638,36 +866,63 @@ pub const Snapshot = struct {
         }
     };
 
-    pub fn relationships(self: Snapshot, filter: RelationshipFilter) RelationshipIterator {
-        return .{ .assertions = self.assertions, .index = 0, .filter = filter };
+    pub fn relationships(self: *const Snapshot, filter: RelationshipFilter) RelationshipIterator {
+        return .{
+            .snapshot = self,
+            .assertions = self.assertions,
+            .index = 0,
+            .filter = filter,
+        };
     }
 
-    pub fn countRelationships(self: Snapshot, filter: RelationshipFilter) usize {
+    pub fn countRelationships(self: *const Snapshot, filter: RelationshipFilter) usize {
         var iterator = self.relationships(filter);
         var count: usize = 0;
         while (iterator.next()) |_| count += 1;
         return count;
     }
 
-    pub fn firstRelationship(self: Snapshot, filter: RelationshipFilter) ?model.Assertion {
+    pub fn firstRelationship(self: *const Snapshot, filter: RelationshipFilter) ?model.Assertion {
         var iterator = self.relationships(filter);
         return iterator.next();
     }
 
-    pub fn countUnresolvedAssertions(self: Snapshot) usize {
+    pub const AssertionFilter = struct {
+        resolution: ?model.ResolutionCategory = null,
+        unit: ?SourceUnitId = null,
+        /// Producer name, so a consumer can ask what one producer established
+        /// rather than treating every assertion as equally sourced.
+        producer: ?[]const u8 = null,
+        freshness: ?model.Freshness = .current,
+    };
+
+    pub fn countAssertions(self: *const Snapshot, filter: AssertionFilter) usize {
         var count: usize = 0;
         for (self.assertions) |assertion| {
-            if (assertion.resolution.category() == .unresolved) count += 1;
+            if (filter.resolution) |category| {
+                if (assertion.resolution.category() != category) continue;
+            }
+            if (filter.unit) |id| {
+                const evidence = assertion.evidence orelse continue;
+                if (evidence.unit != id) continue;
+            }
+            if (filter.producer) |name| {
+                if (!std.mem.eql(u8, assertion.producer.name, name)) continue;
+            }
+            if (filter.freshness) |freshness| {
+                if (self.assertionFreshness(assertion) != freshness) continue;
+            }
+            count += 1;
         }
         return count;
     }
 
-    pub fn countApproximateAssertions(self: Snapshot) usize {
-        var count: usize = 0;
-        for (self.assertions) |assertion| {
-            if (assertion.resolution.category() == .approximate) count += 1;
-        }
-        return count;
+    pub fn countUnresolvedAssertions(self: *const Snapshot) usize {
+        return self.countAssertions(.{ .resolution = .unresolved });
+    }
+
+    pub fn countApproximateAssertions(self: *const Snapshot) usize {
+        return self.countAssertions(.{ .resolution = .approximate });
     }
 
     pub fn identityEventsAt(self: Snapshot, revision: u64, gpa: Allocator) Allocator.Error![]model.IdentityEvent {
@@ -724,7 +979,8 @@ fn addDefinition(
     name: []const u8,
     range: model.SourceRange,
 ) !EntityId {
-    return graph.addEntity(.{
+    const evidence: model.SourceEvidence = .{ .unit = unit, .range = range, .text = name };
+    const id = try graph.addEntity(.{
         .kind = .definition,
         .identity = .{
             .scope = scope,
@@ -734,11 +990,17 @@ fn addDefinition(
             .signature = name,
             .container_path = &.{},
         },
-        .evidence = .{ .unit = unit, .range = range, .text = name },
+        .evidence = evidence,
         .extension = .{ .namespace = "java", .labels = &.{} },
-        .producer = frontend,
-        .resolution = .{ .fact = .{ .method = "declaration in source" } },
     });
+    _ = try graph.addAssertion(
+        .{ .entity_exists = id },
+        frontend,
+        evidence,
+        .{ .fact = .{ .method = "declaration in source" } },
+    );
+    try graph.markAnalyzed(unit);
+    return id;
 }
 
 test "a graph is built and queried without any language frontend" {
@@ -765,9 +1027,9 @@ test "a graph is built and queried without any language frontend" {
     var snapshot = try graph.publish();
     defer snapshot.deinit();
 
-    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.repository));
-    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.file));
-    try testing.expectEqual(@as(usize, 2), snapshot.countEntities(.definition));
+    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .repository }));
+    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .file }));
+    try testing.expectEqual(@as(usize, 2), snapshot.countEntities(.{ .kind = .definition }));
     try testing.expectEqual(@as(usize, 1), snapshot.countUnresolvedAssertions());
     try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
 
@@ -873,8 +1135,8 @@ test "a published snapshot does not observe later graph mutation" {
     var after = try graph.publish();
     defer after.deinit();
 
-    try testing.expectEqual(@as(usize, 1), before.countEntities(.definition));
-    try testing.expectEqual(@as(usize, 2), after.countEntities(.definition));
+    try testing.expectEqual(@as(usize, 1), before.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 2), after.countEntities(.{ .kind = .definition }));
     try testing.expect(before.revision < after.revision);
 }
 
@@ -919,6 +1181,61 @@ test "a source range is evidence, not identity" {
     const moved = snapshot.entityById(greet).?;
     try testing.expectEqual(greet, moved.id);
     try testing.expectEqual(@as(u32, 400), moved.evidence.?.range.start_byte);
+}
+
+test "the source container's extent follows an edit" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
+
+    var before = try graph.publish();
+    defer before.deinit();
+    const file_before = before.findEntity(.{ .kind = .file }).?;
+    try testing.expectEqual(@as(u32, 11), file_before.evidence.?.range.end_byte);
+    try testing.expectEqual(@as(u32, 11), before.firstRelationship(.{
+        .kind = .defines,
+        .target = file_before.id,
+    }).?.evidence.?.range.end_byte);
+
+    _ = try graph.setSourceUnitBytes(unit, "class A {\n  void f() {}\n}\n");
+
+    var after = try graph.publish();
+    defer after.deinit();
+    const file_after = after.findEntity(.{ .kind = .file }).?;
+
+    // The source container is the same entity; only its projection moved.
+    try testing.expectEqual(file_before.id, file_after.id);
+    try testing.expectEqual(@as(u32, 26), file_after.evidence.?.range.end_byte);
+    try testing.expectEqual(@as(u32, 3), file_after.evidence.?.range.end_row);
+
+    // What source ingestion claims about the unit moved with it, rather than
+    // continuing to describe the previous contents.
+    try testing.expectEqual(@as(usize, 1), after.countRelationships(.{
+        .kind = .defines,
+        .target = file_after.id,
+    }));
+    try testing.expectEqual(@as(u32, 26), after.firstRelationship(.{
+        .kind = .defines,
+        .target = file_after.id,
+    }).?.evidence.?.range.end_byte);
+}
+
+test "a unit is pending until it is analyzed and current afterwards" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
+
+    var pending = try graph.publish();
+    defer pending.deinit();
+    try testing.expectEqual(UnitAnalysis.pending, pending.unitAnalysis(unit).?);
+    try testing.expectEqual(@as(usize, 1), pending.countUnits(.pending));
+
+    _ = try addDefinition(&graph, unit, "a/A.java", "greet", testRange(0, 5));
+
+    var current = try graph.publish();
+    defer current.deinit();
+    try testing.expectEqual(UnitAnalysis.current, current.unitAnalysis(unit).?);
+    try testing.expectEqual(@as(usize, 1), current.countEntities(.{ .kind = .definition }));
 }
 
 test "a duplicate source unit path is rejected" {
