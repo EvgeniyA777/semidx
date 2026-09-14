@@ -651,7 +651,7 @@ pub const Graph = struct {
         const bucket = if (evidence) |observed| self.assertionBucket(observed.unit) else null;
         try (bucket orelse &self.assertions).append(self.gpa, .{
             .id = id,
-            .claim = claim,
+            .claim = try self.internClaim(claim),
             .producer = .{
                 .name = try self.pool.intern(producer.name),
                 .version = try self.pool.intern(producer.version),
@@ -906,6 +906,23 @@ pub const Graph = struct {
             .name = try self.pool.internOptional(value.name),
             .signature = try self.pool.internOptional(value.signature),
             .container_path = try self.pool.internSlice(value.container_path),
+        };
+    }
+
+    /// A claim can carry a string only as an unresolved target's designator,
+    /// and that string belongs to whoever produced the claim, such as a
+    /// frontend batch released right after integration.
+    fn internClaim(self: *Graph, value: model.Claim) Allocator.Error!model.Claim {
+        return switch (value) {
+            .relationship => |relationship| .{ .relationship = .{
+                .kind = relationship.kind,
+                .source = relationship.source,
+                .target = switch (relationship.target) {
+                    .entity => relationship.target,
+                    .designator => |name| .{ .designator = try self.pool.intern(name) },
+                },
+            } },
+            .entity_exists, .identity_correspondence => value,
         };
     }
 
@@ -1498,6 +1515,28 @@ test "an invalid resolution never reaches the graph" {
         .{ .unit = unit, .range = testRange(0, 5), .text = "println()" },
         .{ .unresolved = .{ .missing = .target_entity, .explanation = "not in fixture scope" } },
     ));
+}
+
+test "an unresolved designator is owned by the graph, not by its producer" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
+    const greet = try addDefinition(&graph, unit, "greet", testRange(0, 5));
+
+    var producer_bytes = "println".*;
+    _ = try graph.addRelationship(
+        .{ .kind = .calls, .source = greet, .target = .{ .designator = &producer_bytes } },
+        frontend,
+        .{ .unit = unit, .range = testRange(0, 5), .text = "println()" },
+        .{ .unresolved = .{ .missing = .target_entity, .explanation = "not in fixture scope" } },
+    );
+    // The producer reuses its memory once the claim is handed over.
+    @memset(&producer_bytes, 'x');
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{ .designator = "println", .resolution = .unresolved }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .designator = "xxxxxxx" }));
 }
 
 test "a published snapshot does not observe later graph mutation" {

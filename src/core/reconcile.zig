@@ -377,6 +377,37 @@ fn integrateNames(
     return integrate(graph, builder.batch());
 }
 
+test "an unresolved designator outlives the batch that produced it" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const unit = try graph.addSourceUnit("a/A.java", .java, "v1");
+
+    {
+        var builder = contract.BatchBuilder.init(graph.gpa, unit, test_capabilities);
+        defer builder.deinit();
+        try syntheticBatch(&builder, &.{"greet"}, "v1");
+        _ = try integrate(&graph, builder.batch());
+
+        // Every string the batch handed over lives in its arena, which is
+        // released right after integration; overwrite them first so a borrowed
+        // one is visible rather than left to whatever reuses the memory.
+        for (builder.relationships.items) |relationship| {
+            switch (relationship.target) {
+                .designator => |name| @memset(@constCast(name), 'x'),
+                .local, .external => {},
+            }
+        }
+    }
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .calls,
+        .designator = "report",
+        .resolution = .unresolved,
+    }));
+}
+
 test "a body-only edit preserves every entity id" {
     var graph = try Graph.init(testing.allocator, "fixtures");
     defer graph.deinit();

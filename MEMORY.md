@@ -392,7 +392,15 @@ why. This is not a changelog of removed implementation; see `git log`.
   local binding, capture, or `usingnamespace` could shadow it. Everything else —
   container members, other declarations, non-bare callees — is unsupported or
   unresolved. The pinned grammar parses an empty `struct {}` as an error, so such
-  a unit reports `analysis_failed`. `semidx-dev` over `src/` indexes all 20 units.
+  a unit reports `analysis_failed`. The same grammar parses `!helper()` as a call
+  on the type-shaped callee `!helper`, so bare calls under logical negation stay
+  unresolved and are undercounted. `semidx-dev` over `src/` indexes all 20 units.
+  The Stages 1–3 review found that `Graph.addAssertion` kept an unresolved
+  target's designator as a slice of the frontend batch arena, which is freed
+  after integration (latent for Java and Clojure too, exposed by the Zig
+  dogfood run). The graph now interns it like every other assertion string, so
+  a stored assertion borrows nothing from its producer; Stage 3.5 in report 004
+  records the fix and its regression tests. Stage 4 was held until then.
   It explicitly excludes a published semantic contract, persistence, HTTP,
   remote services, resources/prompts, source text by default, Zig imports,
   namespace/container lookup, comptime semantics, methods, fields, local

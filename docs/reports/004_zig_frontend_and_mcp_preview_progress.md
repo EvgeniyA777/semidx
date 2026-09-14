@@ -26,6 +26,7 @@ See [Session A Handoff](#session-a-handoff).
 | Stage 1: Zig grammar and language registration | Completed (`6bcbbd7`) | `.zig` is discovered as `model.Language.zig`; a pinned `tree-sitter-zig` is fetched by the setup script and compiled in the full lane only; a skeletal Zig frontend reports failed, unsupported, or confirmed-empty analysis and emits no facts. |
 | Stage 2: Zig definition facts | Completed (`575bf92`) | Named top-level `fn` declarations and top-level `const` declarations bound directly to a struct/enum/union/opaque expression are current `definition` facts with `DEFINES` from the file. Container members and every other declaration are reported as unsupported. A body edit preserves identity; a rename is identity loss. |
 | Stage 3: Zig same-unit simple calls | Completed (`50d68c4`) | Every call expression in a covered function body is recorded as `CALLS`. A bare callee is a fact only when the unit's top level declares that name exactly once, as a covered function, and no parameter, local binding, capture, or `usingnamespace` could give it another meaning; every other callee stays unresolved with its reason. No `REFERENCES` are emitted. |
+| Stage 3.5: Graph-owned relationship designators | Completed | Fixes the review blocker: `Graph.addAssertion` now interns an unresolved target's designator, so no relationship keeps a slice of the frontend batch that produced it. `zig build run -- src` completes. |
 | Stage 4: Local MCP stdio preview | Pending (Session B) | |
 | Stage 5: Dogfood, documentation, and handoff | Pending (Session B) | |
 
@@ -217,8 +218,8 @@ Verification:
 | `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | Pass (61 + 24 tests) |
 | `zig build test-core --summary all` | Pass |
 | `zig build test --summary all` | Pass, 163/163 |
-| `zig build run -- src` | 20 Zig units, all current; 185 definitions; 515 facts (about 104 of them `CALLS`), 536 unresolved, 0 approximate, 0 stale, no `analysis_failed` |
-| `zig build run -- .` | 48 units including fixtures and tests; runs to completion |
+| `zig build run -- src` | Recorded at the time as passing with 20 current units, 185 definitions, 515 facts, 536 unresolved. **Correction (Stage 3.5):** only the first lines of output were inspected; the command crashed after the summary, as the review below found. The counts were right; "passing" was not. |
+| `zig build run -- .` | Recorded at the time as running to completion. **Correction (Stage 3.5):** not actually observed, for the same reason. |
 | `./scripts/check-agent-attribution.sh --all` | Pass (exit 0) |
 | `./scripts/check-memory-freshness.sh` | Pass (exit 0) |
 | `git diff --check` | Pass |
@@ -269,7 +270,7 @@ files named by the plan.
 
 ### Confirmed Finding: Dangling Relationship Designators
 
-Status: unresolved. Severity: blocker before Stage 4.
+Status: fixed in Stage 3.5 (see below). Severity: blocker before Stage 4.
 
 `zig build run -- src` does not complete in the review environment. It prints
 the expected summary counts first (`20` Zig units, `185` definitions, `515`
@@ -325,3 +326,46 @@ same dangling-string defect.
 | `zig build run -- fixtures/vertical-slice/zig` | Pass |
 | `zig build run -- src/frontends/zig.zig` | Pass |
 | `zig build run -- src` | Fail: abort while printing unresolved designators |
+
+## Stage 3.5: Graph-Owned Relationship Designators
+
+Fix for the review's confirmed finding. Changed files: `src/core/graph.zig`,
+`src/core/reconcile.zig`.
+
+- The defect was in the shared core, not in the Zig frontend: every assertion
+  field that holds a string was interned except `model.Target.designator`, so
+  the Java and Clojure frontends handed over borrowed designators too. Their
+  fixtures were small enough that the freed arena was not reused before it was
+  read.
+- `Graph.internClaim` copies a relationship's designator into the graph's
+  string pool; `addAssertion` stores the interned claim after validation. A
+  designator is the only string a `model.Claim` can carry.
+- Regression tests do not rely on reading freed memory. Each overwrites the
+  producer's bytes after handing the claim over and then reads the graph:
+  `an unresolved designator is owned by the graph, not by its producer`
+  (graph level) and `an unresolved designator outlives the batch that produced
+  it` (through `reconcile.integrate` and a `BatchBuilder`).
+
+Finding recorded while verifying the fix (open, not a correctness defect):
+
+- The pinned grammar parses a logical negation applied to a call, `!helper()`
+  or `!a.b()`, as a call whose callee is an `error_union_type` (`!helper`), the
+  shape of the type `!T`. Such a call is recorded as unresolved with designator
+  `!helper` ("the callee is not a bare name"), never as a fact, so bare calls
+  under `!` are undercounted. Unary minus parses correctly. Reinterpreting that
+  node as a negated call would repair the tree by assumption, which the plan's
+  stop conditions rule out, so this is left as residual risk pending a decision.
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | Pass, 87/87 |
+| `zig build test-core --summary all` | Pass, 87/87 |
+| `zig build test --summary all` | Pass, 165/165 |
+| `zig build run -- src` | Exit 0, full output (838 lines): 20 units, 185 definitions, 515 facts, 536 unresolved, 0 approximate, 0 stale; no non-printable bytes in output |
+| `zig build run -- .` | Exit 0, full output (1255 lines) |
+| Mutation: `addAssertion` stores `.claim = claim` again | Both regression tests fail; restored |
+| `./scripts/check-agent-attribution.sh --all` | Pass (exit 0) |
+| `git diff --check` | Pass |
