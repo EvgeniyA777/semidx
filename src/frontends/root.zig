@@ -12,6 +12,7 @@ const core = @import("semidx_core");
 const ts = @import("semidx_tree_sitter");
 
 pub const java = @import("java.zig");
+pub const java_packages = @import("java_packages.zig");
 pub const clojure = @import("clojure.zig");
 
 const model = core.model;
@@ -44,6 +45,10 @@ pub const Analyzer = struct {
     /// changed file must move this by exactly one, whatever the repository's
     /// size.
     invocations: usize,
+    /// Which units have declared classes in which Java package, so a Java
+    /// unit's context is built from its own package rather than from the whole
+    /// repository. Meaningful for the one graph this analyzer indexes into.
+    java_packages: java_packages.Packages,
 
     pub const default_budget: ts.Budget = .{ .max_bytes = 8 << 20 };
 
@@ -53,6 +58,7 @@ pub const Analyzer = struct {
             .parsers = @splat(null),
             .budget = budget,
             .invocations = 0,
+            .java_packages = java_packages.Packages.init(gpa),
         };
     }
 
@@ -61,6 +67,7 @@ pub const Analyzer = struct {
             if (slot.*) |*parser| parser.deinit();
             slot.* = null;
         }
+        self.java_packages.deinit();
         self.* = undefined;
     }
 
@@ -76,8 +83,12 @@ pub const Analyzer = struct {
     /// only the changed unit is reanalyzed, and its entities keep their
     /// identities. Parser-level reuse would need the edit ranges this pipeline
     /// does not receive; see `tree_sitter.Parser.parse`.
+    ///
+    /// `graph` is where repository context is read from. Without one, the unit
+    /// is analyzed on its own and every name that leaves it stays unresolved.
     pub fn analyze(
         self: *Analyzer,
+        graph: ?*core.Graph,
         input: contract.FrontendInput,
         builder: *contract.BatchBuilder,
     ) !void {
@@ -102,9 +113,33 @@ pub const Analyzer = struct {
         defer tree.deinit();
 
         switch (language) {
-            .java => try java.analyze(builder, input, tree),
+            .java => {
+                var scratch = std.heap.ArenaAllocator.init(self.gpa);
+                defer scratch.deinit();
+                const context = if (graph) |repository|
+                    try self.javaContext(repository, input.unit.id, tree.root(), input.unit.bytes, scratch.allocator())
+                else
+                    java.Context.empty;
+                try java.analyze(builder, input, tree, context);
+            },
             .clojure => try clojure.analyze(builder, input, tree),
         }
+    }
+
+    fn javaContext(
+        self: *Analyzer,
+        graph: *core.Graph,
+        unit: model.SourceUnitId,
+        root: ts.Node,
+        bytes: []const u8,
+        allocator: Allocator,
+    ) !java.Context {
+        // A unit that does not parse yields no assertions, so it needs no
+        // context either.
+        if (root.hasError()) return java.Context.empty;
+        const package = (try java.declaredPackage(allocator, root, bytes)) orelse
+            return java.Context.empty;
+        return self.java_packages.context(graph, package, unit, allocator);
     }
 
     /// Reanalyzes one source unit and applies the result to the graph.
@@ -120,8 +155,10 @@ pub const Analyzer = struct {
             capabilitiesFor(input.unit.language),
         );
         defer builder.deinit();
-        try self.analyze(input, &builder);
-        return core.reconcile.integrate(graph, builder.batch());
+        try self.analyze(graph, input, &builder);
+        const outcome = try core.reconcile.integrate(graph, builder.batch());
+        if (input.unit.language == .java) try self.java_packages.note(graph, unit);
+        return outcome;
     }
 };
 
@@ -150,6 +187,130 @@ test "the java frontend keeps parse node types out of the shared core" {
     // shared-core kind.
     try testing.expectEqualStrings("method_declaration", greet.extension.get("java.construct").?);
     try testing.expectEqual(model.EntityKind.definition, greet.kind);
+}
+
+fn addJava(
+    analyzer: *Analyzer,
+    graph: *core.Graph,
+    path: []const u8,
+    source: []const u8,
+) !model.SourceUnitId {
+    const unit = try graph.addSourceUnit(path, .java, source);
+    _ = try analyzer.indexUnit(graph, unit);
+    return unit;
+}
+
+/// The context `unit` would be analyzed with, as `declaredPackage` reads it.
+fn contextFor(
+    analyzer: *Analyzer,
+    graph: *core.Graph,
+    unit: model.SourceUnitId,
+    allocator: Allocator,
+) !java.Context {
+    const input = graph.frontendInput(unit).?;
+    var parser = try ts.Parser.init(.java);
+    defer parser.deinit();
+    var tree = try parser.parse(input.unit.bytes, null);
+    defer tree.deinit();
+    return analyzer.javaContext(graph, unit, tree.root(), input.unit.bytes, allocator);
+}
+
+test "a java unit alone receives an empty context" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const unit = try addJava(&analyzer, &graph, "demo/Greeter.java", "package demo;\nclass Greeter { Helper helper; }\n");
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    const context = try contextFor(&analyzer, &graph, unit, scratch.allocator());
+    try testing.expectEqualStrings("demo", context.package);
+    try testing.expectEqual(@as(usize, 0), context.types.len);
+    try testing.expect(context.lookup("demo", "Greeter") == null);
+}
+
+test "a java unit's context names the one class of that name its package declares elsewhere" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const helper = try addJava(&analyzer, &graph, "demo/Helper.java", "package demo;\nclass Helper {}\n");
+    const greeter = try addJava(&analyzer, &graph, "demo/Greeter.java", "package demo;\nclass Greeter {}\n");
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    const helper_class = snapshot.findDefinition("demo/Helper.java", "Helper").?;
+
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    const context = try contextFor(&analyzer, &graph, greeter, scratch.allocator());
+    const binding = context.lookup("demo", "Helper").?;
+    try testing.expectEqual(helper_class.id, binding.unique.entity);
+    try testing.expectEqual(helper, binding.unique.provider);
+
+    // A binding answers only for the package it was read for.
+    try testing.expect(context.lookup("other", "Helper") == null);
+}
+
+test "a class name declared twice in a package reaches the context as ambiguous" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    _ = try addJava(&analyzer, &graph, "one/Helper.java", "package demo;\nclass Helper {}\n");
+    _ = try addJava(&analyzer, &graph, "two/Helper.java", "package demo;\nclass Helper {}\n");
+    const greeter = try addJava(&analyzer, &graph, "demo/Greeter.java", "package demo;\nclass Greeter {}\n");
+
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    const context = try contextFor(&analyzer, &graph, greeter, scratch.allocator());
+    try testing.expectEqual(@as(u32, 2), context.lookup("demo", "Helper").?.ambiguous);
+}
+
+test "a java context leaves out other packages, the default package, the unit itself, and stale classes" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    _ = try addJava(&analyzer, &graph, "other/Helper.java", "package other;\nclass Helper {}\n");
+    _ = try addJava(&analyzer, &graph, "Loose.java", "class Loose {}\n");
+    _ = try addJava(&analyzer, &graph, "demo/sub/Deep.java", "package demo.sub;\nclass Deep {}\n");
+    const edited = try addJava(&analyzer, &graph, "demo/Edited.java", "package demo;\nclass Edited {}\n");
+    const greeter = try addJava(
+        &analyzer,
+        &graph,
+        "demo/Greeter.java",
+        "@Deprecated package demo;\nclass Greeter {}\nclass Second {}\n",
+    );
+
+    // Edited into source that does not parse: its class is still recorded, but
+    // it is no longer a current fact anything may be resolved to.
+    _ = try graph.setSourceUnitBytes(edited, "package demo;\nclass Edited {\n");
+    const failed = try analyzer.indexUnit(&graph, edited);
+    try testing.expect(!failed.applied);
+
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    const context = try contextFor(&analyzer, &graph, greeter, scratch.allocator());
+    // The annotation is not part of the package name.
+    try testing.expectEqualStrings("demo", context.package);
+    try testing.expect(context.lookup("demo", "Helper") == null);
+    try testing.expect(context.lookup("demo", "Loose") == null);
+    try testing.expect(context.lookup("demo", "Deep") == null);
+    try testing.expect(context.lookup("demo", "Edited") == null);
+    try testing.expect(context.lookup("demo", "Greeter") == null);
+    try testing.expect(context.lookup("demo", "Second") == null);
+    try testing.expectEqual(@as(usize, 0), context.types.len);
+
+    // Repaired, it is current again and back in the context.
+    _ = try graph.setSourceUnitBytes(edited, "package   demo ;\nclass Edited {}\n");
+    _ = try analyzer.indexUnit(&graph, edited);
+    const repaired = try contextFor(&analyzer, &graph, greeter, scratch.allocator());
+    try testing.expect(repaired.lookup("demo", "Edited") != null);
 }
 
 test "the clojure frontend keeps its own vocabulary in extension payloads" {

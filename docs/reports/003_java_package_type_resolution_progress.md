@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-Stage 1 is complete. Stage 2 is next.
+Stages 1 and 2 are complete. Stage 3 is next.
 
 ## Stage Log
 
@@ -22,8 +22,8 @@ Stage 1 is complete. Stage 2 is next.
 | --- | --- | --- |
 | Plan creation | Completed | Created [ADR 004](../adr/004_allow_java_same_package_type_resolution.md) and [plan 003](../plans/003_java_package_type_resolution.md). Applied the Plan Readiness Gate; result: ready for execution. |
 | Stage 1: Context and external target contract | Completed | `DraftTarget.external` names a graph-established definition together with its provider unit. Integration checks every external target before touching the graph. A stale claim may outlive a withdrawn cross-unit target; a current one may not. |
-| Stage 2: Java package binding context | Not started | Next. |
-| Stage 3: Java cross-unit type resolution | Not started | Blocked by Stage 2. |
+| Stage 2: Java package binding context | Completed | The analyzer builds a per-package binding table from current Java class facts and hands it to the Java frontend; duplicate names arrive as ambiguous. The frontend does not use it yet. |
+| Stage 3: Java cross-unit type resolution | Not started | Next. |
 | Stage 4: Package export invalidation | Not started | Blocked by Stage 3. |
 | Stage 5: Documentation, review, and closure | Not started | Closure stage after implementation. |
 
@@ -73,6 +73,41 @@ Verification:
 | `zig build test --summary all` | 127/127 passed; vertical-slice tests unchanged. |
 | `zig fmt build.zig src tests` | Applied; no further changes. |
 
+## Stage 2: Java Package Binding Context
+
+Changed files: `src/frontends/java.zig`, `src/frontends/java_packages.zig`
+(new), `src/frontends/root.zig`.
+
+Decisions taken inside the plan's boundary:
+
+- `java.Context` is the analyzer context path the plan asked for. It holds one
+  package and its `TypeBinding`s (`unique` external target or `ambiguous`
+  count). `Context.empty` is what a unit analyzed without a graph receives;
+  `Analyzer.analyze` takes an optional graph for that reason. Clojure receives
+  no context.
+- `java_packages.exportsOf` is the single definition of a Java package export:
+  a live `definition` with Java language, role `class`, no container, a
+  non-empty `java.package` label, whose existence `Graph.currentDefinitionFact`
+  finds recorded as a current fact by `frontend.java`. A stale or failed unit
+  exports nothing.
+- `java_packages.Packages` keeps one piece of state between analyses: which
+  units have declared classes in which package. It is a hint that bounds the
+  table to one package; every hinted unit is read back from the graph through
+  `exportsOf`, so a unit that moved package or went stale contributes nothing.
+  No shared-core query was added for packages, and no package entity exists.
+- `java.declaredPackage` rebuilds the package name from its identifiers and
+  skips annotations. The previous `packageName` took the first named child, so
+  an annotated package declaration would have produced an annotation's text as
+  the package. The `java.package` label now uses the same function.
+- The analyzed unit's own previous classes are excluded from its context; its
+  local classes are resolved from its own batch.
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `zig build test --summary all` | 131/131 passed (4 new frontend tests). |
+
 ## Risk Matrix
 
 | Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
@@ -80,6 +115,8 @@ Verification:
 | Frontends never allocate or invent identity | An external id is taken on trust | Unit (reconcile) | Validation before mutation | Unknown id, file entity, wrong provider, undeclared provider, stale provider, removed target, structural kind | `an external target is refused unless it is a current definition of its declared provider` |
 | External targets integrate as facts | Valid target dropped or duplicated | Unit (reconcile) | Snapshot query by target id | — | `a batch can target a definition another unit established` |
 | Publication never hands out a dangling current fact | Provider removal breaks publish or leaks | Unit (reconcile/graph) | `checkInvariants` | Stale claim tolerated; current claim refused | `only a stale claim may outlive ...`, `a current claim naming a withdrawn definition is refused at publication` |
+| Package context is language scoping, not name matching | Other package, default package, or stale class offered as a candidate | Integration (analyzer + parser) | `Analyzer.javaContext` | Other package, default package, nested package, self, stale provider, annotated package | `a java context leaves out other packages, ...` |
+| Ambiguity is never resolved silently | One duplicate picked | Integration | `Packages.context` | Two providers of one name | `a class name declared twice in a package reaches the context as ambiguous` |
 
 ## Verification History
 
@@ -95,6 +132,6 @@ Documentation-only planning checks run during plan creation:
 ## Next Handoff
 
 Continue with
-[Stage 2](../plans/003_java_package_type_resolution.md#stage-2-java-package-binding-context).
+[Stage 3](../plans/003_java_package_type_resolution.md#stage-3-java-cross-unit-type-resolution).
 Semantic Code Indexing (semidx MCP) failed to connect in the implementing
 session (connection timeout), so code was located by targeted direct reads.

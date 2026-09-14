@@ -31,6 +31,93 @@ pub const capabilities: contract.Capabilities = .{
 /// reported as an unsupported construct, never as an absence of invocations.
 const max_depth: u32 = 64;
 
+/// What a simple type name can mean among the other source units of one
+/// explicit Java package, as read from current graph facts.
+pub const Binding = union(enum) {
+    /// Exactly one current top-level class of this name, in another unit.
+    unique: contract.ExternalTarget,
+    /// More than one, counted. The name does not identify a class, and no
+    /// candidate is preferred.
+    ambiguous: u32,
+};
+
+pub const TypeBinding = struct {
+    name: []const u8,
+    binding: Binding,
+};
+
+/// The repository context the analyzer hands this frontend for one unit.
+///
+/// It is a projection, not a model: the analyzer rebuilds it from the graph for
+/// every analysis, and it carries no authority beyond naming candidates. An
+/// empty context is what a unit analyzed on its own receives.
+pub const Context = struct {
+    /// The package the bindings describe. Empty when none were read.
+    package: []const u8,
+    /// Top-level classes other units currently declare in `package`.
+    types: []const TypeBinding,
+
+    pub const empty: Context = .{ .package = "", .types = &.{} };
+
+    /// A binding is only an answer for the package it was read for.
+    pub fn lookup(self: Context, package: []const u8, name: []const u8) ?Binding {
+        if (package.len == 0 or !std.mem.eql(u8, self.package, package)) return null;
+        for (self.types) |entry| {
+            if (std.mem.eql(u8, entry.name, name)) return entry.binding;
+        }
+        return null;
+    }
+};
+
+/// The explicit package a Java source unit declares, or null when it declares
+/// none. Annotations on the declaration are not part of the name, and the name
+/// is rebuilt from its identifiers, so layout inside it cannot change it.
+pub fn declaredPackage(
+    allocator: std.mem.Allocator,
+    root: ts.Node,
+    source: []const u8,
+) !?[]const u8 {
+    var top_level = root.namedChildren();
+    while (top_level.next()) |node| {
+        if (!std.mem.eql(u8, node.kind(), "package_declaration")) continue;
+        var children = node.namedChildren();
+        while (children.next()) |child| {
+            if (!isName(child.kind())) continue;
+            var name: std.ArrayList(u8) = .empty;
+            errdefer name.deinit(allocator);
+            if (!try appendName(allocator, &name, child, source, 0)) return null;
+            return try name.toOwnedSlice(allocator);
+        }
+        return null;
+    }
+    return null;
+}
+
+fn isName(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "identifier") or std.mem.eql(u8, kind, "scoped_identifier");
+}
+
+/// Returns false when the name nests deeper than this frontend traverses.
+fn appendName(
+    allocator: std.mem.Allocator,
+    out: *std.ArrayList(u8),
+    node: ts.Node,
+    source: []const u8,
+    depth: u32,
+) !bool {
+    if (depth >= max_depth) return false;
+    if (!std.mem.eql(u8, node.kind(), "scoped_identifier")) {
+        try out.appendSlice(allocator, node.text(source));
+        return true;
+    }
+    const scope = node.childByFieldName("scope") orelse return false;
+    const name = node.childByFieldName("name") orelse return false;
+    if (!try appendName(allocator, out, scope, source, depth + 1)) return false;
+    try out.append(allocator, '.');
+    try out.appendSlice(allocator, name.text(source));
+    return true;
+}
+
 const ClassInfo = struct {
     index: u32,
     name: []const u8,
@@ -50,7 +137,9 @@ pub fn analyze(
     builder: *contract.BatchBuilder,
     input: contract.FrontendInput,
     tree: ts.Tree,
+    context: Context,
 ) !void {
+    _ = context;
     const source = input.unit.bytes;
     const root = tree.root();
     if (root.hasError()) {
@@ -70,7 +159,7 @@ pub fn analyze(
     var methods: std.ArrayList(MethodInfo) = .empty;
     defer methods.deinit(gpa);
 
-    var package: []const u8 = "";
+    const package = (try declaredPackage(builder.allocator(), root, source)) orelse "";
 
     // Pass 1: definitions. A relationship can only be expressed once every
     // definition in the unit has a batch-local index.
@@ -78,10 +167,7 @@ pub fn analyze(
     while (top_level.next()) |node| {
         const kind = node.kind();
 
-        if (std.mem.eql(u8, kind, "package_declaration")) {
-            package = try builder.dupe(packageName(node, source));
-            continue;
-        }
+        if (std.mem.eql(u8, kind, "package_declaration")) continue;
         if (!std.mem.eql(u8, kind, "class_declaration")) {
             try builder.addDiagnostic(.unsupported_construct, try builder.print(
                 "`{s}` at the top level is outside this frontend's coverage",
@@ -225,12 +311,6 @@ pub fn analyze(
         const body = method.node.childByFieldName("body") orelse continue;
         try emitInvocations(builder, source, method, body, methods.items, 0);
     }
-}
-
-fn packageName(node: ts.Node, source: []const u8) []const u8 {
-    var children = node.namedChildren();
-    if (children.next()) |identifier| return identifier.text(source);
-    return "";
 }
 
 fn evidenceOf(
