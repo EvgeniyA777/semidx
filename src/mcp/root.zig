@@ -510,6 +510,25 @@ test "one dispatcher serves modern requests statelessly and legacy requests afte
     try testing.expect(std.mem.indexOf(u8, h.log.written(), "indexed 1 source units") != null);
 }
 
+test "the product version is reported in server identity and health, apart from the contract version" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.init(false, "");
+    defer h.deinit();
+
+    const discover = (try h.send(arena, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server/discover\",\"params\":{" ++ modern_meta ++ "}}")).?;
+    const server_info = discover.object.get("result").?.object.get("_meta").?.object.get("io.modelcontextprotocol/serverInfo").?.object;
+    try testing.expectEqualStrings(protocol.product_version, server_info.get("version").?.string);
+
+    const health = try h.callTool(arena, "semidx_health", "{}");
+    const structured = health.object.get("structuredContent").?.object;
+    try testing.expectEqualStrings(protocol.product_version, structured.get("product_version").?.string);
+    try testing.expectEqualStrings(protocol.product_version, structured.get("server").?.object.get("version").?.string);
+    try testing.expect(structured.get("semantic_contract_version").? == .null);
+}
+
 test "tool results carry resolution, freshness, producer, and the snapshot revision" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();

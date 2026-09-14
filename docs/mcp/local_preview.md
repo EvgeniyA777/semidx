@@ -78,11 +78,14 @@ zig build mcp -- --root .                  # same, through the build system
 | --- | --- |
 | `--root <dir>` | Directory to index. Default: the current directory. Result paths are relative to it and `/`-separated. |
 | `--allow-evidence-text` | Opt-in: include the source text producers recorded as evidence for each claim, at most 400 bytes per claim. Off by default. See [Source Text](#source-text). |
+| `--version` | Print `semidx-mcp <product version>` to stdout and exit. |
 | `--help` | Print usage to stderr and exit. |
 
 Streams and exit status:
 
-- stdout carries MCP messages only, one JSON object per line.
+- While serving, stdout carries MCP messages only, one JSON object per line.
+  `--version` is the one invocation that writes anything else to stdout, and it
+  does not serve.
 - stderr carries a startup summary, refresh failures, ignored notifications, and
   an exit line.
 - The server exits with status 0 when its stdin closes, 1 when the root cannot
@@ -140,7 +143,7 @@ an explanation.
 
 | Tool | Arguments (defaults) | Returns |
 | --- | --- | --- |
-| `semidx_health` | none | Root, snapshot revision, unit counts by analysis state and language, entity and assertion counts, per-language parser availability and declared coverage, diagnostic counts, the last scan outcome, and whether evidence text is enabled. |
+| `semidx_health` | none | Product version, root, snapshot revision, unit counts by analysis state and language, entity and assertion counts, per-language parser availability and declared coverage, diagnostic counts, the last scan outcome, and whether evidence text is enabled. |
 | `semidx_repo_map` | `path_prefix`, `language`, `limit` (100, max 1000 files), `definitions_per_file` (50, max 500) | Units sorted by path, each with its analysis state, diagnostic counts, and top-level definitions (definitions with an empty container path), plus the number of nested definitions. |
 | `semidx_find_definitions` | `name`, `path`, `language`, `role`, `freshness` (`current`), `resolution` (`any`), `limit` (50, max 500) | Definitions matching every given filter, each with its existence claim's resolution, producer, and freshness. |
 | `semidx_references` | `entity_id`, or `name` with optional `path`/`language`; `direction` (`incoming`), `freshness` (`current`), `resolution` (`any`), `limit` (100, max 1000) | The target definitions (at most 50) and the `REFERENCES`/`CALLS` relationships into them (`incoming`) or out of them (`outgoing`). A call is one occurrence and is listed once. |
@@ -160,6 +163,10 @@ Every structured result carries:
 | --- | --- |
 | `snapshot.revision` | The graph revision every value in this result was read from. |
 | `semantic_contract_version` | Always `null`: no semantic contract is published. |
+
+The product version (`0.1.0-preview.1`) is reported by `--version`, in
+`serverInfo.version`, and as `product_version` in `semidx_health`. It versions
+the binary and its behavior; it is not a semantic contract version.
 
 An **entity** carries `id`, `kind` (`repository`, `file`, `definition`),
 `language`, `role`, `name`, `freshness`, and `evidence`. Full entities (from
@@ -240,6 +247,6 @@ Notifications, including malformed ones, are never answered.
 - A refresh that fails part-way through reconciliation leaves the graph partly
   updated while the previous snapshot stays published; the next successful
   refresh publishes the graph as it then stands.
-- There is no product version at runtime beyond `serverInfo.version` `0.0.0`;
-  release versioning is tracked in
+- The product version is a preview version: tool names, arguments, and result
+  fields may change between previews. Release discipline is tracked in
   [follow-up 004](../followups/004_release_discipline_for_mcp_preview.md).

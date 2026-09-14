@@ -582,6 +582,8 @@ pub fn health(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, status: Statu
     const snapshot = ctx.snapshot;
 
     try beginStructured(ctx, s);
+    try s.objectField("product_version");
+    try s.write(protocol.product_version);
     try s.objectField("server");
     try protocol.writeImplementation(s);
     try s.objectField("root");

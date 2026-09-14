@@ -26,7 +26,9 @@ pub const legacy_version = "2025-06-18";
 
 pub const server_name = "semidx";
 pub const server_title = "semidx local MCP preview";
-pub const server_version = "0.0.0";
+/// The product version, from `build.zig.zon`. It versions the binary and its
+/// behavior, never the semantic contract, which stays unpublished.
+pub const product_version = @import("semidx_version").product_version;
 
 /// Messages longer than this are refused rather than buffered without bound.
 pub const max_message_bytes: usize = 1 << 20;
@@ -229,7 +231,7 @@ pub fn writeImplementation(s: *Stringify) Writer.Error!void {
     try s.objectField("title");
     try s.write(server_title);
     try s.objectField("version");
-    try s.write(server_version);
+    try s.write(product_version);
     try s.endObject();
 }
 
@@ -366,7 +368,7 @@ test "error envelopes carry the fields each era requires" {
     try endResult(&s);
     try testing.expectEqualStrings(
         "{\"jsonrpc\":\"2.0\",\"id\":\"x\",\"result\":{\"resultType\":\"complete\",\"_meta\":{\"io.modelcontextprotocol/serverInfo\":" ++
-            "{\"name\":\"semidx\",\"title\":\"semidx local MCP preview\",\"version\":\"0.0.0\"}}}}",
+            "{\"name\":\"semidx\",\"title\":\"semidx local MCP preview\",\"version\":\"" ++ product_version ++ "\"}}}}",
         out.written(),
     );
 

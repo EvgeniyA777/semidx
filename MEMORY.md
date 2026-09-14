@@ -444,7 +444,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   dogfood run). The graph now interns it like every other assertion string, so
   a stored assertion borrows nothing from its producer; Stage 3.5 in report 004
   records the fix and its regression tests. Stage 4 was held until then.
-  **The MCP preview exists** (`src/mcp/`, executable `semidx-mcp`,
+  **The MCP preview exists** (`src/mcp/`, executable `semidx-mcp`, product
+  version `0.1.0-preview.1` defined once in `build.zig.zon` and reported by
+  `--version`, `serverInfo.version`, and `semidx_health.product_version`,
   `zig build mcp -- --root <dir>`, `zig build test-mcp`). It scans the root at
   startup, publishes one snapshot, and answers every tool call from the snapshot
   published when the call arrives; `semidx_refresh` rescans, reconciles through

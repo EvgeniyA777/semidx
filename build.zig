@@ -1,5 +1,8 @@
 const std = @import("std");
 
+/// The package manifest is the one place the product version is written.
+const manifest = @import("build.zig.zon");
+
 /// Local parser dependency locations resolved at configure time.
 ///
 /// The slice keeps every parser dependency local and explicit: grammar C
@@ -161,6 +164,8 @@ pub fn build(b: *std.Build) void {
 
     // The local MCP stdio preview. A consumer of published snapshots: it
     // imports the assembled index and nothing below it.
+    const version_options = b.addOptions();
+    version_options.addOption([]const u8, "product_version", manifest.version);
     const mcp = b.addModule("semidx_mcp", .{
         .root_source_file = b.path("src/mcp/root.zig"),
         .target = target,
@@ -168,6 +173,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
         .imports = &.{
             .{ .name = "semidx", .module = semidx },
+            .{ .name = "semidx_version", .module = version_options.createModule() },
         },
     });
     const mcp_tests = b.addTest(.{ .root_module = mcp });
@@ -198,6 +204,7 @@ pub fn build(b: *std.Build) void {
     const smoke_options = b.addOptions();
     smoke_options.addOptionPath("mcp_exe", mcp_exe.getEmittedBin());
     smoke_options.addOption([]const u8, "fixtures_dir", b.pathFromRoot("fixtures/vertical-slice"));
+    smoke_options.addOption([]const u8, "product_version", manifest.version);
     const mcp_smoke = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/mcp_smoke_test.zig"),

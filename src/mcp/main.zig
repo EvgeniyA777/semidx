@@ -7,7 +7,7 @@ const std = @import("std");
 const mcp = @import("semidx_mcp");
 
 const usage =
-    \\usage: semidx-mcp [--root <dir>] [--allow-evidence-text]
+    \\usage: semidx-mcp [--root <dir>] [--allow-evidence-text] [--version]
     \\
     \\Indexes <dir> (default: the current directory) into an in-memory semantic
     \\graph and serves it as an MCP server over stdio.
@@ -15,6 +15,7 @@ const usage =
     \\  --root <dir>              source tree to index; result paths are relative to it
     \\  --allow-evidence-text     let tool results include the source text producers
     \\                            recorded as evidence, bounded per claim; off by default
+    \\  --version                 print the product version to stdout and exit
     \\
 ;
 
@@ -41,6 +42,14 @@ pub fn main(init: std.process.Init) !void {
             options.root = root_owned.?;
         } else if (std.mem.eql(u8, argument, "--allow-evidence-text")) {
             options.evidence_text = true;
+        } else if (std.mem.eql(u8, argument, "--version")) {
+            // Not serving, so stdout is free: a version belongs where scripts
+            // read it.
+            var stdout_buffer: [128]u8 = undefined;
+            var stdout = std.Io.File.stdout().writer(io, &stdout_buffer);
+            try stdout.interface.print("semidx-mcp {s}\n", .{mcp.protocol.product_version});
+            try stdout.interface.flush();
+            return;
         } else if (std.mem.eql(u8, argument, "--help") or std.mem.eql(u8, argument, "-h")) {
             try log.writeAll(usage);
             try log.flush();

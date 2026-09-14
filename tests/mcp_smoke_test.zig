@@ -94,6 +94,22 @@ const Client = struct {
     }
 };
 
+test "semidx-mcp --version prints the product version to stdout and exits" {
+    const gpa = testing.allocator;
+    const result = try std.process.run(gpa, io, .{
+        .argv = &.{ build_options.mcp_exe, "--version" },
+        .timeout = .{ .duration = .{ .raw = .fromSeconds(30), .clock = .awake } },
+    });
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+    try testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // The release this tree prepares. The version itself is defined once, in
+    // build.zig.zon; this pins what the gate expects of it.
+    try testing.expectEqualStrings("0.1.0-preview.1", build_options.product_version);
+    try testing.expectEqualStrings("semidx-mcp 0.1.0-preview.1\n", result.stdout);
+    try testing.expectEqualStrings("", result.stderr);
+}
+
 fn errorCode(response: Value) i64 {
     return response.object.get("error").?.object.get("code").?.integer;
 }
@@ -139,6 +155,8 @@ test "semidx-mcp serves both protocol eras over stdio with nothing but protocol 
     try testing.expect(first_revision > 0);
     try testing.expectEqual(@as(i64, 1), health.get("units").?.object.get("current").?.integer);
     try testing.expect(!health.get("evidence_text").?.object.get("enabled").?.bool);
+    try testing.expectEqualStrings(build_options.product_version, health.get("product_version").?.string);
+    try testing.expect(health.get("semantic_contract_version").? == .null);
     for (health.get("languages").?.array.items) |language| {
         try testing.expect(language.object.get("parser").?.object.get("available").?.bool);
     }

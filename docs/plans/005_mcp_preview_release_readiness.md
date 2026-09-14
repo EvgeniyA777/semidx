@@ -2,8 +2,8 @@
 title: "MCP preview release readiness"
 doc_type: "plan"
 lifecycle: "active"
-status: "planned"
-agent_action: "execute_when_requested"
+status: "in_progress"
+agent_action: "ready_for_execution"
 updated: "2026-09-14"
 ---
 
