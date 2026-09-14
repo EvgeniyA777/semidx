@@ -14,17 +14,18 @@ Companion log for
 
 ## Current Status
 
-Session A (Stages 1–3, the Zig frontend) is in progress. Following the plan's
-Execution Recommendations, execution stops after Stage 3 for a separate review
-before Session B (Stages 4–5, the MCP preview and documentation).
+Session A (Stages 1–3, the Zig frontend) is complete. Following the plan's
+Execution Recommendations, execution stops here for a separate review of
+Stages 1–3 before Session B (Stages 4–5, the MCP preview and documentation).
+See [Session A Handoff](#session-a-handoff).
 
 ## Stage Log
 
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 1: Zig grammar and language registration | Completed (`6bcbbd7`) | `.zig` is discovered as `model.Language.zig`; a pinned `tree-sitter-zig` is fetched by the setup script and compiled in the full lane only; a skeletal Zig frontend reports failed, unsupported, or confirmed-empty analysis and emits no facts. |
-| Stage 2: Zig definition facts | Completed | Named top-level `fn` declarations and top-level `const` declarations bound directly to a struct/enum/union/opaque expression are current `definition` facts with `DEFINES` from the file. Container members and every other declaration are reported as unsupported. A body edit preserves identity; a rename is identity loss. |
-| Stage 3: Zig same-unit simple calls | Pending | |
+| Stage 2: Zig definition facts | Completed (`575bf92`) | Named top-level `fn` declarations and top-level `const` declarations bound directly to a struct/enum/union/opaque expression are current `definition` facts with `DEFINES` from the file. Container members and every other declaration are reported as unsupported. A body edit preserves identity; a rename is identity loss. |
+| Stage 3: Zig same-unit simple calls | Completed | Every call expression in a covered function body is recorded as `CALLS`. A bare callee is a fact only when the unit's top level declares that name exactly once, as a covered function, and no parameter, local binding, capture, or `usingnamespace` could give it another meaning; every other callee stays unresolved with its reason. No `REFERENCES` are emitted. |
 | Stage 4: Local MCP stdio preview | Pending (Session B) | |
 | Stage 5: Dogfood, documentation, and handoff | Pending (Session B) | |
 
@@ -56,6 +57,10 @@ conditions; no hard fail. Result: ready for execution.
 | Degradation stays distinguishable (constitution §3, plan Stage 1) | Uncovered or broken Zig reads as empty | Integration (analyzer + reconcile) | `frontends/root` routing into `frontends/zig` | Unparsable source; only-uncovered source; empty source | `frontends/root.zig` Zig tests |
 | Only exact declaration shapes become definitions (ADR 005, plan Stage 2) | A `var`, alias, call, conditional, error set, or container member becomes a definition | Integration (frontend through reconcile) | `frontends/zig.containerDeclaration` token reading | Each non-covered shape listed; mutation dropping the `const` requirement | `only exact zig declaration shapes become definitions`, `declarations inside a zig container are not top-level definitions` |
 | Zig identity follows graph evidence, not ranges (constitution §4, plan Stage 2) | Body edit breaks ids, or rename silently retargets | Fixture / edit history | Reconciliation over `IdentityEvidence` | Rename; unparsable edit then repair | `zig/edits/01`, `02`, `03`, `05` tests in `tests/vertical_slice_test.zig` |
+| Same-unit calls are exact only under the narrow rule (ADR 003, ADR 005, plan Stage 3) | A name match becomes a fact: member, namespace, builtin, shadowed, duplicated, aliased, or imported names | Integration (frontend through reconcile) | `frontends/zig.decideName` | Field, namespace, and computed callees; parameter, `const`, destructuring, capture, nested fn-type parameter; duplicate; alias; container; import; `usingnamespace`; calls in tests, `comptime`, and nested containers; mutations disabling resolution and shadowing | `a bare zig call resolves only to ...`, `usingnamespace leaves ...`, `a destructuring binding shadows ...` |
+| Calls specialize references (CORE.md, plan Stage 3) | One occurrence answers a reference query twice | Fixture | Snapshot reference query | Unresolved calls counted too | `same-unit zig calls are current facts ...` |
+| Call freshness and identity under edits (constitution §4, §5, plan Stage 3) | Callee body edit stales callers; callee rename silently retargets | Fixture / edit history | Reconciliation | Callee-only rename (`06`); joint rename (`03`); target appears (`04`) | Zig call edit-history tests in `tests/vertical_slice_test.zig` |
+| Java and Clojure unchanged (plan Stage 3) | A shared change alters other frontends | Fixture + full lane | Producer-scoped assertion counts | Zig unit added beside both | `adding a zig unit leaves java and clojure analysis unchanged`, full lane |
 | Grammar defects surface as failure, not facts (plan stop condition) | A parse tree repaired with `MISSING` nodes yields guessed declarations | Integration | `root.hasError()` gate | `const Empty = struct {};` | `an empty zig container fails the unit's analysis rather than yielding a guess` |
 
 ## Stage 1: Zig Grammar And Language Registration
@@ -158,3 +163,98 @@ Verification:
 | `zig build test --summary all` | Pass, 154/154 |
 | `zig build run -- src` | 20 Zig units, all current; 173 definitions; 0 unresolved, 0 approximate |
 | Mutation: `const` requirement removed from `containerDeclaration` | `only exact zig declaration shapes become definitions` fails; restored |
+
+## Stage 3: Zig Same-Unit Simple Calls
+
+Changed files: `src/frontends/zig.zig`, `src/frontends/root.zig`,
+`tests/vertical_slice_test.zig`, new
+`fixtures/vertical-slice/zig/edits/06_callee_renamed.zig`.
+
+Node shapes read before extraction (probe files under `tree-sitter parse`):
+`call_expression` has `function` and `arguments` fields; a bare callee is an
+`identifier`, while `x.foo()` and `ns.foo()` are `field_expression` callees and
+`@builtin(...)` is a separate `builtin_function` node. Captures are `payload`
+nodes of identifiers; parameters are `parameter` nodes with a `name` field, in
+function declarations and in nested `function_signature` types; `const a, var b
+= ...` destructuring puts each keyword directly before its identifier in one
+`variable_declaration`.
+
+Decisions taken inside the plan's boundary:
+
+- The resolution rule, in order: a parameter or any `const`/`var`/capture
+  binding of the name anywhere in the function body leaves the call unresolved;
+  a top-level `usingnamespace` leaves every bare call unresolved; otherwise the
+  call is a fact only when exactly one top-level declaration of that name
+  exists and it is a covered function. Every top-level `const`/`var` counts
+  toward that uniqueness, covered or not, so an alias, import, or container of
+  the name is not skipped over to reach a function.
+- Shadowing is decided without block scoping: a binding anywhere in the body
+  counts everywhere in it. Zig rejects locals that shadow container
+  declarations, so for code that compiles this loses nothing; for source that
+  parses but does not compile, it can only leave more calls unresolved.
+- Every call expression in a covered body is recorded, not only resolved ones:
+  non-bare callees become unresolved `CALLS` whose designator is the callee's
+  source text (`std.debug.print`, `greeter.greet`), as the Java frontend does
+  for qualified invocations. Builtin calls record nothing, but their arguments
+  are walked, so `@as(u8, helper())` still records `helper`.
+- A container expression inside a function body is not walked, and is reported
+  once per kind ("inside a function body, whose calls were not analyzed"),
+  because inside it a bare name may mean one of its own members. Bodies of
+  tests, `comptime` blocks, and container members are not walked at all; they
+  are already reported as unsupported declarations.
+- The Zig frontend emits no `REFERENCES`: the plan's Stage 3 covers calls only,
+  and non-call uses of a name include locals and fields this frontend does not
+  model.
+- Depth beyond 64 nodes stops the walk and is reported once per unit as an
+  unsupported construct. The binding collector stops at the same depth; a
+  binding below that depth can only shadow calls that are not recorded either.
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | Pass (61 + 24 tests) |
+| `zig build test-core --summary all` | Pass |
+| `zig build test --summary all` | Pass, 163/163 |
+| `zig build run -- src` | 20 Zig units, all current; 185 definitions; 515 facts (about 104 of them `CALLS`), 536 unresolved, 0 approximate, 0 stale, no `analysis_failed` |
+| `zig build run -- .` | 48 units including fixtures and tests; runs to completion |
+| `./scripts/check-agent-attribution.sh --all` | Pass (exit 0) |
+| `./scripts/check-memory-freshness.sh` | Pass (exit 0) |
+| `git diff --check` | Pass |
+| Mutation: the unique-function branch of `decideName` returns unresolved | 5 tests fail (1 frontend, 4 fixture); restored |
+| Mutation: local-binding check disabled | 2 frontend tests fail; restored |
+
+## Session A Handoff
+
+Commits: Stage 1 `6bcbbd7`, Stage 2 `575bf92`, Stage 3 in the commit that adds
+this section.
+
+For the review of Stages 1–3:
+
+- Review focus from the plan applies: resolution honesty (no name match as a
+  fact), identity from graph evidence, and no new shared-core kind. The places
+  to read are `containerDeclaration`, `collectBindings`, and `decideName` in
+  `src/frontends/zig.zig`.
+- Deliberate choices a reviewer may disagree with: per-kind aggregation of
+  unsupported-construct diagnostics; no signature in Zig identity evidence;
+  error sets outside container coverage; unresolved `CALLS` recorded for
+  non-bare callees; no `REFERENCES`.
+
+Residual risk:
+
+- The pinned grammar turns an empty container body (`struct {}`) into a parse
+  error, so such a unit reports `analysis_failed` and contributes nothing
+  (see Stage 2).
+- Coverage stops at the file namespace. Methods and nested declarations are
+  invisible as definitions, and calls made inside them are not recorded, so
+  "who calls X" undercounts for code organized in containers, which is most
+  Zig. Queries still see the unsupported-construct diagnostics that say so.
+- `RULES.md` Project Context and `README.md` still describe the slice as Java
+  and Clojure only, and `SPEC.md` does not mention Zig. The plan assigns those
+  updates to Stage 5; `MEMORY.md` was updated for Stages 1–3 now.
+
+Next: review Stages 1–3, then Session B runs Stage 4 (local MCP stdio preview)
+and Stage 5 from this log. Session B must read the `2026-07-28` MCP
+specification from the plan's link rather than implement `server/discover`
+from memory, as the plan's Execution Recommendations require.

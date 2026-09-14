@@ -491,6 +491,153 @@ test "only exact zig declaration shapes become definitions" {
     try testing.expectEqual(@as(usize, 3), snapshot.countDiagnostics(.unsupported_construct));
 }
 
+fn zigCall(snapshot: *const core.Snapshot, from: []const u8, designator: []const u8) ?model.Assertion {
+    const source = snapshot.findDefinition("probe.zig", from) orelse return null;
+    var calls = snapshot.relationships(.{ .kind = .calls, .source = source.id, .designator = designator });
+    return calls.next();
+}
+
+fn expectZigCallUnresolved(snapshot: *const core.Snapshot, from: []const u8, designator: []const u8, fragment: []const u8) !void {
+    const call = zigCall(snapshot, from, designator) orelse return error.TestExpectedCall;
+    try testing.expect(!call.resolution.isFact());
+    try testing.expect(std.mem.indexOf(u8, call.resolution.unresolved.explanation, fragment) != null);
+}
+
+test "a bare zig call resolves only to the unit's one top-level function of that name" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const outcome = try indexZig(&analyzer, &graph,
+        \\const std = @import("std");
+        \\const Shape = struct { size: u8 };
+        \\const alias = helper;
+        \\fn helper() u8 { return 1; }
+        \\fn twice() void {}
+        \\fn twice() void {}
+        \\fn main(param: u8) void {
+        \\    _ = helper();
+        \\    _ = @as(u8, helper());
+        \\    std.debug.print("", .{});
+        \\    _ = Shape.make();
+        \\    _ = param();
+        \\    _ = missing();
+        \\    twice();
+        \\    _ = alias();
+        \\    _ = Shape();
+        \\    _ = std();
+        \\    const local = 1;
+        \\    _ = local();
+        \\    for (items) |capture| _ = capture();
+        \\    const Inner = struct { fn run() void { helper(); } };
+        \\    _ = Inner;
+        \\}
+        \\test "calls in tests are not analyzed" { _ = helper(); }
+        \\comptime { _ = helper(); }
+        \\
+    );
+    try testing.expect(outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+
+    const main = snapshot.findDefinition("probe.zig", "main").?;
+    const helper = snapshot.findDefinition("probe.zig", "helper").?;
+
+    // Both bare calls to `helper`, one inside a builtin's arguments, are facts;
+    // the builtin itself records nothing.
+    try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{
+        .kind = .calls,
+        .source = main.id,
+        .target = helper.id,
+        .resolution = .fact,
+    }));
+    var facts = snapshot.relationships(.{ .kind = .calls, .resolution = .fact });
+    while (facts.next()) |fact| {
+        try testing.expectEqualStrings("frontend.zig", fact.producer.name);
+        try testing.expect(fact.evidence != null);
+    }
+    try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+
+    try expectZigCallUnresolved(&snapshot, "main", "std.debug.print", "not a bare name");
+    try expectZigCallUnresolved(&snapshot, "main", "Shape.make", "not a bare name");
+    try expectZigCallUnresolved(&snapshot, "main", "param", "local binding");
+    try expectZigCallUnresolved(&snapshot, "main", "local", "local binding");
+    try expectZigCallUnresolved(&snapshot, "main", "capture", "local binding");
+    try expectZigCallUnresolved(&snapshot, "main", "missing", "no top-level declaration");
+    try expectZigCallUnresolved(&snapshot, "main", "twice", "more than one");
+    try expectZigCallUnresolved(&snapshot, "main", "alias", "not a covered function");
+    try expectZigCallUnresolved(&snapshot, "main", "Shape", "not a covered function");
+    try expectZigCallUnresolved(&snapshot, "main", "std", "not a covered function");
+
+    // Two resolved and ten unresolved occurrences, each answered once by the
+    // reference query and never as a separate reference.
+    try testing.expectEqual(@as(usize, 12), snapshot.countRelationships(.{ .source = main.id, .kind = .calls }));
+    try testing.expectEqual(@as(usize, 12), snapshot.countRelationships(.{ .source = main.id, .reference_query = true }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .kind = .references }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+
+    // The call inside the container in `main`'s body, and the calls in the test
+    // and the comptime block, were not recorded; the container is reported.
+    try testing.expectEqual(@as(usize, 12), snapshot.countRelationships(.{ .kind = .calls }));
+    var reported = false;
+    for (snapshot.diagnostics) |diagnostic| {
+        if (std.mem.indexOf(u8, diagnostic.message, "`struct_declaration` inside a function body") != null) reported = true;
+    }
+    try testing.expect(reported);
+}
+
+test "usingnamespace leaves every bare zig call unresolved" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    _ = try indexZig(&analyzer, &graph,
+        \\usingnamespace @import("other.zig");
+        \\fn helper() void {}
+        \\fn main() void { helper(); }
+        \\
+    );
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try expectZigCallUnresolved(&snapshot, "main", "helper", "usingnamespace");
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+}
+
+test "a destructuring binding shadows a zig call of the same name" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    _ = try indexZig(&analyzer, &graph,
+        \\fn first() void {}
+        \\fn second() void {}
+        \\fn pair() void {}
+        \\fn main() void {
+        \\    const first, var second = pair();
+        \\    first();
+        \\    second();
+        \\    const F = fn (pair: u8) void;
+        \\    _ = F;
+        \\    pair();
+        \\}
+        \\
+    );
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try expectZigCallUnresolved(&snapshot, "main", "first", "local binding");
+    try expectZigCallUnresolved(&snapshot, "main", "second", "local binding");
+    // A parameter name inside a nested function type counts as a binding too:
+    // over-counting bindings can only leave calls unresolved.
+    try expectZigCallUnresolved(&snapshot, "main", "pair", "local binding");
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+}
+
 test "an empty zig container fails the unit's analysis rather than yielding a guess" {
     // The pinned grammar reads `struct {}` as a container field with a missing
     // name. That is a parse error, so the whole unit is reported as failed;

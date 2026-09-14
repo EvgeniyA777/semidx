@@ -7,14 +7,18 @@
 //!
 //! Covered today:
 //!
-//! - a named top-level `fn` declaration, as a `function` definition; and
+//! - a named top-level `fn` declaration, as a `function` definition;
 //! - a top-level `const` whose value is written directly as a `struct`,
-//!   `enum`, `union`, or `opaque` expression, as a `container` definition.
+//!   `enum`, `union`, or `opaque` expression, as a `container` definition; and
+//! - inside a covered function body, every call expression: a call whose
+//!   callee is a bare name is a `CALLS` fact only when that name can mean
+//!   nothing but the one top-level function of that name in the same unit.
 //!
 //! Not covered: other top-level constants and variables (imports, aliases,
-//! values), tests, `comptime` blocks, `usingnamespace`, and everything declared
-//! inside a container. A container's members are Zig declarations in their own
-//! namespace, and nothing here resolves that namespace.
+//! values), tests, `comptime` blocks, `usingnamespace`, everything declared
+//! inside a container, builtin calls, and names that are not called. A
+//! container's members are Zig declarations in their own namespace, and nothing
+//! here resolves that namespace, imports, fields, or methods.
 
 const std = @import("std");
 
@@ -32,18 +36,25 @@ pub const capabilities: contract.Capabilities = .{
     .language = .zig,
     .producer = .{ .name = "frontend.zig", .version = version },
     .entity_roles = &.{ "function", "container" },
-    .relationship_kinds = &.{.defines},
+    .relationship_kinds = &.{ .defines, .calls },
     .coverage_note = "named top-level `fn` declarations and top-level `const` " ++
         "declarations bound directly to a struct, enum, union, or opaque " ++
-        "expression; members of containers and every other declaration are unsupported",
+        "expression; call expressions in those functions' bodies, where a bare " ++
+        "callee name resolves only to the unit's one top-level function of that " ++
+        "name and every other callee stays unresolved; members of containers, " ++
+        "builtin calls, and every other declaration are unsupported",
 };
+
+/// Guards against unbounded recursion on pathological input. Exceeding it is
+/// reported as an unsupported construct, never as an absence of calls.
+const max_depth: u32 = 64;
 
 /// The most distinct uncovered constructs reported one by one. The rest are
 /// still reported, as one count.
 const max_reported_kinds: usize = 16;
 
 /// Where an uncovered construct was found.
-const Placement = enum { top_level, container_member };
+const Placement = enum { top_level, container_member, function_body };
 
 /// Counts uncovered constructs by node kind and placement, so a unit full of
 /// imports yields one diagnostic per kind rather than one per line.
@@ -80,6 +91,10 @@ const Uncovered = struct {
                     "{d} `{s}` declared inside a top-level container, outside this frontend's coverage",
                     .{ entry.count, entry.kind },
                 ),
+                .function_body => try builder.print(
+                    "{d} `{s}` inside a function body, whose calls were not analyzed",
+                    .{ entry.count, entry.kind },
+                ),
             });
         }
         if (self.overflow > 0) {
@@ -106,6 +121,31 @@ const ContainerDeclaration = struct {
     label: []const u8,
 };
 
+/// One name declared at the top level of the unit, covered or not. Every one
+/// counts when deciding what a bare name can mean.
+const TopLevelName = struct {
+    name: []const u8,
+    /// The batch index of the covered function this name declares, if it is
+    /// one.
+    function: ?u32,
+};
+
+/// A covered function whose body is walked for calls.
+const FunctionBody = struct {
+    index: u32,
+    declaration: ts.Node,
+    body: ts.Node,
+};
+
+/// What the call walk of one unit needs to decide a bare callee name.
+const CallScope = struct {
+    source: []const u8,
+    names: []const TopLevelName,
+    /// `usingnamespace` can bring declarations of any name into the unit's
+    /// namespace, so no bare name is decided while one is present.
+    using_namespace: bool,
+};
+
 pub fn analyze(
     builder: *contract.BatchBuilder,
     input: contract.FrontendInput,
@@ -127,6 +167,13 @@ pub fn analyze(
     var uncovered: Uncovered = .{};
     var definitions: usize = 0;
 
+    const gpa = builder.gpa;
+    var names: std.ArrayList(TopLevelName) = .empty;
+    defer names.deinit(gpa);
+    var bodies: std.ArrayList(FunctionBody) = .empty;
+    defer bodies.deinit(gpa);
+    var using_namespace = false;
+
     var members = root.namedChildren();
     while (members.next()) |member| {
         const kind = member.kind();
@@ -143,10 +190,17 @@ pub fn analyze(
             }, "named top-level `fn` declaration in the analyzed source unit");
             try addDefines(builder, member, name, index);
             definitions += 1;
+            try names.append(gpa, .{ .name = name, .function = index });
+            if (member.childByFieldName("body")) |body| {
+                try bodies.append(gpa, .{ .index = index, .declaration = member, .body = body });
+            }
             continue;
         }
 
         if (std.mem.eql(u8, kind, "variable_declaration")) {
+            if (declaredIdentifier(member)) |identifier| {
+                try names.append(gpa, .{ .name = identifier.text(source), .function = null });
+            }
             const declaration = containerDeclaration(member) orelse {
                 uncovered.note(kind, .top_level);
                 continue;
@@ -167,16 +221,207 @@ pub fn analyze(
             continue;
         }
 
+        if (std.mem.eql(u8, kind, "using_namespace_declaration")) using_namespace = true;
         uncovered.note(kind, .top_level);
     }
 
+    const unit_scope: CallScope = .{
+        .source = source,
+        .names = names.items,
+        .using_namespace = using_namespace,
+    };
+    var too_deep = false;
+    for (bodies.items) |function| {
+        var locals: std.ArrayList([]const u8) = .empty;
+        defer locals.deinit(gpa);
+        try collectParameters(gpa, source, function.declaration, &locals);
+        try collectBindings(gpa, source, function.body, &locals, 0);
+        try walkCalls(builder, unit_scope, function, locals.items, function.body, &uncovered, &too_deep, 0);
+    }
+
     try uncovered.report(builder);
+    if (too_deep) {
+        try builder.addDiagnostic(
+            .unsupported_construct,
+            "a function body nested deeper than this frontend traverses was not analyzed for calls",
+        );
+    }
     if (definitions == 0) {
         try builder.addDiagnostic(
             .confirmed_absence,
             "the source unit parsed and declares no top-level function or container",
         );
     }
+}
+
+/// The names a function's own parameters bind.
+fn collectParameters(
+    gpa: std.mem.Allocator,
+    source: []const u8,
+    declaration: ts.Node,
+    locals: *std.ArrayList([]const u8),
+) !void {
+    var children = declaration.namedChildren();
+    while (children.next()) |child| {
+        if (!std.mem.eql(u8, child.kind(), "parameters")) continue;
+        var parameters = child.namedChildren();
+        while (parameters.next()) |parameter| {
+            const name = parameter.childByFieldName("name") orelse continue;
+            try locals.append(gpa, name.text(source));
+        }
+    }
+}
+
+/// Every name a function body binds anywhere: `const` and `var` declarations
+/// (including destructuring), capture payloads, and parameters of nested
+/// function types. Scope is ignored on purpose. Treating a binding as visible
+/// everywhere in the body can only leave more calls unresolved, never resolve
+/// one wrongly.
+fn collectBindings(
+    gpa: std.mem.Allocator,
+    source: []const u8,
+    node: ts.Node,
+    locals: *std.ArrayList([]const u8),
+    depth: u32,
+) !void {
+    // Calls below the depth limit are not recorded either, and a binding can
+    // only shadow calls in its own block or deeper.
+    if (depth >= max_depth) return;
+
+    const kind = node.kind();
+    if (std.mem.eql(u8, kind, "payload")) {
+        var captures = node.namedChildren();
+        while (captures.next()) |capture| {
+            if (std.mem.eql(u8, capture.kind(), "identifier")) try locals.append(gpa, capture.text(source));
+        }
+        return;
+    }
+    if (std.mem.eql(u8, kind, "parameter")) {
+        if (node.childByFieldName("name")) |name| try locals.append(gpa, name.text(source));
+    }
+
+    // A `const` or `var` keyword binds the identifier that follows it.
+    const count = node.childCount();
+    var binds_next = false;
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        const child = node.childAt(index) orelse continue;
+        const child_kind = child.kind();
+        if (isComment(child_kind)) continue;
+        if (!child.isNamed()) {
+            binds_next = std.mem.eql(u8, child_kind, "const") or std.mem.eql(u8, child_kind, "var");
+            continue;
+        }
+        if (binds_next and std.mem.eql(u8, child_kind, "identifier")) {
+            try locals.append(gpa, child.text(source));
+        } else {
+            try collectBindings(gpa, source, child, locals, depth + 1);
+        }
+        binds_next = false;
+    }
+}
+
+fn walkCalls(
+    builder: *contract.BatchBuilder,
+    scope: CallScope,
+    function: FunctionBody,
+    locals: []const []const u8,
+    node: ts.Node,
+    uncovered: *Uncovered,
+    too_deep: *bool,
+    depth: u32,
+) !void {
+    if (depth >= max_depth) {
+        too_deep.* = true;
+        return;
+    }
+
+    const kind = node.kind();
+    if (containerLabel(kind) != null) {
+        // A container opens its own namespace, where a bare name may mean one
+        // of its members instead.
+        uncovered.note(kind, .function_body);
+        return;
+    }
+    if (std.mem.eql(u8, kind, "call_expression")) {
+        if (node.childByFieldName("function")) |callee| {
+            try emitCall(builder, scope, function, locals, node, callee);
+        }
+    }
+
+    var children = node.namedChildren();
+    while (children.next()) |child| {
+        try walkCalls(builder, scope, function, locals, child, uncovered, too_deep, depth + 1);
+    }
+}
+
+fn emitCall(
+    builder: *contract.BatchBuilder,
+    scope: CallScope,
+    function: FunctionBody,
+    locals: []const []const u8,
+    call: ts.Node,
+    callee: ts.Node,
+) !void {
+    const simple = std.mem.eql(u8, callee.kind(), "identifier");
+    const designator = try builder.dupe(callee.text(scope.source));
+    if (designator.len == 0) return;
+
+    const decision: CallDecision = if (simple)
+        decideName(scope, locals, designator)
+    else
+        .{ .unresolved = "the callee is not a bare name; field, namespace, method, and computed callees are not resolved" };
+
+    try builder.addRelationship(.{
+        .kind = .calls,
+        .source = .{ .entity = function.index },
+        .target = switch (decision) {
+            .function => |index| .{ .local = index },
+            .unresolved => .{ .designator = designator },
+        },
+        .evidence = evidenceOf(builder, call, designator),
+        .resolution = switch (decision) {
+            .function => .{ .fact = .{
+                .method = "bare callee naming the one top-level declaration of that name in the analyzed source unit, a function",
+            } },
+            .unresolved => |explanation| .{ .unresolved = .{
+                .missing = .target_entity,
+                .explanation = explanation,
+            } },
+        },
+    });
+}
+
+const CallDecision = union(enum) {
+    function: u32,
+    unresolved: []const u8,
+};
+
+fn decideName(scope: CallScope, locals: []const []const u8, name: []const u8) CallDecision {
+    for (locals) |local| {
+        if (std.mem.eql(u8, local, name)) {
+            return .{ .unresolved = "a parameter or local binding in the enclosing function has this name" };
+        }
+    }
+    if (scope.using_namespace) {
+        return .{ .unresolved = "the unit has a `usingnamespace` declaration, which can bring another declaration of this name into scope" };
+    }
+
+    var matches: u32 = 0;
+    var function: ?u32 = null;
+    for (scope.names) |entry| {
+        if (!std.mem.eql(u8, entry.name, name)) continue;
+        matches += 1;
+        function = entry.function;
+    }
+    return switch (matches) {
+        0 => .{ .unresolved = "no top-level declaration of this name exists in the analyzed source unit" },
+        1 => if (function) |index|
+            .{ .function = index }
+        else
+            .{ .unresolved = "the one top-level declaration of this name is not a covered function" },
+        else => .{ .unresolved = "more than one top-level declaration in the analyzed source unit has this name" },
+    };
 }
 
 fn addDefinition(
@@ -254,6 +499,20 @@ fn containerDeclaration(node: ts.Node) ?ContainerDeclaration {
             continue;
         }
         if (name == null and std.mem.eql(u8, kind, "identifier")) name = token;
+    }
+    return null;
+}
+
+/// The identifier a `const` or `var` declaration binds: the first identifier
+/// child, which the grammar places directly after the keyword. Anything before
+/// it is a keyword or an `extern` library string.
+fn declaredIdentifier(node: ts.Node) ?ts.Node {
+    var children = node.namedChildren();
+    while (children.next()) |child| {
+        const kind = child.kind();
+        if (std.mem.eql(u8, kind, "identifier")) return child;
+        if (isComment(kind) or std.mem.eql(u8, kind, "string")) continue;
+        return null;
     }
     return null;
 }

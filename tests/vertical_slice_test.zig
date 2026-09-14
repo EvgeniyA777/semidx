@@ -1925,3 +1925,185 @@ test "editing the zig fixture into unparsable source stops its facts being curre
     try testing.expectEqual(greet_before.id, repaired_snapshot.findDefinition(zig_path, "greet").?.id);
     try testing.expectEqual(@as(usize, 0), repaired_snapshot.countDiagnostics(.analysis_failed));
 }
+
+test "same-unit zig calls are current facts and every other callee stays unresolved" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var snapshot = try fixture.index.publish();
+    defer snapshot.deinit();
+
+    const greeting = snapshot.findDefinition(zig_path, "greeting").?;
+    const greet = snapshot.findDefinition(zig_path, "greet").?;
+    const announce = snapshot.findDefinition(zig_path, "announce").?;
+
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .calls,
+        .source = greet.id,
+        .target = greeting.id,
+        .resolution = .fact,
+    }));
+    // `greet()` inside the print arguments is the top-level function.
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .calls,
+        .source = announce.id,
+        .target = greet.id,
+        .resolution = .fact,
+    }));
+
+    // `greeter.greet()` names the container member, not the top-level `greet`,
+    // and nothing here resolves members, so it is not retargeted to either.
+    for ([_][]const u8{ "std.debug.print", "greeter.greet", "report" }) |designator| {
+        try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+            .kind = .calls,
+            .source = announce.id,
+            .designator = designator,
+            .resolution = .unresolved,
+        }));
+    }
+    try testing.expectEqual(@as(usize, 4), snapshot.countRelationships(.{ .source = announce.id, .kind = .calls }));
+    try testing.expectEqual(@as(usize, 4), snapshot.countRelationships(.{ .source = announce.id, .reference_query = true }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .source = announce.id, .kind = .references }));
+
+    // The call facts carry a range and the Zig producer, and the call inside
+    // the test block produced nothing.
+    var facts = snapshot.relationships(.{ .kind = .calls, .resolution = .fact });
+    var fact_count: usize = 0;
+    while (facts.next()) |fact| : (fact_count += 1) {
+        try testing.expectEqualStrings("frontend.zig", fact.producer.name);
+        const evidence = fact.evidence.?;
+        try testing.expectEqual(fixture.unit, evidence.unit);
+        try testing.expect(evidence.range.end_byte > evidence.range.start_byte);
+    }
+    try testing.expectEqual(@as(usize, 2), fact_count);
+    try testing.expectEqual(@as(usize, 5), snapshot.countRelationships(.{ .kind = .calls }));
+}
+
+test "a zig callee body edit keeps its callers' facts current" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const greeting_before = before.findDefinition(zig_path, "greeting").?;
+    const greet_before = before.findDefinition(zig_path, "greet").?;
+
+    _ = try fixture.edit("zig/edits/01_body_edit.zig");
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(greeting_before.id, after.findDefinition(zig_path, "greeting").?.id);
+    try testing.expectEqual(@as(usize, 1), after.countRelationships(.{
+        .kind = .calls,
+        .source = greet_before.id,
+        .target = greeting_before.id,
+        .resolution = .fact,
+        .freshness = .current,
+    }));
+    try testing.expectEqual(@as(usize, 0), after.countAssertions(.{ .freshness = .stale }));
+}
+
+test "renaming a zig callee alone leaves its call unresolved rather than retargeted" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const greeting_before = before.findDefinition(zig_path, "greeting").?;
+    const greet_before = before.findDefinition(zig_path, "greet").?;
+
+    const outcome = try fixture.edit("zig/edits/06_callee_renamed.zig");
+    try testing.expectEqual(@as(usize, 1), outcome.lost);
+    try testing.expectEqual(@as(usize, 1), outcome.created);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    const salutation = after.findDefinition(zig_path, "salutation").?;
+    try testing.expectEqual(salutation.id, after.identityEventFor(greeting_before.id, outcome.revision).?.replacement.?);
+
+    // `greet` still says `greeting()`, which no longer names anything.
+    try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .kind = .calls, .source = greet_before.id, .target = salutation.id }));
+    try testing.expectEqual(@as(usize, 1), after.countRelationships(.{
+        .kind = .calls,
+        .source = greet_before.id,
+        .designator = "greeting",
+        .resolution = .unresolved,
+    }));
+}
+
+test "renaming a zig callee together with its call follows the replacement" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const greet_before = before.findDefinition(zig_path, "greet").?;
+
+    _ = try fixture.edit("zig/edits/03_renamed_definition.zig");
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    const salutation = after.findDefinition(zig_path, "salutation").?;
+    try testing.expectEqual(@as(usize, 1), after.countRelationships(.{
+        .kind = .calls,
+        .source = greet_before.id,
+        .target = salutation.id,
+        .resolution = .fact,
+    }));
+}
+
+test "a zig call moves from unresolved to resolved when its target appears" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const announce_before = before.findDefinition(zig_path, "announce").?;
+
+    const outcome = try fixture.edit("zig/edits/04_reference_resolved.zig");
+    try testing.expectEqual(@as(usize, 5), outcome.preserved);
+    try testing.expectEqual(@as(usize, 1), outcome.created);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    const report = after.findDefinition(zig_path, "report").?;
+    try testing.expectEqual(@as(usize, 1), after.countRelationships(.{
+        .kind = .calls,
+        .source = announce_before.id,
+        .target = report.id,
+        .resolution = .fact,
+    }));
+    try testing.expectEqual(@as(usize, 0), after.countRelationships(.{
+        .kind = .calls,
+        .source = announce_before.id,
+        .designator = "report",
+    }));
+}
+
+test "adding a zig unit leaves java and clojure analysis unchanged" {
+    var fixture = try Fixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const java_assertions = before.countAssertions(.{ .producer = "frontend.java" });
+    const clojure_assertions = before.countAssertions(.{ .producer = "frontend.clojure" });
+
+    const source = try loadFixture(testing.allocator, zig_path);
+    defer testing.allocator.free(source);
+    _ = try fixture.index.addUnit(zig_path, .zig, source);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(java_assertions, after.countAssertions(.{ .producer = "frontend.java" }));
+    try testing.expectEqual(clojure_assertions, after.countAssertions(.{ .producer = "frontend.clojure" }));
+    try testing.expectEqual(@as(usize, 8 + 5), after.countEntities(.{ .kind = .definition }));
+    // A Java or Clojure call named `greet` did not become a Zig fact, or the
+    // other way round: every call fact stays inside its own language's unit.
+    var facts = after.relationships(.{ .kind = .calls, .resolution = .fact });
+    while (facts.next()) |fact| {
+        const target = after.entityById(fact.claim.relationship.target.entity).?;
+        const evidence = fact.evidence.?;
+        try testing.expectEqual(evidence.unit, target.evidence.?.unit);
+    }
+}

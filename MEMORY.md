@@ -372,13 +372,27 @@ why. This is not a changelog of removed implementation; see `git log`.
   explicitly did not act on it.
 - Deepen frontend coverage only against stated risk, and report coverage through
   a capability matrix rather than by widening the fixtures quietly.
-- **Plan 004 is ready for execution.** It onboards Zig as the next language
+- **Plan 004 is in progress: Stages 1–3 (the Zig frontend) are implemented and
+  await review; Stages 4–5 (the MCP preview and documentation) have not
+  started.** It onboards Zig as the next language
   frontend for dogfooding and then adds a local stdio MCP preview over published
   graph snapshots ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md),
-  [plan 004](docs/plans/004_zig_frontend_and_mcp_preview.md)). The intended
-  slice is narrow: `.zig` discovery, pinned local `tree-sitter-zig`, top-level
-  Zig definitions, same-unit simple Zig calls, and graph-first MCP tools for
-  health, repository map, definition lookup, references, context, and refresh.
+  [plan 004](docs/plans/004_zig_frontend_and_mcp_preview.md),
+  [report 004](docs/reports/004_zig_frontend_and_mcp_preview_progress.md)). The
+  intended slice is narrow: `.zig` discovery, pinned local `tree-sitter-zig`,
+  top-level Zig definitions, same-unit simple Zig calls, and graph-first MCP
+  tools for health, repository map, definition lookup, references, context, and
+  refresh. What exists now: `.zig` files are source units; the full lane
+  compiles `tree-sitter-zig` pinned at `6479aa13`; named top-level `fn`
+  declarations and top-level `const` declarations bound directly to a
+  struct/enum/union/opaque expression are `function`/`container` definitions
+  (`zig.construct`, `zig.container` extension labels, no signature in identity);
+  a bare call in a covered function body is a `CALLS` fact only when the unit's
+  top level declares that name once, as a covered function, and no parameter,
+  local binding, capture, or `usingnamespace` could shadow it. Everything else —
+  container members, other declarations, non-bare callees — is unsupported or
+  unresolved. The pinned grammar parses an empty `struct {}` as an error, so such
+  a unit reports `analysis_failed`. `semidx-dev` over `src/` indexes all 20 units.
   It explicitly excludes a published semantic contract, persistence, HTTP,
   remote services, resources/prompts, source text by default, Zig imports,
   namespace/container lookup, comptime semantics, methods, fields, local
