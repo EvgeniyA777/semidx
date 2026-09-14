@@ -403,6 +403,48 @@ Additional negative checks:
 - If MCP tool output starts requiring a published semantic contract version,
   stop and settle `SPEC.md` public contract requirements first.
 
+## Execution Recommendations
+
+Recorded on 2026-09-14 at the maintainer's request. These are advice for how
+to run the plan, not scope: they change no stage, DoD, or stop condition.
+
+**Start from a fresh session.** Everything a new agent needs from earlier work
+is in the commits, `MEMORY.md`, and the plan 003 report, and `RULES.md` makes it
+read them. Before exploring code, check whether the semidx MCP server connects;
+it timed out in the plan 003 session, and if it is unavailable again, record the
+fallback in the progress log as this plan already requires.
+
+**Split execution into two sessions at the Stage 3 / Stage 4 boundary.**
+
+1. Session A runs Stages 1–3, the Zig frontend. It stays inside the existing
+   ingestion pipeline: grammar, language registration, `frontends/zig.zig`, and
+   fixtures. It ends with per-stage commits and an up-to-date progress log.
+2. Between the sessions, review Stages 1–3 separately, as was done for plan 003.
+3. Session B runs Stages 4–5, the MCP preview and documentation. `src/mcp/`
+   depends only on published snapshots, so Session B needs the progress log, not
+   Session A's context.
+
+**Executor model.**
+
+- Stages 1–4: Claude Opus 5. The main risks are the ones a model can miss without
+  noticing: assuming tree-sitter-zig node shapes instead of testing them,
+  letting a name match become a fact, breaking stdio framing with any stdout
+  output, and applying the stop conditions, which call for judgment.
+- Stage 5 alone is documentation and could run on Claude Sonnet 5. When it is
+  the tail of Session B, switching models for it is not worth it.
+- Other models were not assessed for this plan.
+
+**Environment traps to clear before starting.**
+
+- Stage 1 needs network access once: `./scripts/setup-tree-sitter-grammars.sh`
+  fetches `tree-sitter-zig`. Approve that before Session A, or it stops at its
+  first stage. Build and index steps stay offline.
+- The MCP `2026-07-28` specification is newer than the May 2026 training cutoff
+  of the recommended models. Session B must read the specification from the link
+  in Sources Of Truth rather than implement `server/discover` from memory. If it
+  cannot, take the stop condition for one protocol target and implement
+  `2025-06-18` only.
+
 ## Review Focus
 
 - Graph authority: MCP must not establish or relabel assertions.

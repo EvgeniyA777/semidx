@@ -382,7 +382,12 @@ why. This is not a changelog of removed implementation; see `git log`.
   It explicitly excludes a published semantic contract, persistence, HTTP,
   remote services, resources/prompts, source text by default, Zig imports,
   namespace/container lookup, comptime semantics, methods, fields, local
-  variables, and cross-unit Zig resolution.
+  variables, and cross-unit Zig resolution. Execution advice lives in the plan's
+  [Execution Recommendations](docs/plans/004_zig_frontend_and_mcp_preview.md#execution-recommendations):
+  a fresh session split at the Stage 3 / Stage 4 boundary with a review between
+  the sessions, Claude Opus 5 for Stages 1–4, one-time network access for the
+  grammar fetch, and reading the `2026-07-28` MCP specification rather than
+  relying on model memory.
 - `scripts/git-hooks/pre-push` still carries an inert block that refreshes
   `docs/code-context.md` through a Clojure alias when `deps.edn` exists. Both
   files went with the removed implementation, so the block never runs; remove it
