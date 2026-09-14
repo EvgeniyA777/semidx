@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-13"
+updated: "2026-09-14"
 ---
 
 # Testing and Verification Policy
@@ -76,6 +76,13 @@ Common lanes include:
 Run the narrowest lane that can fail on the change: `zig build test-core` for
 shared-core edits, `zig build test` before any commit that touches a frontend,
 the adapter, the build, or a fixture.
+
+A runtime smoke passes only after the process exits with status 0 and the full
+stdout/stderr streams have been consumed. Inspecting only an initial prefix,
+summary, or progress line is not verification. When the command is meant to
+produce text or protocol output, record whether the complete output contained
+non-printable bytes, non-protocol stdout, or a late crash after a successful
+summary.
 
 Coverage reports are diagnostic. An arbitrary percentage does not replace
 requirement and risk analysis.

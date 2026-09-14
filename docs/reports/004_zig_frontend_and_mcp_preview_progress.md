@@ -26,7 +26,7 @@ See [Session A Handoff](#session-a-handoff).
 | Stage 1: Zig grammar and language registration | Completed (`6bcbbd7`) | `.zig` is discovered as `model.Language.zig`; a pinned `tree-sitter-zig` is fetched by the setup script and compiled in the full lane only; a skeletal Zig frontend reports failed, unsupported, or confirmed-empty analysis and emits no facts. |
 | Stage 2: Zig definition facts | Completed (`575bf92`) | Named top-level `fn` declarations and top-level `const` declarations bound directly to a struct/enum/union/opaque expression are current `definition` facts with `DEFINES` from the file. Container members and every other declaration are reported as unsupported. A body edit preserves identity; a rename is identity loss. |
 | Stage 3: Zig same-unit simple calls | Completed (`50d68c4`) | Every call expression in a covered function body is recorded as `CALLS`. A bare callee is a fact only when the unit's top level declares that name exactly once, as a covered function, and no parameter, local binding, capture, or `usingnamespace` could give it another meaning; every other callee stays unresolved with its reason. No `REFERENCES` are emitted. |
-| Stage 3.5: Graph-owned relationship designators | Completed | Fixes the review blocker: `Graph.addAssertion` now interns an unresolved target's designator, so no relationship keeps a slice of the frontend batch that produced it. `zig build run -- src` completes. |
+| Stage 3.5: Graph-owned relationship designators | Completed (`211a529`) | Fixes the review blocker: `Graph.addAssertion` now interns an unresolved target's designator, so no relationship keeps a slice of the frontend batch that produced it. `zig build run -- src` completes. |
 | Stage 4: Local MCP stdio preview | Pending (Session B) | |
 | Stage 5: Dogfood, documentation, and handoff | Pending (Session B) | |
 
@@ -355,6 +355,15 @@ Finding recorded while verifying the fix (open, not a correctness defect):
   under `!` are undercounted. Unary minus parses correctly. Reinterpreting that
   node as a negated call would repair the tree by assumption, which the plan's
   stop conditions rule out, so this is left as residual risk pending a decision.
+
+Disposition: defer to a Zig frontend follow-up, not Stage 4. The current
+behavior is incomplete but honest: it records unresolved `CALLS` rather than a
+false fact, so the MCP preview can expose it with resolution metadata. Do not
+add an ad hoc `!` rewrite while implementing MCP. A later frontend plan may
+cover logical-negation callees only after pinning the exact tree-sitter node
+shape in a fixture, proving the transformed callee is still a normal
+`call_expression`, and adding positive and negative tests for `!foo()`,
+`!ns.foo()`, `!!foo()`, error-union type syntax, and unresolved diagnostics.
 
 Verification:
 

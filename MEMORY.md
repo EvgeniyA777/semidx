@@ -81,15 +81,16 @@ why. This is not a changelog of removed implementation; see `git log`.
 - `docs/agent-policy/{documentation,git,testing,tooling}.md` owns detailed
   cross-cutting process. Testing policy now names the real verification lanes
   (`zig build test-core`, `zig build test`, `zig fmt --check`,
-  `zig build run`), and tooling policy carries a Zig addendum naming which probe
-  belongs to which edit. Documentation policy owns ownership, filenames,
-  frontmatter, lifecycle, the ADR procedure, progress logs, and the Plan
-  Readiness Gate; git policy owns hooks, command ordering, commit and push rules,
-  and both the attribution and constitution-freeze enforcement; testing policy
-  owns risk-based verification and local services; tooling policy owns MCP-first
-  retrieval, code reading, and editing probes, and scopes the MCP sections as
-  development tooling configured outside this repository rather than the rebuilt
-  public API.
+  `zig build run`) and requires runtime smoke evidence to consume the full
+  stdout/stderr streams and check the exit status, not just an early summary.
+  Tooling policy carries a Zig addendum naming which probe belongs to which
+  edit. Documentation policy owns ownership, filenames, frontmatter, lifecycle,
+  the ADR procedure, progress logs, and the Plan Readiness Gate; git policy owns
+  hooks, command ordering, commit and push rules, and both the attribution and
+  constitution-freeze enforcement; testing policy owns risk-based verification
+  and local services; tooling policy owns MCP-first retrieval, code reading, and
+  editing probes, and scopes the MCP sections as development tooling configured
+  outside this repository rather than the rebuilt public API.
 - The ADR procedure is enabled and the sequence starts at `001`;
   [docs/adr/README.md](docs/adr/README.md) is the index.
   [ADR 001](docs/adr/001_choose_zig_implementation_language.md) accepts Zig as
@@ -373,8 +374,8 @@ why. This is not a changelog of removed implementation; see `git log`.
 - Deepen frontend coverage only against stated risk, and report coverage through
   a capability matrix rather than by widening the fixtures quietly.
 - **Plan 004 is in progress: Stages 1–3 (the Zig frontend) are implemented and
-  await review; Stages 4–5 (the MCP preview and documentation) have not
-  started.** It onboards Zig as the next language
+  reviewed; Stage 3.5 fixed the review blocker; Stages 4–5 (the MCP preview
+  and documentation) have not started.** It onboards Zig as the next language
   frontend for dogfooding and then adds a local stdio MCP preview over published
   graph snapshots ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md),
   [plan 004](docs/plans/004_zig_frontend_and_mcp_preview.md),
@@ -394,7 +395,10 @@ why. This is not a changelog of removed implementation; see `git log`.
   unresolved. The pinned grammar parses an empty `struct {}` as an error, so such
   a unit reports `analysis_failed`. The same grammar parses `!helper()` as a call
   on the type-shaped callee `!helper`, so bare calls under logical negation stay
-  unresolved and are undercounted. `semidx-dev` over `src/` indexes all 20 units.
+  unresolved and are undercounted. This is not a Stage 4 blocker because it does
+  not create false facts, but Stage 4 must not repair it ad hoc while adding MCP;
+  resolve it only in a Zig frontend follow-up with parser-node evidence and
+  regression tests. `semidx-dev` over `src/` indexes all 20 units.
   The Stages 1–3 review found that `Graph.addAssertion` kept an unresolved
   target's designator as a slice of the frontend batch arena, which is freed
   after integration (latent for Java and Clojure too, exposed by the Zig
