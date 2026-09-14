@@ -324,6 +324,16 @@ why. This is not a changelog of removed implementation; see `git log`.
   as the legitimate path. That work may force `module` / `IMPORTS` admission
   questions, but they should be resolved from evidence, not admitted as a paper
   model.
+- **Plan 003 is ready for implementation.**
+  [ADR 004](docs/adr/004_allow_java_same_package_type_resolution.md) permits the
+  narrow Java case: an unqualified top-level type name in an explicit package may
+  resolve to exactly one current Java top-level class definition in the same
+  package, with dependency evidence. The implementation plan is
+  [docs/plans/003_java_package_type_resolution.md](docs/plans/003_java_package_type_resolution.md);
+  its companion log is
+  [docs/reports/003_java_package_type_resolution_progress.md](docs/reports/003_java_package_type_resolution_progress.md).
+  It does not admit `module` or `IMPORTS`, and it does not widen Clojure or
+  general Java coverage.
 - Source identity needs a stronger evidence story for common refactors where a
   file moves and changes in the same rescan. The current exact-content rule is
   intentionally conservative; future work should prefer explicit VCS/IDE move

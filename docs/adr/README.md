@@ -18,3 +18,4 @@ ratified constitution.
 - [001: Choose Zig As The Implementation Language](001_choose_zig_implementation_language.md)
 - [002: Use Local Tree-sitter C Sources For Language Frontends](002_local_tree_sitter_parser_dependency.md)
 - [003: Reject Repository-Wide Name Matching As Graph Assertions](003_reject_name_match_assertions.md)
+- [004: Allow Java Same-Package Type Resolution](004_allow_java_same_package_type_resolution.md)
