@@ -598,6 +598,35 @@ pub const Graph = struct {
         }
     }
 
+    /// The assertion establishing a definition as a current fact, if there is
+    /// one: the entity is live, the unit that introduced it is live and its
+    /// analysis is current, and its existence was recorded as a fact against
+    /// those contents.
+    ///
+    /// This is what another unit's analysis may rely on. Reading it costs what
+    /// the introducing unit holds, never what the repository holds.
+    pub fn currentDefinitionFact(self: *Graph, id: EntityId) ?model.Assertion {
+        const found = self.entity(id) orelse return null;
+        if (!found.isLive() or found.kind != .definition) return null;
+        const observed = found.evidence orelse return null;
+        const record = self.unit(observed.unit) orelse return null;
+        if (!record.isLive() or record.analysis() != .current) return null;
+        if (found.observed_revision < record.content_revision) return null;
+
+        const bucket = self.assertionBucket(observed.unit) orelse return null;
+        self.unit_work += bucket.items.len;
+        for (bucket.items) |assertion| {
+            switch (assertion.claim) {
+                .entity_exists => |existing| if (existing != id) continue,
+                else => continue,
+            }
+            if (!assertion.resolution.isFact()) continue;
+            if (assertion.revision < record.content_revision) continue;
+            return assertion;
+        }
+        return null;
+    }
+
     fn definitionBucket(self: *Graph, id: SourceUnitId) ?*std.ArrayList(EntityId) {
         const index = id.index();
         if (index >= self.unit_definitions.items.len) return null;
@@ -806,7 +835,17 @@ pub const Graph = struct {
                 .relationship => |rel| {
                     try self.expectLive(rel.source);
                     switch (rel.target) {
-                        .entity => |id| try self.expectLive(id),
+                        .entity => |id| self.expectLive(id) catch |err| {
+                            // A claim that reached into another unit can
+                            // outlive its target: the provider removed the
+                            // definition while this unit's own contents could
+                            // not be analyzed again. The claim already stopped
+                            // answering current-state queries, so it stays as
+                            // recorded instead of being withdrawn on behalf of
+                            // an analysis nobody ran. A current claim naming a
+                            // missing entity is still refused.
+                            if (self.entity(id) == null or !self.claimIsStale(assertion)) return err;
+                        },
                         .designator => {},
                     }
                 },
@@ -816,6 +855,13 @@ pub const Graph = struct {
                 },
             }
         }
+    }
+
+    /// The same rule `Snapshot.assertionFreshness` applies, read from the store.
+    fn claimIsStale(self: *const Graph, assertion: model.Assertion) bool {
+        const observed = assertion.evidence orelse return false;
+        const record = self.unit(observed.unit) orelse return false;
+        return assertion.revision < record.content_revision;
     }
 
     fn expectLive(self: *const Graph, id: EntityId) GraphError!void {

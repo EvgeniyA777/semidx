@@ -50,9 +50,24 @@ pub const LocalRef = union(enum) {
     entity: u32,
 };
 
+/// A definition another source unit established, as the frontend was handed it.
+///
+/// The frontend does not allocate this id and cannot discover it by itself: it
+/// only ever sees one unit. Whoever builds its analysis context reads the id
+/// from the graph together with the unit that introduced it, and integration
+/// re-checks both against the graph before anything is recorded.
+pub const ExternalTarget = struct {
+    entity: model.EntityId,
+    /// The unit whose analysis established the target. The batch must also
+    /// declare a dependency on it, so a change there reaches this unit.
+    provider: model.SourceUnitId,
+};
+
 pub const DraftTarget = union(enum) {
     /// Resolved inside the analyzed unit.
     local: u32,
+    /// Resolved to a definition established outside the analyzed unit.
+    external: ExternalTarget,
     /// A name read from source that the frontend could not resolve.
     designator: []const u8,
 };
@@ -77,11 +92,8 @@ pub const DraftRelationship = struct {
 
 /// A declaration that this unit's analysis read something about another unit.
 ///
-/// No frontend produces one yet. A frontend is handed one source unit and sees
-/// nothing else, so it has no way to name another unit's id — which is itself
-/// the finding: when cross-unit resolution arrives, this contract needs a way
-/// for a frontend to be told what else exists, and that is a contract change
-/// rather than a frontend change.
+/// A frontend can name another unit only through what its analysis context
+/// handed it, so a dependency accompanies every `ExternalTarget` it records.
 pub const DraftDependency = struct {
     provider: model.SourceUnitId,
     /// Why, in the producer's own words.

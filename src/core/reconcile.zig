@@ -17,7 +17,21 @@ const contract = @import("contract.zig");
 const graph_mod = @import("graph.zig");
 const Graph = graph_mod.Graph;
 
-pub const Error = graph_mod.GraphError;
+pub const Error = graph_mod.GraphError || error{
+    /// Containment and definition introduction are claims about one unit's own
+    /// organization; no unit introduces what another unit declares.
+    ExternalStructuralTarget,
+    /// An entity of the analyzed unit is a local target, not an external one.
+    ExternalTargetInsideUnit,
+    /// The batch relies on another unit without saying so, so a change there
+    /// would never reach it.
+    UndeclaredExternalProvider,
+    ExternalTargetMustBeDefinition,
+    /// The target was not introduced by the unit the batch named for it.
+    ExternalTargetProviderMismatch,
+    /// The target is not a current fact of its provider.
+    ExternalTargetNotCurrent,
+};
 
 pub const Outcome = struct {
     revision: u64,
@@ -33,6 +47,9 @@ pub const Outcome = struct {
 
 pub fn integrate(graph: *Graph, batch: contract.FrontendBatch) Error!Outcome {
     const unit = graph.unit(batch.unit) orelse return error.UnknownSourceUnit;
+    // Checked before anything is touched, so a rejected batch leaves the unit
+    // exactly as its previous analysis left it.
+    if (!batch.hasBlockingDiagnostic()) try checkExternalTargets(graph, batch);
     const revision = graph.beginRevision();
     const producer = batch.capabilities.producer;
 
@@ -193,6 +210,7 @@ pub fn integrate(graph: *Graph, batch: contract.FrontendBatch) Error!Outcome {
         };
         const target: model.Target = switch (draft.target) {
             .local => |index| .{ .entity = local_ids[index].? },
+            .external => |external| .{ .entity = external.entity },
             .designator => |name| .{ .designator = name },
         };
         _ = try graph.addRelationship(
@@ -220,6 +238,40 @@ pub fn integrate(graph: *Graph, batch: contract.FrontendBatch) Error!Outcome {
 
     try graph.markAnalyzed(batch.unit);
     return outcome;
+}
+
+/// A frontend never allocates identity, and an id it hands back for another
+/// unit's entity is not taken on trust: it must still name a current fact of
+/// the unit the batch says it came from, and the batch must depend on that unit.
+fn checkExternalTargets(graph: *Graph, batch: contract.FrontendBatch) Error!void {
+    for (batch.relationships) |draft| {
+        const external = switch (draft.target) {
+            .external => |external| external,
+            .local, .designator => continue,
+        };
+        switch (draft.kind) {
+            .contains, .defines => return error.ExternalStructuralTarget,
+            .references, .calls => {},
+        }
+        if (external.provider == batch.unit) return error.ExternalTargetInsideUnit;
+        if (!declaresProvider(batch.dependencies, external.provider)) {
+            return error.UndeclaredExternalProvider;
+        }
+
+        const target = graph.entity(external.entity) orelse return error.UnknownEntity;
+        if (!target.isLive()) return error.RemovedEntity;
+        if (target.kind != .definition) return error.ExternalTargetMustBeDefinition;
+        const observed = target.evidence orelse return error.ExternalTargetProviderMismatch;
+        if (observed.unit != external.provider) return error.ExternalTargetProviderMismatch;
+        if (graph.currentDefinitionFact(external.entity) == null) return error.ExternalTargetNotCurrent;
+    }
+}
+
+fn declaresProvider(declared: []const contract.DraftDependency, provider: model.SourceUnitId) bool {
+    for (declared) |dependency| {
+        if (dependency.provider == provider) return true;
+    }
+    return false;
 }
 
 const testing = std.testing;
@@ -689,6 +741,171 @@ test "a departing unit leaves no dependency pointing at it" {
 
     try graph.removeSourceUnit(provider);
     try testing.expectEqual(@as(usize, 0), graph.dependencies.count());
+}
+
+/// Integrates a dependent unit declaring `other`, whose first entity references
+/// `target` as an external entity. `declare` names the provider the batch says
+/// it relied on, or none.
+fn integrateExternalReference(
+    graph: *Graph,
+    dependent: model.SourceUnitId,
+    kind: model.RelationshipKind,
+    target: contract.ExternalTarget,
+    declare: ?model.SourceUnitId,
+) !Outcome {
+    var builder = contract.BatchBuilder.init(testing.allocator, dependent, test_capabilities);
+    defer builder.deinit();
+    try syntheticBatch(&builder, &.{"other"}, "v1");
+    try builder.addRelationship(.{
+        .kind = kind,
+        .source = .{ .entity = 0 },
+        .target = .{ .external = target },
+        .evidence = .{ .unit = dependent, .range = range(600, 605), .text = try builder.dupe("greet") },
+        .resolution = .{ .fact = .{ .method = "resolved by the analysis context" } },
+    });
+    if (declare) |provider| try builder.addDependency(provider, "read a definition declared in another unit");
+    return integrate(graph, builder.batch());
+}
+
+test "a batch can target a definition another unit established" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const provider = try graph.addSourceUnit("a/A.java", .java, "v1");
+    const dependent = try graph.addSourceUnit("b/B.java", .java, "v1");
+    _ = try integrateNames(&graph, provider, &.{"greet"}, "v1");
+
+    var before = try graph.publish();
+    defer before.deinit();
+    const greet = before.findDefinition("a/A.java", "greet").?;
+
+    _ = try integrateExternalReference(&graph, dependent, .references, .{
+        .entity = greet.id,
+        .provider = provider,
+    }, provider);
+
+    var after = try graph.publish();
+    defer after.deinit();
+    const other = after.findDefinition("b/B.java", "other").?;
+    const reference = after.firstRelationship(.{
+        .kind = .references,
+        .source = other.id,
+        .target = greet.id,
+    }).?;
+    try testing.expectEqual(model.ResolutionCategory.fact, reference.resolution.category());
+    try testing.expectEqualStrings(test_producer.name, reference.producer.name);
+    // Recorded in the dependent unit, which is what withdraws it when that unit
+    // is analyzed again.
+    try testing.expectEqual(dependent, reference.evidence.?.unit);
+    try testing.expectEqual(@as(usize, 1), graph.dependencies.count());
+    // No entity was allocated for the target.
+    try testing.expectEqual(before.countEntities(.{ .kind = .definition }) + 1, after.countEntities(.{ .kind = .definition }));
+}
+
+test "an external target is refused unless it is a current definition of its declared provider" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const provider = try graph.addSourceUnit("a/A.java", .java, "v1");
+    const dependent = try graph.addSourceUnit("b/B.java", .java, "v1");
+    const bystander = try graph.addSourceUnit("c/C.java", .java, "v1");
+    _ = try integrateNames(&graph, provider, &.{"greet"}, "v1");
+    _ = try integrateNames(&graph, bystander, &.{"elsewhere"}, "v1");
+    _ = try integrateNames(&graph, dependent, &.{"other"}, "v1");
+
+    var before = try graph.publish();
+    defer before.deinit();
+    const greet = before.findDefinition("a/A.java", "greet").?.id;
+    const own = before.findDefinition("b/B.java", "other").?.id;
+    const provider_file = before.unit(provider).?.entity;
+    const valid: contract.ExternalTarget = .{ .entity = greet, .provider = provider };
+
+    try testing.expectError(error.UndeclaredExternalProvider, integrateExternalReference(&graph, dependent, .references, valid, null));
+    try testing.expectError(error.UndeclaredExternalProvider, integrateExternalReference(&graph, dependent, .references, valid, bystander));
+    try testing.expectError(error.ExternalStructuralTarget, integrateExternalReference(&graph, dependent, .defines, valid, provider));
+    try testing.expectError(error.ExternalTargetInsideUnit, integrateExternalReference(&graph, dependent, .references, .{
+        .entity = own,
+        .provider = dependent,
+    }, dependent));
+    try testing.expectError(error.UnknownEntity, integrateExternalReference(&graph, dependent, .references, .{
+        .entity = @enumFromInt(999),
+        .provider = provider,
+    }, provider));
+    try testing.expectError(error.ExternalTargetMustBeDefinition, integrateExternalReference(&graph, dependent, .references, .{
+        .entity = provider_file,
+        .provider = provider,
+    }, provider));
+    try testing.expectError(error.ExternalTargetProviderMismatch, integrateExternalReference(&graph, dependent, .references, .{
+        .entity = greet,
+        .provider = bystander,
+    }, bystander));
+
+    // Every refusal left the dependent exactly as its last analysis left it.
+    var unchanged = try graph.publish();
+    defer unchanged.deinit();
+    try testing.expectEqual(own, unchanged.findDefinition("b/B.java", "other").?.id);
+    try testing.expectEqual(graph_mod.UnitAnalysis.current, unchanged.unitAnalysis(dependent).?);
+    try testing.expectEqual(@as(usize, 0), graph.dependencies.count());
+    try testing.expectEqual(@as(usize, 0), unchanged.countRelationships(.{ .target = greet, .kind = .references }));
+
+    // A provider whose contents changed without being analyzed again no longer
+    // establishes anything another unit may rely on.
+    _ = try graph.setSourceUnitBytes(provider, "v2");
+    try testing.expectError(error.ExternalTargetNotCurrent, integrateExternalReference(&graph, dependent, .references, valid, provider));
+
+    // Nor does a definition its provider has since withdrawn.
+    _ = try integrateNames(&graph, provider, &.{"farewell"}, "v2");
+    try testing.expectError(error.RemovedEntity, integrateExternalReference(&graph, dependent, .references, valid, provider));
+}
+
+test "only a stale claim may outlive the definition it reached into another unit for" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const provider = try graph.addSourceUnit("a/A.java", .java, "v1");
+    const dependent = try graph.addSourceUnit("b/B.java", .java, "v1");
+    _ = try integrateNames(&graph, provider, &.{"greet"}, "v1");
+
+    var before = try graph.publish();
+    defer before.deinit();
+    const greet = before.findDefinition("a/A.java", "greet").?.id;
+    _ = try integrateExternalReference(&graph, dependent, .references, .{
+        .entity = greet,
+        .provider = provider,
+    }, provider);
+
+    // The dependent's contents change and cannot be analyzed, so its claim goes
+    // stale; then the provider withdraws the target.
+    _ = try graph.setSourceUnitBytes(dependent, "v2 which nothing could parse");
+    _ = try failAnalysis(&graph, dependent);
+    _ = try integrateNames(&graph, provider, &.{"farewell"}, "v2");
+
+    var after = try graph.publish();
+    defer after.deinit();
+    try testing.expect(after.entityById(greet) == null);
+    try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .target = greet }));
+    try testing.expectEqual(@as(usize, 1), after.countRelationships(.{
+        .target = greet,
+        .kind = .references,
+        .freshness = .stale,
+    }));
+}
+
+test "a current claim naming a withdrawn definition is refused at publication" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const provider = try graph.addSourceUnit("a/A.java", .java, "v1");
+    const dependent = try graph.addSourceUnit("b/B.java", .java, "v1");
+    _ = try integrateNames(&graph, provider, &.{"greet"}, "v1");
+
+    var before = try graph.publish();
+    defer before.deinit();
+    _ = try integrateExternalReference(&graph, dependent, .references, .{
+        .entity = before.findDefinition("a/A.java", "greet").?.id,
+        .provider = provider,
+    }, provider);
+
+    // Nothing reanalyzed the dependent, so its claim is current and wrong. The
+    // graph refuses to publish it rather than hand out a dangling fact.
+    _ = try integrateNames(&graph, provider, &.{"farewell"}, "v2");
+    try testing.expectError(error.DanglingAssertionEndpoint, graph.publish());
 }
 
 test "an edit to one unit does not disturb another unit" {

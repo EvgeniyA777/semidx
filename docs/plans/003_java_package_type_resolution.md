@@ -2,7 +2,7 @@
 title: "Java package type resolution"
 doc_type: "plan"
 lifecycle: "active"
-status: "planned"
+status: "in_progress"
 agent_action: "execute_when_requested"
 updated: "2026-09-14"
 ---
