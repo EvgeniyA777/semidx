@@ -44,6 +44,15 @@ inside another source or program container. It describes source organization or
 program nesting, not by itself the introduction of a program definition. For
 example, a repository containing a file is containment.
 
+**content identity** — Evidence that two observed source-unit contents are the
+same bytes, currently recorded as a SHA-256 value. It is evidence used by
+source-unit correspondence; it is not a semantic identity by itself.
+
+**dependency declaration** — A record that one source unit's analysis read
+something about another source unit. A change to the provider obliges the
+dependent to be reanalyzed. The record says nothing by itself about import
+semantics, module membership, or program availability.
+
 **definition introduction** — A narrower claim that a container directly
 introduces a program definition. For example, a file may introduce a class,
 namespace, function, or variable definition, and a class may introduce a method.
@@ -74,6 +83,11 @@ compiler API, a language server, a static analyzer, or a custom extractor.
 Frontends differ in coverage and in how much they resolve. They do not define
 the model they feed.
 
+**identity correspondence** — Evidence that an entity or source unit observed
+before and after a change is the same semantic thing. Exact correspondence may
+be recorded as established; heuristic evidence may be recorded only without
+pretending it is a fact.
+
 **projection** — A derived view that is not a source of truth: a lexical index,
 a vector index, an embedding window, a rendered snippet, or a rendered subgraph.
 A projection may be derived from the graph or built directly from source text.
@@ -91,6 +105,14 @@ their encoding are schema requirements owned by [SPEC.md](SPEC.md).
 **snapshot** — One consistent state of the graph: the state a query is answered
 against. A consumer never observes a graph assembled from more than one
 snapshot.
+
+**source unit** — An independently addressable source input presented to
+analysis, such as a discovered file. Its identity is allocated by the graph and
+is not its path; path is a property that can change.
+
+**source-unit registry** — The graph-maintained table of known source units,
+their allocated ids, current paths, language, content identity, tombstone state,
+and correspondence evidence across rescans.
 
 **stale** — The state of a source unit whose contents changed without a
 successful reanalysis, and of the assertions that describe its earlier contents.

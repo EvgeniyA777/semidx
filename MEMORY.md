@@ -113,8 +113,11 @@ why. This is not a changelog of removed implementation; see `git log`.
   found afterwards and how they were fixed.
   `docs/reports/003_core_admission_review.md` records the first core admission
   review, and `docs/reports/004_defines_contains_split.md` records the
-  `CONTAINS` / `DEFINES` split that resolved the first admission blocker. Read
-  these reports before extending the implementation.
+  `CONTAINS` / `DEFINES` split that resolved the first admission blocker.
+  `docs/reports/005_repository_scale_ingestion_progress.md` records the
+  repository-scale ingestion plan: source discovery, source-unit identity,
+  rescan reconciliation, scale guards, ADR 003, dependency tracking, and closure.
+  Read these reports before extending the implementation.
 - What the slice is: an in-memory semantic graph over Java and Clojure fixtures,
   built on Zig 0.16 and tree-sitter through the C ABI
   ([ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md)). Source lives
@@ -155,6 +158,15 @@ why. This is not a changelog of removed implementation; see `git log`.
   reintroducing a sweep and watching it fail. `publish` still walks the whole
   graph on purpose, and that cost is measured and accepted, not solved:
   ~1,100 records for 73 units.
+- **Invalidation now has a mechanism but no production producer.**
+  `src/core/dependencies.zig` records unit-to-unit analysis dependencies, clears
+  a unit's previous dependency declarations before recording a new analysis run,
+  forgets declarations involving a removed unit, and propagates invalidation
+  transitively with a bounded round count. `Index.applyScan` seeds propagation
+  from changed and removed units and reanalyzes reached dependents. No real
+  frontend declares such dependencies yet: ADR 003 rejected repository-wide name
+  matching as a graph assertion, and legitimate cross-unit facts are waiting on
+  language-correct scoping and the relevant `CORE.md` admission work.
 - **A source unit's identity is not its path.** `model.Scope` is `repository` or
   `unit: SourceUnitId`, and `IdentityEvidence.scope` carries it, so renaming a
   file moves one property and leaves the unit, its contents, and every entity
@@ -229,10 +241,10 @@ why. This is not a changelog of removed implementation; see `git log`.
 - No public surface: no MCP, HTTP, gRPC, CLI contract, `contracts/` schemas, or
   runtime mirrors. `semidx-dev` is a developer inspection command and nothing
   asserts against its output.
-- No cross-unit assertions, so no invalidation across units: every reference
-  still resolves inside its own unit or stays a designator. Reanalysis is decided
-  by a unit's own content identity alone, which is correct only while that
-  remains true. No file watching, no concurrency.
+- No cross-unit assertions: every reference still resolves inside its own unit
+  or stays a designator. The dependency mechanism can propagate invalidation once
+  a producer declares dependencies, but no production path declares any yet. No
+  file watching, no concurrency.
 - No persistence of the measurement story: `publish` is linear in the graph,
   which is right for publishing per batch of edits and wrong for publishing per
   query. Changing it means changing what a snapshot is, which `SPEC.md` owns.
@@ -287,14 +299,14 @@ why. This is not a changelog of removed implementation; see `git log`.
   the progress logs (001, 002, 005). The load-bearing ones: both frontends
   resolve by name within one source unit, with no imports, inheritance,
   overloads, macros, or local bindings; renaming a *definition* is identity loss,
-  while renaming a *file* is not, because scope is the unit; nothing yet detects
-  that a removed path and an added path are the same unit; the unit table is
-  append-only and never compacts; interned strings of removed entities and stale
-  assertions are never reclaimed while the graph lives; freshness is tracked per
-  unit, so cross-unit invalidation is undecided and must be settled before any
-  cross-unit assertion exists; and both `Snapshot` string borrowing and the
-  default-current query rule are documented conventions rather than type-enforced
-  boundaries.
+  while renaming a *file* with established correspondence is not, because scope
+  is the unit; a file that moved and changed in the same rescan is still removal
+  plus addition until stronger identity evidence exists; the dependency
+  mechanism is synthetic until a language frontend can declare real cross-unit
+  dependencies; the unit table is append-only and never compacts; interned
+  strings of removed entities and stale assertions are never reclaimed while the
+  graph lives; and both `Snapshot` string borrowing and the default-current query
+  rule are documented conventions rather than type-enforced boundaries.
 - The constitution's §1 boundary is now stated once and consistently across
   `CONFORMANCE.md`, `GLOSSARY.md`, and `README.md`: approximate and text-derived
   mechanisms discover, rank, and render; only the graph establishes a program
@@ -302,30 +314,28 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## Near-Term Priorities
 
-- **The active plan is `docs/plans/002_repository_scale_ingestion.md`**, with
-  companion log `docs/reports/005_repository_scale_ingestion_progress.md`. Stage
-  Stages 1 through 4 are done: a tree can be scanned, rescanned, and reconciled,
-  and changing one unit provably costs the same whatever else the repository
-  holds. `src/source/` owns discovery, the one extension-to-language table, the
-  correspondence rule, and the only filesystem access in the ingestion path; it
-  has no parser dependency, so it runs in the `test-core` lane, whose meaning is
-  now "every lane that needs no parser". Stage 5 is next, and it opens with an
-  ADR rather than with code.
-  It takes the implementation to repository scale: source discovery, a
-  source-unit registry whose identity is not a path, rename-surviving identity,
-  measured affected-region reanalysis, and a dependency mechanism invalidation
-  can act on.
-- That track was chosen over `module` / `IMPORTS` admission deliberately. The two
-  blocked candidates need evidence that a cross-unit availability question is
-  answerable and that availability changes invalidate what depended on them; with
-  every reference resolving inside its own unit, none of that is observable, so
-  admitting them now would admit a paper model. Plan 002 does not admit either
-  kind and says so in its non-scope.
+- **Plan 002 is closed.** The graph can now be built and maintained over a
+  discovered repository tree, source-unit identity is separate from path, exact
+  moves preserve the unit and entities inside it, one-unit edits reanalyze one
+  unit at repository scale, and dependency propagation has a tested mechanism.
+  Stage 5 deliberately took the ADR 003 rejected branch: no name-match
+  assertions were added, so cross-unit references remain unresolved designators.
+- The next architecture plan should choose one narrow producer of legitimate
+  cross-unit evidence rather than reopening repository ingestion. A good
+  candidate is language-correct Java package scoping, because ADR 003 names that
+  as the legitimate path. That work may force `module` / `IMPORTS` admission
+  questions, but they should be resolved from evidence, not admitted as a paper
+  model.
+- Source identity needs a stronger evidence story for common refactors where a
+  file moves and changes in the same rescan. The current exact-content rule is
+  intentionally conservative; future work should prefer explicit VCS/IDE move
+  events or language-aware refactoring evidence over similarity presented as a
+  fact.
 - Settle storage and snapshot representation, which `SPEC.md` still lists as
   unspecified. The current `Snapshot` is a value that borrows from a live graph
   and copies the observable state per publish; persistence would change that
-  contract, and so would a long-running process. Plan 002 measures the cost and
-  explicitly does not act on it.
+  contract, and so would a long-running process. Plan 002 measured the cost and
+  explicitly did not act on it.
 - Deepen frontend coverage only against stated risk, and report coverage through
   a capability matrix rather than by widening the fixtures quietly.
 - `scripts/git-hooks/pre-push` still carries an inert block that refreshes

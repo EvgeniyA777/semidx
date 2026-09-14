@@ -1,9 +1,9 @@
 ---
 title: "Repository-scale ingestion progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-14"
 ---
 
@@ -14,10 +14,11 @@ Companion log for
 
 ## Current Status
 
-Stages 1 through 5 are implemented and verified. Stage 5 took its rejected
-branch: [ADR 003](../adr/003_reject_name_match_assertions.md) refused
+Stages 1 through 6 are implemented, verified, and closed. Stage 5 took its
+rejected branch: [ADR 003](../adr/003_reject_name_match_assertions.md) refused
 repository-wide name matching, so no cross-unit resolution was added, and the
-stage delivered the dependency mechanism alone. Stage 6 is closure.
+stage delivered the dependency mechanism alone. Stage 6 synchronized the
+requirements, conformance, glossary, memory, and this log.
 
 ## Stage Log
 
@@ -29,7 +30,7 @@ stage delivered the dependency mechanism alone. Stage 6 is closure.
 | Stage 3: Scan reconciliation | Completed | `src/source/registry.zig` decides correspondence as a pure function; `Index.applyScan` applies it; `Analyzer.invocations` measures what was re-read. |
 | Stage 4: Affected-region proof at scale | Completed | Per-unit buckets and indexes in the graph, `Graph.unit_work`, `fixtures/repository-scale/`, and scale tests that fail if a keyed lookup regresses into a sweep. |
 | Stage 5: Cross-unit dependency tracking | Completed (rejected branch) | [ADR 003](../adr/003_reject_name_match_assertions.md) rejected name-match assertions; `src/core/dependencies.zig` and its wiring were built and proved synthetically. |
-| Stage 6: Closure and documentation | Not started | Awaiting Stage 5. |
+| Stage 6: Closure and documentation | Completed | Synchronized `MEMORY.md`, `SPEC.md`, `CONFORMANCE.md`, `GLOSSARY.md`, this log, and the plan lifecycle; recorded review disposition and remaining risks. |
 
 ## Plan Readiness Gate
 
@@ -625,10 +626,64 @@ Stage 5 DoD, on the rejected branch:
   by necessity. Speculative infrastructure is a real cost, and the justification
   above is the whole of it.
 
-## Open Questions Carried Into Execution
+## Stage 6 Record
 
-These are decided inside the plan but are the ones most likely to need revisiting
-once code exists:
+### What Was Closed
+
+- `MEMORY.md` now records the repository-scale ingestion reality after Stages 1
+  through 5 instead of saying Stage 5 is still next.
+- `SPEC.md` now distinguishes what this plan settled for source identity and
+  invalidation from what remains open for publication and language-correct
+  cross-unit semantics.
+- `CONFORMANCE.md` now records the new evidence this plan supplies without
+  claiming an executable gate, a capability matrix, a semantic contract version,
+  or admitted `module` / `IMPORTS`.
+- `GLOSSARY.md` now owns the new vocabulary introduced by this plan.
+- This plan and progress log are marked completed and historical.
+
+### Engineering Review Disposition
+
+An architecture review raised three concerns after Stage 5. Rechecked against
+the constitution, plan, progress log, ADR 003, implementation, and tests:
+
+1. **Move plus edit losing unit identity.** Accepted as a product risk, not as a
+   confirmed constitutional defect. The current rule deliberately preserves only
+   exact correspondence: same path, or unique identical content under a new path.
+   A file that moved and changed is removal plus addition, with visible identity
+   events. The practical concern is real for common IDE refactors such as
+   renaming a Java class and file together. The next improvement should be a
+   stronger evidence rule, such as explicit VCS/IDE move events or
+   language-aware refactoring evidence, not similarity presented as a fact.
+2. **No cross-unit impact analysis yet.** Accepted as the next capability gap,
+   not as evidence that the graph is fake. ADR 003 rejects only text-derived
+   name matching as a graph assertion; it explicitly leaves language-correct
+   scoping as the right path. The dependency mechanism is ready, but it has no
+   production producer until a frontend can resolve across units by language
+   rules.
+3. **Default `.current` hides stale claims.** Rejected as a core defect. The
+   default is intentionally current-only so stale facts about old source do not
+   answer questions about the current source. A last-known-good view may be a
+   future consumer/query mode, but it should not replace the core default.
+
+One additional confirmed documentation issue was found during that review:
+`MEMORY.md` and the Stage 6 row in this log were stale after Stage 5. This
+closure fixes that issue.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core --summary all` | 80/80 tests passed. |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | 80/80 tests passed; parser-independent lanes still do not need grammar inputs. |
+| `zig build test --summary all` | 123/123 tests passed. |
+| `zig fmt --check build.zig src tests` | Clean. |
+| `zig build run -- fixtures` | Indexed 18 source units; reported 58 definitions, 211 assertions, 182 facts, 29 unresolved assertions, 0 approximate assertions, and 0 stale assertions. |
+| `./scripts/check-agent-attribution.sh --all` | Passed. |
+
+## Open Questions After Closure
+
+These are the questions most likely to need follow-up now that repository-scale
+ingestion exists:
 
 - Whether exact-content-only rename correspondence is too narrow to be useful in
   practice. The plan chooses it deliberately over a similarity heuristic; if real
@@ -637,8 +692,10 @@ once code exists:
 - Whether unit identity should survive a root change, not only a path change. The
   plan scopes identity to one root; multi-root indexing is not in scope and would
   be a `SPEC.md` source-identity question.
-- What `publish` costs once a repository-scale tree exists. Stage 4 measures it
-  and records it as risk; the plan explicitly does not act on the number.
+- How a future frontend gets enough repository context to produce
+  language-correct cross-unit facts and dependencies.
+- What snapshot representation should replace whole-state copying if the process
+  becomes long-lived or publishes per query instead of per edit batch.
 
 ## Blockers
 
@@ -668,26 +725,29 @@ mechanism alone is indeed the thinner result. The unconditional Stage 3 rule was
 overridden in `Index.applyScan` rather than in the registry, which still knows
 nothing about dependencies.
 
-Stage 6 has no anticipated blockers: it is documentation and closure.
+Stage 6 had no blockers.
 
 ## Residual Risk
 
-The plan's largest assumption is that unit identity can be made path-independent
-without touching an accepted core definition. `file` is accepted with "Location
-is a property, not an identity derived from byte or line position", which reads
-as supporting the change rather than blocking it — but if implementation shows
-otherwise, the plan's third stop condition applies and the work pauses for a
-requirements change rather than proceeding.
+The remaining risk is no longer whether repository-scale ingestion works at all;
+that has evidence. The remaining risks are the limits it deliberately exposes:
+
+- exact-content-only move correspondence is conservative and may miss common
+  refactors until stronger external or language evidence exists;
+- cross-unit facts still do not exist, so dependency propagation is proven only
+  synthetically;
+- `module` and `IMPORTS` now have a repository, source-unit identity, and an
+  invalidation mechanism to build on, but still lack common meaning and frontend
+  evidence;
+- snapshot publication still copies the observable graph, which is measured and
+  accepted for batch publication but unsuitable as a per-query strategy;
+- long-lived operation still needs compaction for source units, entities,
+  interned strings, stale assertions, and identity events.
 
 ## Next Handoff
 
-Stage 6: closure. Update `MEMORY.md`, `SPEC.md`'s source-identity and
-invalidation rows, `CONFORMANCE.md`'s current status, and `GLOSSARY.md` if this
-work introduced vocabulary; then record what `module` and `IMPORTS` now have that
-they did not, and what they still lack.
-
-The short version of that last item, for whoever writes it: they now have a
-repository to be about, units whose identity survives a move, and a mechanism
-that can invalidate what a cross-unit fact would depend on. They still lack a
-common meaning, and ADR 003 closed the shortcut that would have let the project
-pretend otherwise.
+Plan 002 is closed. The next architectural plan should not reopen repository
+discovery or identity. It should choose one narrow producer of legitimate
+cross-unit evidence, likely language-correct Java package scoping or a prior
+source-identity evidence plan for explicit move events, and then update
+`CORE.md` / `SPEC.md` only if that evidence actually requires admission work.

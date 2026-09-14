@@ -1,9 +1,9 @@
 ---
 title: "Repository-scale ingestion and the source-unit registry"
 doc_type: "plan"
-lifecycle: "active"
-status: "planned"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-14"
 ---
 

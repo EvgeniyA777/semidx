@@ -4,7 +4,7 @@ doc_type: "specification"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-13"
+updated: "2026-09-14"
 ---
 
 # semidx Conformance
@@ -116,3 +116,28 @@ queries without being withdrawn. See
 That evidence is fixture-scoped. It is not a capability matrix, not a
 per-language accuracy claim, and not a substitute for adopting these families as
 gates.
+
+The repository-scale ingestion slice
+([plan](docs/plans/002_repository_scale_ingestion.md),
+[evidence](docs/reports/005_repository_scale_ingestion_progress.md)) adds
+evidence for the same scenario families at repository scale:
+
+* **stable source-unit identity** — a source unit's identity is not its path;
+  exact moves preserve the unit, the source-container entity, and definitions
+  inside it, while unsupported move-plus-edit cases are visible identity loss;
+* **incremental maintenance** — rescanning an unchanged tree reanalyzes nothing,
+  one-unit edits reanalyze one unit, and unrelated repository growth does not
+  reanalyze existing units;
+* **affected-region cost guard** — repository-scale tests assert per-unit work
+  stays proportional to what changed, and a deliberate graph-wide sweep
+  regression was shown to fail those tests;
+* **consistent observation** — `publish` still produces one complete observable
+  snapshot, with its whole-graph copy cost measured and recorded as storage risk;
+* **honest degradation** — rejected name matches remain unresolved designators,
+  zero approximate assertions is recorded as the honest result, ambiguous moves
+  produce diagnostics, and stale units do not answer current queries.
+
+This evidence still does not admit `module` or `IMPORTS`, publish a semantic
+contract, declare Java or Clojure supported languages, or create a public
+surface. Cross-unit references remain unresolved until a language frontend
+establishes them by language-correct rules.

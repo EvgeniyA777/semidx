@@ -4,7 +4,7 @@ doc_type: "specification"
 lifecycle: "active"
 status: "draft"
 agent_action: "reference_for_context"
-updated: "2026-09-13"
+updated: "2026-09-14"
 ---
 
 # semidx Requirements
@@ -114,6 +114,16 @@ coverage for two languages. There is still no capability matrix, no executable
 conformance suite, and no published coverage. The requirements above remain
 requirements for later verification, not claims of passing results.
 
+The repository-scale ingestion slice is also complete
+([plan](docs/plans/002_repository_scale_ingestion.md),
+[evidence](docs/reports/005_repository_scale_ingestion_progress.md)). It
+settles the first source-identity layer for implementation guidance: discovered
+source units have allocated identity, path is a property, exact moves preserve
+unit and contained entity identities, ambiguous or unsupported moves are
+reported, and move-plus-edit remains identity loss until stronger evidence
+exists. It also adds a dependency propagation mechanism for future cross-unit
+facts, but no production frontend declares dependencies yet.
+
 ## Requirements Still To Specify
 
 | Area | Work needed before the dependent implementation or publication |
@@ -122,11 +132,11 @@ requirements for later verification, not claims of passing results.
 | Initial coverage | Target languages, producer versions, admission fixtures, and measured limitations |
 | Core roster | Resolve the blocked candidates and admission evidence in CORE.md |
 | Extensions and mappings | Per-language definitions, declared mapping semantics, and evidence preservation |
-| Source identity | Source roots, dependencies, generated-source origins, and identity correspondence |
+| Source identity | Discovered roots, source-unit identity, path-as-property, tombstones, and exact move correspondence are implemented for the in-memory slice. Still to specify: generated or virtual source origins, multi-root identity, and stronger evidence for move-plus-edit refactors |
 | Storage and snapshots | Representation, atomic publication, persistence, and contract-version encoding |
 | Public contracts | Schemas, resolution encoding, errors, ordering, pagination, and transport parity |
-| Invalidation | Language-specific change aspects, revision/fingerprint algorithms, and affected-region tracking |
-| Local budgets | Memory, startup, indexing costs, and benchmark repositories |
+| Invalidation | Unit-to-unit dependency propagation exists and is synthetically verified. Still to specify: language-correct producers of dependencies, name-grained or aspect-grained invalidation, and cross-unit facts |
+| Local budgets | Discovery has initial file-size, unit-count, and depth budgets with diagnostics; repository-scale tests guard affected-region work. Still to specify: benchmark repositories, memory/startup budgets, and publish/query cost budgets |
 | Optional outbound data | Destination/data consent settings and verification for projections and diagnostics |
 
 ## Proposed Delivery Direction
