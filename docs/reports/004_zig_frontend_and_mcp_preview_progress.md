@@ -359,11 +359,9 @@ Finding recorded while verifying the fix (open, not a correctness defect):
 Disposition: defer to a Zig frontend follow-up, not Stage 4. The current
 behavior is incomplete but honest: it records unresolved `CALLS` rather than a
 false fact, so the MCP preview can expose it with resolution metadata. Do not
-add an ad hoc `!` rewrite while implementing MCP. A later frontend plan may
-cover logical-negation callees only after pinning the exact tree-sitter node
-shape in a fixture, proving the transformed callee is still a normal
-`call_expression`, and adding positive and negative tests for `!foo()`,
-`!ns.foo()`, `!!foo()`, error-union type syntax, and unresolved diagnostics.
+add an ad hoc `!` rewrite while implementing MCP. The future-plan input is
+tracked in
+[follow-up 001](../followups/001_zig_logical_negation_calls.md).
 
 Verification:
 

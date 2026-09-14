@@ -92,6 +92,7 @@
 | `CONFORMANCE.md` | verification scenario families |
 | `GLOSSARY.md` | project vocabulary outside the constitution's Defined Terms |
 | `MEMORY.md` | current implementation reality, known gaps, near-term priorities |
+| `docs/followups/` | accepted deferred findings and future-plan inputs |
 | `docs/agent-policy/` | cross-cutting engineering policy |
 | `.agents/skills/` | task procedures that load only when relevant |
 

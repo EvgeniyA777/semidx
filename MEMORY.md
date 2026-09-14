@@ -91,6 +91,11 @@ why. This is not a changelog of removed implementation; see `git log`.
   and local services; tooling policy owns MCP-first retrieval, code reading, and
   editing probes, and scopes the MCP sections as development tooling configured
   outside this repository rather than the rebuilt public API.
+- `docs/followups/` is the register for accepted deferred findings that are
+  concrete enough to feed a future plan but are not plans themselves. Use it for
+  bugs, coverage gaps, semantic limitations, upstream limitations, and process
+  defects; keep broad roadmap topics in `SPEC.md` or this memory until they
+  become specific follow-up entries.
 - The ADR procedure is enabled and the sequence starts at `001`;
   [docs/adr/README.md](docs/adr/README.md) is the index.
   [ADR 001](docs/adr/001_choose_zig_implementation_language.md) accepts Zig as
@@ -373,6 +378,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   explicitly did not act on it.
 - Deepen frontend coverage only against stated risk, and report coverage through
   a capability matrix rather than by widening the fixtures quietly.
+- Current open follow-ups are indexed in
+  [docs/followups/README.md](docs/followups/README.md): Zig logical-negation
+  calls, Zig empty-container grammar behavior, and Java classpath boundaries.
 - **Plan 004 is in progress: Stages 1–3 (the Zig frontend) are implemented and
   reviewed; Stage 3.5 fixed the review blocker; Stages 4–5 (the MCP preview
   and documentation) have not started.** It onboards Zig as the next language

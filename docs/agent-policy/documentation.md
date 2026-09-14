@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-13"
+updated: "2026-09-14"
 ---
 
 # Documentation Policy
@@ -38,6 +38,7 @@ updated: "2026-09-13"
 - ADRs own durable technical decisions.
 - Plans own future staged execution.
 - Reports own historical progress, evidence, and handoff records.
+- Follow-up reports own accepted deferred findings that are not yet plans.
 - Runtime behavior belongs in source and tests; documentation must not override
   committed implementation contracts silently.
 - Give each rule or decision one canonical owner and link to it instead of
@@ -46,9 +47,9 @@ updated: "2026-09-13"
 ## Filenames
 
 - New or renamed non-system working documents under `bugs/`, `ideas/`, `plans/`,
-  `reports/`, `adr/`, `docs/adr/`, `docs/design/`, `docs/ideas/`, and
-  `docs/plans/` use a chronological prefix scoped to that directory:
-  `NNN_slug.md`. Documents under `notes/` use a date prefix:
+  `reports/`, `adr/`, `docs/adr/`, `docs/design/`, `docs/followups/`,
+  `docs/ideas/`, and `docs/plans/` use a chronological prefix scoped to that
+  directory: `NNN_slug.md`. Documents under `notes/` use a date prefix:
   `YYYY-MM-DD_slug.md`.
 - Number sequences restart per directory. Choose the next number by scanning the
   target directory for the highest existing numeric prefix, then incrementing it.
@@ -65,8 +66,8 @@ updated: "2026-09-13"
 
 - Non-system working documents under `bugs/`, `ideas/`, `notes/`, `plans/`,
   `reports/`, `adr/`, `docs/adr/`, `docs/agent-policy/`, `docs/design/`,
-  `docs/ideas/`, and `docs/plans/` carry YAML frontmatter when they are newly
-  created, renamed, or materially revised.
+  `docs/followups/`, `docs/ideas/`, and `docs/plans/` carry YAML frontmatter
+  when they are newly created, renamed, or materially revised.
 - The root canonical documents carry the same frontmatter: `SPEC.md`, `CORE.md`,
   `CONFORMANCE.md`, `ARCHITECTURE_RATIONALE.md`, and `GLOSSARY.md`.
 - `ARCHITECTURE_CONSTITUTION.md` is exempt and stays exempt. It is frozen and
@@ -226,3 +227,20 @@ Ready criteria:
   files or commit hash, and verification results.
 - Do not leave progress logs as stale checklists. Label backfilled entries as
   historical notes instead of pretending they were updated live.
+
+## Follow-up Reports
+
+- Store accepted deferred findings under `docs/followups/`; keep
+  `docs/followups/README.md` as the index.
+- Use follow-up reports for concrete future-plan inputs discovered during
+  implementation or review: defects, coverage gaps, semantic limitations,
+  upstream limitations, and process defects. Do not use them as a general
+  wishlist.
+- A follow-up report is not a staged implementation plan and does not authorize
+  work by itself. Promote it into a plan, ADR, or direct implementation task
+  before changing behavior.
+- Each follow-up report records classification, source, current behavior,
+  deferral reason, acceptance direction, required tests, and links back to the
+  plan or report where it was found.
+- When a follow-up is resolved, update its status to `fixed`, `wont_fix`, or
+  `completed` and link the resolving plan, ADR, report, or commit.
