@@ -30,7 +30,7 @@
 - `AGENTS.md` is the Codex entry point and `CLAUDE.md` is the Claude Code entry
   point. Both must point here and stay thin.
 - Repository documentation, rule files, and agent instructions are written in
-  English. Agents may answer the user in Russian when the user writes in Russian;
+  English. Agents must answer the user in Russian when the user writes in Russian;
   committed documentation stays English.
 - Give every rule exactly one canonical owner and link to it instead of copying
   normative text across documents, skills, and reports.
