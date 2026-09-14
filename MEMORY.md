@@ -259,18 +259,24 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## Near-Term Priorities
 
-- Decide the next modeling frontier: either `module` / `IMPORTS` admission for
-  cross-unit availability semantics, or repository-scale ingestion and
-  cross-unit invalidation prerequisites. Keep those tracks separate until a
-  concrete cross-unit assertion exists.
+- **The active plan is `docs/plans/002_repository_scale_ingestion.md`**, with
+  companion log `docs/reports/005_repository_scale_ingestion_progress.md`. It has
+  passed the Plan Readiness Gate and is ready to execute, starting at Stage 1.
+  It takes the implementation to repository scale: source discovery, a
+  source-unit registry whose identity is not a path, rename-surviving identity,
+  measured affected-region reanalysis, and a dependency mechanism invalidation
+  can act on.
+- That track was chosen over `module` / `IMPORTS` admission deliberately. The two
+  blocked candidates need evidence that a cross-unit availability question is
+  answerable and that availability changes invalidate what depended on them; with
+  every reference resolving inside its own unit, none of that is observable, so
+  admitting them now would admit a paper model. Plan 002 does not admit either
+  kind and says so in its non-scope.
 - Settle storage and snapshot representation, which `SPEC.md` still lists as
-  unspecified. The current `Snapshot` is a value that borrows from a live graph;
-  persistence would change that contract, and so would a long-running process.
-- Take the implementation to repository scale: source discovery, a source-unit
-  registry that survives renames, cross-unit assertions, and invalidation of the
-  units an edit actually affects. The slice reconciles one unit at a time and has
-  no cross-unit assertions to invalidate; the per-unit freshness settled in
-  report 002 is the precondition, and cross-unit invalidation is the open part.
+  unspecified. The current `Snapshot` is a value that borrows from a live graph
+  and copies the observable state per publish; persistence would change that
+  contract, and so would a long-running process. Plan 002 measures the cost and
+  explicitly does not act on it.
 - Deepen frontend coverage only against stated risk, and report coverage through
   a capability matrix rather than by widening the fixtures quietly.
 - `scripts/git-hooks/pre-push` still carries an inert block that refreshes
