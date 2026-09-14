@@ -36,7 +36,8 @@ semantic truth.
 ## Current Position
 
 As of 2026-09-14, the Zig dogfood frontend and the first local MCP preview are
-implemented, and the MCP preview awaits review.
+implemented and reviewed. The project is preparing the first local MCP preview
+release candidate, `v0.1.0-preview.1`.
 
 Implemented:
 
@@ -55,13 +56,13 @@ Implemented:
   source units are discovered, the pinned local Zig grammar builds, top-level
   Zig functions and containers become definitions, same-unit bare Zig calls can
   become exact `CALLS` facts, and graph-owned unresolved designators are fixed.
-- Plan 004 Stages 4-5 are implemented: `semidx-mcp` serves graph-backed tools
+- Plan 004 Stages 4-5 are implemented and reviewed: `semidx-mcp` serves graph-backed tools
   over stdio to `2026-07-28` and `2025-06-18` clients with source text off by
   default, documented in [the local preview reference](../mcp/local_preview.md).
 
 In progress:
 
-- Review of Plan 004 Stages 4-5: the MCP preview as a consumer.
+- Plan 005: MCP preview release readiness for `v0.1.0-preview.1`.
 
 Not yet present:
 
@@ -82,8 +83,8 @@ Not yet present:
 | M1: First semantic graph slice | Done | Prove the model can hold exact entities, relationships, identity, freshness, diagnostics, and snapshots. | Core and full tests pass for Java/Clojure fixtures. |
 | M2: Repository-scale local graph | Done | Move from hand-picked files to repository scans and incremental maintenance. | Scan/edit/remove paths preserve consistent graph state and bounded affected-region work. |
 | M3: First cross-unit semantic value | Done | Establish one language-correct cross-unit fact without admitting modules/imports prematurely. | Java same-package type references resolve under the narrow rule. |
-| M4: Dogfood language and local MCP preview | Active | Make semidx useful to its own development loop and to local agents. | Zig dogfood works; `semidx-mcp` answers graph-backed tools over stdio with source text off by default. |
-| M5: Preview release | Next | Make one installable semidx usable against many local repository roots. | `v0.1.0-preview.1` is cut with release gates and local setup docs, without a stable semantic contract promise. |
+| M4: Dogfood language and local MCP preview | Done | Make semidx useful to its own development loop and to local agents. | Zig dogfood works; `semidx-mcp` answers graph-backed tools over stdio with source text off by default. |
+| M5: Preview release | Active | Make one installable semidx usable against many local repository roots. | `v0.1.0-preview.1` is cut with release gates and local setup docs, without a stable semantic contract promise. |
 | M6: Stable local CLI/MCP product | Later | Stabilize the local user-facing product surface. | `v0.1.0` is cut with documented CLI/MCP behavior, install path, version reporting, and support boundaries. |
 | M7: Published semantic contract | Later | Version the semantic model exposed to consumers. | SPEC/CORE publish contract versioning, schema shape, capability matrix, and migration rules. |
 | M8: Deeper semantic coverage | Later | Expand exact graph value without collapsing unsupported or unresolved states. | New language or relationship coverage lands through focused plans, ADRs where needed, and conformance evidence. |
@@ -93,13 +94,13 @@ Not yet present:
 
 The next useful sequence is:
 
-1. Finish Plan 004 Stage 4 and Stage 5. Done; awaiting review.
-2. Review the MCP preview as a consumer: protocol correctness, graph authority,
-   source-text opt-in, output bounds, refresh consistency, and local operation.
-3. Turn follow-up 004 into a small release plan.
-4. Cut `v0.1.0-preview.1` only after the release gates pass from a clean
+1. Execute [Plan 005](../plans/005_mcp_preview_release_readiness.md), the MCP
+   preview release-readiness plan.
+2. Make product versioning, local setup, capability limits, hosted-client
+   consent wording, and real dogfood proofs visible.
+3. Cut `v0.1.0-preview.1` only after the release gates pass from a clean
    checkout.
-5. Use the MCP preview while developing semidx itself and collect evidence for
+4. Use the MCP preview while developing semidx itself and collect evidence for
    the next semantic expansion.
 
 After the preview is usable, prioritize work that increases exact graph value

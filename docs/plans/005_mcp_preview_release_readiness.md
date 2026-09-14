@@ -1,0 +1,359 @@
+---
+title: "MCP preview release readiness"
+doc_type: "plan"
+lifecycle: "active"
+status: "planned"
+agent_action: "execute_when_requested"
+updated: "2026-09-14"
+---
+
+# 005: MCP Preview Release Readiness
+
+## Goal
+
+Prepare `semidx` for the first product preview release:
+`v0.1.0-preview.1`.
+
+The release is a local MCP preview usable by the maintainer and local coding
+agents. It does not publish a stable semantic contract. Its purpose is adoption
+readiness: a fresh agent can connect to one installed binary, point it at a
+local repository with `--root`, ask graph-backed questions, and understand the
+coverage and privacy boundaries without reading the implementation.
+
+The companion progress log is
+[docs/reports/005_mcp_preview_release_readiness_progress.md](../reports/005_mcp_preview_release_readiness_progress.md).
+
+## Scope
+
+- Add product-version reporting for the local CLI/MCP preview.
+- Define the `v0.1.0-preview.1` release gate and release-note shape.
+- Make setup from a clean checkout clear enough for local agent use.
+- Keep one built `semidx-mcp` binary usable against many local repository roots
+  through `--root`.
+- Add or update a visible capability matrix for Java, Clojure, Zig, source
+  ingestion, and MCP output.
+- Document the source-derived data consent boundary for hosted MCP clients.
+- Add reproducible dogfood proof commands over this repository:
+  - health;
+  - repository map;
+  - definition lookup;
+  - references/context;
+  - refresh and snapshot revision change;
+  - unresolved or unsupported diagnostics.
+- Record preview limitations and residual risks without turning them into
+  stable promises.
+
+## Non-Scope
+
+Do not publish a semantic contract version, create `contracts/` schemas, add
+HTTP, persistence, daemon file watching, subscriptions, prompts, resources,
+remote services, package managers, installers, CI release automation, or binary
+distribution for multiple platforms.
+
+Do not widen language semantics merely to make the preview look better. Zig
+logical-negation calls, Zig container/member coverage, Java classpath
+boundaries, imports, namespace resolution, method dispatch, fields, and
+cross-unit Zig calls remain follow-up work unless a planned proof cannot run
+without a narrow fix.
+
+Do not make MCP define graph semantics. MCP remains a consumer over published
+snapshots.
+
+Do not return source text by default. Do not imply that semidx can control what
+a hosted MCP client does after receiving graph values.
+
+Do not create or push a Git tag unless the user explicitly asks to cut the
+release after the release gate passes.
+
+## Sources Of Truth
+
+- [ARCHITECTURE_CONSTITUTION.md](../../ARCHITECTURE_CONSTITUTION.md), especially
+  §1, §3, §5, §6, §7, and §8.
+- [SPEC.md](../../SPEC.md), especially public contract lifecycle, capability
+  matrix ownership, and optional outbound data.
+- [CORE.md](../../CORE.md), for the current unversioned shared-core roster.
+- [CONFORMANCE.md](../../CONFORMANCE.md), for scenario families this preview
+  may cite as evidence without claiming an executable conformance suite.
+- [MEMORY.md](../../MEMORY.md), for current implementation reality.
+- [Product roadmap](../design/001_project_roadmap.md), especially M5.
+- [Product adoption strategy](../design/002_product_adoption_strategy.md),
+  especially the agent habit loop, adoption requirements, first public proofs,
+  and release story.
+- [ADR 005](../adr/005_add_zig_frontend_and_local_mcp_preview.md), which admits
+  the Zig frontend and local MCP preview.
+- [Local MCP preview](../mcp/local_preview.md), which documents the current
+  experimental server.
+- [Follow-up 004](../followups/004_release_discipline_for_mcp_preview.md), the
+  release-discipline input.
+- [Follow-up 005](../followups/005_mcp_source_derived_consent_boundary.md), the
+  hosted-client consent-boundary input.
+
+## Current Implementation Context
+
+- Plan 004 is completed and reviewed. `semidx-mcp` exists under `src/mcp/` and
+  is built by `zig build`.
+- `zig build mcp -- --root <dir>` starts the local stdio preview.
+- `zig build test-mcp` runs MCP tests and a stdio smoke test.
+- The server supports `semidx_health`, `semidx_repo_map`,
+  `semidx_find_definitions`, `semidx_references`, `semidx_context`, and
+  `semidx_refresh`.
+- Results carry graph values, resolution, freshness, producer, bounded-list
+  truncation metadata, and `semantic_contract_version: null`.
+- Source evidence text is excluded unless `--allow-evidence-text` is used.
+- There is no persistence, no public schema set, no stable semantic contract,
+  and no release procedure.
+
+Semantic Code Indexing is required by repository policy when available. If
+callable semidx MCP tools are unavailable in the implementation environment,
+record that fallback in the progress log and use targeted direct inspection.
+
+## Plan-Level Decisions
+
+**The first preview is source-built, not a packaged binary release.**
+`v0.1.0-preview.1` is a product tag over the repository and documentation. The
+user builds the binary locally with the pinned grammar sources and local
+tree-sitter runtime already required by the project.
+
+**Product version and semantic contract version stay separate.** The binary and
+MCP server must report `0.1.0-preview.1` as the product version. MCP structured
+results must continue to report `semantic_contract_version: null`.
+
+**The public promise is local, bounded, honest context.** The preview should
+optimize for installability, trust, visible limits, and reproducible dogfood
+proofs, not for more language breadth.
+
+**Capability claims must be matrix-backed.** README and release notes may point
+to supported preview behavior only after a capability matrix states exact
+coverage, unsupported constructs, unresolved cases, and known limitations.
+
+**Consent language distinguishes source text from source-derived graph values.**
+Default MCP output excludes source text, but graph values such as paths, names,
+designators, ranges, diagnostics, and ids are still derived from local source.
+Hosted-client examples must say that those values may be forwarded by the
+client after the user configures that client.
+
+## Stages
+
+### Stage 1: Product Version And Preview Identity
+
+Purpose: make the binary identify the preview release without implying a stable
+semantic contract.
+
+Likely files:
+
+- `build.zig`
+- `src/mcp/`
+- `src/main.zig` only if the developer inspection binary already shares version
+  plumbing cleanly
+- focused MCP or CLI tests
+- `docs/reports/005_mcp_preview_release_readiness_progress.md`
+
+Required behavior:
+
+- Define the product version as `0.1.0-preview.1` in one implementation-owned
+  place.
+- Expose the product version through `semidx-mcp --version`.
+- Include the product version in MCP server identity and `semidx_health`.
+- Keep every MCP tool result's `semantic_contract_version` equal to `null`.
+- Keep `--help` and existing usage errors unchanged except for any version text
+  intentionally added.
+
+Done when:
+
+- A test or smoke check proves `semidx-mcp --version` reports
+  `0.1.0-preview.1`.
+- MCP health reports the same product version.
+- Existing MCP compatibility and no-source-text checks still pass.
+- No document describes the semantic contract as published or stable.
+
+### Stage 2: Install And Local Agent Configuration
+
+Purpose: make a fresh local setup path short, explicit, and agent-friendly.
+
+Likely files:
+
+- `README.md`
+- `docs/mcp/local_preview.md`
+- optional sample config under `docs/mcp/` if the example becomes too large for
+  prose
+
+Required behavior:
+
+- Document the clean-checkout path:
+  - install Zig 0.16 or newer;
+  - install or point at a local tree-sitter runtime;
+  - run `./scripts/setup-tree-sitter-grammars.sh`;
+  - run `zig build`;
+  - start `zig-out/bin/semidx-mcp --root /path/to/repository`.
+- State that the indexed root is the user's local working copy, not the remote
+  repository that supplied semidx.
+- Provide a minimal MCP client configuration example using absolute paths.
+- Explain that the same binary can be reused for different repositories by
+  changing `--root`.
+- Keep the README concise; put detailed tool behavior in `docs/mcp/local_preview.md`.
+
+Done when:
+
+- A fresh agent can follow the README to a first MCP call without reading
+  source files.
+- The local preview reference still owns full tool and field details.
+- Documentation does not promise binary packages, package-manager installs, CI
+  release artifacts, persistence, or stable schemas.
+
+### Stage 3: Capability Matrix And Consent Boundary
+
+Purpose: make trust boundaries visible before the preview is promoted.
+
+Likely files:
+
+- `SPEC.md`
+- new SPEC-owned child capability matrix, for example
+  `docs/spec/capability_matrix.md`
+- `docs/mcp/local_preview.md`
+- `docs/followups/004_release_discipline_for_mcp_preview.md`
+- `docs/followups/005_mcp_source_derived_consent_boundary.md`
+- `MEMORY.md`
+
+Required behavior:
+
+- Add a capability matrix covering:
+  - source ingestion;
+  - Java;
+  - Clojure;
+  - Zig;
+  - MCP tools and output boundaries.
+- For each language or producer, distinguish:
+  - facts currently produced;
+  - unresolved assertions currently surfaced;
+  - unsupported or unavailable coverage;
+  - identity limitations;
+  - major known false-negative or overbroad cases.
+- Link the matrix from `SPEC.md`, README or MCP docs where appropriate.
+- Add hosted-client consent wording near MCP configuration examples:
+  - semidx itself is local and does not contact the network;
+  - a hosted MCP client may forward returned graph values to its service;
+  - default output excludes source text;
+  - `--allow-evidence-text` adds only recorded evidence text, bounded per claim;
+  - semidx cannot enforce a hosted client's onward transmission policy.
+- Keep follow-up 005 open unless this stage fully resolves its required
+  decisions and tests.
+
+Done when:
+
+- Capability claims in README and MCP docs are backed by the matrix.
+- The matrix avoids stable-contract wording.
+- Consent wording names both source text and source-derived graph values.
+- Default no-source-text tests still pass.
+
+### Stage 4: Dogfood Proofs And Release Gate
+
+Purpose: prove the preview's adoption loop on the real semidx repository.
+
+Likely files:
+
+- `docs/reports/005_mcp_preview_release_readiness_progress.md`
+- optional script under `scripts/` if repeated manual JSON-RPC commands become
+  fragile
+- MCP tests only if a proof exposes an untested runtime invariant
+
+Required behavior:
+
+- Record reproducible commands and observed results for:
+  - `semidx_health`;
+  - `semidx_repo_map` over this repository;
+  - `semidx_find_definitions` for at least one Zig definition;
+  - `semidx_references` or `semidx_context` around that definition;
+  - an edit plus `semidx_refresh` where the snapshot revision changes;
+  - at least one unresolved or unsupported diagnostic.
+- Capture timing or size notes for the key MCP calls when practical, without
+  turning them into release promises.
+- Verify stdout contains only protocol messages and no trailing data after EOF.
+- Verify default MCP output does not include source evidence text.
+- Verify `--allow-evidence-text` remains bounded and accurately described.
+
+Done when:
+
+- The progress log contains enough evidence for a reviewer to reproduce the
+  preview's agent habit loop.
+- The proof uses this repository, not only tiny fixtures.
+- Any found semantic gap is either fixed by a focused change covered by this
+  plan or filed as a follow-up.
+
+### Stage 5: Preview Release Candidate Handoff
+
+Purpose: leave a clean release candidate ready for an explicit tag request.
+
+Likely files:
+
+- `docs/releases/v0.1.0-preview.1.md`
+- `docs/reports/005_mcp_preview_release_readiness_progress.md`
+- `docs/design/001_project_roadmap.md`
+- `docs/followups/README.md`
+- `MEMORY.md`
+
+Required behavior:
+
+- Add preview release notes that clearly say:
+  - `v0.1.0-preview.1` is a local MCP preview;
+  - it is usable by local agents and the maintainer;
+  - it does not promise a stable semantic contract;
+  - the current install path is source-built;
+  - source text is off by default;
+  - known limitations are expected and visible.
+- Run the full release gate from a clean worktree:
+  - `zig build test-core -Dgrammars-dir=/nonexistent --summary all`;
+  - `zig build test --summary all`;
+  - `zig build test-mcp --summary all`;
+  - `zig fmt --check build.zig src tests`;
+  - `zig build run -- src`;
+  - full-output MCP dogfood smoke over `--root .`;
+  - `./scripts/check-agent-attribution.sh --all`;
+  - `./scripts/check-memory-freshness.sh`;
+  - `git diff --check`.
+- Update the roadmap so M5 reflects the actual final state.
+- Mark follow-up 004 completed only if release discipline is now documented and
+  evidenced. Mark follow-up 005 completed only if the consent boundary is
+  documented and tested to the acceptance direction above.
+- Do not create or push the Git tag as part of this plan unless the user gives a
+  separate explicit release-cut instruction.
+
+Done when:
+
+- A reviewer can decide whether to cut `v0.1.0-preview.1` from the final commit.
+- The progress log records exact commands, results, skipped checks, and residual
+  risks.
+- The worktree is clean and the final commit is coherent.
+
+## Verification Strategy
+
+- Use narrow tests for version reporting, health output, and source-text
+  opt-in behavior.
+- Use existing MCP smoke tests for stdio protocol discipline.
+- Use dogfood commands over this repository for adoption proof.
+- Use parser-free core tests to preserve the local dependency boundary.
+- Use the full test lane to preserve frontend behavior.
+- Use documentation gates for attribution, memory freshness, and whitespace.
+
+## Stop Conditions
+
+Stop and update the progress log before continuing if:
+
+- product version reporting requires a broader public CLI contract than this
+  plan describes;
+- a capability matrix would need to declare a stable semantic contract version;
+- a proof can pass only by hiding unresolved, unsupported, stale, approximate,
+  or unavailable states;
+- hosted-client consent wording would imply semidx controls a third-party
+  client's onward transmission;
+- release packaging requires platform-specific artifacts, installers, signing,
+  package-manager publication, or CI automation.
+
+## Execution Recommendations
+
+- Use Claude Opus 5 or an equivalently strong code-review-capable model for the
+  whole plan.
+- Keep the stages in order. Stages 1-3 make the preview legible; Stage 4 proves
+  it; Stage 5 packages the release-candidate handoff.
+- Review after Stage 3 if the capability matrix or consent language changes
+  public claims substantially.
+- Review again before any release tag is created.

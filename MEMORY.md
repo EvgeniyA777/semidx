@@ -394,6 +394,13 @@ why. This is not a changelog of removed implementation; see `git log`.
   to check whether new plans move the project toward exact graph knowledge,
   better incremental local operation, useful local graph projections, or clearer
   evidence, contracts, and release discipline.
+- **Plan 005 is drafted and ready to execute when requested.** It promotes the
+  product-adoption path into MCP preview release readiness for
+  `v0.1.0-preview.1`: product version reporting, local setup, capability matrix,
+  hosted-client consent wording for source-derived graph values, dogfood proofs,
+  release notes, and a release-candidate handoff. It keeps
+  `semantic_contract_version: null` and does not authorize persistence, HTTP,
+  stable schemas, package-manager distribution, or wider language semantics.
 - Current open follow-ups are indexed in
   [docs/followups/README.md](docs/followups/README.md): Zig logical-negation
   calls, Zig empty-container grammar behavior, Java classpath boundaries, and
