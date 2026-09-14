@@ -49,6 +49,13 @@ dependency generations, change epochs, or another mechanism instead. The
 requirement is the semantic ability to distinguish changes that matter
 differently, not this word.
 
+**freshness** — Whether an assertion was established about the current contents
+of the source unit it was observed in. It is a separate axis from *resolution
+level*, and collapsing the two loses information in both directions: a fully
+resolved fact about source that has since changed is still a fact about what its
+producer read and still not current, while an unresolved assertion about the
+contents on disk right now is current and still unresolved.
+
 **frontend** — A language-specific component that produces assertions about
 source code for the model: a parser, a Tree-sitter grammar, a SCIP indexer, a
 compiler API, a language server, a static analyzer, or a custom extractor.
@@ -72,6 +79,13 @@ their encoding are schema requirements owned by [SPEC.md](SPEC.md).
 **snapshot** — One consistent state of the graph: the state a query is answered
 against. A consumer never observes a graph assembled from more than one
 snapshot.
+
+**stale** — The state of a source unit whose contents changed without a
+successful reanalysis, and of the assertions that describe its earlier contents.
+A stale unit is not an empty one: withdrawing its assertions would claim an
+absence nothing observed, and presenting them as current would claim they
+describe source that is no longer there. They stay recorded, stay attributed,
+and stop answering queries that did not ask for them.
 
 **symbol** — A named entity, one a frontend can address by a stable name. A
 symbol is a subset of entities: anonymous constructs are entities but not

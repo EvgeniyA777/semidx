@@ -107,6 +107,12 @@ for the five properties this section asked of it:
   no dependencies, reads only local paths, and the slice indexes and queries
   with nothing else running.
 
+It also separates freshness from resolution, which the Honest degradation family
+requires: a source unit whose contents changed without a successful reanalysis
+reports itself stale, and its earlier assertions stop answering current-state
+queries without being withdrawn. See
+[report 002](docs/reports/002_slice_freshness_followup.md).
+
 That evidence is fixture-scoped. It is not a capability matrix, not a
 per-language accuracy claim, and not a substitute for adopting these families as
 gates.

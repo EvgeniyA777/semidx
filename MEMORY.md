@@ -105,7 +105,9 @@ why. This is not a changelog of removed implementation; see `git log`.
 - **The first Zig vertical slice is implemented.** `docs/plans/001_zig_vertical_slice.md`
   is executed and closed; `docs/reports/001_zig_vertical_slice_progress.md`
   carries the stage outcomes, exact verification commands, review findings,
-  skipped checks, and residual risk. Read the progress log before extending the
+  skipped checks, and residual risk.
+  `docs/reports/002_slice_freshness_followup.md` records three defects a review
+  found afterwards and how they were fixed. Read both before extending the
   implementation.
 - What the slice is: an in-memory semantic graph over Java and Clojure fixtures,
   built on Zig 0.16 and tree-sitter through the C ABI
@@ -140,9 +142,27 @@ why. This is not a changelog of removed implementation; see `git log`.
   plus an unresolved identity-correspondence assertion, never a silent delete and
   create.
 - Degradation stays distinguishable: `analysis_unavailable` (parser could not
-  run, previous state left in place), `analysis_failed` (source does not parse),
-  `unsupported_construct` (outside the frontend's declared coverage, such as a
-  Java field), and `confirmed_absence` (parsed, covered, nothing there).
+  run), `analysis_failed` (source does not parse), `unsupported_construct`
+  (outside the frontend's declared coverage, such as a Java field), and
+  `confirmed_absence` (parsed, covered, nothing there). Diagnostics always
+  describe the latest analysis attempt for a unit; the previous attempt's are
+  withdrawn whether the new one succeeds or not.
+- **Freshness is a separate axis from resolution**, and this is load-bearing.
+  Each source unit records `content_revision` and `analysis_revision`, from
+  which `UnitAnalysis` derives `pending`, `current`, or `stale`. A claim
+  observed in a unit is current when it was recorded at or after that unit's
+  `content_revision` — one rule for entities (`observed_revision`) and
+  assertions (`revision`), with no special-casing by producer. `Index.applyEdit`
+  performs the edit in its own revision before analysis runs, so an edit whose
+  analysis fails leaves the unit `stale`: its earlier assertions are neither
+  withdrawn (that would assert an absence nothing observed, and would destroy
+  the identities a later successful analysis preserves) nor presented as current.
+  Snapshot queries default to `.current`; stale claims stay recorded, stay
+  attributed, and are reachable by asking for them.
+- `Graph.addEntity` allocates an entity and asserts nothing. The producer that
+  observed it records the existence claim with its own provenance and
+  resolution, because allocating an entity and claiming it exists are different
+  acts.
 - Build prerequisites are local files, not services: pinned grammar sources from
   `./scripts/setup-tree-sitter-grammars.sh` and a tree-sitter runtime providing
   `tree_sitter/api.h` and `libtree-sitter.a`. `build.zig.zon` declares no
@@ -212,13 +232,16 @@ why. This is not a changelog of removed implementation; see `git log`.
 - No runtime conformance is claimed as a gate. `CONFORMANCE.md` now records which
   of its five first-slice properties the implementation supplies evidence for;
   none of its scenario families is adopted as an executable check.
-- Known implementation limitations, in full, are in the progress log's Residual
-  Risk section. The load-bearing ones: both frontends resolve by name within one
-  source unit, with no imports, inheritance, overloads, macros, or local
-  bindings; a rename and a file rename are both identity loss because the scope
-  is the unit path; interned strings of removed entities are not reclaimed until
-  the graph is released; and a `Snapshot` borrows strings from its graph, so it
-  must be released first — documented, not enforced by the type.
+- Known implementation limitations, in full, are in the Residual Risk sections of
+  both progress logs. The load-bearing ones: both frontends resolve by name
+  within one source unit, with no imports, inheritance, overloads, macros, or
+  local bindings; a rename and a file rename are both identity loss because the
+  scope is the unit path; interned strings of removed entities and stale
+  assertions are never reclaimed while the graph lives; freshness is tracked per
+  unit, so cross-unit invalidation is undecided and must be settled before any
+  cross-unit assertion exists; and both `Snapshot` string borrowing and the
+  default-current query rule are documented conventions rather than type-enforced
+  boundaries.
 - The constitution's §1 boundary is now stated once and consistently across
   `CONFORMANCE.md`, `GLOSSARY.md`, and `README.md`: approximate and text-derived
   mechanisms discover, rank, and render; only the graph establishes a program
@@ -235,7 +258,8 @@ why. This is not a changelog of removed implementation; see `git log`.
 - Take the implementation to repository scale: source discovery, a source-unit
   registry that survives renames, cross-unit assertions, and invalidation of the
   units an edit actually affects. The slice reconciles one unit at a time and has
-  no cross-unit assertions to invalidate.
+  no cross-unit assertions to invalidate; the per-unit freshness settled in
+  report 002 is the precondition, and cross-unit invalidation is the open part.
 - Deepen frontend coverage only against stated risk, and report coverage through
   a capability matrix rather than by widening the fixtures quietly.
 - `scripts/git-hooks/pre-push` still carries an inert block that refreshes
