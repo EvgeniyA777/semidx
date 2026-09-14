@@ -54,13 +54,23 @@ You must not infer:
 
 ## Build
 
-From the repository root, with Zig 0.16 and a local tree-sitter runtime
-providing `tree_sitter/api.h` and `libtree-sitter.a`:
+The preview is built from source. Prerequisites:
+
+- Zig 0.16 or newer.
+- `git` and network access once, for the grammar setup script.
+- A tree-sitter runtime providing `tree_sitter/api.h` and `libtree-sitter.a`.
+  `zig build` looks under `/opt/homebrew`, `/usr/local`, and `/usr`; on macOS
+  `brew install tree-sitter` provides both files (verified with 0.26.3). For any
+  other install prefix pass `-Dtree-sitter-prefix=<prefix>` or set
+  `SEMIDX_TREE_SITTER_PREFIX`.
+
+From the root of a semidx checkout:
 
 ```sh
-./scripts/setup-tree-sitter-grammars.sh   # once; fetches pinned grammar sources
+./scripts/setup-tree-sitter-grammars.sh   # once; clones pinned grammar sources into .tree-sitter-grammars/
 zig build                                  # installs zig-out/bin/semidx-mcp
-zig build test-mcp                         # unit tests and the stdio smoke test
+zig-out/bin/semidx-mcp --version           # semidx-mcp 0.1.0-preview.1
+zig build test-mcp                         # optional: unit tests and the stdio smoke test
 ```
 
 Building and indexing never use the network. `zig build` names any missing
@@ -111,6 +121,24 @@ start it. For clients that read an `mcpServers` map, such as a project
 Use absolute paths: a client may start the server from any working directory.
 Other clients have their own configuration format; the command and arguments
 are the same.
+
+`--root` names a local working copy on this machine: the repository your agent
+works on, not the semidx checkout that built the binary. One binary serves any
+number of repositories. Register it once per repository with a different
+`--root`, or run separate processes; each process indexes one root and shares
+nothing with the others.
+
+### First Calls
+
+A useful order for an agent starting on a repository:
+
+1. `semidx_health`: is every unit `current`, and which languages have parsers?
+2. `semidx_repo_map` with a `path_prefix`: which files and top-level
+   definitions exist?
+3. `semidx_find_definitions` with a `name`: where is a definition introduced?
+4. `semidx_references` or `semidx_context` on it: what calls it, what does it
+   call, and which of those claims are facts?
+5. `semidx_refresh` after editing files, before trusting later answers.
 
 ### Protocol Versions
 

@@ -45,17 +45,37 @@ inspection tool, not a public interface.
 
 ## Using it from an MCP client
 
-`semidx-mcp` indexes a local directory and answers graph queries over MCP stdio.
-It is an experimental preview with no stable interface, and it returns paths and
-ranges rather than source text:
+`semidx-mcp` (preview `0.1.0-preview.1`) indexes a local directory and answers
+graph queries over MCP stdio. It is an experimental preview with no stable
+interface and no published semantic contract, and it returns paths and ranges
+rather than source text. It is built from source; there are no binary packages.
 
-```sh
-zig build
-zig-out/bin/semidx-mcp --root /path/to/repository
-```
+1. Install [Zig](https://ziglang.org) 0.16 or newer, `git`, and a tree-sitter
+   runtime that provides `tree_sitter/api.h` and `libtree-sitter.a` (on macOS,
+   `brew install tree-sitter`; elsewhere, install it under a prefix and pass
+   `-Dtree-sitter-prefix=<prefix>` to `zig build`).
+2. From this repository, fetch the pinned grammar sources once (needs network):
+   `./scripts/setup-tree-sitter-grammars.sh`
+3. Build: `zig build`. Check it: `zig-out/bin/semidx-mcp --version`.
+4. Register the binary with your MCP client, using absolute paths:
 
-See [docs/mcp/local_preview.md](docs/mcp/local_preview.md) for client
-configuration, tools, result fields, and limits.
+   ```json
+   {
+     "mcpServers": {
+       "semidx": {
+         "command": "/path/to/semidx/zig-out/bin/semidx-mcp",
+         "args": ["--root", "/path/to/your/repository"]
+       }
+     }
+   }
+   ```
+
+`--root` is a local working copy on your machine — the repository you want your
+agent to work on, not this one. One built binary serves any number of
+repositories: register it once per repository with a different `--root`.
+
+See [docs/mcp/local_preview.md](docs/mcp/local_preview.md) for the first calls
+to make, tools, result fields, source-text rules, and limits.
 
 ## License
 
