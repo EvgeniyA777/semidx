@@ -116,10 +116,32 @@ pub const Graph = struct {
     next_assertion: u32,
     repository: EntityId,
     entities: std.ArrayList(model.Entity),
+    /// Assertions not observed in any source unit. Today that is the existence
+    /// of the repository root and nothing else.
     assertions: std.ArrayList(model.Assertion),
+    /// Assertions observed in a source unit, bucketed by it.
+    ///
+    /// Bucketing is not an optimization detail: withdrawing one unit's analysis
+    /// is the single most frequent thing ingestion does, and finding those
+    /// assertions by sweeping every assertion in the repository is how "reanalyze
+    /// the affected region" quietly becomes "touch the whole graph on every
+    /// keystroke".
+    unit_assertions: std.ArrayList(std.ArrayList(model.Assertion)),
     diagnostics: std.ArrayList(model.Diagnostic),
+    unit_diagnostics: std.ArrayList(std.ArrayList(model.Diagnostic)),
+    /// Definitions introduced in each unit, for the same reason.
+    unit_definitions: std.ArrayList(std.ArrayList(EntityId)),
     identity_events: std.ArrayList(model.IdentityEvent),
     units: std.ArrayList(SourceUnitRecord),
+    /// Current path to unit, so registering or moving a unit does not scan.
+    unit_paths: std.StringHashMapUnmanaged(SourceUnitId),
+    /// Stored records examined while applying a change scoped to one source
+    /// unit.
+    ///
+    /// This is the number Stage 4's guard watches. Changing one unit must cost
+    /// the same whatever else the repository holds; if it grows with the graph,
+    /// a lookup that should be keyed has become a sweep.
+    unit_work: usize,
 
     pub fn init(gpa: Allocator, repository_path: []const u8) GraphError!Graph {
         var self: Graph = .{
@@ -130,9 +152,14 @@ pub const Graph = struct {
             .repository = @enumFromInt(0),
             .entities = .empty,
             .assertions = .empty,
+            .unit_assertions = .empty,
             .diagnostics = .empty,
+            .unit_diagnostics = .empty,
+            .unit_definitions = .empty,
             .identity_events = .empty,
             .units = .empty,
+            .unit_paths = .empty,
+            .unit_work = 0,
         };
         errdefer self.deinit();
 
@@ -161,6 +188,13 @@ pub const Graph = struct {
     pub fn deinit(self: *Graph) void {
         for (self.units.items) |record| self.gpa.free(record.bytes);
         self.units.deinit(self.gpa);
+        for (self.unit_assertions.items) |*bucket| bucket.deinit(self.gpa);
+        self.unit_assertions.deinit(self.gpa);
+        for (self.unit_diagnostics.items) |*bucket| bucket.deinit(self.gpa);
+        self.unit_diagnostics.deinit(self.gpa);
+        for (self.unit_definitions.items) |*bucket| bucket.deinit(self.gpa);
+        self.unit_definitions.deinit(self.gpa);
+        self.unit_paths.deinit(self.gpa);
         self.entities.deinit(self.gpa);
         self.assertions.deinit(self.gpa);
         self.diagnostics.deinit(self.gpa);
@@ -214,6 +248,11 @@ pub const Graph = struct {
             self.gpa.free(owned_bytes);
             return err;
         };
+
+        try self.unit_assertions.append(self.gpa, .empty);
+        try self.unit_diagnostics.append(self.gpa, .empty);
+        try self.unit_definitions.append(self.gpa, .empty);
+        try self.unit_paths.put(self.gpa, interned_path, id);
 
         self.units.append(self.gpa, .{
             .id = id,
@@ -321,6 +360,8 @@ pub const Graph = struct {
 
         const revision = self.beginRevision();
         const interned = try self.pool.intern(path);
+        _ = self.unit_paths.remove(self.units.items[index].path);
+        try self.unit_paths.put(self.gpa, interned, id);
         self.units.items[index].path = interned;
 
         const record = self.units.items[index];
@@ -369,6 +410,7 @@ pub const Graph = struct {
 
         const revision = self.beginRevision();
         const file_entity = self.units.items[index].entity;
+        _ = self.unit_paths.remove(self.units.items[index].path);
         self.units.items[index].removed_revision = revision;
 
         var definitions: std.ArrayList(EntityId) = .empty;
@@ -404,12 +446,11 @@ pub const Graph = struct {
         record.analysis_revision = self.revision;
     }
 
-    pub fn unitByPath(self: *const Graph, path: []const u8) ?SourceUnitId {
-        for (self.units.items) |record| {
-            if (!record.isLive()) continue;
-            if (std.mem.eql(u8, record.path, path)) return record.id;
-        }
-        return null;
+    pub fn unitByPath(self: *Graph, path: []const u8) ?SourceUnitId {
+        // Counted so that the Stage 4 guard notices if this ever goes back to
+        // walking the unit table: one examined record here, not one per unit.
+        self.unit_work += 1;
+        return self.unit_paths.get(path);
     }
 
     /// Live units, in identity order, as correspondence evidence for a scan.
@@ -476,6 +517,14 @@ pub const Graph = struct {
             .observed_revision = self.revision,
             .removed_revision = null,
         });
+
+        if (spec.kind == .definition) {
+            if (evidence) |observed| {
+                if (self.definitionBucket(observed.unit)) |bucket| {
+                    try bucket.append(self.gpa, id);
+                }
+            }
+        }
         return id;
     }
 
@@ -498,6 +547,19 @@ pub const Graph = struct {
         const record = self.entityMut(id) orelse return error.UnknownEntity;
         if (!record.isLive()) return error.RemovedEntity;
         record.removed_revision = self.revision;
+
+        if (record.kind == .definition) {
+            if (record.evidence) |observed| {
+                if (self.definitionBucket(observed.unit)) |bucket| {
+                    self.unit_work += bucket.items.len;
+                    for (bucket.items, 0..) |entity_id, index| {
+                        if (entity_id != id) continue;
+                        _ = bucket.orderedRemove(index);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     pub fn entity(self: *const Graph, id: EntityId) ?model.Entity {
@@ -512,19 +574,26 @@ pub const Graph = struct {
         return &self.entities.items[index];
     }
 
-    /// Live definitions whose source evidence lies in the given unit. This is
-    /// the affected semantic region of an edit to that unit.
+    /// Live definitions introduced in the given unit. This is the affected
+    /// semantic region of an edit to that unit, and reading it must cost what
+    /// the unit holds rather than what the repository holds.
     pub fn definitionsInUnit(
-        self: *const Graph,
+        self: *Graph,
         id: SourceUnitId,
         out: *std.ArrayList(EntityId),
         gpa: Allocator,
     ) Allocator.Error!void {
-        for (self.entities.items) |item| {
-            if (item.kind != .definition or !item.isLive()) continue;
-            const evidence = item.evidence orelse continue;
-            if (evidence.unit == id) try out.append(gpa, item.id);
+        const bucket = self.definitionBucket(id) orelse return;
+        self.unit_work += bucket.items.len;
+        for (bucket.items) |entity_id| {
+            if (self.entities.items[entity_id.index()].isLive()) try out.append(gpa, entity_id);
         }
+    }
+
+    fn definitionBucket(self: *Graph, id: SourceUnitId) ?*std.ArrayList(EntityId) {
+        const index = id.index();
+        if (index >= self.unit_definitions.items.len) return null;
+        return &self.unit_definitions.items[index];
     }
 
     // -- assertions ---------------------------------------------------------
@@ -542,7 +611,8 @@ pub const Graph = struct {
         const id: model.AssertionId = @enumFromInt(self.next_assertion);
         self.next_assertion += 1;
 
-        try self.assertions.append(self.gpa, .{
+        const bucket = if (evidence) |observed| self.assertionBucket(observed.unit) else null;
+        try (bucket orelse &self.assertions).append(self.gpa, .{
             .id = id,
             .claim = claim,
             .producer = .{
@@ -566,43 +636,46 @@ pub const Graph = struct {
         return self.addAssertion(.{ .relationship = claim }, producer, evidence, resolution);
     }
 
+    fn assertionBucket(self: *Graph, id: SourceUnitId) ?*std.ArrayList(model.Assertion) {
+        const index = id.index();
+        if (index >= self.unit_assertions.items.len) return null;
+        return &self.unit_assertions.items[index];
+    }
+
+    fn diagnosticBucket(self: *Graph, id: SourceUnitId) ?*std.ArrayList(model.Diagnostic) {
+        const index = id.index();
+        if (index >= self.unit_diagnostics.items.len) return null;
+        return &self.unit_diagnostics.items[index];
+    }
+
     /// Drops every assertion observed in one source unit. Used before a unit's
-    /// assertions are re-derived; assertions from other units are untouched.
+    /// assertions are re-derived; assertions from other units are untouched, and
+    /// not even looked at.
     pub fn dropAssertionsForUnit(self: *Graph, id: SourceUnitId) void {
-        var write: usize = 0;
-        for (self.assertions.items) |assertion| {
-            const keep = blk: {
-                const evidence = assertion.evidence orelse break :blk true;
-                if (evidence.unit != id) break :blk true;
-                // What source ingestion established about the unit itself
-                // survives an edit to the unit's contents. Only analysis
-                // derived from those contents is re-run.
-                break :blk std.mem.eql(u8, assertion.producer.name, ingestion.name);
-            };
-            if (keep) {
-                self.assertions.items[write] = assertion;
-                write += 1;
-            }
-        }
-        self.assertions.shrinkRetainingCapacity(write);
+        // What source ingestion established about the unit itself survives an
+        // edit to the unit's contents. Only analysis derived from those
+        // contents is re-run.
+        self.filterBucket(id, true);
     }
 
     /// Drops what source ingestion previously claimed about one unit, so the
     /// claims can be re-established against its new contents.
     pub fn dropIngestionAssertionsForUnit(self: *Graph, id: SourceUnitId) void {
+        self.filterBucket(id, false);
+    }
+
+    fn filterBucket(self: *Graph, id: SourceUnitId, keep_ingestion: bool) void {
+        const bucket = self.assertionBucket(id) orelse return;
+        self.unit_work += bucket.items.len;
         var write: usize = 0;
-        for (self.assertions.items) |assertion| {
-            const keep = blk: {
-                const evidence = assertion.evidence orelse break :blk true;
-                if (evidence.unit != id) break :blk true;
-                break :blk !std.mem.eql(u8, assertion.producer.name, ingestion.name);
-            };
-            if (keep) {
-                self.assertions.items[write] = assertion;
+        for (bucket.items) |assertion| {
+            const from_ingestion = std.mem.eql(u8, assertion.producer.name, ingestion.name);
+            if (from_ingestion == keep_ingestion) {
+                bucket.items[write] = assertion;
                 write += 1;
             }
         }
-        self.assertions.shrinkRetainingCapacity(write);
+        bucket.shrinkRetainingCapacity(write);
     }
 
     /// Drops what source ingestion said about the tree as a whole, so a rescan
@@ -610,9 +683,7 @@ pub const Graph = struct {
     pub fn dropScanDiagnostics(self: *Graph) void {
         var write: usize = 0;
         for (self.diagnostics.items) |diagnostic| {
-            const keep = diagnostic.unit != null or
-                !std.mem.eql(u8, diagnostic.producer.name, ingestion.name);
-            if (keep) {
+            if (!std.mem.eql(u8, diagnostic.producer.name, ingestion.name)) {
                 self.diagnostics.items[write] = diagnostic;
                 write += 1;
             }
@@ -621,15 +692,9 @@ pub const Graph = struct {
     }
 
     pub fn dropDiagnosticsForUnit(self: *Graph, id: SourceUnitId) void {
-        var write: usize = 0;
-        for (self.diagnostics.items) |diagnostic| {
-            const keep = diagnostic.unit == null or diagnostic.unit.? != id;
-            if (keep) {
-                self.diagnostics.items[write] = diagnostic;
-                write += 1;
-            }
-        }
-        self.diagnostics.shrinkRetainingCapacity(write);
+        const bucket = self.diagnosticBucket(id) orelse return;
+        self.unit_work += bucket.items.len;
+        bucket.clearRetainingCapacity();
     }
 
     pub fn addDiagnostic(
@@ -639,7 +704,8 @@ pub const Graph = struct {
         producer: model.Producer,
         message: []const u8,
     ) GraphError!void {
-        try self.diagnostics.append(self.gpa, .{
+        const bucket = if (id) |unit_id| self.diagnosticBucket(unit_id) else null;
+        try (bucket orelse &self.diagnostics).append(self.gpa, .{
             .kind = kind,
             .unit = id,
             .producer = .{
@@ -689,12 +755,30 @@ pub const Graph = struct {
             if (record.isLive()) try units.append(self.gpa, record.view());
         }
 
+        // Publication is where the graph is walked in full, deliberately: a
+        // consumer observes one complete state. Assertions come out grouped by
+        // the unit they were observed in, which is a stable order, not the
+        // order they happened to be recorded in across units.
+        var assertions: std.ArrayList(model.Assertion) = .empty;
+        errdefer assertions.deinit(self.gpa);
+        try assertions.appendSlice(self.gpa, self.assertions.items);
+        for (self.unit_assertions.items) |bucket| {
+            try assertions.appendSlice(self.gpa, bucket.items);
+        }
+
+        var diagnostics: std.ArrayList(model.Diagnostic) = .empty;
+        errdefer diagnostics.deinit(self.gpa);
+        try diagnostics.appendSlice(self.gpa, self.diagnostics.items);
+        for (self.unit_diagnostics.items) |bucket| {
+            try diagnostics.appendSlice(self.gpa, bucket.items);
+        }
+
         return .{
             .gpa = self.gpa,
             .revision = self.revision,
             .entities = try entities.toOwnedSlice(self.gpa),
-            .assertions = try self.gpa.dupe(model.Assertion, self.assertions.items),
-            .diagnostics = try self.gpa.dupe(model.Diagnostic, self.diagnostics.items),
+            .assertions = try assertions.toOwnedSlice(self.gpa),
+            .diagnostics = try diagnostics.toOwnedSlice(self.gpa),
             .identity_events = try self.gpa.dupe(model.IdentityEvent, self.identity_events.items),
             .units = try units.toOwnedSlice(self.gpa),
         };
@@ -703,7 +787,12 @@ pub const Graph = struct {
     /// Refuses to publish a state whose assertions point at entities that are
     /// not there, rather than letting a query quietly skip them.
     pub fn checkInvariants(self: *const Graph) GraphError!void {
-        for (self.assertions.items) |assertion| {
+        try self.checkAssertions(self.assertions.items);
+        for (self.unit_assertions.items) |bucket| try self.checkAssertions(bucket.items);
+    }
+
+    fn checkAssertions(self: *const Graph, assertions: []const model.Assertion) GraphError!void {
+        for (assertions) |assertion| {
             switch (assertion.claim) {
                 .entity_exists => |id| try self.expectLive(id),
                 .relationship => |rel| {
@@ -921,8 +1010,15 @@ pub const Snapshot = struct {
         snapshot: *const Snapshot,
         index: usize,
         filter: EntityFilter,
+        /// A `path` filter resolved once. Resolving it per candidate entity
+        /// would make every path query cost units times entities.
+        path_scope: ?model.Scope,
+        /// Set when a `path` filter names a unit the snapshot does not hold, so
+        /// the iterator yields nothing rather than matching everything.
+        empty: bool,
 
         pub fn next(self: *EntityIterator) ?model.Entity {
+            if (self.empty) return null;
             while (self.index < self.snapshot.entities.len) {
                 const entity = self.snapshot.entities[self.index];
                 self.index += 1;
@@ -932,9 +1028,8 @@ pub const Snapshot = struct {
                 if (self.filter.scope) |scope| {
                     if (!entity.identity.scope.eql(scope)) continue;
                 }
-                if (self.filter.path) |path| {
-                    const view = self.snapshot.unitByPath(path) orelse return null;
-                    if (!entity.identity.scope.eql(.{ .unit = view.id })) continue;
+                if (self.path_scope) |scope| {
+                    if (!entity.identity.scope.eql(scope)) continue;
                 }
                 if (self.filter.name) |name| {
                     const entity_name = entity.identity.name orelse continue;
@@ -957,7 +1052,22 @@ pub const Snapshot = struct {
     };
 
     pub fn entitiesMatching(self: *const Snapshot, filter: EntityFilter) EntityIterator {
-        return .{ .snapshot = self, .index = 0, .filter = filter };
+        var path_scope: ?model.Scope = null;
+        var empty = false;
+        if (filter.path) |path| {
+            if (self.unitByPath(path)) |view| {
+                path_scope = .{ .unit = view.id };
+            } else {
+                empty = true;
+            }
+        }
+        return .{
+            .snapshot = self,
+            .index = 0,
+            .filter = filter,
+            .path_scope = path_scope,
+            .empty = empty,
+        };
     }
 
     pub fn countEntities(self: *const Snapshot, filter: EntityFilter) usize {

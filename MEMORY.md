@@ -144,6 +144,17 @@ why. This is not a changelog of removed implementation; see `git log`.
   one would name a replacement the graph did not identify.
   `Analyzer.invocations` counts frontend reads, which is what makes "only the
   affected region was reanalyzed" a measured claim.
+- **The graph stores things the way ingestion reads them.** Assertions and
+  diagnostics are bucketed by the source unit they were observed in, definitions
+  are indexed per unit, and paths are indexed to units, so withdrawing one unit's
+  analysis touches that unit and nothing else. Before Stage 4 all three were
+  graph-wide sweeps, which made a full scan of n units O(n²) — invisible at two
+  units, which is why the stage existed. `Graph.unit_work` counts records
+  examined while applying a change scoped to one unit, and the scale tests assert
+  it is identical across trees of different sizes; the guard was verified by
+  reintroducing a sweep and watching it fail. `publish` still walks the whole
+  graph on purpose, and that cost is measured and accepted, not solved:
+  ~1,100 records for 73 units.
 - **A source unit's identity is not its path.** `model.Scope` is `repository` or
   `unit: SourceUnitId`, and `IdentityEvidence.scope` carries it, so renaming a
   file moves one property and leaves the unit, its contents, and every entity
@@ -222,9 +233,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   still resolves inside its own unit or stays a designator. Reanalysis is decided
   by a unit's own content identity alone, which is correct only while that
   remains true. No file watching, no concurrency.
-- No measurement at scale. Reconciliation is proved on a thirteen-unit tree; no
-  tree large enough to expose accidental quadratic behavior exists yet, and
-  nothing records what `publish` costs.
+- No persistence of the measurement story: `publish` is linear in the graph,
+  which is right for publishing per batch of edits and wrong for publishing per
+  query. Changing it means changing what a snapshot is, which `SPEC.md` owns.
 - No executable conformance suite and no capability matrix. The fixture evidence
   is scoped to two small files per language.
 - No published semantic contract. The current core admission results accept
@@ -293,11 +304,13 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 - **The active plan is `docs/plans/002_repository_scale_ingestion.md`**, with
   companion log `docs/reports/005_repository_scale_ingestion_progress.md`. Stage
-  Stages 1 through 3 are done: a tree can be scanned, rescanned, and reconciled.
-  `src/source/` owns discovery, the one extension-to-language table, the
+  Stages 1 through 4 are done: a tree can be scanned, rescanned, and reconciled,
+  and changing one unit provably costs the same whatever else the repository
+  holds. `src/source/` owns discovery, the one extension-to-language table, the
   correspondence rule, and the only filesystem access in the ingestion path; it
   has no parser dependency, so it runs in the `test-core` lane, whose meaning is
-  now "every lane that needs no parser". Stage 4 is next: the proof at scale.
+  now "every lane that needs no parser". Stage 5 is next, and it opens with an
+  ADR rather than with code.
   It takes the implementation to repository scale: source discovery, a
   source-unit registry whose identity is not a path, rename-surviving identity,
   measured affected-region reanalysis, and a dependency mechanism invalidation

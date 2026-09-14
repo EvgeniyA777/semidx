@@ -1064,6 +1064,205 @@ test "a file edited into unparsable source stays stale across a rescan" {
     try testing.expectEqual(greet.id, repaired.findDefinition("Greeter.java", "greet").?.id);
 }
 
+// -- Stage 4: the affected-region proof at scale ----------------------------
+
+/// Fills a tree with `count` units per language that differ only by a number.
+///
+/// Generated rather than committed: a few dozen files that differ by an index
+/// would add noise to the repository without adding evidence, and the property
+/// under test is about size, which a generator states more clearly than a
+/// directory listing does.
+fn fill(tree: *Tree, count: usize) !void {
+    const gpa = testing.allocator;
+    for (0..count) |index| {
+        const java_file = try std.fmt.allocPrint(gpa, "java/Filler{d}.java", .{index});
+        defer gpa.free(java_file);
+        const java_body = try std.fmt.allocPrint(
+            gpa,
+            "class Filler{d} {{\n    String run() {{\n        return helper();\n    }}\n\n" ++
+                "    String helper() {{\n        return \"{d}\";\n    }}\n}}\n",
+            .{ index, index },
+        );
+        defer gpa.free(java_body);
+        try tree.write(java_file, java_body);
+
+        const clj_file = try std.fmt.allocPrint(gpa, "clojure/filler{d}.clj", .{index});
+        defer gpa.free(clj_file);
+        const clj_body = try std.fmt.allocPrint(
+            gpa,
+            "(ns demo.filler{d})\n\n(def value \"{d}\")\n\n(defn run []\n  (str value))\n",
+            .{ index, index },
+        );
+        defer gpa.free(clj_body);
+        try tree.write(clj_file, clj_body);
+    }
+}
+
+/// The unit every scale test edits. Identical in every tree, so the work of
+/// changing it is comparable across tree sizes.
+const subject_before = "class Subject {\n    String run() {\n        return \"before\";\n    }\n}\n";
+const subject_after = "class Subject {\n    String run() {\n        return \"after\";\n    }\n}\n";
+
+const ScaleRun = struct {
+    /// Records the graph examined while applying the scan that first built the
+    /// tree.
+    build_work: usize,
+    /// Records examined while applying a one-unit edit to it.
+    edit_work: usize,
+    /// Frontend invocations caused by that edit.
+    edit_invocations: usize,
+    units: usize,
+    entities: usize,
+    assertions: usize,
+};
+
+fn scaleRun(count: usize) !ScaleRun {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try fill(&tree, count);
+    try tree.write("Subject.java", subject_before);
+
+    const built = try tree.rescan();
+    const build_work = tree.index.graph.unit_work;
+    const invocations_before = tree.invocations();
+
+    var snapshot = try tree.index.publish();
+    defer snapshot.deinit();
+
+    try tree.write("Subject.java", subject_after);
+    const edited = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), edited.changed);
+    try testing.expectEqual(built.added - 1, edited.unchanged);
+
+    return .{
+        .build_work = build_work,
+        .edit_work = tree.index.graph.unit_work - build_work,
+        .edit_invocations = tree.invocations() - invocations_before,
+        .units = snapshot.units.len,
+        .entities = snapshot.entities.len,
+        .assertions = snapshot.assertions.len,
+    };
+}
+
+test "changing one unit costs the same whatever else the repository holds" {
+    const small = try scaleRun(12);
+    const large = try scaleRun(36);
+
+    try testing.expectEqual(@as(usize, 25), small.units);
+    try testing.expectEqual(@as(usize, 73), large.units);
+
+    // One frontend invocation each, regardless of tree size.
+    try testing.expectEqual(@as(usize, 1), small.edit_invocations);
+    try testing.expectEqual(@as(usize, 1), large.edit_invocations);
+
+    // And exactly the same number of stored records examined. This is the
+    // guard: if any per-unit operation goes back to sweeping the graph — an
+    // assertion list filtered end to end, a path resolved by scanning units,
+    // a unit's definitions found by walking every entity — this number grows
+    // with the tree and the test fails.
+    try testing.expectEqual(small.edit_work, large.edit_work);
+}
+
+test "building a tree costs work proportional to the tree, not to its square" {
+    const small = try scaleRun(12);
+    const large = try scaleRun(36);
+
+    // Three times the units for about three times the work. A per-unit
+    // operation that sweeps the graph would make this nine times.
+    try testing.expect(large.build_work < small.build_work * 4);
+    try testing.expect(large.build_work > small.build_work * 2);
+
+    // Stated the other way: the work of building a tree is bounded per unit.
+    try testing.expect(small.build_work < small.units * 64);
+    try testing.expect(large.build_work < large.units * 64);
+}
+
+test "adding units to a large tree reanalyzes only what was added" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try fill(&tree, 24);
+    _ = try tree.rescan();
+
+    const invocations_before = tree.invocations();
+    const work_before = tree.index.graph.unit_work;
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const untouched = before.findDefinition("java/Filler7.java", "run").?;
+
+    try tree.write("java/Added.java", "class Added { void run() {} }\n");
+    try tree.write("clojure/added.clj", "(ns demo.added)\n(defn run [] \"x\")\n");
+    const outcome = try tree.rescan();
+
+    try testing.expectEqual(@as(usize, 2), outcome.added);
+    try testing.expectEqual(@as(usize, 48), outcome.unchanged);
+    try testing.expectEqual(@as(usize, 2), tree.invocations() - invocations_before);
+
+    // Two units' worth of work for a repository of fifty.
+    try testing.expect(tree.index.graph.unit_work - work_before < 64);
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(untouched.id, after.findDefinition("java/Filler7.java", "run").?.id);
+    // Two source containers, a Java class and its method, a Clojure namespace
+    // and its function.
+    try testing.expectEqual(before.entities.len + 6, after.entities.len);
+}
+
+test "the repository-scale fixtures keep cross-unit references unresolved" {
+    const gpa = testing.allocator;
+    const root = try std.fs.path.join(gpa, &.{ build_options.fixtures_dir, "..", "repository-scale" });
+    defer gpa.free(root);
+
+    var dir = try std.Io.Dir.cwd().openDir(testing.io, root, .{
+        .iterate = true,
+        .follow_symlinks = false,
+    });
+    defer dir.close(testing.io);
+
+    var found = try semidx.source.discovery.scanDir(gpa, testing.io, dir, root, .{});
+    defer found.deinit();
+
+    var index = try semidx.Index.init(gpa, root);
+    defer index.deinit();
+    const outcome = try index.applyScan(found);
+    try testing.expectEqual(@as(usize, 6), outcome.added);
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    // Each unit's own definitions resolve.
+    const greeter = snapshot.findDefinition("java/demo/Greeter.java", "greet").?;
+    const salutation = snapshot.findDefinition("java/demo/Greeter.java", "salutation").?;
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .calls,
+        .source = greeter.id,
+        .target = salutation.id,
+        .resolution = .fact,
+    }));
+
+    // A name that leaves its unit does not. `Helper` is declared, in another
+    // unit, and stays a designator with a recorded explanation rather than
+    // being matched across the tree.
+    const class = snapshot.findDefinition("java/demo/Greeter.java", "Greeter").?;
+    const reference = snapshot.firstRelationship(.{
+        .kind = .references,
+        .source = class.id,
+        .designator = "Helper",
+    }).?;
+    try testing.expectEqual(model.ResolutionCategory.unresolved, reference.resolution.category());
+    try testing.expect(snapshot.findDefinition("java/demo/Helper.java", "Helper") != null);
+
+    const clojure_greet = snapshot.findDefinition("clojure/demo/greeter.clj", "greet").?;
+    const decorate = snapshot.firstRelationship(.{
+        .kind = .calls,
+        .source = clojure_greet.id,
+        .designator = "decorate",
+    }).?;
+    try testing.expectEqual(model.ResolutionCategory.unresolved, decorate.resolution.category());
+    try testing.expect(snapshot.findDefinition("clojure/demo/helper.clj", "decorate") != null);
+}
+
 test "a snapshot taken before an edit keeps observing the state it was published from" {
     var fixture = try Fixture.init(testing.allocator);
     defer fixture.deinit();

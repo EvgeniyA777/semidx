@@ -14,10 +14,10 @@ Companion log for
 
 ## Current Status
 
-Stages 1 through 3 are implemented and verified. A tree can be scanned, rescanned,
-and reconciled: unchanged units are not re-read, a moved file keeps everything
-inside it, a deleted file's definitions leave visibly, and the work a rescan does
-is measured rather than assumed. Stage 4 is the proof at scale.
+Stages 1 through 4 are implemented and verified. A tree can be scanned,
+rescanned, and reconciled; changing one unit costs the same whatever else the
+repository holds, and that is now enforced by a guard rather than believed.
+Stage 5 is next: giving invalidation something real to act on.
 
 ## Stage Log
 
@@ -27,7 +27,7 @@ is measured rather than assumed. Stage 4 is the proof at scale.
 | Stage 1: Source discovery | Completed | `src/source/{root,languages,scan,discovery}.zig`, the `semidx_source` module, `Index.addScan`, and a developer command that takes a root. |
 | Stage 2: Unit identity independent of path | Completed | `model.Scope`, unit tombstones, `setSourceUnitPath`, `removeSourceUnit`, and both frontends scoping entities to the unit. |
 | Stage 3: Scan reconciliation | Completed | `src/source/registry.zig` decides correspondence as a pure function; `Index.applyScan` applies it; `Analyzer.invocations` measures what was re-read. |
-| Stage 4: Affected-region proof at scale | Not started | Awaiting Stage 3. |
+| Stage 4: Affected-region proof at scale | Completed | Per-unit buckets and indexes in the graph, `Graph.unit_work`, `fixtures/repository-scale/`, and scale tests that fail if a keyed lookup regresses into a sweep. |
 | Stage 5: Cross-unit dependency tracking | Not started | Awaiting Stage 3. Opens with an ADR. |
 | Stage 6: Closure and documentation | Not started | Awaiting Stage 5. |
 
@@ -404,6 +404,119 @@ move, and an emptied tree.
   work; Stage 4 is where a tree large enough to expose an accidental quadratic
   gets built.
 
+## Stage 4 Record
+
+### The Guard Required Fixing What It Measures
+
+Writing the guard first showed that ingestion was quadratic in three places, all
+of them per-unit operations implemented as graph-wide sweeps:
+
+- `dropAssertionsForUnit` and `dropIngestionAssertionsForUnit` filtered every
+  assertion in the repository to find one unit's.
+- `definitionsInUnit` walked every entity in the repository.
+- `unitByPath` walked every unit, and it is called on every registration and
+  every move.
+
+Each is O(graph) per unit, so a full scan of n units was O(n²). None of it was
+visible at two units, which is exactly why the stage exists.
+
+The fix is to store things the way they are accessed. Assertions and diagnostics
+are bucketed by the source unit they were observed in, definitions are indexed
+per unit, and paths are indexed to units. Withdrawing one unit's analysis now
+touches that unit's bucket and nothing else. `publish` still walks everything —
+deliberately, because a consumer observes one complete state — and now
+concatenates the buckets, which makes assertion order grouped by unit rather than
+global insertion order. That order is still deterministic.
+
+One query was quadratic too, outside the ingestion path: `EntityFilter.path`
+resolved a path to a unit once per candidate entity. It resolves once per query
+now.
+
+### How The Guard Works
+
+`Graph.unit_work` counts stored records examined while applying a change scoped
+to one source unit. The scale tests build two trees of different sizes, apply the
+same one-unit edit to each, and assert the counter moved by exactly the same
+amount. If any per-unit operation goes back to sweeping, that number grows with
+the tree and the assertion fails.
+
+It was verified by regression rather than by assumption: reverting `filterBucket`
+to a graph-wide sweep made the counter read 1532 instead of 524 on the larger
+tree, and all three scale tests failed. The change was then reverted.
+
+A second test states the same property from the other side — building a tree of
+three times the units costs between two and four times the work, not nine — and
+bounds the work per unit by a constant.
+
+### Measured Publish Cost
+
+`publish` copies the observable state on every call. On a generated tree of 73
+units:
+
+| Records | Count |
+| --- | --- |
+| Source units | 73 |
+| Entities | 292 (73 files, 218 definitions, 1 repository) |
+| Assertions | 764 |
+
+So one publish copies roughly 1,100 records for 73 units, around 15 per unit,
+and it is linear in the graph rather than in the change. **This is recorded as an
+accepted cost, not a solved problem.** It is the right shape for a slice that
+publishes once per batch of edits and the wrong shape for a consumer that
+publishes per query. Changing it means changing what a snapshot is, which is the
+storage-and-snapshots item owned by `SPEC.md`, and this plan deliberately does
+not touch it.
+
+### `fixtures/repository-scale/`
+
+Six units, three per language, with a namespace structure and cross-unit
+references that are all currently unresolved — `Greeter` names the type `Helper`,
+`demo.greeter/greet` names `decorate`, and both are declared in other units. A
+test asserts they stay designators with recorded explanations while same-unit
+references resolve as facts.
+
+This is the tree Stage 5 needs, and it is small on purpose. The large trees that
+make quadratic behavior observable are generated inside the tests: a few dozen
+committed files differing only by an index would add noise without adding
+evidence. The plan asked for rescan histories in the fixture directory; they are
+generated too, for the same reason, and the fixture `README.md` says so.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core --summary all` | 67/67 passed. |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | 67/67 passed. |
+| `zig build test --summary all` | 110/110 passed, after deleting `.zig-cache/` and `zig-out/`. |
+| `zig build run -- fixtures/repository-scale` | 6 units, 14 definitions, 48 assertions, 5 unresolved, 0 stale. |
+| Deliberate regression of `filterBucket` to a graph-wide sweep | All three scale tests failed; reverted. |
+| `zig fmt --check build.zig src tests` | Clean. |
+| `./scripts/check-agent-attribution.sh --all` | Passed. |
+
+Stage 4 DoD, item by item:
+
+- Tests over trees of 25 and 73 units assert the edit cost is equal across them
+  and that one frontend invocation happened in each.
+- The guard fails if a keyed lookup becomes a scan, demonstrated by doing it.
+- The measured `publish` cost is recorded above and named as an accepted risk.
+
+### Residual Risk From Stage 4
+
+- **`publish` is linear in the graph.** Measured above. Acceptable while
+  publication is per batch; not acceptable per query.
+- **Entity correspondence within a unit is quadratic in that unit's size.** A
+  file with a thousand definitions compares a million pairs. It is bounded by
+  what changed, not by the repository, so the guard passes — but a generated
+  source file would find it. Fixing it means hashing identity evidence.
+- **`Snapshot.entityById` is still a scan.** It is a query convenience and not on
+  the ingestion path, so the guard does not cover it; a consumer resolving many
+  ids would feel it.
+- **The unit table, the entity table, and the identity event log never compact.**
+  A long-lived process over a churning tree grows all three without bound.
+- **`unit_work` counts what it was told to count.** It covers the operations this
+  plan introduced; a future sweep added somewhere uncounted would not fail the
+  guard. The counter is a tripwire, not a proof.
+
 ## Open Questions Carried Into Execution
 
 These are decided inside the plan but are the ones most likely to need revisiting
@@ -437,15 +550,20 @@ rename under the correspondence rule, so it never needs to be applied as one. Th
 second stands as a decision rather than a blocker — exact-content moves are
 claimed, everything else is a removal and an addition.
 
-Potential Stage 4 blockers:
+Both anticipated Stage 4 blockers were resolved as predicted: large trees are
+generated in the tests, and `Graph.unit_work` became the countable proxy for
+graph-level work.
 
-- A fixture tree large enough to expose accidental quadratic behavior has to be
-  generated rather than committed, or the repository grows by a few dozen
-  near-identical files. Generating it in the test is the likely answer, and
-  `std.testing.tmpDir` already supports it.
-- Asserting "work proportional to change" needs a countable proxy for work.
-  `Analyzer.invocations` covers reanalysis; graph-level work — `publish` copying
-  the observable state — has no counter yet.
+Potential Stage 5 blockers:
+
+- The ADR that opens the stage may conclude that recording a repository-wide
+  name match as an approximate assertion is incompatible with §1. The stage is
+  written to complete either way, but the dependency mechanism alone is a
+  thinner result than the stage suggests.
+- Invalidation has to override the rule Stage 3 established — that a unit whose
+  own content did not change is never re-read. That rule is currently
+  unconditional and lives in the registry, which knows nothing about
+  dependencies.
 
 ## Residual Risk
 
@@ -458,7 +576,10 @@ requirements change rather than proceeding.
 
 ## Next Handoff
 
-Start with Stage 4: the affected-region proof at scale. The mechanism exists and
-is measured on thirteen units; what is missing is a tree large enough for the
-claim to be falsifiable, a guard that fails if a keyed lookup regresses into a
-scan, and a recorded measurement of what `publish` costs over such a tree.
+Start with Stage 5, and start with its ADR rather than with code. The question is
+whether recording a repository-wide unique-name match as an **approximate**
+assertion is compatible with §1 forbidding an approximate mechanism from
+establishing a program relationship, given that §3 provides the approximate
+category and requires it to stay distinct from fact. Both answers have a complete
+DoD in the plan; the dependency mechanism itself is independent of the outcome
+and can be built first.

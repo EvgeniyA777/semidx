@@ -74,6 +74,11 @@ pub fn integrate(graph: *Graph, batch: contract.FrontendBatch) Error!Outcome {
     var outcome: Outcome = .{ .revision = revision, .applied = true };
 
     // Pass 1: correspondence. A matched entity keeps its id.
+    //
+    // This is quadratic in the size of one unit, and deliberately not in the
+    // size of the graph: only the definitions of the unit being reconciled are
+    // ever compared.
+    graph.unit_work += batch.entities.len * previous.items.len;
     for (batch.entities, 0..) |draft, index| {
         for (previous.items, matched_previous) |candidate, *matched| {
             if (matched.*) continue;
