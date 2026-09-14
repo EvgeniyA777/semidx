@@ -39,11 +39,14 @@ why. This is not a changelog of removed implementation; see `git log`.
   [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md) explains why the
   principles exist, and [CONFORMANCE.md](CONFORMANCE.md) owns reviewable and
   eventually executable scenario families.
-- `CORE.md` is a **draft candidate roster**. No kind or roster version is
-  accepted or published yet. Open `module` semantics block `IMPORTS`; they no
-  longer block `DEFINES`, whose container endpoint now ranges over whichever
-  container kinds are admitted, so basic containment does not wait on `module`.
-  Textual-inclusion coverage and admission fixtures remain unresolved.
+- `CORE.md` is a **draft roster with an initial unversioned admission result**.
+  `repository`, `file`, `definition`, `REFERENCES`, and `CALLS` are accepted as
+  shared-core meanings for the fixture-scoped implementation; no roster version
+  or public contract is published. `DEFINES` is deliberately not admitted yet
+  because its candidate text and implementation evidence disagree about whether
+  it means definition-introduction only or general direct containment.
+  `module` and `IMPORTS` remain blocked, and textual-inclusion coverage remains
+  unresolved.
 - `SPEC.md` is a **draft requirements entry point**. It owns changing
   requirements, semantic contract lifecycle, publication and migration rules,
   outstanding specification work, and proposed delivery direction. It also owns
@@ -54,7 +57,8 @@ why. This is not a changelog of removed implementation; see `git log`.
   [document ownership policy](docs/agent-policy/documentation.md).
 - Document status is synchronized. `SPEC.md` and `CORE.md` are `draft` because
   their own text is unfinished: SPEC still lists ten requirement areas to
-  specify, and no kind in CORE is admitted. `CONFORMANCE.md`,
+  specify, and CORE still has blocked candidates plus no published semantic
+  contract version. `CONFORMANCE.md`,
   `ARCHITECTURE_RATIONALE.md`, and `GLOSSARY.md` are `active` because their text
   is settled — a specification is not a draft merely because the work it
   describes has not started. `ARCHITECTURE_CONSTITUTION.md` carries no
@@ -107,8 +111,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   carries the stage outcomes, exact verification commands, review findings,
   skipped checks, and residual risk.
   `docs/reports/002_slice_freshness_followup.md` records three defects a review
-  found afterwards and how they were fixed. Read both before extending the
-  implementation.
+  found afterwards and how they were fixed.
+  `docs/reports/003_core_admission_review.md` records the first core admission
+  review. Read all three before extending the implementation.
 - What the slice is: an in-memory semantic graph over Java and Clojure fixtures,
   built on Zig 0.16 and tree-sitter through the C ABI
   ([ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md)). Source lives
@@ -188,10 +193,11 @@ why. This is not a changelog of removed implementation; see `git log`.
   no invalidation across units, no file watching, no concurrency.
 - No executable conformance suite and no capability matrix. The fixture evidence
   is scoped to two small files per language.
-- No accepted core roster and no published semantic contract. `CORE.md`
-  candidates are unchanged: the slice deliberately admitted none, and exercising
-  a candidate is not admission evidence. Java and Clojure fixture coverage is not
-  a claim of supported languages.
+- No published semantic contract. The initial core admission result accepts
+  `repository`, `file`, `definition`, `REFERENCES`, and `CALLS` as unversioned
+  implementation guidance only. `DEFINES`, `module`, and `IMPORTS` are not
+  admitted. Java and Clojure fixture coverage is not a claim of supported
+  languages.
 - No vectors, embeddings, RAG, or retrieval of any kind.
 
 ## Active Constraints And Known Gaps
@@ -249,9 +255,9 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 ## Near-Term Priorities
 
-- Decide whether the slice's fixture evidence supports admitting any `CORE.md`
-  candidate. The plan forbade admitting one as part of the implementation, so
-  that question is open and the `SPEC.md` admission criteria still apply in full.
+- Resolve the `DEFINES` admission blocker: choose whether the relationship means
+  definition-introduction only or general direct containment across source
+  containers and program entities, then add matching fixtures and tests.
 - Settle storage and snapshot representation, which `SPEC.md` still lists as
   unspecified. The current `Snapshot` is a value that borrows from a live graph;
   persistence would change that contract, and so would a long-running process.
