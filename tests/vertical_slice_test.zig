@@ -1209,7 +1209,7 @@ test "adding units to a large tree reanalyzes only what was added" {
     try testing.expectEqual(before.entities.len + 6, after.entities.len);
 }
 
-test "the repository-scale fixtures keep cross-unit references unresolved" {
+test "the repository-scale fixtures resolve only what a language's scoping establishes" {
     const gpa = testing.allocator;
     const root = try std.fs.path.join(gpa, &.{ build_options.fixtures_dir, "..", "repository-scale" });
     defer gpa.free(root);
@@ -1227,6 +1227,11 @@ test "the repository-scale fixtures keep cross-unit references unresolved" {
     defer index.deinit();
     const outcome = try index.applyScan(found);
     try testing.expectEqual(@as(usize, 6), outcome.added);
+    // Units are analyzed in path order, so `Greeter` and `Helper` were read
+    // before `Unrelated` finished changing what package `demo` declares, and
+    // both are read once more. `Unrelated` and the Clojure units are not.
+    try testing.expectEqual(@as(usize, 2), outcome.invalidated);
+    try testing.expectEqual(@as(usize, 8), outcome.analyzed);
 
     var snapshot = try index.publish();
     defer snapshot.deinit();
@@ -1241,18 +1246,23 @@ test "the repository-scale fixtures keep cross-unit references unresolved" {
         .resolution = .fact,
     }));
 
-    // A name that leaves its unit does not. `Helper` is declared, in another
-    // unit, and stays a designator with a recorded explanation rather than
-    // being matched across the tree.
+    // `Helper` is declared by exactly one other unit of package `demo`, so Java
+    // scoping establishes what the name means: a fact about that class, with the
+    // dependency that keeps it current.
     const class = snapshot.findDefinition("java/demo/Greeter.java", "Greeter").?;
+    const helper = snapshot.findDefinition("java/demo/Helper.java", "Helper").?;
     const reference = snapshot.firstRelationship(.{
         .kind = .references,
         .source = class.id,
-        .designator = "Helper",
+        .target = helper.id,
     }).?;
-    try testing.expectEqual(model.ResolutionCategory.unresolved, reference.resolution.category());
-    try testing.expect(snapshot.findDefinition("java/demo/Helper.java", "Helper") != null);
+    try testing.expectEqual(model.ResolutionCategory.fact, reference.resolution.category());
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .designator = "Helper" }));
+    try testing.expectEqual(@as(usize, 1), index.graph.dependencies.count());
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
 
+    // Clojure namespace resolution was not decided, so a name that leaves its
+    // unit there is still a designator, not matched across the tree.
     const clojure_greet = snapshot.findDefinition("clojure/demo/greeter.clj", "greet").?;
     const decorate = snapshot.firstRelationship(.{
         .kind = .calls,
@@ -1433,6 +1443,261 @@ test "a type declared in the unit still resolves locally when its package declar
         .resolution = .fact,
     }));
     try testing.expectEqual(@as(usize, 0), index.graph.dependencies.count());
+}
+
+const demo_greeter = "package demo;\n\nclass Greeter {\n    Helper helper;\n}\n";
+
+/// A tree with a dependent in package `demo`, one more `demo` unit, a package
+/// of its own with `others` units, a default-package unit, and a Clojure unit.
+fn packageTree(tree: *Tree, others: usize) !void {
+    try tree.write("demo/Greeter.java", demo_greeter);
+    try tree.write("demo/Unrelated.java", "package demo;\n\nclass Unrelated {\n    void run() {}\n}\n");
+    for (0..others) |index| {
+        const path = try std.fmt.allocPrint(testing.allocator, "other/Other{d}.java", .{index});
+        defer testing.allocator.free(path);
+        const body = try std.fmt.allocPrint(testing.allocator, "package other;\n\nclass Other{d} {{ Helper helper; }}\n", .{index});
+        defer testing.allocator.free(body);
+        try tree.write(path, body);
+    }
+    try tree.write("Loose.java", "class Loose { Helper helper; }\n");
+    try tree.write("clojure/demo/greeter.clj", "(ns demo.greeter)\n(defn greet [] (Helper.))\n");
+}
+
+/// The one reference `Greeter` makes, whatever it currently resolves to.
+fn greeterReference(snapshot: *const semidx.Snapshot) !model.Assertion {
+    const class = snapshot.findDefinition("demo/Greeter.java", "Greeter").?;
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = class.id,
+    }));
+    return snapshot.firstRelationship(.{ .kind = .references, .source = class.id }).?;
+}
+
+fn expectGreeterResolvesTo(tree: *Tree, path: []const u8) !void {
+    var snapshot = try tree.index.publish();
+    defer snapshot.deinit();
+    const target = snapshot.findDefinition(path, "Helper").?;
+    const reference = try greeterReference(&snapshot);
+    try testing.expectEqual(model.ResolutionCategory.fact, reference.resolution.category());
+    try testing.expectEqual(target.id, reference.relationship().?.target.entity);
+}
+
+fn expectGreeterUnresolved(tree: *Tree, fragment: []const u8) !void {
+    var snapshot = try tree.index.publish();
+    defer snapshot.deinit();
+    const reference = try greeterReference(&snapshot);
+    try testing.expectEqualStrings("Helper", reference.relationship().?.target.designator);
+    try expectExplanation(reference, fragment);
+}
+
+test "adding a same-package provider resolves a dependent nobody edited" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try packageTree(&tree, 6);
+    _ = try tree.rescan();
+    try expectGreeterUnresolved(&tree, "package `demo`");
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const greeter_class = before.findDefinition("demo/Greeter.java", "Greeter").?;
+    const baseline = tree.invocations();
+
+    try tree.write("demo/Helper.java", "package demo;\n\nclass Helper {}\n");
+    const outcome = try tree.rescan();
+
+    try testing.expectEqual(@as(usize, 1), outcome.added);
+    try testing.expectEqual(@as(usize, 0), outcome.changed);
+    // The two other `demo` units, and nothing from `other`, the default package,
+    // or Clojure — even though every one of them names `Helper` too.
+    try testing.expectEqual(@as(usize, 2), outcome.invalidated);
+    try testing.expectEqual(@as(usize, 3), outcome.analyzed);
+    try testing.expectEqual(baseline + 3, tree.invocations());
+
+    try expectGreeterResolvesTo(&tree, "demo/Helper.java");
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    // Reanalysis preserved the dependent's identity; it was read, not rebuilt.
+    try testing.expectEqual(greeter_class.id, after.findDefinition("demo/Greeter.java", "Greeter").?.id);
+    const other = after.findDefinition("other/Other0.java", "Other0").?;
+    try testing.expectEqual(model.ResolutionCategory.unresolved, (try referenceFrom(&after, other.id, "Helper")).resolution.category());
+}
+
+test "renaming, replacing, duplicating, moving, and removing a provider keep the dependent current" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try packageTree(&tree, 2);
+    try tree.write("demo/Helper.java", "package demo;\n\nclass Helper {}\n");
+    _ = try tree.rescan();
+    try expectGreeterResolvesTo(&tree, "demo/Helper.java");
+
+    var first = try tree.index.publish();
+    defer first.deinit();
+    const original = first.findDefinition("demo/Helper.java", "Helper").?;
+
+    // Renamed: the old target is gone, and no current query still finds a fact
+    // pointing at it.
+    try tree.write("demo/Helper.java", "package demo;\n\nclass Assistant {}\n");
+    var outcome = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), outcome.changed);
+    try expectGreeterUnresolved(&tree, "package `demo`");
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .target = original.id }));
+        try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .target = original.id, .freshness = null }));
+    }
+    try testing.expectEqual(@as(usize, 0), tree.index.graph.dependencies.count());
+
+    // A new unique provider in another unit.
+    try tree.write("demo/Help.java", "package demo;\n\nclass Helper {}\n");
+    _ = try tree.rescan();
+    try expectGreeterResolvesTo(&tree, "demo/Help.java");
+
+    // A second one makes the name ambiguous, and removing it resolves it again.
+    try tree.write("demo/HelpToo.java", "package demo;\n\nclass Helper {}\n");
+    _ = try tree.rescan();
+    try expectGreeterUnresolved(&tree, "ambiguous");
+    try testing.expectEqual(@as(usize, 0), tree.index.graph.dependencies.count());
+    try tree.remove("demo/HelpToo.java");
+    outcome = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), outcome.removed);
+    try expectGreeterResolvesTo(&tree, "demo/Help.java");
+
+    // Moving the provider to another package takes the binding with it.
+    try tree.write("demo/Help.java", "package other;\n\nclass Helper {}\n");
+    _ = try tree.rescan();
+    try expectGreeterUnresolved(&tree, "package `demo`");
+
+    // Back again, then deleted outright.
+    try tree.write("demo/Help.java", "package demo;\n\nclass Helper {}\n");
+    _ = try tree.rescan();
+    try expectGreeterResolvesTo(&tree, "demo/Help.java");
+    try tree.remove("demo/Help.java");
+    _ = try tree.rescan();
+    try expectGreeterUnresolved(&tree, "package `demo`");
+}
+
+test "a provider body edit reaches its dependent through the dependency alone" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try packageTree(&tree, 4);
+    try tree.write("demo/Helper.java", "package demo;\n\nclass Helper {}\n");
+    _ = try tree.rescan();
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const helper = before.findDefinition("demo/Helper.java", "Helper").?;
+    const baseline = tree.invocations();
+
+    try tree.write("demo/Helper.java", "package demo;\n\nclass Helper {\n    void added() {}\n}\n");
+    const outcome = try tree.rescan();
+
+    // The package's exports did not change, so only the unit that declared it
+    // read `Helper` is read again: not `Unrelated`, not `other`.
+    try testing.expectEqual(@as(usize, 1), outcome.changed);
+    try testing.expectEqual(@as(usize, 1), outcome.invalidated);
+    try testing.expectEqual(baseline + 2, tree.invocations());
+
+    // The class kept its identity, and the fact still names it.
+    try expectGreeterResolvesTo(&tree, "demo/Helper.java");
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(helper.id, after.findDefinition("demo/Helper.java", "Helper").?.id);
+}
+
+test "a package export change costs its own package, not the repository" {
+    const small = try packageChangeInvocations(4);
+    const large = try packageChangeInvocations(24);
+    // One added provider plus the two other `demo` units, at either size.
+    try testing.expectEqual(@as(usize, 3), small);
+    try testing.expectEqual(small, large);
+}
+
+fn packageChangeInvocations(others: usize) !usize {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try packageTree(&tree, others);
+    _ = try tree.rescan();
+    const baseline = tree.invocations();
+    try tree.write("demo/Helper.java", "package demo;\n\nclass Helper {}\n");
+    _ = try tree.rescan();
+    return tree.invocations() - baseline;
+}
+
+test "a stale dependent survives its provider's removal without blocking publication" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try packageTree(&tree, 1);
+    try tree.write("demo/Helper.java", "package demo;\n\nclass Helper {}\n");
+    _ = try tree.rescan();
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const helper = before.findDefinition("demo/Helper.java", "Helper").?;
+    const greeter = before.unitByPath("demo/Greeter.java").?;
+
+    try tree.write("demo/Greeter.java", "package demo;\n\nclass Greeter {\n    Helper helper;\n");
+    _ = try tree.rescan();
+    try tree.remove("demo/Helper.java");
+    const outcome = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), outcome.removed);
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(semidx.core.graph.UnitAnalysis.stale, after.unitAnalysis(greeter.id).?);
+    try testing.expect(after.entityById(helper.id) == null);
+    // The claim is recorded as what an earlier reading established, and does
+    // not answer a current query.
+    try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .target = helper.id }));
+    try testing.expectEqual(@as(usize, 1), after.countRelationships(.{ .target = helper.id, .freshness = .stale }));
+
+    // Repairing the dependent reads it against what exists now.
+    try tree.write("demo/Greeter.java", demo_greeter);
+    _ = try tree.rescan();
+    try expectGreeterUnresolved(&tree, "package `demo`");
+}
+
+test "direct edits and removals keep cross-unit facts current without a scan" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    const greeter = try index.addUnit("demo/Greeter.java", .java, demo_greeter);
+    const helper = try index.addUnit("demo/Helper.java", .java, "package demo;\nclass Helper {}\n");
+    {
+        var snapshot = try index.publish();
+        defer snapshot.deinit();
+        const class = snapshot.findDefinition("demo/Greeter.java", "Greeter").?;
+        try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+            .source = class.id,
+            .target = snapshot.findDefinition("demo/Helper.java", "Helper").?.id,
+            .resolution = .fact,
+        }));
+    }
+
+    _ = try index.applyEdit(helper, "package demo;\nclass Assistant {}\n");
+    {
+        var snapshot = try index.publish();
+        defer snapshot.deinit();
+        const class = snapshot.findDefinition("demo/Greeter.java", "Greeter").?;
+        try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+            .source = class.id,
+            .designator = "Helper",
+            .resolution = .unresolved,
+        }));
+    }
+
+    _ = try index.applyEdit(helper, "package demo;\nclass Helper {}\n");
+    try index.removeUnit(helper);
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(semidx.core.graph.UnitAnalysis.current, snapshot.unitAnalysis(greeter).?);
+    const class = snapshot.findDefinition("demo/Greeter.java", "Greeter").?;
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .source = class.id,
+        .designator = "Helper",
+        .resolution = .unresolved,
+    }));
 }
 
 test "a snapshot taken before an edit keeps observing the state it was published from" {

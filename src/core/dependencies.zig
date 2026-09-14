@@ -5,14 +5,18 @@
 //! assertion is derived from a single unit, and exactly wrong the moment one is
 //! not. This module is the override.
 //!
-//! Nothing declares a dependency today.
 //! [ADR 003](../../docs/adr/003_reject_name_match_assertions.md) rejected the
-//! cheap way to produce cross-unit facts, and the legitimate way — a frontend
-//! applying its language's scoping rules — is waiting on `module` admission. The
-//! mechanism is built now anyway, because the rule it overrides is currently
-//! unconditional and lives in the registry: adding invalidation after a system
-//! has assumed it never needs any is the retrofit the architecture rationale
-//! warns about for incrementality generally.
+//! cheap way to produce cross-unit facts; the first legitimate one is the Java
+//! frontend resolving a type name within its package
+//! ([ADR 004](../../docs/adr/004_allow_java_same_package_type_resolution.md)),
+//! which declares a dependency on the unit that declares the class. The
+//! mechanism predates it on purpose: adding invalidation after a system has
+//! assumed it never needs any is the retrofit the architecture rationale warns
+//! about for incrementality generally.
+//!
+//! A dependency only reaches a unit that already read a provider. A name that
+//! stayed unresolved because its provider did not exist yet read nothing, so
+//! `Index` keeps those current separately, by package.
 //!
 //! What a dependency means here is deliberately coarse: unit A's analysis read
 //! something about unit B, so a change to B obliges a re-read of A. A finer rule

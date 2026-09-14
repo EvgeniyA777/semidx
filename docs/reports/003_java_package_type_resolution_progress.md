@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-Stages 1 to 3 are complete. Stage 4 is next.
+Stages 1 to 4 are complete. Stage 5 is next.
 
 ## Stage Log
 
@@ -24,8 +24,8 @@ Stages 1 to 3 are complete. Stage 4 is next.
 | Stage 1: Context and external target contract | Completed | `DraftTarget.external` names a graph-established definition together with its provider unit. Integration checks every external target before touching the graph. A stale claim may outlive a withdrawn cross-unit target; a current one may not. |
 | Stage 2: Java package binding context | Completed | The analyzer builds a per-package binding table from current Java class facts and hands it to the Java frontend; duplicate names arrive as ambiguous. The frontend does not use it yet. |
 | Stage 3: Java cross-unit type resolution | Completed | A simple type name in an explicit package resolves to the one current top-level class another unit declares in that package, as a `REFERENCES` fact with a dependency on the provider. Every other case stays unresolved with its reason. The repository-scale fixture expectation moved to Stage 4 (see below). |
-| Stage 4: Package export invalidation | Not started | Next. |
-| Stage 5: Documentation, review, and closure | Not started | Closure stage after implementation. |
+| Stage 4: Package export invalidation | Completed | Every index mutation (scan, add, edit, remove) reanalyzes dependents of changed providers and the other Java units of every package whose exported classes changed, ordered so a unit read before the last change is read again. The repository-scale `Helper` reference is now a fact. |
+| Stage 5: Documentation, review, and closure | Not started | Next. |
 
 ## Plan Readiness Gate
 
@@ -149,6 +149,50 @@ Verification:
 | --- | --- |
 | `zig build test --summary all` | 134/134 passed (3 new integration tests); the repository-scale test still passes with its pre-Stage-4 expectation, confirming the ordering analysis above. |
 
+## Stage 4: Package Export Invalidation
+
+Changed files: `src/root.zig`, `src/core/dependencies.zig` (module comment),
+`tests/vertical_slice_test.zig`, `fixtures/repository-scale/README.md`.
+
+Decisions taken inside the plan's boundary:
+
+- `Index.Upkeep` replaces `Index.propagateInvalidation` and runs for every
+  mutation: `applyScan`, and now also `addUnit`, `applyEdit`, and `removeUnit`.
+  Leaving the direct calls without it would let a provider edit remove a class a
+  current dependent still names, and the next publish would refuse the graph.
+- Dependency propagation is computed before the batch touches anything. The
+  previous implementation computed it after removals, and
+  `Graph.removeSourceUnit` forgets every declaration naming the removed unit, so
+  a removed provider's dependents were never reached. That defect was latent
+  while no producer declared dependencies; its old doc comment already claimed
+  the pre-scan reading this now implements.
+- Package export change: each removal and own-content analysis compares the
+  unit's `java_packages.exportsOf` before and after, and records the step at
+  which each package's exports last changed. At the end, a hinted unit of that
+  package is reanalyzed when it currently exports into the package and was not
+  analyzed at or after that step. This is what makes a unit read early in a scan
+  (the repository-scale `Greeter`, read before `Helper`) current, without
+  reanalyzing units that already saw the final bindings.
+- A unit that is stale or cannot be analyzed exports nothing and is not owed a
+  package reanalysis, since reading its unchanged contents again would fail the
+  same way. It can still be reached through its dependency declaration; its
+  stale claim then survives under Stage 1's invariant rule.
+- Reanalysis never changes exports, because exports depend only on a unit's own
+  contents, so one round settles a batch. Owed units are sorted by id so the
+  order does not follow hash-map iteration.
+- Work stays package-scoped: an export change in `demo` reads `demo`'s other
+  units only, and a body edit that leaves exports unchanged reads only the units
+  that declared a dependency on the provider.
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `zig build test --summary all` | 140/140 passed (6 new integration tests; repository-scale test updated to expect the `Helper` fact, `invalidated == 2`, `analyzed == 8`). |
+| Mutation: package-change marking disabled | 7 tests failed, including the repository-scale, provider-addition, provider-lifecycle, invocation-count, stale-dependent, and direct-edit tests. Restored. |
+| Mutation: dependency-propagated reanalysis disabled | `a provider body edit reaches its dependent through the dependency alone` failed. Restored. |
+| `zig build run -- fixtures/repository-scale` | Observational: `Helper` no longer listed among unresolved targets; `decorate` still is; 0 approximate, 0 stale. |
+
 ## Risk Matrix
 
 | Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
@@ -161,6 +205,12 @@ Verification:
 | Same-package names become facts only under ADR 004 | Name matching sneaks back in | Integration (Index) | `java.resolveType` | Qualified, other package, missing, default package, ambiguous, class and method type parameter, member type, supertypes, import, non-class type | `java type names outside the same-package rule stay unresolved and say why` |
 | Same-unit behavior preserved | Local class displaced by a package binding | Integration | `java.resolveType` | Same name in unit and package | `a type declared in the unit still resolves locally ...` |
 | Cross-unit fact attributable, dependency recorded, roster unchanged | Fact without dependency or with a new entity kind | Integration | Snapshot + `graph.dependencies` | — | `a java type name resolves to the one class its package declares in another unit` |
+| Added provider leaves dependent unresolved | No declaration reaches a dependent that read nothing | Fixture + rescan | `Upkeep` package marking | Dependent never edited | `adding a same-package provider resolves a dependent nobody edited`, repository-scale test |
+| Removed, renamed, duplicated, or moved provider leaves a stale fact current | Fact names a withdrawn or no-longer-unique class | Rescan | `Upkeep` | Rename, replacement, duplicate, removal, package move; stale queries checked | `renaming, replacing, duplicating, moving, and removing a provider keep the dependent current` |
+| Cross-unit dependency never triggers | Provider body edit ignored | Rescan | Dependency propagation | Exports unchanged | `a provider body edit reaches its dependent through the dependency alone` |
+| Package invalidation becomes repository-wide | Work grows with unrelated packages | Invocation counts at two sizes | `Upkeep.finish` | 4 vs 24 units in another package, default package, Clojure | `a package export change costs its own package, not the repository` |
+| Stale dependent blocks publication | Dangling claim after provider removal | Rescan | `checkInvariants` | Dependent unparsable | `a stale dependent survives its provider's removal without blocking publication` |
+| Non-scan mutations skip upkeep | Direct edit leaves dangling current fact | Integration | `Index.applyEdit`, `removeUnit`, `addUnit` | — | `direct edits and removals keep cross-unit facts current without a scan` |
 
 ## Verification History
 
@@ -176,6 +226,6 @@ Documentation-only planning checks run during plan creation:
 ## Next Handoff
 
 Continue with
-[Stage 4](../plans/003_java_package_type_resolution.md#stage-4-package-export-invalidation).
+[Stage 5](../plans/003_java_package_type_resolution.md#stage-5-documentation-review-and-closure).
 Semantic Code Indexing (semidx MCP) failed to connect in the implementing
 session (connection timeout), so code was located by targeted direct reads.
