@@ -14,10 +14,10 @@ Companion log for
 
 ## Current Status
 
-Stage 1 is implemented and verified. Discovery walks a root and produces a scan;
-the developer command takes a directory. Nothing reconciles a rescan yet, so the
-registry, rename-surviving identity, and affected-region measurement are still
-ahead.
+Stages 1 and 2 are implemented and verified. Discovery walks a root, and a unit's
+identity no longer depends on where it is found, so a rename preserves everything
+inside the renamed file. Nothing reconciles a rescan yet: the registry has the
+primitives, but deciding what changed between two scans is Stage 3.
 
 ## Stage Log
 
@@ -25,7 +25,7 @@ ahead.
 | --- | --- | --- |
 | Plan creation | Completed | Created the staged plan and this log. Gate applied; findings below. |
 | Stage 1: Source discovery | Completed | `src/source/{root,languages,scan,discovery}.zig`, the `semidx_source` module, `Index.addScan`, and a developer command that takes a root. |
-| Stage 2: Unit identity independent of path | Not started | Awaiting Stage 1. |
+| Stage 2: Unit identity independent of path | Completed | `model.Scope`, unit tombstones, `setSourceUnitPath`, `removeSourceUnit`, and both frontends scoping entities to the unit. |
 | Stage 3: Scan reconciliation | Not started | Awaiting Stage 2. |
 | Stage 4: Affected-region proof at scale | Not started | Awaiting Stage 3. |
 | Stage 5: Cross-unit dependency tracking | Not started | Awaiting Stage 3. Opens with an ADR. |
@@ -188,6 +188,94 @@ Stage 1 DoD, item by item:
   20,000 units, 64 levels. Stage 4 is the first point where a real tree can say
   whether they are reasonable.
 
+## Stage 2 Record
+
+### The Stop Condition Did Not Fire
+
+The plan's third stop condition was that unit identity might not be makeable
+path-independent without changing the accepted `file` definition in `CORE.md`.
+It did not apply: that definition already says "Location is a property, not an
+identity derived from byte or line position. Renames and moves obey the
+constitutional identity and provenance rules", which supports the change rather
+than blocking it. No accepted core meaning changed.
+
+### What Was Built
+
+- `model.Scope` is a union of `repository` and `unit: SourceUnitId`.
+  `IdentityEvidence.scope` now carries it instead of a path string.
+- Source units carry `removed_revision` and tombstone rather than disappear, so
+  a removed unit's identity is never handed to a later one. `SourceUnitView`
+  carries the unit's source-container entity, which is how a consumer gets from
+  a path to entities now.
+- `Graph.setSourceUnitPath` moves a unit: it updates the path property, refreshes
+  the container's evidence, and re-records what ingestion claims. It does not
+  touch `content_revision`, so a rename does not make a unit stale and owes no
+  reanalysis.
+- `Graph.removeSourceUnit` withdraws the unit's assertions and removes its
+  entities, recording a `removed` identity event for each — a definition that
+  left with its file is observable as having left, not merely missing.
+- `Snapshot.EntityFilter` gained `path`, resolved through the unit registry.
+  `findDefinition(path, name)` keeps its shape, so most call sites did not move.
+- Both frontends scope entities to `input.unit.id`.
+
+### Decisions Taken During Stage 2
+
+- **The source container entity has no name.** Its identity is its unit and its
+  role. Naming it by its path would have made the container itself break
+  identity on exactly the operation this stage exists to survive. The path lives
+  on the unit and in the entity's evidence, both of which a rename refreshes.
+- **A missing scope became unrepresentable rather than validated.**
+  `ValidationError.MissingIdentityScope` is gone, because `Scope` is a union with
+  no empty case. A constraint the type enforces is better than one a function
+  checks.
+- **A rename is not an edit.** It opens a revision, because it mutates the graph,
+  but leaves `content_revision` alone. Freshness therefore stays `current`
+  through a rename, which is correct: the contents nobody touched are still the
+  contents that were analyzed.
+- **Unit identity stays an index into an append-only table**, the same shape
+  `EntityId` already uses. Allocated by the graph, never derived from the path,
+  never reused because the table only grows.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core --summary all` | 56/56 passed, up from 50. |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | 56/56 passed. |
+| `zig build test --summary all` | 87/87 passed, after deleting `.zig-cache/` and `zig-out/`. |
+| `zig build run -- fixtures/vertical-slice/java` | Unit paths now come from the registry rather than from identity evidence; output unchanged in shape. |
+| `zig fmt --check build.zig src tests` | Clean. |
+| `./scripts/check-agent-attribution.sh --all` | Passed. |
+
+Stage 2 DoD, item by item:
+
+- A unit-level test renames a unit and asserts that every definition in it, the
+  source container itself, and the relationship count between them are unchanged
+  — and that what ingestion claims about the unit now carries the new path.
+- A test registers two units at the same relative path under different roots and
+  asserts they are distinct units whose definitions, identical in every field a
+  consumer can name, do not correspond and do not occupy the same slot.
+- The existing 81 tests passed unchanged in meaning. The only test edits were
+  three filters where `.scope = <path>` became `.path = <path>`, which is the
+  same question asked of the registry instead of of identity evidence.
+- An end-to-end test renames a real fixture unit, asserts no identity event was
+  recorded at that revision, and then edits the renamed unit and gets four
+  preserved entities — so identity survives a rename *and* an edit after it.
+
+### Residual Risk From Stage 2
+
+- Unit identity is an index into an append-only table. Tombstones make removal
+  safe, but the table never shrinks, so a long-lived process over a churning
+  repository grows it without bound. Same shape as entity tombstones; a
+  compaction story belongs with persistence.
+- `setSourceUnitPath` rejects a move onto an occupied path. A scan that swaps two
+  files' paths therefore cannot be applied as two renames in either order. Stage
+  3 owns rescan reconciliation and must handle the swap, probably by resolving
+  removals before renames.
+- Nothing yet detects a rename. Stage 2 makes one survivable; deciding that a
+  removed path and an added path are the same unit is Stage 3's correspondence
+  rule, using the content identity Stage 1 already produces.
+
 ## Open Questions Carried Into Execution
 
 These are decided inside the plan but are the ones most likely to need revisiting
@@ -212,13 +300,18 @@ Neither anticipated Stage 1 blocker materialized. `std.Io.Dir.iterate` and
 needed no platform scoping beyond skipping itself if the filesystem refuses to
 create a link.
 
-Potential Stage 2 blockers:
+Neither anticipated Stage 2 blocker materialized. The `scope` change touched
+both frontends and three test filters and nothing else, and the stop condition
+did not apply.
 
-- `IdentityEvidence.scope` is a string today and is compared by value. Making it
-  carry unit identity touches both frontends, the reconciler's correspondence
-  rule, and every test that names a path as a scope.
-- The plan's third stop condition applies if unit identity cannot be made
-  path-independent without changing the accepted `file` definition in `CORE.md`.
+Potential Stage 3 blockers:
+
+- A scan that swaps two units' paths cannot be applied as two renames in either
+  order, because a move onto an occupied path is rejected. Reconciliation has to
+  order removals before renames, or stage the moves.
+- Rename correspondence is exact-content only by decision. If a rescan of a real
+  tree shows it almost never fires, the answer is a stronger evidence rule, not a
+  similarity guess presented as a fact.
 
 ## Residual Risk
 
@@ -231,8 +324,9 @@ requirements change rather than proceeding.
 
 ## Next Handoff
 
-Start with Stage 2: unit identity independent of path. Discovery already
-produces the content identity that Stage 3's correspondence rule will need, so
-Stage 2 is purely a model change — allocate unit identity, tombstone removals,
-move path and language to properties, and change `IdentityEvidence.scope` to
-carry unit identity rather than a path string.
+Start with Stage 3: scan reconciliation. Both halves it needs now exist —
+discovery produces content identity, and the registry can rename and remove
+units without breaking what is inside them. Stage 3 decides which of unchanged,
+changed, added, removed, or renamed applies to each unit between two scans, and
+counts frontend invocations so "only the affected region was reanalyzed" is
+measured rather than asserted.

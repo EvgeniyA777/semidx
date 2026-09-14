@@ -98,7 +98,10 @@ fn printSummary(out: *std.Io.Writer, snapshot: *const semidx.Snapshot) !void {
             entity.identity.name orelse "<anonymous>",
         });
         if (entity.evidence) |evidence| {
-            try out.print("  ({s}:{d})", .{ entity.identity.scope, evidence.range.start_row + 1 });
+            // The path comes from the unit registry, not from identity
+            // evidence, which no longer carries one.
+            const path = if (snapshot.unit(evidence.unit)) |unit| unit.path else "<unknown unit>";
+            try out.print("  ({s}:{d})", .{ path, evidence.range.start_row + 1 });
         }
         try out.print("\n", .{});
     }

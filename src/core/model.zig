@@ -177,14 +177,33 @@ pub const Assertion = struct {
     }
 };
 
+/// Where an entity belongs.
+///
+/// A source unit appears here by the identity the graph allocated for it, never
+/// by its path. A path is where a unit is found today; making it the scope would
+/// bake a location into identity, which is the same mistake as deriving identity
+/// from a byte range, and it is what makes renaming a file destroy the identity
+/// of everything inside it.
+pub const Scope = union(enum) {
+    /// The indexed source tree itself.
+    repository,
+    /// One source unit.
+    unit: SourceUnitId,
+
+    pub fn eql(a: Scope, b: Scope) bool {
+        return std.meta.eql(a, b);
+    }
+};
+
 /// Evidence that two observations describe the same semantic entity.
 ///
 /// This is evidence, not an id: the graph allocates ids and consults this to
 /// decide correspondence. A body edit leaves it unchanged; moving a definition
 /// within its container leaves it unchanged, because no field is positional.
 pub const IdentityEvidence = struct {
-    /// The source scope the entity belongs to, such as a source unit path.
-    scope: []const u8,
+    /// The scope the entity belongs to, by allocated identity rather than by
+    /// location. A rename moves a property of the unit and leaves this alone.
+    scope: Scope,
     /// Absent for source containers that are not presented to analysis as one
     /// language, such as the repository root.
     language: ?Language,
@@ -197,7 +216,7 @@ pub const IdentityEvidence = struct {
 
     pub fn corresponds(a: IdentityEvidence, b: IdentityEvidence) bool {
         if (a.language != b.language) return false;
-        if (!std.mem.eql(u8, a.scope, b.scope)) return false;
+        if (!a.scope.eql(b.scope)) return false;
         if (!std.mem.eql(u8, a.role, b.role)) return false;
         if (!optionalStringEql(a.name, b.name)) return false;
         if (!optionalStringEql(a.signature, b.signature)) return false;
@@ -213,7 +232,7 @@ pub const IdentityEvidence = struct {
     /// replacement is reported as identity loss instead of silently.
     pub fn sameSlot(a: IdentityEvidence, b: IdentityEvidence) bool {
         if (a.language != b.language) return false;
-        if (!std.mem.eql(u8, a.scope, b.scope)) return false;
+        if (!a.scope.eql(b.scope)) return false;
         if (!std.mem.eql(u8, a.role, b.role)) return false;
         if (a.container_path.len != b.container_path.len) return false;
         for (a.container_path, b.container_path) |x, y| {
@@ -338,7 +357,6 @@ pub const ValidationError = error{
     MissingRelationshipEvidence,
     UnresolvedTargetPresentedAsFact,
     ResolvedTargetMarkedUnresolved,
-    MissingIdentityScope,
     MissingIdentityRole,
 };
 
@@ -385,8 +403,10 @@ pub fn validateAssertion(
     }
 }
 
+/// There is no scope check here. `Scope` is a union with no empty case, so a
+/// missing scope is unrepresentable rather than rejected — which is the better
+/// of the two, and is why the previous `MissingIdentityScope` error is gone.
 pub fn validateIdentityEvidence(identity: IdentityEvidence) ValidationError!void {
-    if (identity.scope.len == 0) return error.MissingIdentityScope;
     if (identity.role.len == 0) return error.MissingIdentityRole;
 }
 
@@ -503,7 +523,7 @@ test "calls answer a reference query and containment does not" {
 test "identity evidence ignores source position" {
     const containers = [_][]const u8{"Greeter"};
     const a: IdentityEvidence = .{
-        .scope = "java/Greeter.java",
+        .scope = .{ .unit = test_unit },
         .language = .java,
         .role = "method",
         .name = "greet",
@@ -541,7 +561,7 @@ test "identity evidence is not an entity id" {
     // Two entities may carry equal evidence in different scopes and stay
     // distinct; nothing derives an id from these fields.
     const a: IdentityEvidence = .{
-        .scope = "java/Greeter.java",
+        .scope = .{ .unit = test_unit },
         .language = .java,
         .role = "method",
         .name = "greet",
@@ -549,28 +569,41 @@ test "identity evidence is not an entity id" {
         .container_path = &.{},
     };
     var b = a;
-    b.scope = "java/Other.java";
+    b.scope = .{ .unit = @enumFromInt(1) };
     try testing.expect(!a.corresponds(b));
     try testing.expect(!a.sameSlot(b));
 }
 
-test "identity evidence must name a scope and a role" {
-    try testing.expectError(error.MissingIdentityScope, validateIdentityEvidence(.{
-        .scope = "",
-        .language = .clojure,
-        .role = "defn",
-        .name = "greet",
-        .signature = null,
-        .container_path = &.{},
-    }));
+test "a scope is an allocated identity, not a location" {
+    // Two units may sit at the same relative path under different roots. They
+    // are different units, so entities in them do not correspond, and no
+    // rewriting of paths can make them.
+    const first: Scope = .{ .unit = @enumFromInt(0) };
+    const second: Scope = .{ .unit = @enumFromInt(1) };
+    try testing.expect(!first.eql(second));
+    try testing.expect(first.eql(.{ .unit = @enumFromInt(0) }));
+    try testing.expect(!first.eql(.repository));
+    const root: Scope = .repository;
+    try testing.expect(root.eql(.repository));
+}
+
+test "identity evidence must name a role" {
     try testing.expectError(error.MissingIdentityRole, validateIdentityEvidence(.{
-        .scope = "clojure/greeter.clj",
+        .scope = .{ .unit = test_unit },
         .language = .clojure,
         .role = "",
         .name = "greet",
         .signature = null,
         .container_path = &.{},
     }));
+    try validateIdentityEvidence(.{
+        .scope = .repository,
+        .language = null,
+        .role = "repository",
+        .name = null,
+        .signature = null,
+        .container_path = &.{},
+    });
 }
 
 test "a relationship without source evidence is rejected" {

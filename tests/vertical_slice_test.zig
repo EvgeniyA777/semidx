@@ -78,7 +78,7 @@ test "the java fixture yields the expected entities and relationships" {
 
     // Source ingestion says the repository contains the file. The frontend says
     // the file introduces the class, and the class introduces its methods.
-    const java_file = snapshot.findEntity(.{ .kind = .file, .scope = java_path }).?;
+    const java_file = snapshot.findEntity(.{ .kind = .file, .path = java_path }).?;
     try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
         .kind = .contains,
         .target = java_file.id,
@@ -582,7 +582,7 @@ test "editing a clojure fixture into unparsable source stops its facts being cur
     // Still recorded, still attributed, just not current.
     try testing.expectEqual(greet_before.id, after.findEntity(.{
         .kind = .definition,
-        .scope = clojure_path,
+        .path = clojure_path,
         .name = "greet",
         .freshness = .stale,
     }).?.id);
@@ -594,13 +594,13 @@ test "the source container's extent tracks the file it stands for" {
 
     var before = try fixture.index.publish();
     defer before.deinit();
-    const file_before = before.findEntity(.{ .kind = .file, .scope = java_path }).?;
+    const file_before = before.findEntity(.{ .kind = .file, .path = java_path }).?;
 
     _ = try fixture.edit(fixture.java_unit, "java/edits/02_added_definition.java");
 
     var after = try fixture.index.publish();
     defer after.deinit();
-    const file_after = after.findEntity(.{ .kind = .file, .scope = java_path }).?;
+    const file_after = after.findEntity(.{ .kind = .file, .path = java_path }).?;
 
     try testing.expectEqual(file_before.id, file_after.id);
     try testing.expect(
@@ -665,6 +665,51 @@ test "a scan of the fixture root discovers its units without a manual list" {
     const unparsable = snapshot.unitByPath("java/edits/05_unparsable.java").?;
     try testing.expectEqual(semidx.core.graph.UnitAnalysis.pending, unparsable.analysis());
     try testing.expect(snapshot.countDiagnostics(.analysis_failed) > 0);
+}
+
+test "renaming a java fixture keeps every identity inside it" {
+    var fixture = try Fixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const greeter = before.findDefinition(java_path, "Greeter").?;
+    const greet = before.findDefinition(java_path, "greet").?;
+    const announce = before.findDefinition(java_path, "announce").?;
+    const file = before.unit(fixture.java_unit).?.entity;
+    const calls_before = before.countRelationships(.{ .source = announce.id });
+
+    try fixture.index.renameUnit(fixture.java_unit, "java/Renamed.java");
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+
+    // Everything the file introduced kept its id, and so did the file.
+    try testing.expectEqual(greeter.id, after.findDefinition("java/Renamed.java", "Greeter").?.id);
+    try testing.expectEqual(greet.id, after.findDefinition("java/Renamed.java", "greet").?.id);
+    try testing.expectEqual(file, after.unit(fixture.java_unit).?.entity);
+    try testing.expectEqual(calls_before, after.countRelationships(.{ .source = announce.id }));
+
+    // A rename is not an edit. Nothing went stale, and no identity broke.
+    try testing.expectEqual(
+        semidx.core.graph.UnitAnalysis.current,
+        after.unitAnalysis(fixture.java_unit).?,
+    );
+    const events = try after.identityEventsAt(after.revision, testing.allocator);
+    defer testing.allocator.free(events);
+    try testing.expectEqual(@as(usize, 0), events.len);
+
+    // The Clojure unit did not move.
+    try testing.expect(after.findDefinition(clojure_path, "greet") != null);
+
+    // And an edit after the rename still reconciles against the same entities.
+    const outcome = try fixture.edit(fixture.java_unit, "java/edits/01_body_edit.java");
+    try testing.expectEqual(@as(usize, 4), outcome.preserved);
+    try testing.expectEqual(@as(usize, 0), outcome.lost);
+
+    var edited = try fixture.index.publish();
+    defer edited.deinit();
+    try testing.expectEqual(greet.id, edited.findDefinition("java/Renamed.java", "greet").?.id);
 }
 
 test "a snapshot taken before an edit keeps observing the state it was published from" {

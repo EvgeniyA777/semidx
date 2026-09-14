@@ -62,7 +62,8 @@ pub fn analyze(
     }
 
     const gpa = builder.gpa;
-    const scope = try builder.dupe(input.unit.path);
+    // Entities are scoped to the unit, not to where the unit currently sits.
+    const scope: model.Scope = .{ .unit = input.unit.id };
 
     var classes: std.ArrayList(ClassInfo) = .empty;
     defer classes.deinit(gpa);

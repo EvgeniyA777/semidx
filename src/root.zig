@@ -101,6 +101,21 @@ pub const Index = struct {
         }
     }
 
+    /// Moves a unit to a new path. Its contents did not change, so nothing is
+    /// reanalyzed and nothing inside it loses its identity.
+    pub fn renameUnit(
+        self: *Index,
+        unit: model.SourceUnitId,
+        path: []const u8,
+    ) !void {
+        _ = try self.graph.setSourceUnitPath(unit, path);
+    }
+
+    /// Takes a unit out of the index, removing what it introduced.
+    pub fn removeUnit(self: *Index, unit: model.SourceUnitId) !void {
+        try self.graph.removeSourceUnit(unit);
+    }
+
     pub fn publish(self: *Index) !Snapshot {
         return self.graph.publish();
     }

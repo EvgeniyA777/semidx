@@ -21,6 +21,7 @@ pub const GraphError = error{
     DefinitionIntroductionTargetMustBeDefinition,
     DuplicateSourceUnitPath,
     UnknownSourceUnit,
+    RemovedSourceUnit,
     DanglingAssertionEndpoint,
 } || model.ValidationError || Allocator.Error;
 
@@ -52,6 +53,13 @@ pub const SourceUnitRecord = struct {
     /// The revision at which a frontend last analyzed this unit successfully,
     /// or 0 if it never has.
     analysis_revision: u64,
+    /// Set when the unit leaves the index. The record stays behind so its
+    /// identity is never handed to a later unit.
+    removed_revision: ?u64,
+
+    pub fn isLive(self: SourceUnitRecord) bool {
+        return self.removed_revision == null;
+    }
 
     pub fn analysis(self: SourceUnitRecord) UnitAnalysis {
         if (self.analysis_revision == 0) return .pending;
@@ -63,6 +71,7 @@ pub const SourceUnitRecord = struct {
             .id = self.id,
             .path = self.path,
             .language = self.language,
+            .entity = self.entity,
             .content_revision = self.content_revision,
             .analysis_revision = self.analysis_revision,
         };
@@ -73,8 +82,15 @@ pub const SourceUnitRecord = struct {
 /// snapshot answers questions about the graph, not about source text.
 pub const SourceUnitView = struct {
     id: SourceUnitId,
+    /// Where the unit is found now. A property, not its identity: a rename
+    /// changes this and leaves the unit, its contents, and everything defined
+    /// inside it alone.
     path: []const u8,
     language: model.Language,
+    /// The source container entity for this unit. A consumer that found a unit
+    /// by path reaches its entities from here, rather than by matching a path
+    /// against identity evidence.
+    entity: EntityId,
     content_revision: u64,
     analysis_revision: u64,
 
@@ -114,7 +130,7 @@ pub const Graph = struct {
         self.repository = try self.addEntity(.{
             .kind = .repository,
             .identity = .{
-                .scope = repository_path,
+                .scope = .repository,
                 .language = null,
                 .role = "repository",
                 .name = repository_path,
@@ -165,13 +181,17 @@ pub const Graph = struct {
         const interned_path = try self.pool.intern(path);
         const owned_bytes = try self.gpa.dupe(u8, bytes);
 
+        // The source container's identity is the unit, and nothing else. Its
+        // name is deliberately absent: a path is the one property a rename
+        // changes, so naming the entity by it would make every rename an
+        // identity break for the container itself.
         const file_entity = self.addEntity(.{
             .kind = .file,
             .identity = .{
-                .scope = interned_path,
+                .scope = .{ .unit = id },
                 .language = language,
                 .role = "file",
-                .name = interned_path,
+                .name = null,
                 .signature = null,
                 .container_path = &.{},
             },
@@ -194,6 +214,7 @@ pub const Graph = struct {
             .entity = file_entity,
             .content_revision = self.revision,
             .analysis_revision = 0,
+            .removed_revision = null,
         }) catch |err| {
             self.gpa.free(owned_bytes);
             return err;
@@ -263,6 +284,82 @@ pub const Graph = struct {
         );
     }
 
+    /// Moves a unit to a new path.
+    ///
+    /// Nothing about the unit's identity, its contents, or the entities defined
+    /// inside it changes, because none of them is derived from the path. What
+    /// changes is one property and the evidence that carries it, so the unit
+    /// does not go stale and no reanalysis is owed.
+    pub fn setSourceUnitPath(
+        self: *Graph,
+        id: SourceUnitId,
+        path: []const u8,
+    ) GraphError!u64 {
+        const index = id.index();
+        if (index >= self.units.items.len) return error.UnknownSourceUnit;
+        if (!self.units.items[index].isLive()) return error.RemovedSourceUnit;
+        if (self.unitByPath(path)) |occupant| {
+            if (occupant != id) return error.DuplicateSourceUnitPath;
+        }
+
+        const revision = self.beginRevision();
+        const interned = try self.pool.intern(path);
+        self.units.items[index].path = interned;
+
+        const record = self.units.items[index];
+        try self.refreshEntity(record.entity, .{
+            .unit = record.id,
+            .range = wholeUnitRange(record.bytes),
+            .text = interned,
+        }, model.ExtensionPayload.empty);
+
+        self.dropIngestionAssertionsForUnit(id);
+        try self.recordUnitIngestion(record);
+        return revision;
+    }
+
+    /// Takes a unit out of the index.
+    ///
+    /// Its entities are removed and its assertions withdrawn, each with a
+    /// recorded identity event: a definition that left with its file must be
+    /// observable as having left, not simply missing. The unit record stays
+    /// behind tombstoned, so its identity is never reused.
+    pub fn removeSourceUnit(self: *Graph, id: SourceUnitId) GraphError!void {
+        const index = id.index();
+        if (index >= self.units.items.len) return error.UnknownSourceUnit;
+        if (!self.units.items[index].isLive()) return error.RemovedSourceUnit;
+
+        const revision = self.beginRevision();
+        const file_entity = self.units.items[index].entity;
+        self.units.items[index].removed_revision = revision;
+
+        var definitions: std.ArrayList(EntityId) = .empty;
+        defer definitions.deinit(self.gpa);
+        try self.definitionsInUnit(id, &definitions, self.gpa);
+
+        self.dropAssertionsForUnit(id);
+        self.dropIngestionAssertionsForUnit(id);
+        self.dropDiagnosticsForUnit(id);
+
+        for (definitions.items) |entity_id| {
+            try self.addIdentityEvent(
+                .removed,
+                entity_id,
+                null,
+                "the source unit that introduced it is no longer indexed",
+            );
+            try self.removeEntity(entity_id);
+        }
+
+        try self.addIdentityEvent(
+            .removed,
+            file_entity,
+            null,
+            "the source unit is no longer indexed",
+        );
+        try self.removeEntity(file_entity);
+    }
+
     /// Records that a frontend has analyzed this unit's current contents.
     pub fn markAnalyzed(self: *Graph, id: SourceUnitId) GraphError!void {
         const record = self.unitMut(id) orelse return error.UnknownSourceUnit;
@@ -271,6 +368,7 @@ pub const Graph = struct {
 
     pub fn unitByPath(self: *const Graph, path: []const u8) ?SourceUnitId {
         for (self.units.items) |record| {
+            if (!record.isLive()) continue;
             if (std.mem.eql(u8, record.path, path)) return record.id;
         }
         return null;
@@ -290,6 +388,7 @@ pub const Graph = struct {
 
     pub fn frontendInput(self: *const Graph, id: SourceUnitId) ?contract.FrontendInput {
         const record = self.unit(id) orelse return null;
+        if (!record.isLive()) return null;
         return .{ .unit = .{
             .id = record.id,
             .path = record.path,
@@ -522,7 +621,9 @@ pub const Graph = struct {
 
         var units: std.ArrayList(SourceUnitView) = .empty;
         errdefer units.deinit(self.gpa);
-        for (self.units.items) |record| try units.append(self.gpa, record.view());
+        for (self.units.items) |record| {
+            if (record.isLive()) try units.append(self.gpa, record.view());
+        }
 
         return .{
             .gpa = self.gpa,
@@ -592,7 +693,7 @@ pub const Graph = struct {
 
     fn internIdentity(self: *Graph, value: model.IdentityEvidence) Allocator.Error!model.IdentityEvidence {
         return .{
-            .scope = try self.pool.intern(value.scope),
+            .scope = value.scope,
             .language = value.language,
             .role = try self.pool.intern(value.role),
             .name = try self.pool.internOptional(value.name),
@@ -736,7 +837,13 @@ pub const Snapshot = struct {
 
     pub const EntityFilter = struct {
         kind: ?model.EntityKind = null,
-        scope: ?[]const u8 = null,
+        /// Matches by allocated scope.
+        scope: ?model.Scope = null,
+        /// Matches by where a unit is found right now. A convenience over
+        /// `scope`, resolved through the unit registry rather than by comparing
+        /// a path against identity evidence — which is exactly what identity
+        /// evidence no longer holds.
+        path: ?[]const u8 = null,
         name: ?[]const u8 = null,
         role: ?[]const u8 = null,
         language: ?model.Language = null,
@@ -759,7 +866,11 @@ pub const Snapshot = struct {
                     if (entity.kind != kind) continue;
                 }
                 if (self.filter.scope) |scope| {
-                    if (!std.mem.eql(u8, entity.identity.scope, scope)) continue;
+                    if (!entity.identity.scope.eql(scope)) continue;
+                }
+                if (self.filter.path) |path| {
+                    const view = self.snapshot.unitByPath(path) orelse return null;
+                    if (!entity.identity.scope.eql(.{ .unit = view.id })) continue;
                 }
                 if (self.filter.name) |name| {
                     const entity_name = entity.identity.name orelse continue;
@@ -806,11 +917,12 @@ pub const Snapshot = struct {
         return null;
     }
 
-    /// Looks a definition up by identity evidence a consumer can name. It is a
-    /// query convenience, not an identity: the answer is an entity that carries
-    /// its own id. Stale definitions are excluded, like every other query.
-    pub fn findDefinition(self: *const Snapshot, scope: []const u8, name: []const u8) ?model.Entity {
-        return self.findEntity(.{ .kind = .definition, .scope = scope, .name = name });
+    /// Looks a definition up by the unit it is currently found in and its name.
+    /// It is a query convenience, not an identity: the answer is an entity that
+    /// carries its own id, and the path is resolved through the unit registry.
+    /// Stale definitions are excluded, like every other query.
+    pub fn findDefinition(self: *const Snapshot, path: []const u8, name: []const u8) ?model.Entity {
+        return self.findEntity(.{ .kind = .definition, .path = path, .name = name });
     }
 
     // -- relationships ------------------------------------------------------
@@ -981,7 +1093,6 @@ const frontend: model.Producer = .{ .name = "frontend.test", .version = "slice-0
 fn addDefinition(
     graph: *Graph,
     unit: SourceUnitId,
-    scope: []const u8,
     name: []const u8,
     range: model.SourceRange,
 ) !EntityId {
@@ -989,7 +1100,7 @@ fn addDefinition(
     const id = try graph.addEntity(.{
         .kind = .definition,
         .identity = .{
-            .scope = scope,
+            .scope = .{ .unit = unit },
             .language = .java,
             .role = "method",
             .name = name,
@@ -1014,8 +1125,8 @@ test "a graph is built and queried without any language frontend" {
     defer graph.deinit();
 
     const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
-    const greet = try addDefinition(&graph, unit, "a/A.java", "greet", testRange(0, 5));
-    const greeting = try addDefinition(&graph, unit, "a/A.java", "greeting", testRange(6, 14));
+    const greet = try addDefinition(&graph, unit, "greet", testRange(0, 5));
+    const greeting = try addDefinition(&graph, unit, "greeting", testRange(6, 14));
 
     _ = try graph.addRelationship(
         .{ .kind = .calls, .source = greet, .target = .{ .entity = greeting } },
@@ -1067,7 +1178,7 @@ test "a relationship to an entity the graph does not have is rejected" {
     var graph = try Graph.init(testing.allocator, "fixtures");
     defer graph.deinit();
     const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
-    const greet = try addDefinition(&graph, unit, "a/A.java", "greet", testRange(0, 5));
+    const greet = try addDefinition(&graph, unit, "greet", testRange(0, 5));
 
     try testing.expectError(error.UnknownEntity, graph.addRelationship(
         .{ .kind = .calls, .source = greet, .target = .{ .entity = @enumFromInt(99) } },
@@ -1087,8 +1198,8 @@ test "a relationship to a removed entity is rejected" {
     var graph = try Graph.init(testing.allocator, "fixtures");
     defer graph.deinit();
     const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
-    const greet = try addDefinition(&graph, unit, "a/A.java", "greet", testRange(0, 5));
-    const gone = try addDefinition(&graph, unit, "a/A.java", "gone", testRange(6, 10));
+    const greet = try addDefinition(&graph, unit, "greet", testRange(0, 5));
+    const gone = try addDefinition(&graph, unit, "gone", testRange(6, 10));
 
     try graph.removeEntity(gone);
     try testing.expectError(error.RemovedEntity, graph.addRelationship(
@@ -1104,7 +1215,7 @@ test "containment cannot point at an unresolved designator" {
     var graph = try Graph.init(testing.allocator, "fixtures");
     defer graph.deinit();
     const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
-    const greet = try addDefinition(&graph, unit, "a/A.java", "greet", testRange(0, 5));
+    const greet = try addDefinition(&graph, unit, "greet", testRange(0, 5));
 
     try testing.expectError(error.UnresolvedContainment, graph.addRelationship(
         .{ .kind = .contains, .source = greet, .target = .{ .designator = "somewhere" } },
@@ -1132,7 +1243,7 @@ test "an invalid resolution never reaches the graph" {
     var graph = try Graph.init(testing.allocator, "fixtures");
     defer graph.deinit();
     const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
-    const greet = try addDefinition(&graph, unit, "a/A.java", "greet", testRange(0, 5));
+    const greet = try addDefinition(&graph, unit, "greet", testRange(0, 5));
 
     try testing.expectError(error.UnresolvedTargetPresentedAsFact, graph.addRelationship(
         .{ .kind = .calls, .source = greet, .target = .{ .designator = "println" } },
@@ -1152,13 +1263,13 @@ test "a published snapshot does not observe later graph mutation" {
     var graph = try Graph.init(testing.allocator, "fixtures");
     defer graph.deinit();
     const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
-    _ = try addDefinition(&graph, unit, "a/A.java", "greet", testRange(0, 5));
+    _ = try addDefinition(&graph, unit, "greet", testRange(0, 5));
 
     var before = try graph.publish();
     defer before.deinit();
 
     _ = graph.beginRevision();
-    _ = try addDefinition(&graph, unit, "a/A.java", "farewell", testRange(6, 15));
+    _ = try addDefinition(&graph, unit, "farewell", testRange(6, 15));
 
     var after = try graph.publish();
     defer after.deinit();
@@ -1172,8 +1283,8 @@ test "publishing refuses a state whose assertions have lost an endpoint" {
     var graph = try Graph.init(testing.allocator, "fixtures");
     defer graph.deinit();
     const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
-    const greet = try addDefinition(&graph, unit, "a/A.java", "greet", testRange(0, 5));
-    const greeting = try addDefinition(&graph, unit, "a/A.java", "greeting", testRange(6, 14));
+    const greet = try addDefinition(&graph, unit, "greet", testRange(0, 5));
+    const greeting = try addDefinition(&graph, unit, "greeting", testRange(6, 14));
     _ = try graph.addRelationship(
         .{ .kind = .calls, .source = greet, .target = .{ .entity = greeting } },
         frontend,
@@ -1189,11 +1300,11 @@ test "a source range is evidence, not identity" {
     var graph = try Graph.init(testing.allocator, "fixtures");
     defer graph.deinit();
     const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
-    const greet = try addDefinition(&graph, unit, "a/A.java", "greet", testRange(0, 5));
+    const greet = try addDefinition(&graph, unit, "greet", testRange(0, 5));
 
     // Two definitions may legitimately report the same range; they stay
     // distinct entities, and neither id is derived from the range.
-    const other = try addDefinition(&graph, unit, "a/A.java", "other", testRange(0, 5));
+    const other = try addDefinition(&graph, unit, "other", testRange(0, 5));
     try testing.expect(greet != other);
 
     // Moving the definition changes only the projection.
@@ -1258,12 +1369,150 @@ test "a unit is pending until it is analyzed and current afterwards" {
     try testing.expectEqual(UnitAnalysis.pending, pending.unitAnalysis(unit).?);
     try testing.expectEqual(@as(usize, 1), pending.countUnits(.pending));
 
-    _ = try addDefinition(&graph, unit, "a/A.java", "greet", testRange(0, 5));
+    _ = try addDefinition(&graph, unit, "greet", testRange(0, 5));
 
     var current = try graph.publish();
     defer current.deinit();
     try testing.expectEqual(UnitAnalysis.current, current.unitAnalysis(unit).?);
     try testing.expectEqual(@as(usize, 1), current.countEntities(.{ .kind = .definition }));
+}
+
+test "renaming a unit changes one property and nothing else" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const unit = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
+    const greet = try addDefinition(&graph, unit, "greet", testRange(0, 5));
+    const greeting = try addDefinition(&graph, unit, "greeting", testRange(6, 14));
+    _ = try graph.addRelationship(
+        .{ .kind = .calls, .source = greet, .target = .{ .entity = greeting } },
+        frontend,
+        .{ .unit = unit, .range = testRange(20, 30), .text = "greeting()" },
+        .{ .fact = .{ .method = "same-container name match" } },
+    );
+
+    var before = try graph.publish();
+    defer before.deinit();
+    const file_before = before.unit(unit).?.entity;
+    const relationships_before = before.countRelationships(.{ .source = greet });
+
+    _ = try graph.setSourceUnitPath(unit, "b/Renamed.java");
+
+    var after = try graph.publish();
+    defer after.deinit();
+
+    // The unit, its source container, and every definition inside it kept
+    // their identity. Only the path moved.
+    try testing.expectEqualStrings("b/Renamed.java", after.unit(unit).?.path);
+    try testing.expectEqual(file_before, after.unit(unit).?.entity);
+    try testing.expectEqual(greet, after.findDefinition("b/Renamed.java", "greet").?.id);
+    try testing.expectEqual(greeting, after.findDefinition("b/Renamed.java", "greeting").?.id);
+    try testing.expectEqual(relationships_before, after.countRelationships(.{ .source = greet }));
+
+    // A rename is not a content change, so nothing went stale and no
+    // reanalysis is owed.
+    try testing.expectEqual(UnitAnalysis.current, after.unitAnalysis(unit).?);
+
+    // The old path answers nothing, and what ingestion claims about the unit
+    // carries the new one.
+    try testing.expect(after.findDefinition("a/A.java", "greet") == null);
+    try testing.expectEqualStrings(
+        "b/Renamed.java",
+        after.firstRelationship(.{ .kind = .contains, .target = file_before }).?.evidence.?.text,
+    );
+    try testing.expect(after.entityById(file_before).?.identity.name == null);
+}
+
+test "two units at the same relative path are different units" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    // Same relative path, different roots, modelled here as the two distinct
+    // units an indexer would register for them.
+    const first = try graph.addSourceUnit("one/demo/A.java", .java, "class A {}\n");
+    const second = try graph.addSourceUnit("two/demo/A.java", .java, "class A {}\n");
+    try testing.expect(first != second);
+
+    const in_first = try addDefinition(&graph, first, "greet", testRange(0, 5));
+    const in_second = try addDefinition(&graph, second, "greet", testRange(0, 5));
+    try testing.expect(in_first != in_second);
+
+    // Identical in every respect a consumer can name, and still not the same
+    // entity, because the scope they carry is the unit rather than the path.
+    const a = graph.entity(in_first).?.identity;
+    const b = graph.entity(in_second).?.identity;
+    try testing.expectEqualStrings(a.name.?, b.name.?);
+    try testing.expect(!a.corresponds(b));
+    try testing.expect(!a.sameSlot(b));
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(in_first, snapshot.findDefinition("one/demo/A.java", "greet").?.id);
+    try testing.expectEqual(in_second, snapshot.findDefinition("two/demo/A.java", "greet").?.id);
+}
+
+test "removing a unit removes what it introduced, visibly" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const going = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
+    const staying = try graph.addSourceUnit("b/B.java", .java, "class B {}\n");
+    const greet = try addDefinition(&graph, going, "greet", testRange(0, 5));
+    const other = try addDefinition(&graph, staying, "other", testRange(0, 5));
+
+    var before = try graph.publish();
+    defer before.deinit();
+    const file_going = before.unit(going).?.entity;
+
+    try graph.removeSourceUnit(going);
+
+    var after = try graph.publish();
+    defer after.deinit();
+
+    try testing.expect(after.unit(going) == null);
+    try testing.expect(after.entityById(greet) == null);
+    try testing.expect(after.entityById(file_going) == null);
+    try testing.expectEqual(@as(usize, 1), after.countEntities(.{ .kind = .file }));
+    try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .target = file_going }));
+
+    // The definition did not simply stop being mentioned; its departure is a
+    // recorded identity event.
+    const event = after.identityEventFor(greet, after.revision).?;
+    try testing.expectEqual(model.IdentityEventKind.removed, event.kind);
+    try testing.expect(event.replacement == null);
+
+    // The other unit is untouched.
+    try testing.expectEqual(other, after.findDefinition("b/B.java", "other").?.id);
+    try testing.expectEqual(UnitAnalysis.current, after.unitAnalysis(staying).?);
+}
+
+test "a removed unit's identity is never handed to a later unit" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const first = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
+    try graph.removeSourceUnit(first);
+
+    // The same path becomes available again, and gets a different unit.
+    const second = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
+    try testing.expect(first != second);
+    try testing.expectError(error.RemovedSourceUnit, graph.removeSourceUnit(first));
+    try testing.expectError(error.RemovedSourceUnit, graph.setSourceUnitPath(first, "c/C.java"));
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(second, snapshot.unitByPath("a/A.java").?.id);
+}
+
+test "a rename onto an occupied path is rejected" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const first = try graph.addSourceUnit("a/A.java", .java, "class A {}\n");
+    _ = try graph.addSourceUnit("b/B.java", .java, "class B {}\n");
+
+    try testing.expectError(
+        error.DuplicateSourceUnitPath,
+        graph.setSourceUnitPath(first, "b/B.java"),
+    );
+    // Renaming a unit to the path it already has is not a conflict with itself.
+    _ = try graph.setSourceUnitPath(first, "a/A.java");
 }
 
 test "a duplicate source unit path is rejected" {

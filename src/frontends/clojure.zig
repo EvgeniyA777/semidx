@@ -95,7 +95,8 @@ pub fn analyze(
     }
 
     const gpa = builder.gpa;
-    const scope = try builder.dupe(input.unit.path);
+    // Entities are scoped to the unit, not to where the unit currently sits.
+    const scope: model.Scope = .{ .unit = input.unit.id };
 
     // The namespace is resolved first so that a definition's containment does
     // not depend on the order forms happen to appear in.

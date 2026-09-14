@@ -234,7 +234,6 @@ fn range(start: u32, end: u32) model.SourceRange {
 /// which is resolved only when a definition of that name is present.
 fn syntheticBatch(
     builder: *contract.BatchBuilder,
-    scope: []const u8,
     names: []const []const u8,
     body_marker: []const u8,
 ) !void {
@@ -243,7 +242,7 @@ fn syntheticBatch(
         _ = try builder.addEntity(.{
             .kind = .definition,
             .identity = .{
-                .scope = scope,
+                .scope = .{ .unit = builder.unit },
                 .language = .java,
                 .role = "method",
                 .name = try builder.dupe(name),
@@ -306,7 +305,7 @@ fn integrateNames(
 ) !Outcome {
     var builder = contract.BatchBuilder.init(graph.gpa, unit, test_capabilities);
     defer builder.deinit();
-    try syntheticBatch(&builder, graph.unit(unit).?.path, names, body_marker);
+    try syntheticBatch(&builder, names, body_marker);
     return integrate(graph, builder.batch());
 }
 

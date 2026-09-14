@@ -129,6 +129,16 @@ why. This is not a changelog of removed implementation; see `git log`.
   contract. `zig build test-core` builds and runs the core alone, and passes with
   `-Dgrammars-dir=/nonexistent`, which is the mechanical proof that the core does
   not depend on a parser.
+- **A source unit's identity is not its path.** `model.Scope` is `repository` or
+  `unit: SourceUnitId`, and `IdentityEvidence.scope` carries it, so renaming a
+  file moves one property and leaves the unit, its contents, and every entity
+  inside it alone. The source container entity has no name for the same reason:
+  naming it by its path would make the container break identity on precisely the
+  operation this design exists to survive. Path lookups go through the unit
+  registry (`Snapshot.unitByPath`, `EntityFilter.path`), not through identity
+  evidence. A rename opens a revision but does not touch `content_revision`, so
+  it never makes a unit stale. Units tombstone on removal, so an identity is
+  never handed to a later unit.
 - How the model holds the constitutional distinctions. Entity ids are allocated
   by the graph and never derived from a range; ranges are `SourceEvidence` only.
   Every assertion carries a producer and a `Resolution` of `fact`, `unresolved`,
@@ -193,12 +203,11 @@ why. This is not a changelog of removed implementation; see `git log`.
 - No public surface: no MCP, HTTP, gRPC, CLI contract, `contracts/` schemas, or
   runtime mirrors. `semidx-dev` is a developer inspection command and nothing
   asserts against its output.
-- No rescan reconciliation. Source discovery exists (plan 002 Stage 1), but a
-  second scan of a changed tree is not yet reconciled against the first:
-  `Index.addScan` is first-pass only, unit identity is still the path, and a
-  rename still destroys the identity of everything in the renamed file. No
-  cross-unit assertions, no invalidation across units, no file watching, no
-  concurrency.
+- No rescan reconciliation. Discovery exists and renames are survivable
+  (plan 002 Stages 1 and 2), but nothing yet decides what changed between two
+  scans: `Index.addScan` is first-pass only, and nothing detects that a removed
+  path and an added path are the same unit. No cross-unit assertions, no
+  invalidation across units, no file watching, no concurrency.
 - No executable conformance suite and no capability matrix. The fixture evidence
   is scoped to two small files per language.
 - No published semantic contract. The current core admission results accept
@@ -247,10 +256,12 @@ why. This is not a changelog of removed implementation; see `git log`.
   of its five first-slice properties the implementation supplies evidence for;
   none of its scenario families is adopted as an executable check.
 - Known implementation limitations, in full, are in the Residual Risk sections of
-  both progress logs. The load-bearing ones: both frontends resolve by name
-  within one source unit, with no imports, inheritance, overloads, macros, or
-  local bindings; a rename and a file rename are both identity loss because the
-  scope is the unit path; interned strings of removed entities and stale
+  the progress logs (001, 002, 005). The load-bearing ones: both frontends
+  resolve by name within one source unit, with no imports, inheritance,
+  overloads, macros, or local bindings; renaming a *definition* is identity loss,
+  while renaming a *file* is not, because scope is the unit; nothing yet detects
+  that a removed path and an added path are the same unit; the unit table is
+  append-only and never compacts; interned strings of removed entities and stale
   assertions are never reclaimed while the graph lives; freshness is tracked per
   unit, so cross-unit invalidation is undecided and must be settled before any
   cross-unit assertion exists; and both `Snapshot` string borrowing and the
@@ -265,10 +276,10 @@ why. This is not a changelog of removed implementation; see `git log`.
 
 - **The active plan is `docs/plans/002_repository_scale_ingestion.md`**, with
   companion log `docs/reports/005_repository_scale_ingestion_progress.md`. Stage
-  1 is done: `src/source/` owns discovery, the one extension-to-language table,
-  and the only filesystem access in the ingestion path, and `semidx-dev` takes a
-  root directory. It has no parser dependency, so it runs in the `test-core`
-  lane, whose meaning is now "every lane that needs no parser". Stage 2 is next.
+  Stages 1 and 2 are done. `src/source/` owns discovery, the one
+  extension-to-language table, and the only filesystem access in the ingestion
+  path; it has no parser dependency, so it runs in the `test-core` lane, whose
+  meaning is now "every lane that needs no parser". Stage 3 is next.
   It takes the implementation to repository scale: source discovery, a
   source-unit registry whose identity is not a path, rename-surviving identity,
   measured affected-region reanalysis, and a dependency mechanism invalidation
