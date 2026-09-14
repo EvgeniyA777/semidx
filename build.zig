@@ -26,13 +26,30 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Source discovery owns the only filesystem access in the ingestion path.
+    // It reads `core/model` for value vocabulary and nothing else from the core,
+    // and nothing in the core reads it back.
+    const source = b.addModule("semidx_source", .{
+        .root_source_file = b.path("src/source/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "semidx_core", .module = core },
+        },
+    });
+
     const core_tests = b.addTest(.{ .root_module = core });
     const run_core_tests = b.addRunArtifact(core_tests);
-    const core_test_step = b.step("test-core", "Run core model, graph, and reconciliation tests (no parser dependency)");
-    core_test_step.dependOn(&run_core_tests.step);
+    const source_tests = b.addTest(.{ .root_module = source });
+    const run_source_tests = b.addRunArtifact(source_tests);
 
-    const test_step = b.step("test", "Run the full vertical-slice test lane");
+    const core_test_step = b.step("test-core", "Run every lane that needs no parser: shared core and source ingestion");
+    core_test_step.dependOn(&run_core_tests.step);
+    core_test_step.dependOn(&run_source_tests.step);
+
+    const test_step = b.step("test", "Run the full test lane");
     test_step.dependOn(&run_core_tests.step);
+    test_step.dependOn(&run_source_tests.step);
 
     const deps = resolveParserDeps(b) orelse {
         const fail = b.addFail(
@@ -81,6 +98,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "semidx_core", .module = core },
             .{ .name = "semidx_tree_sitter", .module = tree_sitter },
             .{ .name = "semidx_frontends", .module = frontends },
+            .{ .name = "semidx_source", .module = source },
         },
     });
 

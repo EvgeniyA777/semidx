@@ -26,21 +26,37 @@ pub fn main(init: std.process.Init) !void {
 
     var indexed: usize = 0;
     while (arguments.next()) |path| {
+        // A directory is walked; anything else is treated as one source file.
+        // Opening it is the test, because asking the filesystem what something
+        // is and then acting on the answer is two answers.
+        if (std.Io.Dir.cwd().openDir(io, path, .{ .iterate = true, .follow_symlinks = false })) |dir| {
+            var root = dir;
+            defer root.close(io);
+            var found = semidx.source.discovery.scanDir(gpa, io, root, path, .{}) catch |err| {
+                try out.print("skipped {s}: {t}\n", .{ path, err });
+                continue;
+            };
+            defer found.deinit();
+            try index.addScan(found);
+            indexed += found.units.len;
+            continue;
+        } else |_| {}
+
         const language = semidx.languageForPath(path) orelse {
-            try out.print("skipped {s}: no frontend in this slice covers it\n", .{path});
+            try out.print("skipped {s}: no frontend in this build covers it\n", .{path});
             continue;
         };
-        const source = std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(16 << 20)) catch |err| {
+        const bytes = std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(16 << 20)) catch |err| {
             try out.print("skipped {s}: {t}\n", .{ path, err });
             continue;
         };
-        defer gpa.free(source);
-        _ = try index.addUnit(path, language, source);
+        defer gpa.free(bytes);
+        _ = try index.addUnit(path, language, bytes);
         indexed += 1;
     }
 
     if (indexed == 0) {
-        try out.print("usage: semidx-dev <source file>...\n", .{});
+        try out.print("usage: semidx-dev <source file or directory>...\n", .{});
         try out.flush();
         return;
     }

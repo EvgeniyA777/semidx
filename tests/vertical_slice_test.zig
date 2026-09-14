@@ -613,6 +613,60 @@ test "the source container's extent tracks the file it stands for" {
     );
 }
 
+test "a scan of the fixture root discovers its units without a manual list" {
+    const gpa = testing.allocator;
+
+    var root = try std.Io.Dir.cwd().openDir(testing.io, build_options.fixtures_dir, .{
+        .iterate = true,
+        .follow_symlinks = false,
+    });
+    defer root.close(testing.io);
+
+    var found = try semidx.source.discovery.scanDir(
+        gpa,
+        testing.io,
+        root,
+        build_options.fixtures_dir,
+        .{},
+    );
+    defer found.deinit();
+
+    // Both fixture languages are present, every discovered unit is one a
+    // frontend covers, and the base fixtures are among them.
+    try testing.expect(found.units.len >= 4);
+    try testing.expect(found.unitByPath(java_path) != null);
+    try testing.expect(found.unitByPath(clojure_path) != null);
+
+    var java_units: usize = 0;
+    var clojure_units: usize = 0;
+    for (found.units) |unit| {
+        try testing.expectEqual(unit.language, semidx.languageForPath(unit.path).?);
+        switch (unit.language) {
+            .java => java_units += 1,
+            .clojure => clojure_units += 1,
+        }
+    }
+    try testing.expect(java_units > 0);
+    try testing.expect(clojure_units > 0);
+
+    var index = try semidx.Index.init(gpa, build_options.fixtures_dir);
+    defer index.deinit();
+    try index.addScan(found);
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    try testing.expectEqual(found.units.len, snapshot.countEntities(.{ .kind = .file }));
+    try testing.expect(snapshot.findDefinition(java_path, "greet") != null);
+    try testing.expect(snapshot.findDefinition(clojure_path, "greet") != null);
+
+    // The deliberately unparsable fixtures were discovered and registered, and
+    // report that nothing analyzed them rather than looking like empty files.
+    const unparsable = snapshot.unitByPath("java/edits/05_unparsable.java").?;
+    try testing.expectEqual(semidx.core.graph.UnitAnalysis.pending, unparsable.analysis());
+    try testing.expect(snapshot.countDiagnostics(.analysis_failed) > 0);
+}
+
 test "a snapshot taken before an edit keeps observing the state it was published from" {
     var fixture = try Fixture.init(testing.allocator);
     defer fixture.deinit();

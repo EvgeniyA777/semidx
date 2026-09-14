@@ -14,15 +14,17 @@ Companion log for
 
 ## Current Status
 
-Planning is complete and the Plan Readiness Gate has been applied. Implementation
-has not started.
+Stage 1 is implemented and verified. Discovery walks a root and produces a scan;
+the developer command takes a directory. Nothing reconciles a rescan yet, so the
+registry, rename-surviving identity, and affected-region measurement are still
+ahead.
 
 ## Stage Log
 
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Plan creation | Completed | Created the staged plan and this log. Gate applied; findings below. |
-| Stage 1: Source discovery | Not started | Awaiting implementation. |
+| Stage 1: Source discovery | Completed | `src/source/{root,languages,scan,discovery}.zig`, the `semidx_source` module, `Index.addScan`, and a developer command that takes a root. |
 | Stage 2: Unit identity independent of path | Not started | Awaiting Stage 1. |
 | Stage 3: Scan reconciliation | Not started | Awaiting Stage 2. |
 | Stage 4: Affected-region proof at scale | Not started | Awaiting Stage 3. |
@@ -84,6 +86,108 @@ any implementation.
 
 **Gate result: ready for execution.**
 
+## Stage 1 Record
+
+### What Was Built
+
+- `src/source/languages.zig` owns the one extension-to-language table.
+  `semidx.languageForPath` now forwards to it instead of carrying a second copy.
+- `src/source/scan.zig` owns the scan value: `ScannedUnit`, `ScanDiagnostic`,
+  `Budgets`, `Options`, and the exclusion list. Content identity is SHA-256.
+- `src/source/discovery.zig` owns the walk. `scan` opens a root path; `scanDir`
+  walks an already-open handle, which is what lets tests work against a
+  temporary directory without assuming anything about the working directory.
+- `build.zig` gains the `semidx_source` module. It has no C dependency, so it
+  joins the `test-core` step; that step's description now reads "every lane that
+  needs no parser" rather than naming only the core.
+- `Index.addScan` registers a scan's units and records what the scan declined as
+  graph diagnostics, so a file that was found but not ingested stays visible.
+- `semidx-dev` takes directories as well as files.
+
+### Decisions Taken During Stage 1
+
+- **Symbolic links are not followed at all.** The plan asked to refuse links
+  that leave the root and to terminate on loops; declining every link satisfies
+  both with no path arithmetic and no cycle bookkeeping. Every link is reported,
+  so a skipped one is never silent. A link pointing inside the root is therefore
+  also skipped: a real limitation, recorded below rather than hidden.
+- **Exclusion is an explicit directory-name list, not a dot-prefix rule.**
+  `.git` must be skipped and `.github` must not be; only a list can express that.
+- **Units are sorted by path.** Directory iteration order is a filesystem detail,
+  and letting it through would make unit identity allocation in Stage 2 and every
+  test over a scan depend on it.
+- **Content identity is SHA-256, not a fast 64-bit hash.** This value will decide
+  "unchanged, do not reanalyze" and "same unit under a new path". A collision
+  there is not a slow answer; it is a wrong graph with a heuristic wearing the
+  face of a fact.
+- **Policy exclusions produce no diagnostic; everything else does.** A file no
+  frontend covers and a directory on the exclusion list are not degradation. A
+  budget refusal, an unreadable file, and a symbolic link are.
+
+### Plan Correction
+
+The plan's Dependency Direction said `source/discovery` depends on "nothing in
+`core/`", while Stage 1's task list required one extension-to-language table
+shared with `languageForPath`, which returns `model.Language`. Both could not
+hold: honoring the first would have forced a second `Language` enum whose first
+symptom would be a file that is a source unit to one caller and invisible to
+another. The line now permits `core/model` value vocabulary only — `Language`
+and `DiagnosticKind` — and forbids `core/graph`, `core/contract`, and
+`core/reconcile`. The property being protected, that nothing in the core depends
+on the filesystem, is unchanged and is still proved by
+`zig build test-core -Dgrammars-dir=/nonexistent`.
+
+### Defect Found And Fixed During Stage 1
+
+`SourceScan` carries its arena by value, and the returned struct literal
+initialized `.arena` before a field that allocated into that arena. The field
+initializers run in written order, so the arena state was copied before the last
+allocation was made, and that allocation was unreachable from the result. The
+leak checker caught it on the empty-tree case, where it was the only allocation.
+Fixed by hoisting every allocation above the literal, with a comment saying why
+the order matters.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core --summary all` | 50/50 passed: core 38, source 12. |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | 50/50 passed; source ingestion has no parser dependency either. |
+| `zig build test --summary all` | 80/80 passed across five lanes, after deleting `.zig-cache/` and `zig-out/`. |
+| `zig build run -- fixtures` | Walked the fixture tree, registered 12 units, and reported the two deliberately unparsable fixtures as `pending` rather than as empty files. |
+| `zig fmt --check build.zig src tests` | Clean. |
+| `./scripts/check-agent-attribution.sh --all` | Passed. |
+
+Stage 1 DoD, item by item:
+
+- Tests build a temporary tree and assert the discovered set, including that an
+  excluded directory contributes nothing and an unmapped extension is not a
+  unit. Two exclusion cases are covered (`.git`, `zig-out`), plus a `.java.bak`
+  file that must not match on a suffix.
+- A file at the size budget produces a diagnostic naming the limit, and the
+  smaller file beside it is still ingested.
+- A symbolic link loop terminates: a link to its own containing directory is
+  reported, the walk completes, and only the real files are found.
+- The unit budget and the depth budget each produce one diagnostic naming the
+  limit.
+- An unreadable root is `error.RootUnavailable`, not an empty scan.
+- A scan of the same tree twice is identical.
+- `zig build test-core` passes with no filesystem dependency in `src/core/`.
+
+### Residual Risk From Stage 1
+
+- A symbolic link pointing inside the root is skipped along with one pointing
+  out. Correct for confinement, wrong for a repository that uses links
+  internally. The diagnostic makes it visible; widening it needs real path
+  resolution and a cycle set.
+- `SourceScan` holds its arena by value, so copying one and releasing both is a
+  double free. Same shape as `Graph`; documented, not type-enforced.
+- `Index.addScan` is first-pass only. Calling it twice rejects the repeated
+  paths, because reconciliation against an existing registry is Stage 3.
+- Budgets are defaults picked by judgement, not measurement: 4 MiB per file,
+  20,000 units, 64 levels. Stage 4 is the first point where a real tree can say
+  whether they are reasonable.
+
 ## Open Questions Carried Into Execution
 
 These are decided inside the plan but are the ones most likely to need revisiting
@@ -103,12 +207,18 @@ once code exists:
 
 None for plan creation.
 
-Potential Stage 1 blockers:
+Neither anticipated Stage 1 blocker materialized. `std.Io.Dir.iterate` and
+`openDir` with `follow_symlinks = false` were sufficient, and the symlink test
+needed no platform scoping beyond skipping itself if the filesystem refuses to
+create a link.
 
-- `std.Io.Dir` directory walking in Zig 0.16 may not expose what the walk needs
-  without more plumbing than expected; the filesystem API moved in this release.
-- Symlink semantics differ enough across platforms that the confinement test may
-  need to be platform-scoped.
+Potential Stage 2 blockers:
+
+- `IdentityEvidence.scope` is a string today and is compared by value. Making it
+  carry unit identity touches both frontends, the reconciler's correspondence
+  rule, and every test that names a path as a scope.
+- The plan's third stop condition applies if unit identity cannot be made
+  path-independent without changing the accepted `file` definition in `CORE.md`.
 
 ## Residual Risk
 
@@ -121,5 +231,8 @@ requirements change rather than proceeding.
 
 ## Next Handoff
 
-Start with Stage 1. Read the plan, reports 001 to 004, and the current
-`MEMORY.md`, then check the working tree before creating `src/source/`.
+Start with Stage 2: unit identity independent of path. Discovery already
+produces the content identity that Stage 3's correspondence rule will need, so
+Stage 2 is purely a model change — allocate unit identity, tombstone removals,
+move path and language to properties, and change `IdentityEvidence.scope` to
+carry unit identity rather than a path string.

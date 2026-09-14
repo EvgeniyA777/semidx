@@ -193,8 +193,12 @@ why. This is not a changelog of removed implementation; see `git log`.
 - No public surface: no MCP, HTTP, gRPC, CLI contract, `contracts/` schemas, or
   runtime mirrors. `semidx-dev` is a developer inspection command and nothing
   asserts against its output.
-- No repository-scale ingestion: no source discovery, no cross-unit assertions,
-  no invalidation across units, no file watching, no concurrency.
+- No rescan reconciliation. Source discovery exists (plan 002 Stage 1), but a
+  second scan of a changed tree is not yet reconciled against the first:
+  `Index.addScan` is first-pass only, unit identity is still the path, and a
+  rename still destroys the identity of everything in the renamed file. No
+  cross-unit assertions, no invalidation across units, no file watching, no
+  concurrency.
 - No executable conformance suite and no capability matrix. The fixture evidence
   is scoped to two small files per language.
 - No published semantic contract. The current core admission results accept
@@ -260,8 +264,11 @@ why. This is not a changelog of removed implementation; see `git log`.
 ## Near-Term Priorities
 
 - **The active plan is `docs/plans/002_repository_scale_ingestion.md`**, with
-  companion log `docs/reports/005_repository_scale_ingestion_progress.md`. It has
-  passed the Plan Readiness Gate and is ready to execute, starting at Stage 1.
+  companion log `docs/reports/005_repository_scale_ingestion_progress.md`. Stage
+  1 is done: `src/source/` owns discovery, the one extension-to-language table,
+  and the only filesystem access in the ingestion path, and `semidx-dev` takes a
+  root directory. It has no parser dependency, so it runs in the `test-core`
+  lane, whose meaning is now "every lane that needs no parser". Stage 2 is next.
   It takes the implementation to repository scale: source discovery, a
   source-unit registry whose identity is not a path, rename-surviving identity,
   measured affected-region reanalysis, and a dependency mechanism invalidation

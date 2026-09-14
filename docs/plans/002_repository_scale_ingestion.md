@@ -255,7 +255,13 @@ nothing is analyzed in isolation, which is the current behavior and stays valid.
 
 ### Dependency Direction
 
-- `source/discovery` depends on the standard library and on nothing in `core/`.
+- `source/discovery` depends on the standard library and, from `core/model`, on
+  value vocabulary only: `Language` and `DiagnosticKind`. It must not depend on
+  `core/graph`, `core/contract`, or `core/reconcile`. An earlier draft of this
+  line said "nothing in `core/`", which contradicted Stage 1's requirement of one
+  extension-to-language table shared with `languageForPath` and would have forced
+  a second `Language` enum that is guaranteed to drift. The property being
+  protected is the other direction, and it is unchanged.
 - `source/registry` depends on scan values and on `core/model` identity types.
 - `core/graph`, `core/reconcile`, and `core/dependencies` depend on `core/model`
   and on each other as they already do.
