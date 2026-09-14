@@ -10,6 +10,7 @@ const Allocator = std.mem.Allocator;
 const model = @import("model.zig");
 const contract = @import("contract.zig");
 const StringPool = @import("strings.zig").StringPool;
+const dependencies_mod = @import("dependencies.zig");
 
 pub const EntityId = model.EntityId;
 pub const SourceUnitId = model.SourceUnitId;
@@ -135,6 +136,8 @@ pub const Graph = struct {
     units: std.ArrayList(SourceUnitRecord),
     /// Current path to unit, so registering or moving a unit does not scan.
     unit_paths: std.StringHashMapUnmanaged(SourceUnitId),
+    /// What each unit's analysis read beyond its own contents.
+    dependencies: dependencies_mod.Dependencies,
     /// Stored records examined while applying a change scoped to one source
     /// unit.
     ///
@@ -159,6 +162,7 @@ pub const Graph = struct {
             .identity_events = .empty,
             .units = .empty,
             .unit_paths = .empty,
+            .dependencies = dependencies_mod.Dependencies.init(gpa),
             .unit_work = 0,
         };
         errdefer self.deinit();
@@ -195,6 +199,7 @@ pub const Graph = struct {
         for (self.unit_definitions.items) |*bucket| bucket.deinit(self.gpa);
         self.unit_definitions.deinit(self.gpa);
         self.unit_paths.deinit(self.gpa);
+        self.dependencies.deinit();
         self.entities.deinit(self.gpa);
         self.assertions.deinit(self.gpa);
         self.diagnostics.deinit(self.gpa);
@@ -411,6 +416,9 @@ pub const Graph = struct {
         const revision = self.beginRevision();
         const file_entity = self.units.items[index].entity;
         _ = self.unit_paths.remove(self.units.items[index].path);
+        // A declaration naming a unit that no longer exists is not a
+        // dependency, it is a dangling record.
+        self.dependencies.forget(id);
         self.units.items[index].removed_revision = revision;
 
         var definitions: std.ArrayList(EntityId) = .empty;

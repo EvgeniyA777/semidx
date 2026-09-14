@@ -14,10 +14,10 @@ Companion log for
 
 ## Current Status
 
-Stages 1 through 4 are implemented and verified. A tree can be scanned,
-rescanned, and reconciled; changing one unit costs the same whatever else the
-repository holds, and that is now enforced by a guard rather than believed.
-Stage 5 is next: giving invalidation something real to act on.
+Stages 1 through 5 are implemented and verified. Stage 5 took its rejected
+branch: [ADR 003](../adr/003_reject_name_match_assertions.md) refused
+repository-wide name matching, so no cross-unit resolution was added, and the
+stage delivered the dependency mechanism alone. Stage 6 is closure.
 
 ## Stage Log
 
@@ -28,7 +28,7 @@ Stage 5 is next: giving invalidation something real to act on.
 | Stage 2: Unit identity independent of path | Completed | `model.Scope`, unit tombstones, `setSourceUnitPath`, `removeSourceUnit`, and both frontends scoping entities to the unit. |
 | Stage 3: Scan reconciliation | Completed | `src/source/registry.zig` decides correspondence as a pure function; `Index.applyScan` applies it; `Analyzer.invocations` measures what was re-read. |
 | Stage 4: Affected-region proof at scale | Completed | Per-unit buckets and indexes in the graph, `Graph.unit_work`, `fixtures/repository-scale/`, and scale tests that fail if a keyed lookup regresses into a sweep. |
-| Stage 5: Cross-unit dependency tracking | Not started | Awaiting Stage 3. Opens with an ADR. |
+| Stage 5: Cross-unit dependency tracking | Completed (rejected branch) | [ADR 003](../adr/003_reject_name_match_assertions.md) rejected name-match assertions; `src/core/dependencies.zig` and its wiring were built and proved synthetically. |
 | Stage 6: Closure and documentation | Not started | Awaiting Stage 5. |
 
 ## Plan Readiness Gate
@@ -517,6 +517,114 @@ Stage 4 DoD, item by item:
   plan introduced; a future sweep added somewhere uncounted would not fail the
   guard. The counter is a tripwire, not a proof.
 
+## Stage 5 Record
+
+### The ADR Said No
+
+The stage opened with the question it was written to decide: may a designator be
+matched against definitions elsewhere in the tree and recorded as an
+`approximate` assertion?
+
+[ADR 003](../adr/003_reject_name_match_assertions.md) answers no. The short form:
+§1 constrains what *produced* a claim, not how it is labelled, so a relationship
+that would not exist without a string comparison is established by a string
+comparison whatever resolution it carries. `ARCHITECTURE_RATIONALE.md` states the
+intended reading directly — "Approximate retrieval belongs in projections" — and
+prescribes the alternative in the same section: an unresolved target stays
+unresolved, because dropping it loses information and promoting it makes the
+graph false.
+
+This was not the answer the stage was leaning toward when it was planned. The
+plan's own wording ("record such matches as `approximate` assertions") reads as
+though the accepting branch were the expected one. Reading the rationale before
+answering is what changed it, and that is the reason the plan required an ADR
+first rather than a design.
+
+The decision also keeps `approximate` meaningful rather than killing it: it is
+for producers that genuinely compute approximate results about program meaning,
+not for retrieval standing in for analysis nobody performed.
+`Snapshot.countApproximateAssertions` stays honestly at zero.
+
+### What Was Built
+
+`src/core/dependencies.zig` records that a unit's analysis read something about
+another unit, and answers which units a change obliges to be re-read.
+
+- `Dependencies.declare`, `clearDependent` (a reanalysis withdraws what the
+  previous run depended on), and `forget` (a departing unit leaves no dangling
+  record).
+- `Dependencies.propagate` computes the transitive closure, excludes units
+  already being reanalyzed, terminates on cycles, and reports `exhausted` rather
+  than silently truncating when a chain exceeds its round budget.
+- `contract.DraftDependency` and `BatchBuilder.addDependency` let a frontend
+  batch declare one; `reconcile.integrate` records them.
+- `Index.applyScan` seeds propagation from changed and removed units and
+  reanalyzes what it reaches, counting it as `ScanOutcome.invalidated`.
+
+### Why Build It With No Producer
+
+Nothing declares a dependency today, so the mechanism is a no-op in practice.
+That is uncomfortable, and the reason it was still built is specific rather than
+general: Stage 3 established the rule that a unit whose own content did not
+change is never re-read, and that rule is unconditional and lives in the
+registry. It is correct while every assertion comes from a single unit and wrong
+the moment one does not.
+
+`ARCHITECTURE_RATIONALE.md` argues that incrementality cannot be retrofitted
+because doing so means rewriting storage, identity, invalidation, and observation
+together. The same argument applies to the override: adding it after a system has
+assumed it never needs one is the retrofit. Building it now costs one module and
+makes the next plan's cross-unit work an addition rather than a rewrite.
+
+### A Finding The Contract Handed Back
+
+A frontend is given one source unit and sees nothing else, so it has no way to
+name another unit's id — which means no frontend can populate `DraftDependency`
+even in principle. Only a synthetic batch can.
+
+That is not a gap in this stage; it is the shape of the next one. When cross-unit
+resolution arrives, the frontend contract needs a way for a frontend to be told
+what else exists, and that is a contract change rather than a frontend change.
+The doc comment on `DraftDependency` says so.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core --summary all` | 80/80 passed, up from 67. |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | 80/80 passed. |
+| `zig build test --summary all` | 123/123 passed, after deleting `.zig-cache/` and `zig-out/`. |
+| `zig build run -- fixtures/repository-scale` | 6 units, 48 assertions, 5 unresolved, **0 approximate**. |
+| `zig fmt --check build.zig src tests` | Clean. |
+| `./scripts/check-agent-attribution.sh --all` | Passed. |
+
+Stage 5 DoD, on the rejected branch:
+
+- The dependency mechanism is proved either way, and it is: declaring a
+  dependency through a frontend batch causes the provider's change to reach the
+  dependent, and the dependent's change to reach the provider nothing.
+  Reanalysis withdraws the previous run's declarations; a departing unit leaves
+  no record pointing at it. Ten further tests cover propagation directly:
+  transitivity, cycles, self-declaration, already-reanalyzed exclusion, and
+  budget exhaustion.
+- The ADR exists, is linked from the ADR index, and its consequences are
+  recorded here.
+- The progress log records the reasoning, which is this section.
+
+### Residual Risk From Stage 5
+
+- **A dependency is unit-to-unit, not name-to-name.** Adding a new unit
+  therefore invalidates nothing, because no declaration can name a unit that did
+  not exist when it was written. A name-grained rule would handle it, and the
+  `reason` field is where that refinement goes.
+- **Propagation runs once per scan, over the declarations as they stood before
+  it.** A reanalysis that declares new dependencies does not have those chased in
+  the same pass. Unobservable with no producer; a defined limit to revisit with
+  one.
+- **The mechanism is unexercised in production paths.** Its tests are synthetic
+  by necessity. Speculative infrastructure is a real cost, and the justification
+  above is the whole of it.
+
 ## Open Questions Carried Into Execution
 
 These are decided inside the plan but are the ones most likely to need revisiting
@@ -554,16 +662,13 @@ Both anticipated Stage 4 blockers were resolved as predicted: large trees are
 generated in the tests, and `Graph.unit_work` became the countable proxy for
 graph-level work.
 
-Potential Stage 5 blockers:
+Both anticipated Stage 5 blockers materialized, and both were handled as the plan
+provided for. The ADR did conclude against the approximate branch, and the
+mechanism alone is indeed the thinner result. The unconditional Stage 3 rule was
+overridden in `Index.applyScan` rather than in the registry, which still knows
+nothing about dependencies.
 
-- The ADR that opens the stage may conclude that recording a repository-wide
-  name match as an approximate assertion is incompatible with §1. The stage is
-  written to complete either way, but the dependency mechanism alone is a
-  thinner result than the stage suggests.
-- Invalidation has to override the rule Stage 3 established — that a unit whose
-  own content did not change is never re-read. That rule is currently
-  unconditional and lives in the registry, which knows nothing about
-  dependencies.
+Stage 6 has no anticipated blockers: it is documentation and closure.
 
 ## Residual Risk
 
@@ -576,10 +681,13 @@ requirements change rather than proceeding.
 
 ## Next Handoff
 
-Start with Stage 5, and start with its ADR rather than with code. The question is
-whether recording a repository-wide unique-name match as an **approximate**
-assertion is compatible with §1 forbidding an approximate mechanism from
-establishing a program relationship, given that §3 provides the approximate
-category and requires it to stay distinct from fact. Both answers have a complete
-DoD in the plan; the dependency mechanism itself is independent of the outcome
-and can be built first.
+Stage 6: closure. Update `MEMORY.md`, `SPEC.md`'s source-identity and
+invalidation rows, `CONFORMANCE.md`'s current status, and `GLOSSARY.md` if this
+work introduced vocabulary; then record what `module` and `IMPORTS` now have that
+they did not, and what they still lack.
+
+The short version of that last item, for whoever writes it: they now have a
+repository to be about, units whose identity survives a move, and a mechanism
+that can invalidate what a cross-unit fact would depend on. They still lack a
+common meaning, and ADR 003 closed the shortcut that would have let the project
+pretend otherwise.

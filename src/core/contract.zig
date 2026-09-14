@@ -75,6 +75,19 @@ pub const DraftRelationship = struct {
     resolution: model.Resolution,
 };
 
+/// A declaration that this unit's analysis read something about another unit.
+///
+/// No frontend produces one yet. A frontend is handed one source unit and sees
+/// nothing else, so it has no way to name another unit's id — which is itself
+/// the finding: when cross-unit resolution arrives, this contract needs a way
+/// for a frontend to be told what else exists, and that is a contract change
+/// rather than a frontend change.
+pub const DraftDependency = struct {
+    provider: model.SourceUnitId,
+    /// Why, in the producer's own words.
+    reason: []const u8,
+};
+
 pub const DraftDiagnostic = struct {
     kind: model.DiagnosticKind,
     message: []const u8,
@@ -91,6 +104,7 @@ pub const FrontendBatch = struct {
     entities: []const DraftEntity,
     relationships: []const DraftRelationship,
     diagnostics: []const DraftDiagnostic,
+    dependencies: []const DraftDependency,
 
     pub fn hasBlockingDiagnostic(self: FrontendBatch) bool {
         for (self.diagnostics) |diagnostic| {
@@ -115,6 +129,7 @@ pub const BatchBuilder = struct {
     entities: std.ArrayList(DraftEntity),
     relationships: std.ArrayList(DraftRelationship),
     diagnostics: std.ArrayList(DraftDiagnostic),
+    dependencies: std.ArrayList(DraftDependency),
 
     pub fn init(gpa: Allocator, unit: model.SourceUnitId, capabilities: Capabilities) BatchBuilder {
         return .{
@@ -125,6 +140,7 @@ pub const BatchBuilder = struct {
             .entities = .empty,
             .relationships = .empty,
             .diagnostics = .empty,
+            .dependencies = .empty,
         };
     }
 
@@ -132,6 +148,7 @@ pub const BatchBuilder = struct {
         self.entities.deinit(self.gpa);
         self.relationships.deinit(self.gpa);
         self.diagnostics.deinit(self.gpa);
+        self.dependencies.deinit(self.gpa);
         self.arena.deinit();
         self.* = undefined;
     }
@@ -195,6 +212,17 @@ pub const BatchBuilder = struct {
         try self.diagnostics.append(self.gpa, .{ .kind = kind, .message = try self.dupe(message) });
     }
 
+    pub fn addDependency(
+        self: *BatchBuilder,
+        provider: model.SourceUnitId,
+        reason: []const u8,
+    ) Allocator.Error!void {
+        try self.dependencies.append(self.gpa, .{
+            .provider = provider,
+            .reason = try self.dupe(reason),
+        });
+    }
+
     pub fn batch(self: *const BatchBuilder) FrontendBatch {
         return .{
             .unit = self.unit,
@@ -202,6 +230,7 @@ pub const BatchBuilder = struct {
             .entities = self.entities.items,
             .relationships = self.relationships.items,
             .diagnostics = self.diagnostics.items,
+            .dependencies = self.dependencies.items,
         };
     }
 };

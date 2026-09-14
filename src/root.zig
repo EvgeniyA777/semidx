@@ -85,6 +85,9 @@ pub const Index = struct {
         /// Moves the scan declined to claim because the content did not
         /// identify one unit. Those units appear as removals and additions.
         ambiguous_renames: usize = 0,
+        /// Units reanalyzed not because they changed but because something they
+        /// had read did. Zero until a producer declares a dependency.
+        invalidated: usize = 0,
     };
 
     /// Applies a scan of the source tree to the graph.
@@ -152,8 +155,61 @@ pub const Index = struct {
             }
         }
 
+        try self.propagateInvalidation(correspondence, found, &outcome);
         try self.recordScanDiagnostics(found, correspondence);
         return outcome;
+    }
+
+    /// Reanalyzes units that read something the scan changed or removed.
+    ///
+    /// Propagation runs once, over the declarations as they stood before the
+    /// scan. A reanalysis may declare new dependencies, and those are not
+    /// chased in the same pass; with no producer declaring any, that is a
+    /// defined limit rather than an observable one.
+    fn propagateInvalidation(
+        self: *Index,
+        correspondence: source.registry.Correspondence,
+        found: source.SourceScan,
+        outcome: *ScanOutcome,
+    ) !void {
+        _ = found;
+        const gpa = self.graph.gpa;
+        if (self.graph.dependencies.count() == 0) return;
+
+        var seeds: std.ArrayList(model.SourceUnitId) = .empty;
+        defer seeds.deinit(gpa);
+        for (correspondence.decisions) |decision| {
+            switch (decision) {
+                // A move changes no contents, and an addition has nothing
+                // pointing at it yet: a declaration names a unit, and no unit
+                // can have named one that did not exist.
+                .changed => |match| try seeds.append(gpa, match.id),
+                .removed => |id| try seeds.append(gpa, id),
+                else => {},
+            }
+        }
+        if (seeds.items.len == 0) return;
+
+        const propagation = try self.graph.dependencies.propagate(gpa, seeds.items);
+        defer gpa.free(propagation.affected);
+
+        for (propagation.affected) |id| {
+            const record = self.graph.unit(id) orelse continue;
+            if (!record.isLive()) continue;
+            _ = try self.analyzer.indexUnit(&self.graph, id);
+            outcome.invalidated += 1;
+            outcome.analyzed += 1;
+        }
+
+        if (propagation.exhausted) {
+            try self.graph.addDiagnostic(
+                .analysis_unavailable,
+                null,
+                core.graph.ingestion,
+                "invalidation stopped at its propagation budget; units further " ++
+                    "along the dependency chain were not reanalyzed",
+            );
+        }
     }
 
     /// Records what the scan declined to ingest and what it declined to decide,

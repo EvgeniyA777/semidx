@@ -6,6 +6,7 @@ pub const model = @import("model.zig");
 pub const contract = @import("contract.zig");
 pub const graph = @import("graph.zig");
 pub const reconcile = @import("reconcile.zig");
+pub const dependencies = @import("dependencies.zig");
 pub const strings = @import("strings.zig");
 
 pub const Graph = graph.Graph;
@@ -16,5 +17,6 @@ test {
     _ = contract;
     _ = graph;
     _ = reconcile;
+    _ = dependencies;
     _ = strings;
 }

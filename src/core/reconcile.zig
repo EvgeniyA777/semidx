@@ -207,6 +207,17 @@ pub fn integrate(graph: *Graph, batch: contract.FrontendBatch) Error!Outcome {
         try graph.addDiagnostic(diagnostic.kind, batch.unit, producer, diagnostic.message);
     }
 
+    // What the previous run of this unit read is not evidence about what this
+    // one read, so the old declarations go before the new ones arrive.
+    graph.dependencies.clearDependent(batch.unit);
+    for (batch.dependencies) |declared| {
+        try graph.dependencies.declare(.{
+            .dependent = batch.unit,
+            .provider = declared.provider,
+            .reason = try graph.pool.intern(declared.reason),
+        });
+    }
+
     try graph.markAnalyzed(batch.unit);
     return outcome;
 }
@@ -608,6 +619,76 @@ test "one unit going stale does not make another unit stale" {
     try testing.expectEqual(graph_mod.UnitAnalysis.current, after.unitAnalysis(b).?);
     try testing.expectEqual(@as(usize, 1), after.countEntities(.{ .kind = .definition }));
     try testing.expect(after.findDefinition("b/B.java", "other") != null);
+}
+
+test "a frontend's declared dependency is recorded and reaches the dependent" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const provider = try graph.addSourceUnit("a/A.java", .java, "v1");
+    const dependent = try graph.addSourceUnit("b/B.java", .java, "v1");
+
+    _ = try integrateNames(&graph, provider, &.{"greet"}, "v1");
+
+    {
+        var builder = contract.BatchBuilder.init(testing.allocator, dependent, test_capabilities);
+        defer builder.deinit();
+        try syntheticBatch(&builder, &.{"other"}, "v1");
+        try builder.addDependency(provider, "read a definition declared in another unit");
+        _ = try integrate(&graph, builder.batch());
+    }
+
+    try testing.expectEqual(@as(usize, 1), graph.dependencies.count());
+
+    // Changing the provider obliges the dependent to be re-read.
+    const affected = try graph.dependencies.propagate(testing.allocator, &.{provider});
+    defer testing.allocator.free(affected.affected);
+    try testing.expectEqual(@as(usize, 1), affected.affected.len);
+    try testing.expectEqual(dependent, affected.affected[0]);
+
+    // Changing the dependent obliges the provider nothing.
+    const other_way = try graph.dependencies.propagate(testing.allocator, &.{dependent});
+    defer testing.allocator.free(other_way.affected);
+    try testing.expectEqual(@as(usize, 0), other_way.affected.len);
+}
+
+test "reanalyzing a unit withdraws what its previous analysis depended on" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const provider = try graph.addSourceUnit("a/A.java", .java, "v1");
+    const dependent = try graph.addSourceUnit("b/B.java", .java, "v1");
+    _ = try integrateNames(&graph, provider, &.{"greet"}, "v1");
+
+    {
+        var builder = contract.BatchBuilder.init(testing.allocator, dependent, test_capabilities);
+        defer builder.deinit();
+        try syntheticBatch(&builder, &.{"other"}, "v1");
+        try builder.addDependency(provider, "read a definition declared in another unit");
+        _ = try integrate(&graph, builder.batch());
+    }
+    try testing.expectEqual(@as(usize, 1), graph.dependencies.count());
+
+    // The next analysis of the dependent reads nothing outside itself, so the
+    // previous run's declaration is not evidence about this one.
+    _ = try graph.setSourceUnitBytes(dependent, "v2");
+    _ = try integrateNames(&graph, dependent, &.{"other"}, "v2");
+    try testing.expectEqual(@as(usize, 0), graph.dependencies.count());
+}
+
+test "a departing unit leaves no dependency pointing at it" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const provider = try graph.addSourceUnit("a/A.java", .java, "v1");
+    const dependent = try graph.addSourceUnit("b/B.java", .java, "v1");
+    _ = try integrateNames(&graph, provider, &.{"greet"}, "v1");
+
+    var builder = contract.BatchBuilder.init(testing.allocator, dependent, test_capabilities);
+    defer builder.deinit();
+    try syntheticBatch(&builder, &.{"other"}, "v1");
+    try builder.addDependency(provider, "read a definition declared in another unit");
+    _ = try integrate(&graph, builder.batch());
+
+    try graph.removeSourceUnit(provider);
+    try testing.expectEqual(@as(usize, 0), graph.dependencies.count());
 }
 
 test "an edit to one unit does not disturb another unit" {
