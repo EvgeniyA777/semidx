@@ -25,7 +25,7 @@ See [Session A Handoff](#session-a-handoff).
 | --- | --- | --- |
 | Stage 1: Zig grammar and language registration | Completed (`6bcbbd7`) | `.zig` is discovered as `model.Language.zig`; a pinned `tree-sitter-zig` is fetched by the setup script and compiled in the full lane only; a skeletal Zig frontend reports failed, unsupported, or confirmed-empty analysis and emits no facts. |
 | Stage 2: Zig definition facts | Completed (`575bf92`) | Named top-level `fn` declarations and top-level `const` declarations bound directly to a struct/enum/union/opaque expression are current `definition` facts with `DEFINES` from the file. Container members and every other declaration are reported as unsupported. A body edit preserves identity; a rename is identity loss. |
-| Stage 3: Zig same-unit simple calls | Completed | Every call expression in a covered function body is recorded as `CALLS`. A bare callee is a fact only when the unit's top level declares that name exactly once, as a covered function, and no parameter, local binding, capture, or `usingnamespace` could give it another meaning; every other callee stays unresolved with its reason. No `REFERENCES` are emitted. |
+| Stage 3: Zig same-unit simple calls | Completed (`50d68c4`) | Every call expression in a covered function body is recorded as `CALLS`. A bare callee is a fact only when the unit's top level declares that name exactly once, as a covered function, and no parameter, local binding, capture, or `usingnamespace` could give it another meaning; every other callee stays unresolved with its reason. No `REFERENCES` are emitted. |
 | Stage 4: Local MCP stdio preview | Pending (Session B) | |
 | Stage 5: Dogfood, documentation, and handoff | Pending (Session B) | |
 
@@ -227,8 +227,7 @@ Verification:
 
 ## Session A Handoff
 
-Commits: Stage 1 `6bcbbd7`, Stage 2 `575bf92`, Stage 3 in the commit that adds
-this section.
+Commits: Stage 1 `6bcbbd7`, Stage 2 `575bf92`, Stage 3 `50d68c4`.
 
 For the review of Stages 1–3:
 
@@ -258,3 +257,71 @@ Next: review Stages 1–3, then Session B runs Stage 4 (local MCP stdio preview)
 and Stage 5 from this log. Session B must read the `2026-07-28` MCP
 specification from the plan's link rather than implement `server/discover`
 from memory, as the plan's Execution Recommendations require.
+
+## Review: Stages 1-3
+
+Reviewer pass recorded on 2026-09-14.
+
+Semantic Code Indexing was required by policy, but no callable semidx tools were
+available through tool discovery in the review environment; only unrelated MCP
+tools were exposed. The review used targeted direct inspection of the changed
+files named by the plan.
+
+### Confirmed Finding: Dangling Relationship Designators
+
+Status: unresolved. Severity: blocker before Stage 4.
+
+`zig build run -- src` does not complete in the review environment. It prints
+the expected summary counts first (`20` Zig units, `185` definitions, `515`
+facts, `536` unresolved, `0` approximate, `0` stale), then aborts while printing
+unresolved call targets:
+
+```text
+Segmentation fault at address ...
+src/main.zig:114:48: ... in printSummary
+    .designator => |name| try out.print("  {s} -> {s} ({s})\n", .{
+```
+
+The storage path explains the crash. `src/frontends/zig.zig` creates unresolved
+call targets from `BatchBuilder` arena memory:
+
+- `emitCall` duplicates the callee into `designator`;
+- unresolved calls store `.target = .{ .designator = designator }`.
+
+`src/frontends/root.zig` then destroys that arena after integration:
+
+- `Analyzer.indexUnit` initializes a `BatchBuilder`;
+- `defer builder.deinit()` runs after `core.reconcile.integrate`.
+
+`src/core/graph.zig` interns producer, evidence, and resolution strings in
+`addAssertion`, but stores `.claim = claim` unchanged. For a relationship whose
+target is `.designator`, the graph therefore retains a slice owned by the
+frontend batch arena. Published snapshots can later read freed memory. The
+larger Zig dogfood run exposes it deterministically; smaller tests can pass by
+accident because the freed arena contents have not yet been overwritten.
+
+Smallest reasonable fix: intern claim-owned strings when storing assertions.
+Add an `internClaim`/`internTarget` helper in `Graph` and call it from
+`addAssertion` before appending the assertion, so relationship designators live
+in `StringPool` just like evidence text and resolution explanations. Add a test
+that publishes and reads an unresolved relationship after its `BatchBuilder`
+has been destroyed, then keep `zig build run -- src` as verification evidence.
+
+Do not start Stage 4 until this is fixed. The MCP preview will expose
+relationship designators through snapshot-backed tools, so it would inherit the
+same dangling-string defect.
+
+### Verification Run By Reviewer
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | Pass, 85/85 |
+| `zig build test-core --summary all` | Pass, 85/85 |
+| `zig build test --summary all` | Pass, 163/163 |
+| `zig fmt --check build.zig src tests` | Pass |
+| `./scripts/check-agent-attribution.sh --all` | Pass |
+| `./scripts/check-memory-freshness.sh` | Pass |
+| `git diff --check` | Pass |
+| `zig build run -- fixtures/vertical-slice/zig` | Pass |
+| `zig build run -- src/frontends/zig.zig` | Pass |
+| `zig build run -- src` | Fail: abort while printing unresolved designators |
