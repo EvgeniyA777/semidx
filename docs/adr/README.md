@@ -16,3 +16,4 @@ ratified constitution.
 ## Records
 
 - [001: Choose Zig As The Implementation Language](001_choose_zig_implementation_language.md)
+- [002: Use Local Tree-sitter C Sources For Language Frontends](002_local_tree_sitter_parser_dependency.md)
