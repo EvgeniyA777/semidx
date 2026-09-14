@@ -380,7 +380,8 @@ why. This is not a changelog of removed implementation; see `git log`.
   a capability matrix rather than by widening the fixtures quietly.
 - Current open follow-ups are indexed in
   [docs/followups/README.md](docs/followups/README.md): Zig logical-negation
-  calls, Zig empty-container grammar behavior, and Java classpath boundaries.
+  calls, Zig empty-container grammar behavior, Java classpath boundaries, and
+  release discipline for the local MCP preview.
 - **Plan 004 is in progress: Stages 1–3 (the Zig frontend) are implemented and
   reviewed; Stage 3.5 fixed the review blocker; Stages 4–5 (the MCP preview
   and documentation) have not started.** It onboards Zig as the next language

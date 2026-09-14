@@ -18,6 +18,8 @@ evidence would make it ready to implement or close.
   tool source.
 - `process_defect`: project workflow or verification behavior that let a defect
   through or made evidence ambiguous.
+- `release_readiness`: packaging, versioning, distribution, or release-gate work
+  needed before publishing an installable product.
 
 ## Open Follow-ups
 
@@ -26,3 +28,4 @@ evidence would make it ready to implement or close.
 | [001](001_zig_logical_negation_calls.md) | open | `coverage_gap` | [Plan 004 report](../reports/004_zig_frontend_and_mcp_preview_progress.md#stage-35-graph-owned-relationship-designators) | Zig calls under logical negation stay unresolved as `!callee`. |
 | [002](002_zig_empty_container_grammar.md) | open | `upstream_limitation` | [Plan 004 report](../reports/004_zig_frontend_and_mcp_preview_progress.md#stage-2-zig-definition-facts) | The pinned Zig grammar reports empty container bodies as parse errors. |
 | [003](003_java_classpath_boundaries.md) | open | `semantic_limitation` | [Plan 003 report](../reports/003_java_package_type_resolution_progress.md#residual-risk) | Java same-package resolution treats the repository as one classpath. |
+| [004](004_release_discipline_for_mcp_preview.md) | open | `release_readiness` | [Plan 004](../plans/004_zig_frontend_and_mcp_preview.md#stage-5-dogfood-documentation-and-handoff) | Define preview and stable release rules for the local CLI/MCP product. |
