@@ -409,7 +409,7 @@ fn indexZig(analyzer: *Analyzer, graph: *core.Graph, source: []const u8) !core.r
     return analyzer.indexUnit(graph, unit);
 }
 
-test "a zig unit reaches the zig frontend and yields no invented facts" {
+test "a zig unit with only uncovered declarations yields no invented facts" {
     var analyzer = Analyzer.init(testing.allocator, null);
     defer analyzer.deinit();
     var graph = try core.Graph.init(testing.allocator, "fixtures");
@@ -422,10 +422,117 @@ test "a zig unit reaches the zig frontend and yields no invented facts" {
     defer snapshot.deinit();
     try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.{ .kind = .definition }));
     try testing.expectEqual(@as(usize, 0), snapshot.countAssertions(.{ .resolution = .fact, .producer = "frontend.zig" }));
-    // Two uncovered kinds, each reported once with its count; nothing claims
-    // the unit is empty.
+    // Two uncovered kinds, each reported once with its count, beside the
+    // narrower claim that no covered declaration is there.
     try testing.expectEqual(@as(usize, 2), snapshot.countDiagnostics(.unsupported_construct));
+    try testing.expectEqual(@as(usize, 1), snapshot.countDiagnostics(.confirmed_absence));
+}
+
+test "only exact zig declaration shapes become definitions" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const outcome = try indexZig(&analyzer, &graph,
+        \\const Plain = struct { a: u8 };
+        \\pub const Packed = packed struct { bits: u8 };
+        \\const Typed: type = enum { a };
+        \\const Tagged = union(enum) { x: u8 };
+        \\const Handle = opaque { const size = 1; };
+        \\extern fn external() void;
+        \\pub inline fn inlined() void {}
+        \\var Mutable = struct { a: u8 };
+        \\const Alias = Plain;
+        \\const Chosen = if (true) struct { a: u8 } else struct { b: u8 };
+        \\const Made = Make(u8);
+        \\const Failure = error{Bad};
+        \\threadlocal var counter: u32 = 0;
+        \\
+    );
+    try testing.expect(outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+
+    for ([_][]const u8{ "Plain", "Packed", "Typed", "Tagged", "Handle" }) |name| {
+        const container = snapshot.findDefinition("probe.zig", name).?;
+        try testing.expectEqualStrings("container", container.identity.role);
+        try testing.expectEqualStrings("container", container.extension.get("zig.construct").?);
+    }
+    try testing.expectEqualStrings("struct", snapshot.findDefinition("probe.zig", "Packed").?.extension.get("zig.container").?);
+    try testing.expectEqualStrings("enum", snapshot.findDefinition("probe.zig", "Typed").?.extension.get("zig.container").?);
+    try testing.expectEqualStrings("union", snapshot.findDefinition("probe.zig", "Tagged").?.extension.get("zig.container").?);
+    try testing.expectEqualStrings("opaque", snapshot.findDefinition("probe.zig", "Handle").?.extension.get("zig.container").?);
+
+    for ([_][]const u8{ "external", "inlined" }) |name| {
+        const function = snapshot.findDefinition("probe.zig", name).?;
+        try testing.expectEqualStrings("function", function.identity.role);
+        try testing.expect(function.identity.signature == null);
+    }
+
+    // A `var`, an alias, a conditional, a call, an error set, and a plain
+    // variable are not container declarations, however they evaluate.
+    for ([_][]const u8{ "Mutable", "Alias", "Chosen", "Made", "Failure", "counter" }) |name| {
+        try testing.expect(snapshot.findDefinition("probe.zig", name) == null);
+    }
+    try testing.expectEqual(@as(usize, 7), snapshot.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 7), snapshot.countRelationships(.{ .kind = .defines }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
     try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.confirmed_absence));
+
+    // Six uncovered top-level declarations of one kind, and the members of
+    // the covered containers: fields and one nested declaration.
+    var top_level_reported = false;
+    for (snapshot.diagnostics) |diagnostic| {
+        if (std.mem.indexOf(u8, diagnostic.message, "6 top-level `variable_declaration`") != null) top_level_reported = true;
+    }
+    try testing.expect(top_level_reported);
+    try testing.expectEqual(@as(usize, 3), snapshot.countDiagnostics(.unsupported_construct));
+}
+
+test "an empty zig container fails the unit's analysis rather than yielding a guess" {
+    // The pinned grammar reads `struct {}` as a container field with a missing
+    // name. That is a parse error, so the whole unit is reported as failed;
+    // nothing here repairs the tree by assuming what was meant.
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const outcome = try indexZig(&analyzer, &graph, "const Empty = struct {};\nfn greet() void {}\n");
+    try testing.expect(!outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(@as(usize, 1), snapshot.countDiagnostics(.analysis_failed));
+    try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.{ .kind = .definition }));
+}
+
+test "declarations inside a zig container are not top-level definitions" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    _ = try indexZig(&analyzer, &graph,
+        \\const Outer = struct {
+        \\    field: u8,
+        \\    pub const Inner = struct { a: u8 };
+        \\    fn method() void {}
+        \\    fn other() void {}
+        \\};
+        \\
+    );
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .definition }));
+    for ([_][]const u8{ "Inner", "method", "other", "field" }) |name| {
+        try testing.expect(snapshot.findDefinition("probe.zig", name) == null);
+    }
+    // Members are counted per kind: a field, a nested declaration, two functions.
+    try testing.expectEqual(@as(usize, 3), snapshot.countDiagnostics(.unsupported_construct));
 }
 
 test "an empty zig unit reports confirmed absence" {

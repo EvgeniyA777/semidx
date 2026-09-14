@@ -192,6 +192,17 @@ pub const Node = struct {
         return if (child.isNull()) null else child;
     }
 
+    /// Every child, anonymous tokens included. Keywords such as `const` are
+    /// anonymous in most grammars, so a frontend that needs one reads it here.
+    pub fn childCount(self: Node) u32 {
+        return c.ts_node_child_count(self.raw);
+    }
+
+    pub fn childAt(self: Node, index: u32) ?Node {
+        const found: Node = .{ .raw = c.ts_node_child(self.raw, index) };
+        return if (found.isNull()) null else found;
+    }
+
     pub fn childByFieldName(self: Node, name: []const u8) ?Node {
         const child: Node = .{
             .raw = c.ts_node_child_by_field_name(self.raw, name.ptr, @intCast(name.len)),
@@ -298,6 +309,39 @@ test "the local zig grammar parses through the adapter" {
     const function = root.namedChild(0).?;
     try testing.expectEqualStrings("function_declaration", function.kind());
     try testing.expectEqualStrings("greet", function.childByFieldName("name").?.text(source));
+}
+
+test "anonymous tokens are reachable where named children skip them" {
+    var parser = try Parser.init(.zig);
+    defer parser.deinit();
+
+    const source = "pub const Greeter = struct {};\n";
+    var tree = try parser.parse(source, null);
+    defer tree.deinit();
+
+    const declaration = tree.root().namedChild(0).?;
+    try testing.expectEqualStrings("variable_declaration", declaration.kind());
+    // Named children see the name and the value, not the keywords.
+    try testing.expectEqual(@as(u32, 2), declaration.namedChildCount());
+
+    var kinds: [8][]const u8 = undefined;
+    var named: [8]bool = undefined;
+    const count = declaration.childCount();
+    try testing.expect(count <= kinds.len);
+    for (0..count) |index| {
+        const token = declaration.childAt(@intCast(index)).?;
+        kinds[index] = token.kind();
+        named[index] = token.isNamed();
+    }
+    try testing.expectEqual(@as(u32, 6), count);
+    try testing.expectEqualStrings("pub", kinds[0]);
+    try testing.expectEqualStrings("const", kinds[1]);
+    try testing.expect(!named[1]);
+    try testing.expectEqualStrings("identifier", kinds[2]);
+    try testing.expectEqualStrings("=", kinds[3]);
+    try testing.expectEqualStrings("struct_declaration", kinds[4]);
+    try testing.expectEqualStrings(";", kinds[5]);
+    try testing.expect(declaration.childAt(count) == null);
 }
 
 test "a syntax error is visible on the tree rather than silently dropped" {

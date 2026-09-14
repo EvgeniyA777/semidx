@@ -1719,3 +1719,209 @@ test "a snapshot taken before an edit keeps observing the state it was published
     try testing.expectEqual(@as(usize, 8), before.countEntities(.{ .kind = .definition }));
     try testing.expectEqual(@as(usize, 9), after.countEntities(.{ .kind = .definition }));
 }
+
+// -- Plan 004: Zig fixture coverage -----------------------------------------
+
+const zig_path = "zig/greeter.zig";
+
+const ZigFixture = struct {
+    index: semidx.Index,
+    unit: model.SourceUnitId,
+
+    fn init(gpa: std.mem.Allocator) !ZigFixture {
+        var index = try semidx.Index.init(gpa, build_options.fixtures_dir);
+        errdefer index.deinit();
+        const source = try loadFixture(gpa, zig_path);
+        defer gpa.free(source);
+        const unit = try index.addUnit(zig_path, .zig, source);
+        return .{ .index = index, .unit = unit };
+    }
+
+    fn deinit(self: *ZigFixture) void {
+        self.index.deinit();
+        self.* = undefined;
+    }
+
+    fn edit(self: *ZigFixture, relative: []const u8) !semidx.reconcile.Outcome {
+        const gpa = self.index.graph.gpa;
+        const source = try loadFixture(gpa, relative);
+        defer gpa.free(source);
+        return self.index.applyEdit(self.unit, source);
+    }
+};
+
+fn hasDiagnosticContaining(snapshot: *const semidx.Snapshot, kind: model.DiagnosticKind, fragment: []const u8) bool {
+    for (snapshot.diagnostics) |diagnostic| {
+        if (diagnostic.kind != kind) continue;
+        if (std.mem.indexOf(u8, diagnostic.message, fragment) != null) return true;
+    }
+    return false;
+}
+
+test "the zig fixture yields its top-level functions and containers as definitions" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var snapshot = try fixture.index.publish();
+    defer snapshot.deinit();
+
+    try testing.expectEqual(
+        semidx.core.graph.UnitAnalysis.current,
+        snapshot.unitAnalysis(fixture.unit).?,
+    );
+
+    const greeter = snapshot.findDefinition(zig_path, "Greeter").?;
+    const mood = snapshot.findDefinition(zig_path, "Mood").?;
+    const greeting = snapshot.findDefinition(zig_path, "greeting").?;
+    const greet = snapshot.findDefinition(zig_path, "greet").?;
+    const announce = snapshot.findDefinition(zig_path, "announce").?;
+
+    try testing.expectEqualStrings("container", greeter.identity.role);
+    try testing.expectEqualStrings("struct", greeter.extension.get("zig.container").?);
+    try testing.expectEqualStrings("enum", mood.extension.get("zig.container").?);
+    for ([_]model.Entity{ greeting, greet, announce }) |function| {
+        try testing.expectEqualStrings("function", function.identity.role);
+        try testing.expectEqualStrings("function", function.extension.get("zig.construct").?);
+    }
+    for ([_]model.Entity{ greeter, mood, greeting, greet, announce }) |definition| {
+        try testing.expectEqual(model.EntityKind.definition, definition.kind);
+        try testing.expectEqual(model.Language.zig, definition.identity.language.?);
+        try testing.expectEqualStrings("zig", definition.extension.namespace);
+        try testing.expectEqual(@as(usize, 0), definition.identity.container_path.len);
+    }
+    try testing.expectEqual(@as(usize, 5), snapshot.countEntities(.{ .kind = .definition }));
+
+    // Ingestion says the repository contains the file; the frontend says the
+    // file introduces each covered declaration, as a fact of its own.
+    const file = snapshot.findEntity(.{ .kind = .file, .path = zig_path }).?;
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{ .kind = .contains, .target = file.id }));
+    try testing.expectEqual(@as(usize, 5), snapshot.countRelationships(.{
+        .kind = .defines,
+        .source = file.id,
+        .resolution = .fact,
+    }));
+    try testing.expect(snapshot.countAssertions(.{ .producer = "frontend.zig", .resolution = .fact }) >= 10);
+
+    // The `greet` method inside `Greeter`, the `name` field, the import, the
+    // constant, and the test are not definitions, and they are reported
+    // instead of looking absent.
+    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .definition, .name = "greet" }));
+    for ([_][]const u8{ "name", "std", "limit" }) |name| {
+        try testing.expect(snapshot.findDefinition(zig_path, name) == null);
+    }
+    try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, "2 top-level `variable_declaration`"));
+    try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, "`test_declaration`"));
+    try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, "`function_declaration` declared inside a top-level container"));
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+    try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.confirmed_absence));
+}
+
+test "a zig body edit preserves every definition id" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const greeting_before = before.findDefinition(zig_path, "greeting").?;
+    const announce_before = before.findDefinition(zig_path, "announce").?;
+
+    const outcome = try fixture.edit("zig/edits/01_body_edit.zig");
+    try testing.expect(outcome.applied);
+    try testing.expectEqual(@as(usize, 5), outcome.preserved);
+    try testing.expectEqual(@as(usize, 0), outcome.created);
+    try testing.expectEqual(@as(usize, 0), outcome.removed);
+    try testing.expectEqual(@as(usize, 0), outcome.lost);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(greeting_before.id, after.findDefinition(zig_path, "greeting").?.id);
+    try testing.expectEqual(announce_before.id, after.findDefinition(zig_path, "announce").?.id);
+    try testing.expect(before.revision < after.revision);
+}
+
+test "an added zig definition leaves the others untouched" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const greet_before = before.findDefinition(zig_path, "greet").?;
+
+    const outcome = try fixture.edit("zig/edits/02_added_definition.zig");
+    try testing.expectEqual(@as(usize, 5), outcome.preserved);
+    try testing.expectEqual(@as(usize, 1), outcome.created);
+    try testing.expectEqual(@as(usize, 0), outcome.lost);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(greet_before.id, after.findDefinition(zig_path, "greet").?.id);
+    const farewell = after.findDefinition(zig_path, "farewell").?;
+    try testing.expectEqual(
+        model.IdentityEventKind.created,
+        after.identityEventFor(farewell.id, outcome.revision).?.kind,
+    );
+}
+
+test "a renamed zig definition is reported as identity loss with its replacement" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const greeting_before = before.findDefinition(zig_path, "greeting").?;
+    const greet_before = before.findDefinition(zig_path, "greet").?;
+
+    const outcome = try fixture.edit("zig/edits/03_renamed_definition.zig");
+    try testing.expectEqual(@as(usize, 1), outcome.lost);
+    try testing.expectEqual(@as(usize, 1), outcome.created);
+    try testing.expectEqual(@as(usize, 4), outcome.preserved);
+    try testing.expectEqual(@as(usize, 0), outcome.removed);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(greet_before.id, after.findDefinition(zig_path, "greet").?.id);
+
+    const event = after.identityEventFor(greeting_before.id, outcome.revision).?;
+    try testing.expectEqual(model.IdentityEventKind.lost, event.kind);
+    const salutation = after.findDefinition(zig_path, "salutation").?;
+    try testing.expectEqual(salutation.id, event.replacement.?);
+    try testing.expect(after.entityById(greeting_before.id) == null);
+}
+
+test "editing the zig fixture into unparsable source stops its facts being current" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const greet_before = before.findDefinition(zig_path, "greet").?;
+
+    const outcome = try fixture.edit("zig/edits/05_unparsable.zig");
+    try testing.expect(!outcome.applied);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(
+        semidx.core.graph.UnitAnalysis.stale,
+        after.unitAnalysis(fixture.unit).?,
+    );
+    try testing.expectEqual(@as(usize, 1), after.countDiagnostics(.analysis_failed));
+    try testing.expect(after.findDefinition(zig_path, "greet") == null);
+    try testing.expectEqual(greet_before.id, after.findEntity(.{
+        .kind = .definition,
+        .path = zig_path,
+        .name = "greet",
+        .freshness = .stale,
+    }).?.id);
+
+    // Nothing was deleted, so repairing the source restores the same entities.
+    const repaired = try fixture.edit("zig/edits/01_body_edit.zig");
+    try testing.expect(repaired.applied);
+    try testing.expectEqual(@as(usize, 5), repaired.preserved);
+    try testing.expectEqual(@as(usize, 0), repaired.created);
+
+    var repaired_snapshot = try fixture.index.publish();
+    defer repaired_snapshot.deinit();
+    try testing.expectEqual(greet_before.id, repaired_snapshot.findDefinition(zig_path, "greet").?.id);
+    try testing.expectEqual(@as(usize, 0), repaired_snapshot.countDiagnostics(.analysis_failed));
+}
