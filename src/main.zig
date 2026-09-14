@@ -1,0 +1,108 @@
+//! Developer-only inspection command.
+//!
+//! It indexes the source files named on the command line and prints a summary
+//! of the resulting graph. Its output is not a contract: no test asserts
+//! against it, and no consumer should parse it. It exists so that the slice can
+//! be run against real files without a test harness, and to show that indexing
+//! and querying need no service, no daemon, and no network.
+
+const std = @import("std");
+const semidx = @import("semidx");
+
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
+
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(io, &stdout_buffer);
+    const out = &stdout.interface;
+
+    var index = try semidx.Index.init(gpa, ".");
+    defer index.deinit();
+
+    var arguments = init.minimal.args.iterate();
+    defer arguments.deinit();
+    _ = arguments.skip();
+
+    var indexed: usize = 0;
+    while (arguments.next()) |path| {
+        const language = semidx.languageForPath(path) orelse {
+            try out.print("skipped {s}: no frontend in this slice covers it\n", .{path});
+            continue;
+        };
+        const source = std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(16 << 20)) catch |err| {
+            try out.print("skipped {s}: {t}\n", .{ path, err });
+            continue;
+        };
+        defer gpa.free(source);
+        _ = try index.addUnit(path, language, source);
+        indexed += 1;
+    }
+
+    if (indexed == 0) {
+        try out.print("usage: semidx-dev <source file>...\n", .{});
+        try out.flush();
+        return;
+    }
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    try printSummary(out, snapshot);
+    try out.flush();
+}
+
+fn printSummary(out: *std.Io.Writer, snapshot: semidx.Snapshot) !void {
+    try out.print("revision {d}\n", .{snapshot.revision});
+    try out.print("  repositories {d}\n", .{snapshot.countEntities(.repository)});
+    try out.print("  files        {d}\n", .{snapshot.countEntities(.file)});
+    try out.print("  definitions  {d}\n", .{snapshot.countEntities(.definition)});
+    try out.print("  assertions   {d}\n", .{snapshot.assertions.len});
+    try out.print("    facts       {d}\n", .{countResolution(snapshot, .fact)});
+    try out.print("    unresolved  {d}\n", .{snapshot.countUnresolvedAssertions()});
+    try out.print("    approximate {d}\n", .{snapshot.countApproximateAssertions()});
+
+    try out.print("\ndefinitions\n", .{});
+    for (snapshot.entities) |entity| {
+        if (entity.kind != .definition) continue;
+        try out.print("  [{d}] {s} {s} {s}", .{
+            @intFromEnum(entity.id),
+            @tagName(entity.identity.language.?),
+            entity.identity.role,
+            entity.identity.name orelse "<anonymous>",
+        });
+        if (entity.evidence) |evidence| {
+            try out.print("  ({s}:{d})", .{ entity.identity.scope, evidence.range.start_row + 1 });
+        }
+        try out.print("\n", .{});
+    }
+
+    try out.print("\nunresolved targets\n", .{});
+    var unresolved = snapshot.relationships(.{ .resolution = .unresolved });
+    while (unresolved.next()) |assertion| {
+        const relationship = assertion.claim.relationship;
+        switch (relationship.target) {
+            .designator => |name| try out.print("  {s} -> {s} ({s})\n", .{
+                @tagName(relationship.kind),
+                name,
+                assertion.resolution.unresolved.explanation,
+            }),
+            .entity => {},
+        }
+    }
+
+    if (snapshot.diagnostics.len > 0) {
+        try out.print("\ndiagnostics\n", .{});
+        for (snapshot.diagnostics) |diagnostic| {
+            try out.print("  {s}: {s}\n", .{ @tagName(diagnostic.kind), diagnostic.message });
+        }
+    }
+}
+
+fn countResolution(snapshot: semidx.Snapshot, category: semidx.model.ResolutionCategory) usize {
+    var count: usize = 0;
+    for (snapshot.assertions) |assertion| {
+        if (assertion.resolution.category() == category) count += 1;
+    }
+    return count;
+}

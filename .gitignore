@@ -37,6 +37,10 @@ scripts/lsp-toolchain/node_modules/
 .jdtls-toolchain/
 .jdtls.env
 
+# Zig build outputs
+.zig-cache/
+zig-out/
+
 # Python bytecode
 __pycache__/
 *.pyc
