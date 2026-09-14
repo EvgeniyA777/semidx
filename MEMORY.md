@@ -96,6 +96,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   bugs, coverage gaps, semantic limitations, upstream limitations, and process
   defects; keep broad roadmap topics in `SPEC.md` or this memory until they
   become specific follow-up entries.
+- `docs/design/001_project_roadmap.md` is the orientation layer for project
+  direction. It records the current milestone, next product steps, and
+  anti-drift checks; it is not an implementation plan.
 - The ADR procedure is enabled and the sequence starts at `001`;
   [docs/adr/README.md](docs/adr/README.md) is the index.
   [ADR 001](docs/adr/001_choose_zig_implementation_language.md) accepts Zig as
@@ -378,6 +381,10 @@ why. This is not a changelog of removed implementation; see `git log`.
   explicitly did not act on it.
 - Deepen frontend coverage only against stated risk, and report coverage through
   a capability matrix rather than by widening the fixtures quietly.
+- Use [docs/design/001_project_roadmap.md](docs/design/001_project_roadmap.md)
+  to check whether new plans move the project toward exact graph knowledge,
+  better incremental local operation, useful local graph projections, or clearer
+  evidence, contracts, and release discipline.
 - Current open follow-ups are indexed in
   [docs/followups/README.md](docs/followups/README.md): Zig logical-negation
   calls, Zig empty-container grammar behavior, Java classpath boundaries, and
