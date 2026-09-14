@@ -40,6 +40,7 @@ pub const SourceUnitId = enum(u32) {
 pub const Language = enum {
     java,
     clojure,
+    zig,
 
     pub fn tag(self: Language) []const u8 {
         return @tagName(self);

@@ -10,10 +10,12 @@ CLOJURE_REPO="${SEMIDX_TREE_SITTER_CLOJURE_GRAMMAR_REPO:-https://github.com/soga
 ELIXIR_REPO="${SEMIDX_TREE_SITTER_ELIXIR_GRAMMAR_REPO:-https://github.com/elixir-lang/tree-sitter-elixir.git}"
 JAVA_REPO="${SEMIDX_TREE_SITTER_JAVA_GRAMMAR_REPO:-https://github.com/tree-sitter/tree-sitter-java.git}"
 TYPESCRIPT_REPO="${SEMIDX_TREE_SITTER_TYPESCRIPT_GRAMMAR_REPO:-https://github.com/tree-sitter/tree-sitter-typescript.git}"
+ZIG_REPO="${SEMIDX_TREE_SITTER_ZIG_GRAMMAR_REPO:-https://github.com/tree-sitter-grammars/tree-sitter-zig.git}"
 CLOJURE_REF="${SEMIDX_TREE_SITTER_CLOJURE_GRAMMAR_REF:-e43eff80d17cf34852dcd92ca5e6986d23a7040f}"
 ELIXIR_REF="${SEMIDX_TREE_SITTER_ELIXIR_GRAMMAR_REF:-main}"
 JAVA_REF="${SEMIDX_TREE_SITTER_JAVA_GRAMMAR_REF:-e10607b45ff745f5f876bfa3e94fbcc6b44bdc11}"
 TYPESCRIPT_REF="${SEMIDX_TREE_SITTER_TYPESCRIPT_GRAMMAR_REF:-75b3874edb2dc714fb1fd77a32013d0f8699989f}"
+ZIG_REF="${SEMIDX_TREE_SITTER_ZIG_GRAMMAR_REF:-6479aa13f32f701c383083d8b28360ebd682fb7d}"
 ENV_FILE=""
 
 while [[ $# -gt 0 ]]; do
@@ -50,6 +52,7 @@ sync_grammar "tree-sitter-clojure" "$CLOJURE_REPO" "$CLOJURE_REF"
 sync_grammar "tree-sitter-elixir" "$ELIXIR_REPO" "$ELIXIR_REF"
 sync_grammar "tree-sitter-java" "$JAVA_REPO" "$JAVA_REF"
 sync_grammar "tree-sitter-typescript" "$TYPESCRIPT_REPO" "$TYPESCRIPT_REF"
+sync_grammar "tree-sitter-zig" "$ZIG_REPO" "$ZIG_REF"
 
 if [[ -z "$TREE_SITTER_CLI_SOURCE" ]]; then
   TREE_SITTER_CLI_SOURCE="$(command -v tree-sitter || true)"
@@ -70,6 +73,7 @@ CLOJURE_PATH="$GRAMMARS_DIR/tree-sitter-clojure"
 ELIXIR_PATH="$GRAMMARS_DIR/tree-sitter-elixir"
 JAVA_PATH="$GRAMMARS_DIR/tree-sitter-java"
 TYPESCRIPT_PATH="$GRAMMARS_DIR/tree-sitter-typescript/typescript"
+ZIG_PATH="$GRAMMARS_DIR/tree-sitter-zig"
 
 if [[ -n "$ENV_FILE" ]]; then
   {
@@ -80,6 +84,7 @@ if [[ -n "$ENV_FILE" ]]; then
     echo "SEMIDX_TREE_SITTER_ELIXIR_GRAMMAR_PATH=$ELIXIR_PATH"
     echo "SEMIDX_TREE_SITTER_JAVA_GRAMMAR_PATH=$JAVA_PATH"
     echo "SEMIDX_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH=$TYPESCRIPT_PATH"
+    echo "SEMIDX_TREE_SITTER_ZIG_GRAMMAR_PATH=$ZIG_PATH"
   } > "$ENV_FILE"
   echo "wrote_env_file=$ENV_FILE"
 fi
@@ -92,10 +97,12 @@ echo "tree_sitter_clojure_grammar=$CLOJURE_PATH"
 echo "tree_sitter_elixir_grammar=$ELIXIR_PATH"
 echo "tree_sitter_java_grammar=$JAVA_PATH"
 echo "tree_sitter_typescript_grammar=$TYPESCRIPT_PATH"
+echo "tree_sitter_zig_grammar=$ZIG_PATH"
 echo "tree_sitter_clojure_ref=$CLOJURE_REF"
 echo "tree_sitter_elixir_ref=$ELIXIR_REF"
 echo "tree_sitter_java_ref=$JAVA_REF"
 echo "tree_sitter_typescript_ref=$TYPESCRIPT_REF"
+echo "tree_sitter_zig_ref=$ZIG_REF"
 
 if [[ -n "$TREE_SITTER_CLI_PATH" ]]; then
   echo "export SEMIDX_TREE_SITTER_CLI_PATH=$TREE_SITTER_CLI_PATH"
@@ -104,3 +111,4 @@ echo "export SEMIDX_TREE_SITTER_CLOJURE_GRAMMAR_PATH=$CLOJURE_PATH"
 echo "export SEMIDX_TREE_SITTER_ELIXIR_GRAMMAR_PATH=$ELIXIR_PATH"
 echo "export SEMIDX_TREE_SITTER_JAVA_GRAMMAR_PATH=$JAVA_PATH"
 echo "export SEMIDX_TREE_SITTER_TYPESCRIPT_GRAMMAR_PATH=$TYPESCRIPT_PATH"
+echo "export SEMIDX_TREE_SITTER_ZIG_GRAMMAR_PATH=$ZIG_PATH"

@@ -13,6 +13,11 @@ const ParserDeps = struct {
     runtime_lib: []const u8,
 };
 
+/// Grammar checkouts compiled into the full lane, by directory name under the
+/// grammars directory. Each one is a pinned checkout from
+/// `scripts/setup-tree-sitter-grammars.sh`.
+const grammar_checkouts = [_][]const u8{ "tree-sitter-java", "tree-sitter-clojure", "tree-sitter-zig" };
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -159,7 +164,7 @@ fn addParserDeps(b: *std.Build, module: *std.Build.Module, deps: ParserDeps) voi
     module.addIncludePath(.{ .cwd_relative = deps.runtime_include });
     module.addObjectFile(.{ .cwd_relative = deps.runtime_lib });
 
-    for ([_][]const u8{ "tree-sitter-java", "tree-sitter-clojure" }) |grammar| {
+    for (grammar_checkouts) |grammar| {
         const src_dir = b.pathJoin(&.{ deps.grammars_dir, grammar, "src" });
         module.addIncludePath(.{ .cwd_relative = src_dir });
         module.addCSourceFile(.{
@@ -177,7 +182,7 @@ fn resolveParserDeps(b: *std.Build) ?ParserDeps {
     ) orelse b.graph.environ_map.get("SEMIDX_TREE_SITTER_GRAMMARS_DIR") orelse
         b.pathFromRoot(".tree-sitter-grammars");
 
-    for ([_][]const u8{ "tree-sitter-java", "tree-sitter-clojure" }) |grammar| {
+    for (grammar_checkouts) |grammar| {
         if (!fileExists(b, b.pathJoin(&.{ grammars_dir, grammar, "src", "parser.c" }))) return null;
     }
 

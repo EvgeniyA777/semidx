@@ -321,6 +321,26 @@ test "a scan finds the covered units and nothing else" {
     try testing.expect(found.unitByPath("zig-out/Built.java") == null);
 }
 
+test "a scan finds zig units and skips zig build outputs" {
+    var tree = Tree.init();
+    defer tree.deinit();
+
+    try tree.file("build.zig", "pub fn build() void {}\n");
+    try tree.file("src/root.zig", "fn main() void {}\n");
+    try tree.file("build.zig.zon", ".{}\n");
+    try tree.file(".zig-cache/o/generated.zig", "fn cached() void {}\n");
+    try tree.file("zig-out/lib/installed.zig", "fn installed() void {}\n");
+
+    var found = try tree.scan(.{});
+    defer found.deinit();
+
+    try testing.expectEqual(@as(usize, 2), found.units.len);
+    try testing.expectEqualStrings("build.zig", found.units[0].path);
+    try testing.expectEqualStrings("src/root.zig", found.units[1].path);
+    for (found.units) |unit| try testing.expectEqual(model.Language.zig, unit.language);
+    try testing.expectEqual(@as(usize, 0), found.diagnostics.len);
+}
+
 test "a scan of the same tree twice is identical" {
     var tree = Tree.init();
     defer tree.deinit();

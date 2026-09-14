@@ -17,6 +17,7 @@ const c = @cImport({
 
 extern fn tree_sitter_java() callconv(.c) *const c.TSLanguage;
 extern fn tree_sitter_clojure() callconv(.c) *const c.TSLanguage;
+extern fn tree_sitter_zig() callconv(.c) *const c.TSLanguage;
 
 pub const Error = error{
     /// The grammar could not be assigned, which in practice means the grammar
@@ -30,11 +31,13 @@ pub const Error = error{
 pub const Grammar = enum {
     java,
     clojure,
+    zig,
 
     fn language(self: Grammar) *const c.TSLanguage {
         return switch (self) {
             .java => tree_sitter_java(),
             .clojure => tree_sitter_clojure(),
+            .zig => tree_sitter_zig(),
         };
     }
 
@@ -280,6 +283,23 @@ test "the local clojure grammar parses through the adapter" {
     try testing.expectEqualStrings("(ns demo.greeter)", first.text(source));
 }
 
+test "the local zig grammar parses through the adapter" {
+    var parser = try Parser.init(.zig);
+    defer parser.deinit();
+
+    const source = "fn greet() void {}\n";
+    var tree = try parser.parse(source, null);
+    defer tree.deinit();
+
+    const root = tree.root();
+    try testing.expect(!root.hasError());
+    try testing.expectEqualStrings("source_file", root.kind());
+
+    const function = root.namedChild(0).?;
+    try testing.expectEqualStrings("function_declaration", function.kind());
+    try testing.expectEqualStrings("greet", function.childByFieldName("name").?.text(source));
+}
+
 test "a syntax error is visible on the tree rather than silently dropped" {
     var parser = try Parser.init(.java);
     defer parser.deinit();
@@ -345,4 +365,5 @@ test "one parser parses successive contents of the same unit independently" {
 test "the grammars and the runtime agree on the parser ABI" {
     try testing.expect(Grammar.java.abiVersion() <= runtime_abi_version);
     try testing.expect(Grammar.clojure.abiVersion() <= runtime_abi_version);
+    try testing.expect(Grammar.zig.abiVersion() <= runtime_abi_version);
 }

@@ -14,6 +14,7 @@ const ts = @import("semidx_tree_sitter");
 pub const java = @import("java.zig");
 pub const java_packages = @import("java_packages.zig");
 pub const clojure = @import("clojure.zig");
+pub const zig = @import("zig.zig");
 
 const model = core.model;
 const contract = core.contract;
@@ -22,6 +23,7 @@ pub fn capabilitiesFor(language: model.Language) contract.Capabilities {
     return switch (language) {
         .java => java.capabilities,
         .clojure => clojure.capabilities,
+        .zig => zig.capabilities,
     };
 }
 
@@ -29,6 +31,7 @@ fn grammarFor(language: model.Language) ts.Grammar {
     return switch (language) {
         .java => java.grammar,
         .clojure => clojure.grammar,
+        .zig => zig.grammar,
     };
 }
 
@@ -123,6 +126,7 @@ pub const Analyzer = struct {
                 try java.analyze(builder, input, tree, context);
             },
             .clojure => try clojure.analyze(builder, input, tree),
+            .zig => try zig.analyze(builder, input, tree),
         }
     }
 
@@ -340,7 +344,7 @@ test "the clojure frontend keeps its own vocabulary in extension payloads" {
     try testing.expectEqualStrings("greet/0", greet.identity.signature.?);
 }
 
-test "both frontends describe the same core kinds" {
+test "the java and clojure frontends describe the same core kinds" {
     // Coverage differs; the core meaning does not. Both frontends produce
     // definitions and the same three relationship kinds.
     for ([_]model.Language{ .java, .clojure }) |language| {
@@ -398,6 +402,60 @@ test "a source unit with no definitions reports confirmed absence" {
     try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.{ .kind = .definition }));
     try testing.expectEqual(@as(usize, 1), snapshot.countDiagnostics(.confirmed_absence));
     try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.analysis_unavailable));
+}
+
+fn indexZig(analyzer: *Analyzer, graph: *core.Graph, source: []const u8) !core.reconcile.Outcome {
+    const unit = try graph.addSourceUnit("probe.zig", .zig, source);
+    return analyzer.indexUnit(graph, unit);
+}
+
+test "a zig unit reaches the zig frontend and yields no invented facts" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const outcome = try indexZig(&analyzer, &graph, "const std = @import(\"std\");\nconst io = @import(\"io\");\ntest \"t\" {}\n");
+    try testing.expect(outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countAssertions(.{ .resolution = .fact, .producer = "frontend.zig" }));
+    // Two uncovered kinds, each reported once with its count; nothing claims
+    // the unit is empty.
+    try testing.expectEqual(@as(usize, 2), snapshot.countDiagnostics(.unsupported_construct));
+    try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.confirmed_absence));
+}
+
+test "an empty zig unit reports confirmed absence" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const outcome = try indexZig(&analyzer, &graph, "// nothing but a comment\n");
+    try testing.expect(outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(@as(usize, 1), snapshot.countDiagnostics(.confirmed_absence));
+    try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.unsupported_construct));
+}
+
+test "zig source that does not parse is reported as failed analysis" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const outcome = try indexZig(&analyzer, &graph, "fn greet( void {\n");
+    try testing.expect(!outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(@as(usize, 1), snapshot.countDiagnostics(.analysis_failed));
+    try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.confirmed_absence));
 }
 
 test "source that does not parse is reported as failed analysis" {
