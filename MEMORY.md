@@ -372,6 +372,17 @@ why. This is not a changelog of removed implementation; see `git log`.
   explicitly did not act on it.
 - Deepen frontend coverage only against stated risk, and report coverage through
   a capability matrix rather than by widening the fixtures quietly.
+- **Plan 004 is ready for execution.** It onboards Zig as the next language
+  frontend for dogfooding and then adds a local stdio MCP preview over published
+  graph snapshots ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md),
+  [plan 004](docs/plans/004_zig_frontend_and_mcp_preview.md)). The intended
+  slice is narrow: `.zig` discovery, pinned local `tree-sitter-zig`, top-level
+  Zig definitions, same-unit simple Zig calls, and graph-first MCP tools for
+  health, repository map, definition lookup, references, context, and refresh.
+  It explicitly excludes a published semantic contract, persistence, HTTP,
+  remote services, resources/prompts, source text by default, Zig imports,
+  namespace/container lookup, comptime semantics, methods, fields, local
+  variables, and cross-unit Zig resolution.
 - `scripts/git-hooks/pre-push` still carries an inert block that refreshes
   `docs/code-context.md` through a Clojure alias when `deps.edn` exists. Both
   files went with the removed implementation, so the block never runs; remove it

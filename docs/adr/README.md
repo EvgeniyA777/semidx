@@ -19,3 +19,4 @@ ratified constitution.
 - [002: Use Local Tree-sitter C Sources For Language Frontends](002_local_tree_sitter_parser_dependency.md)
 - [003: Reject Repository-Wide Name Matching As Graph Assertions](003_reject_name_match_assertions.md)
 - [004: Allow Java Same-Package Type Resolution](004_allow_java_same_package_type_resolution.md)
+- [005: Add Zig Frontend And Local MCP Preview](005_add_zig_frontend_and_local_mcp_preview.md)
