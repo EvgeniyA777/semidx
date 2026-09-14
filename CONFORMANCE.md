@@ -139,5 +139,29 @@ evidence for the same scenario families at repository scale:
 
 This evidence still does not admit `module` or `IMPORTS`, publish a semantic
 contract, declare Java or Clojure supported languages, or create a public
-surface. Cross-unit references remain unresolved until a language frontend
-establishes them by language-correct rules.
+surface.
+
+Java same-package type resolution
+([plan](docs/plans/003_java_package_type_resolution.md),
+[evidence](docs/reports/003_java_package_type_resolution_progress.md)) adds
+evidence for cross-unit behavior:
+
+* **graph authority** — a cross-unit `REFERENCES` fact is recorded only when the
+  Java frontend establishes it by package scoping; the same simple name in
+  another package, the default package, an ambiguous package, or a scope a type
+  parameter, member type, supertype, or import could claim stays unresolved with
+  its reason, and Clojure cross-unit names stay unresolved;
+* **knowledge categories** — integration refuses an external target that is not
+  a current definition fact of a declared provider, and the resolution adds no
+  approximate assertion;
+* **incremental maintenance** — adding, renaming, duplicating, moving, or
+  removing a provider updates a dependent that was never edited, a provider body
+  edit reaches its dependent through its dependency, and invocation counts show
+  a package export change rereads only that package at two repository sizes;
+* **consistent observation and honest degradation** — a dependent whose own
+  contents cannot be analyzed keeps its earlier claim as stale after the provider
+  withdraws the target, and publication refuses a current claim naming a
+  withdrawn entity.
+
+Cross-unit references outside that rule remain unresolved until a language
+frontend establishes them by language-correct rules.

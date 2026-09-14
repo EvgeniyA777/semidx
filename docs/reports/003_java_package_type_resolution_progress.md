@@ -14,7 +14,11 @@ Companion log for
 
 ## Current Status
 
-Stages 1 to 4 are complete. Stage 5 is next.
+Stages 1 to 4 are complete, and Stage 5's documentation synchronization and
+closure checks are done. The findings-first review of the final diff with
+`semidx-code-review` has not run yet: it is assigned to a separate reviewing
+agent. The plan and this log stay `in_progress` until that review and the
+disposition of its findings are recorded here.
 
 ## Stage Log
 
@@ -25,7 +29,7 @@ Stages 1 to 4 are complete. Stage 5 is next.
 | Stage 2: Java package binding context | Completed | The analyzer builds a per-package binding table from current Java class facts and hands it to the Java frontend; duplicate names arrive as ambiguous. The frontend does not use it yet. |
 | Stage 3: Java cross-unit type resolution | Completed | A simple type name in an explicit package resolves to the one current top-level class another unit declares in that package, as a `REFERENCES` fact with a dependency on the provider. Every other case stays unresolved with its reason. The repository-scale fixture expectation moved to Stage 4 (see below). |
 | Stage 4: Package export invalidation | Completed | Every index mutation (scan, add, edit, remove) reanalyzes dependents of changed providers and the other Java units of every package whose exported classes changed, ordered so a unit read before the last change is read again. The repository-scale `Helper` reference is now a fact. |
-| Stage 5: Documentation, review, and closure | Not started | Next. |
+| Stage 5: Documentation, review, and closure | In progress | `MEMORY.md`, `SPEC.md`, and `CONFORMANCE.md` synchronized; closure commands pass. Final review pending (separate reviewer). |
 
 ## Plan Readiness Gate
 
@@ -193,6 +197,80 @@ Verification:
 | Mutation: dependency-propagated reanalysis disabled | `a provider body edit reaches its dependent through the dependency alone` failed. Restored. |
 | `zig build run -- fixtures/repository-scale` | Observational: `Helper` no longer listed among unresolved targets; `decorate` still is; 0 approximate, 0 stale. |
 
+## Stage 5: Documentation, Review, And Closure
+
+Changed files: `MEMORY.md`, `SPEC.md`, `CONFORMANCE.md`, this log.
+
+- `MEMORY.md` records the Java same-package producer, the external-target
+  contract, both invalidation mechanisms and their wiring into every `Index`
+  mutation, the stale-claim invariant, the narrowed "does not exist" list, the
+  new load-bearing limitations, and near-term priorities past this workstream.
+- `SPEC.md` records the producer as implementation guidance for one Java rule
+  and updates the Invalidation row.
+- `CONFORMANCE.md` records the cross-unit evidence per scenario family without
+  adopting any family as a gate.
+- `CORE.md` is unchanged. No kind's meaning or admission status changed: the
+  cross-unit reference is an accepted `REFERENCES` between accepted
+  `definition`s, and `module` / `IMPORTS` remain blocked. The evidence that a
+  Java package fit in extension vocabulary is noted in `MEMORY.md` for a future
+  admission review rather than written into admission text now.
+- Historical records (reports 001 and 002, plan 002, ADR 003) still say that no
+  cross-unit assertions exist. They describe their own time and were not
+  rewritten.
+
+Closure verification:
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | 84/84 passed. |
+| `zig build test-core --summary all` | 84/84 passed. |
+| `zig build test --summary all` | 140/140 passed. |
+| `zig fmt --check build.zig src tests` | Passed. |
+| `./scripts/check-agent-attribution.sh --all` | Passed. |
+| `git diff --check` | Passed. |
+| `./scripts/check-memory-freshness.sh` | Passed. |
+| `zig build run -- fixtures/repository-scale` | Observational only; see Stage 4. |
+| `semidx-code-review` findings-first review | Not run in this session; assigned to a separate reviewer. |
+
+## Residual Risk
+
+- **The repository is treated as one Java classpath.** Two build modules that
+  share a package name but cannot see each other are one package to this rule:
+  a class in one can be resolved to a class in the other, as a fact. Duplicates
+  across them are reported as ambiguity, which is safe; a single provider is not.
+  Multi-module boundaries need their own requirement.
+- **Conservative shadowing leaves real references unresolved.** Any class with
+  an `extends` or `implements` clause resolves no cross-unit type names, because
+  inherited member types are not analyzed. Interfaces, enums, records, and
+  nested classes are never providers.
+- **Same-unit resolution is unchanged and still ignores shadowing.** A class
+  declared in the unit wins over a type parameter of the same name, as it did
+  before this plan; the new shadowing checks apply only to cross-unit
+  resolution.
+- **Invalidation is coarse.** A provider body edit rereads every dependent, and
+  an export change rereads every other unit of its package. On a first scan each
+  explicit package is read about twice, and building one package's table costs
+  that package's size per analysis, so a very large single package is quadratic
+  to build.
+- **Freshness is still per unit.** A dependent's claim is not marked stale by
+  its provider's state; `Index` keeps such a claim from being observed by
+  reanalyzing the dependent in the same batch. Code that mutates `Graph` or calls
+  `Analyzer.indexUnit` directly bypasses that upkeep, and `publish` then refuses
+  a current claim naming a withdrawn entity rather than serving it.
+- **A stale claim can name an entity that left the graph.** Consumers asking for
+  stale relationships can receive a target id absent from the snapshot's
+  entities; the target's identity event records its removal.
+- **The package hint is bound to one graph and never pruned.** An `Analyzer`
+  reused across graphs mixes hints (harmless, since every hint is re-read, but
+  wasted work), and hints for units that left a package stay until the analyzer
+  is released.
+- **Declarations recorded during a batch are not propagated within it.** A unit
+  analyzed early in a scan can resolve to a provider whose body changes later in
+  the same scan and is not reread for it. That is safe today because the class
+  keeps its identity when its exports do not change, and an export change is
+  caught by package invalidation; a finer dependency rule would have to revisit
+  it.
+
 ## Risk Matrix
 
 | Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
@@ -225,7 +303,22 @@ Documentation-only planning checks run during plan creation:
 
 ## Next Handoff
 
-Continue with
-[Stage 5](../plans/003_java_package_type_resolution.md#stage-5-documentation-review-and-closure).
+For the reviewing agent: run `semidx-code-review` findings-first over the plan's
+commits on `dev`, from `926a8f1` (Stage 1) through the Stage 5 documentation
+commit, against [ADR 004](../adr/004_allow_java_same_package_type_resolution.md)
+and [plan 003](../plans/003_java_package_type_resolution.md). Record each
+finding and its disposition in a Review section of this log. After the review
+closes, mark the plan `completed` and this log `completed` with historical
+`agent_action` values, and update the plan-003 bullet in `MEMORY.md`.
+
+Places most worth a reviewer's attention:
+
+- `src/frontends/java.zig` `resolveType`: completeness of the JLS 6.4.1 shadowing
+  checks for field and return-type positions.
+- `src/root.zig` `Upkeep`: step ordering within a scan, and the pre-batch
+  dependency reading.
+- `src/core/graph.zig` `checkAssertions`: the stale-claim tolerance.
+- The residual risk that the repository is treated as one Java classpath.
+
 Semantic Code Indexing (semidx MCP) failed to connect in the implementing
 session (connection timeout), so code was located by targeted direct reads.

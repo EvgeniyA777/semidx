@@ -121,8 +121,21 @@ settles the first source-identity layer for implementation guidance: discovered
 source units have allocated identity, path is a property, exact moves preserve
 unit and contained entity identities, ambiguous or unsupported moves are
 reported, and move-plus-edit remains identity loss until stronger evidence
-exists. It also adds a dependency propagation mechanism for future cross-unit
-facts, but no production frontend declares dependencies yet.
+exists. It also added the dependency propagation mechanism cross-unit facts
+need, before any producer declared dependencies.
+
+The first cross-unit producer is implemented
+([ADR 004](docs/adr/004_allow_java_same_package_type_resolution.md),
+[plan](docs/plans/003_java_package_type_resolution.md),
+[evidence](docs/reports/003_java_package_type_resolution_progress.md)). A Java
+simple type name in a unit with an explicit package can be a `REFERENCES` fact
+targeting the one current top-level class another unit declares in that package,
+once the Java frontend has ruled out every scope Java gives precedence over the
+package. The dependent declares a dependency on the provider unit, and a change
+to a package's exported classes reanalyzes that package's other units. This is
+implementation guidance for one Java rule, not a Java coverage claim: it admits
+no `module` or `IMPORTS`, publishes no contract or capability matrix, and treats
+the indexed repository as a single Java classpath.
 
 ## Requirements Still To Specify
 
@@ -135,7 +148,7 @@ facts, but no production frontend declares dependencies yet.
 | Source identity | Discovered roots, source-unit identity, path-as-property, tombstones, and exact move correspondence are implemented for the in-memory slice. Still to specify: generated or virtual source origins, multi-root identity, and stronger evidence for move-plus-edit refactors |
 | Storage and snapshots | Representation, atomic publication, persistence, and contract-version encoding |
 | Public contracts | Schemas, resolution encoding, errors, ordering, pagination, and transport parity |
-| Invalidation | Unit-to-unit dependency propagation exists and is synthetically verified. Still to specify: language-correct producers of dependencies, name-grained or aspect-grained invalidation, and cross-unit facts |
+| Invalidation | Unit-to-unit dependency propagation and Java package-export invalidation exist, with Java same-package type resolution as the first producer. Still to specify: further language-correct producers, name-grained or aspect-grained invalidation, and build-module or classpath boundaries for package scope |
 | Local budgets | Discovery has initial file-size, unit-count, and depth budgets with diagnostics; repository-scale tests guard affected-region work. Still to specify: benchmark repositories, memory/startup budgets, and publish/query cost budgets |
 | Optional outbound data | Destination/data consent settings and verification for projections and diagnostics |
 

@@ -156,15 +156,44 @@ why. This is not a changelog of removed implementation; see `git log`.
   reintroducing a sweep and watching it fail. `publish` still walks the whole
   graph on purpose, and that cost is measured and accepted, not solved:
   ~1,100 records for 73 units.
-- **Invalidation now has a mechanism but no production producer.**
-  `src/core/dependencies.zig` records unit-to-unit analysis dependencies, clears
-  a unit's previous dependency declarations before recording a new analysis run,
-  forgets declarations involving a removed unit, and propagates invalidation
-  transitively with a bounded round count. `Index.applyScan` seeds propagation
-  from changed and removed units and reanalyzes reached dependents. No real
-  frontend declares such dependencies yet: ADR 003 rejected repository-wide name
-  matching as a graph assertion, and legitimate cross-unit facts are waiting on
-  language-correct scoping and the relevant `CORE.md` admission work.
+- **The first production cross-unit facts exist: Java same-package type
+  resolution** ([ADR 004](docs/adr/004_allow_java_same_package_type_resolution.md),
+  [plan 003](docs/plans/003_java_package_type_resolution.md),
+  [report 003](docs/reports/003_java_package_type_resolution_progress.md)). A
+  field type or method return type written as a simple name, in a unit with an
+  explicit package, resolves to the one current top-level class another unit
+  declares in that package — a `REFERENCES` fact with a dependency on the
+  provider unit — but only after the Java frontend rules out a type parameter, a
+  declared member type, any supertype (inherited member types), a single-type or
+  static import of the name, and a top-level non-class type of that name.
+  Qualified, missing, other-package, default-package, ambiguous, and shadowed
+  names stay unresolved with explanations naming the reason. No package entity,
+  `module`, or `IMPORTS` was introduced; the package stays the `java.package`
+  extension label.
+- How that is wired. `contract.DraftTarget.external` names a graph-established
+  definition plus its provider unit; `reconcile.integrate` refuses it before
+  mutating anything unless it is a `REFERENCES`/`CALLS` target, the provider is
+  another unit the batch declares a dependency on, and
+  `Graph.currentDefinitionFact` finds it a current definition fact of that
+  provider. The analyzer builds a `java.Context` per analysis from
+  `frontends/java_packages.zig`: a per-package table rebuilt from current
+  `frontend.java` class facts, bounded to one package by a hint of which units
+  declared classes where (every hint is re-read from the graph).
+- **Invalidation has two mechanisms, run for every index mutation.**
+  `src/core/dependencies.zig` records unit-to-unit analysis dependencies and
+  propagates them transitively with a bounded round count; propagation is now
+  computed before a scan removes anything, because removal forgets declarations
+  (it was computed after, which silently dropped a removed provider's
+  dependents). A name that stayed unresolved read no provider, so
+  `Index.Upkeep` also compares each changed unit's Java exports before and
+  after, and reanalyzes the other units of any package whose exports changed
+  that were read before the change. `addUnit`, `applyEdit`, and `removeUnit` run
+  the same upkeep as `applyScan`. Work stays inside the changed package; tests
+  measure it with invocation counts at two repository sizes.
+- `Graph.checkInvariants` refuses a current relationship whose target entity is
+  gone, but tolerates a stale one: a dependent whose own contents cannot be
+  analyzed keeps its earlier cross-unit claim after the provider withdraws the
+  target, and that claim no longer answers current queries.
 - **A source unit's identity is not its path.** `model.Scope` is `repository` or
   `unit: SourceUnitId`, and `IdentityEvidence.scope` carries it, so renaming a
   file moves one property and leaves the unit, its contents, and every entity
@@ -239,10 +268,10 @@ why. This is not a changelog of removed implementation; see `git log`.
 - No public surface: no MCP, HTTP, gRPC, CLI contract, `contracts/` schemas, or
   runtime mirrors. `semidx-dev` is a developer inspection command and nothing
   asserts against its output.
-- No cross-unit assertions: every reference still resolves inside its own unit
-  or stays a designator. The dependency mechanism can propagate invalidation once
-  a producer declares dependencies, but no production path declares any yet. No
-  file watching, no concurrency.
+- Cross-unit resolution beyond Java same-package top-level types: no Java
+  imports, qualified names, nested classes, inheritance, classpath symbols, or
+  interface/enum/record targets, and no Clojure namespace resolution. Those
+  references stay designators. No file watching, no concurrency.
 - No persistence of the measurement story: `publish` is linear in the graph,
   which is right for publishing per batch of edits and wrong for publishing per
   query. Changing it means changing what a snapshot is, which `SPEC.md` owns.
@@ -294,14 +323,16 @@ why. This is not a changelog of removed implementation; see `git log`.
   of its five first-slice properties the implementation supplies evidence for;
   none of its scenario families is adopted as an executable check.
 - Known implementation limitations, in full, are in the Residual Risk sections of
-  the progress logs (001, 002, 005). The load-bearing ones: both frontends
+  the progress logs (001, 002, 005, 003). The load-bearing ones: both frontends
   resolve by name within one source unit, with no imports, inheritance,
-  overloads, macros, or local bindings; renaming a *definition* is identity loss,
+  overloads, macros, or local bindings, except Java same-package top-level types;
+  that rule treats the indexed repository as one Java classpath, so two build
+  modules sharing a package name are one package to it; renaming a *definition* is identity loss,
   while renaming a *file* with established correspondence is not, because scope
   is the unit; a file that moved and changed in the same rescan is still removal
-  plus addition until stronger identity evidence exists; the dependency
-  mechanism is synthetic until a language frontend can declare real cross-unit
-  dependencies; the unit table is append-only and never compacts; interned
+  plus addition until stronger identity evidence exists; dependencies and package
+  invalidation are coarse (a provider body edit rereads its dependents, an export
+  change rereads its whole package); the unit table is append-only and never compacts; interned
   strings of removed entities and stale assertions are never reclaimed while the
   graph lives; and both `Snapshot` string borrowing and the default-current query
   rule are documented conventions rather than type-enforced boundaries.
@@ -318,22 +349,18 @@ why. This is not a changelog of removed implementation; see `git log`.
   unit at repository scale, and dependency propagation has a tested mechanism.
   Stage 5 deliberately took the ADR 003 rejected branch: no name-match
   assertions were added, so cross-unit references remain unresolved designators.
-- The next architecture plan should choose one narrow producer of legitimate
-  cross-unit evidence rather than reopening repository ingestion. A good
-  candidate is language-correct Java package scoping, because ADR 003 names that
-  as the legitimate path. That work may force `module` / `IMPORTS` admission
-  questions, but they should be resolved from evidence, not admitted as a paper
-  model.
-- **Plan 003 is ready for implementation.**
-  [ADR 004](docs/adr/004_allow_java_same_package_type_resolution.md) permits the
-  narrow Java case: an unqualified top-level type name in an explicit package may
-  resolve to exactly one current Java top-level class definition in the same
-  package, with dependency evidence. The implementation plan is
-  [docs/plans/003_java_package_type_resolution.md](docs/plans/003_java_package_type_resolution.md);
-  its companion log is
-  [docs/reports/003_java_package_type_resolution_progress.md](docs/reports/003_java_package_type_resolution_progress.md).
-  It does not admit `module` or `IMPORTS`, and it does not widen Clojure or
-  general Java coverage.
+- **Plan 003 is implemented; its final findings-first review is pending.**
+  Stages 1–4 are committed and Stage 5's documentation is synchronized; the
+  plan stays `in_progress` until that review is recorded in
+  [report 003](docs/reports/003_java_package_type_resolution_progress.md). It
+  admitted no `module` or `IMPORTS` and widened no Clojure or general Java
+  coverage. It did produce evidence those admission questions can use: a Java
+  package was expressible as extension vocabulary plus an analyzer projection,
+  with no shared-core kind.
+- Next cross-unit work should again be one narrow, language-correct producer
+  with its own requirement: Java single-type imports, or the multi-module
+  classpath boundary the same-package rule currently ignores, are the nearest
+  candidates. Each needs its own decision record; neither is implied by ADR 004.
 - Source identity needs a stronger evidence story for common refactors where a
   file moves and changes in the same rescan. The current exact-content rule is
   intentionally conservative; future work should prefer explicit VCS/IDE move
