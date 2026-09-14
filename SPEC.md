@@ -116,7 +116,7 @@ requirements for later verification, not claims of passing results.
 
 The repository-scale ingestion slice is also complete
 ([plan](docs/plans/002_repository_scale_ingestion.md),
-[evidence](docs/reports/005_repository_scale_ingestion_progress.md)). It
+[evidence](docs/reports/002_consolidated_progress.md#005-repository-scale-ingestion-progress)). It
 settles the first source-identity layer for implementation guidance: discovered
 source units have allocated identity, path is a property, exact moves preserve
 unit and contained entity identities, ambiguous or unsupported moves are

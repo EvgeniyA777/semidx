@@ -111,7 +111,7 @@ It also separates freshness from resolution, which the Honest degradation family
 requires: a source unit whose contents changed without a successful reanalysis
 reports itself stale, and its earlier assertions stop answering current-state
 queries without being withdrawn. See
-[report 002](docs/reports/002_slice_freshness_followup.md).
+[report 002](docs/reports/002_consolidated_progress.md#002-slice-freshness-follow-up).
 
 That evidence is fixture-scoped. It is not a capability matrix, not a
 per-language accuracy claim, and not a substitute for adopting these families as
@@ -119,7 +119,7 @@ gates.
 
 The repository-scale ingestion slice
 ([plan](docs/plans/002_repository_scale_ingestion.md),
-[evidence](docs/reports/005_repository_scale_ingestion_progress.md)) adds
+[evidence](docs/reports/002_consolidated_progress.md#005-repository-scale-ingestion-progress)) adds
 evidence for the same scenario families at repository scale:
 
 * **stable source-unit identity** — a source unit's identity is not its path;

@@ -22,7 +22,7 @@ units there is no repository to grow, no rename to survive, and no unrelated
 work to avoid.
 
 Its companion progress log is
-[docs/reports/005_repository_scale_ingestion_progress.md](../reports/005_repository_scale_ingestion_progress.md).
+[docs/reports/002_consolidated_progress.md section 005](../reports/002_consolidated_progress.md#005-repository-scale-ingestion-progress).
 
 ## Why This Before `module` And `IMPORTS`
 
@@ -93,11 +93,11 @@ quadratic or unbounded behavior, not to reach a performance target.
   Directory walking uses `std.Io.Dir`; nothing here needs a new dependency.
 - The accepted core roster is `repository`, `file`, `definition`, `CONTAINS`,
   `DEFINES`, `REFERENCES`, and `CALLS`, unversioned and unpublished
-  ([report 003](../reports/003_core_admission_review.md),
-  [report 004](../reports/004_defines_contains_split.md)). This plan uses them
+  ([report 002 section 003](../reports/002_consolidated_progress.md#003-core-admission-review),
+  [report 002 section 004](../reports/002_consolidated_progress.md#004-defines-and-contains-split)). This plan uses them
   and changes none of their meanings.
 - Freshness stays a separate axis from resolution
-  ([report 002](../reports/002_slice_freshness_followup.md)). Repository-scale
+  ([report 002 section 002](../reports/002_consolidated_progress.md#002-slice-freshness-follow-up)). Repository-scale
   work adds units that can be stale independently; it does not change the rule.
 - The two fixture frontends stay fixture-scoped. This plan does not widen Java
   or Clojure coverage, and a frontend change that is not required by the unit
@@ -119,7 +119,7 @@ quadratic or unbounded behavior, not to reach a performance target.
   degradation are the ones this plan supplies evidence for.
 - [MEMORY.md](../../MEMORY.md) owns current implementation reality.
 - [Report 001](../reports/001_zig_vertical_slice_progress.md) and
-  [report 002](../reports/002_slice_freshness_followup.md) own what the first
+  [report 002 section 002](../reports/002_consolidated_progress.md#002-slice-freshness-follow-up) own what the first
   slice actually built and what it left as risk.
 
 ## Plan-Level Decisions
@@ -478,10 +478,10 @@ This plan is ready for implementation when:
 
 - the executor starts from a clean or explicitly coordinated working tree;
 - `RULES.md`, `ARCHITECTURE_CONSTITUTION.md`, `SPEC.md`, `CORE.md`,
-  `CONFORMANCE.md`, `MEMORY.md`, ADR 001, ADR 002, reports 001 to 004, and this
-  plan have been read;
+  `CONFORMANCE.md`, `MEMORY.md`, ADR 001, ADR 002, report 001, report 002
+  sections 002 to 004, and this plan have been read;
 - the executor records progress in
-  [docs/reports/005_repository_scale_ingestion_progress.md](../reports/005_repository_scale_ingestion_progress.md);
+  [docs/reports/002_consolidated_progress.md section 005](../reports/002_consolidated_progress.md#005-repository-scale-ingestion-progress);
 - Stage 2 is not started before Stage 1 has landed discovery, because changing
   identity under a hand-written unit list proves nothing.
 

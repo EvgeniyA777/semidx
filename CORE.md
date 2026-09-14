@@ -11,9 +11,9 @@ updated: "2026-09-14"
 
 The shared-core kinds and their admission assessments. The first admission
 review accepted an initial unversioned roster, recorded in
-[report 003](docs/reports/003_core_admission_review.md), and the
+[report 002 section 003](docs/reports/002_consolidated_progress.md#003-core-admission-review), and the
 definition/containment split admitted `CONTAINS` and `DEFINES`, recorded in
-[report 004](docs/reports/004_defines_contains_split.md). That is not a
+[report 002 section 004](docs/reports/002_consolidated_progress.md#004-defines-and-contains-split). That is not a
 published semantic contract version, not a runtime support claim, and not an
 immutable API. Accepted definitions can be used by the implementation; publishing
 them to consumers still requires the lifecycle work in [SPEC.md](SPEC.md).
@@ -75,7 +75,7 @@ one such indexing scope. This does not assert a particular version-control
 system, source layout, or module structure.
 
 **Admission result.** Accepted by
-[report 003](docs/reports/003_core_admission_review.md). Adequacy: scopes existence/reference queries.
+[report 002 section 003](docs/reports/002_consolidated_progress.md#003-core-admission-review). Adequacy: scopes existence/reference queries.
 Identical meaning: source-tree membership is independent of language.
 Honest absence: ingestion must establish a root for a successful index; failure
 is an error, not absence. Subsidiarity: a common query scope cannot depend on an
@@ -90,7 +90,7 @@ generated or virtual unit whose origin is recorded. A retrieval window within
 a source unit is not a file.
 
 **Admission result.** Accepted by
-[report 003](docs/reports/003_core_admission_review.md). Adequacy: locates entities within a source tree.
+[report 002 section 003](docs/reports/002_consolidated_progress.md#003-core-admission-review). Adequacy: locates entities within a source tree.
 Identical meaning: source-unit boundaries do not assert language semantics.
 Honest absence: ingestion distinguishes missing source from failure to read it.
 Subsidiarity: source location is part of the common query contract. Common cost:
@@ -109,7 +109,7 @@ not an arbitrary text interval. Naming is a property; lacking a name does not
 by itself exclude a construct.
 
 **Admission result.** Accepted by
-[report 003](docs/reports/003_core_admission_review.md). Adequacy: carries program-entity existence queries.
+[report 002 section 003](docs/reports/002_consolidated_progress.md#003-core-admission-review). Adequacy: carries program-entity existence queries.
 Identical meaning: the core records the entity; its language-specific kind and
 semantics remain in extensions. Honest absence: unknown constructs and missing
 identity evidence follow the coverage and identity rules. Subsidiarity: existence
@@ -143,7 +143,7 @@ assert that the target is a program definition. The initial admitted evidence is
 source ingestion asserting that a repository contains a file.
 
 **Admission result.** Accepted by
-[report 004](docs/reports/004_defines_contains_split.md). Adequacy: answers
+[report 002 section 004](docs/reports/002_consolidated_progress.md#004-defines-and-contains-split). Adequacy: answers
 where source and program entities sit without forcing every contained entity to
 be a definition. Identical meaning: direct containment is the same source
 organization claim for Java and Clojure fixtures, and future program-containment
@@ -160,7 +160,7 @@ not transitive reachability. A repository containing a file is `CONTAINS`, not
 `DEFINES`, because a file is a source container rather than a program definition.
 
 **Admission result.** Accepted by
-[report 004](docs/reports/004_defines_contains_split.md). Adequacy: answers
+[report 002 section 004](docs/reports/002_consolidated_progress.md#004-defines-and-contains-split). Adequacy: answers
 where a program definition is introduced. Identical meaning: the shared relation
 does not encode Java class membership, Clojure namespace forms, or language
 scope rules; those details remain in frontend extensions and evidence. Honest
@@ -177,7 +177,7 @@ claiming what the reference does. Endpoints retain their admitted kinds;
 language-specific meaning is not rewritten into a generic kind.
 
 **Admission result.** Accepted by
-[report 003](docs/reports/003_core_admission_review.md). Adequacy: carries the common reference question.
+[report 002 section 003](docs/reports/002_consolidated_progress.md#003-core-admission-review). Adequacy: carries the common reference question.
 Identical meaning: designation does not prescribe call, read, or dispatch
 semantics. Honest absence: confirmed absence, unresolved targets, and unavailable
 analysis remain distinct. Subsidiarity: the common reference query cannot depend
@@ -195,7 +195,7 @@ A reference that invokes the referenced definition. Language-specific dispatch
 semantics remain in extensions.
 
 **Admission result.** Accepted by
-[report 003](docs/reports/003_core_admission_review.md). Adequacy: specializes the common reference query.
+[report 002 section 003](docs/reports/002_consolidated_progress.md#003-core-admission-review). Adequacy: specializes the common reference query.
 Identical meaning: invocation needs evidence independent of dispatch mechanism.
 Honest absence: no invocation construct differs from unavailable call analysis.
 Subsidiarity: a common invocation query needs justification across declared

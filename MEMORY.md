@@ -109,15 +109,13 @@ why. This is not a changelog of removed implementation; see `git log`.
   is executed and closed; `docs/reports/001_zig_vertical_slice_progress.md`
   carries the stage outcomes, exact verification commands, review findings,
   skipped checks, and residual risk.
-  `docs/reports/002_slice_freshness_followup.md` records three defects a review
-  found afterwards and how they were fixed.
-  `docs/reports/003_core_admission_review.md` records the first core admission
-  review, and `docs/reports/004_defines_contains_split.md` records the
-  `CONTAINS` / `DEFINES` split that resolved the first admission blocker.
-  `docs/reports/005_repository_scale_ingestion_progress.md` records the
-  repository-scale ingestion plan: source discovery, source-unit identity,
-  rescan reconciliation, scale guards, ADR 003, dependency tracking, and closure.
-  Read these reports before extending the implementation.
+  `docs/reports/002_consolidated_progress.md` now owns the follow-up workstream:
+  the freshness defects and fixes, the first core admission review, the
+  `CONTAINS` / `DEFINES` split that resolved the first admission blocker, and
+  the repository-scale ingestion plan closure covering source discovery,
+  source-unit identity, rescan reconciliation, scale guards, ADR 003, dependency
+  tracking, and closure. Read these two reports before extending the
+  implementation.
 - What the slice is: an in-memory semantic graph over Java and Clojure fixtures,
   built on Zig 0.16 and tree-sitter through the C ABI
   ([ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md)). Source lives
