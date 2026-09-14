@@ -35,8 +35,8 @@ semantic truth.
 
 ## Current Position
 
-As of 2026-09-14, the project is between the Zig dogfood frontend and the first
-local MCP preview.
+As of 2026-09-14, the Zig dogfood frontend and the first local MCP preview are
+implemented, and the MCP preview awaits review.
 
 Implemented:
 
@@ -55,11 +55,13 @@ Implemented:
   source units are discovered, the pinned local Zig grammar builds, top-level
   Zig functions and containers become definitions, same-unit bare Zig calls can
   become exact `CALLS` facts, and graph-owned unresolved designators are fixed.
+- Plan 004 Stages 4-5 are implemented: `semidx-mcp` serves graph-backed tools
+  over stdio to `2026-07-28` and `2025-06-18` clients with source text off by
+  default, documented in [the local preview reference](../mcp/local_preview.md).
 
 In progress:
 
-- Plan 004 Stage 4 and Stage 5: local stdio MCP preview, dogfood, documentation,
-  and handoff.
+- Review of Plan 004 Stages 4-5: the MCP preview as a consumer.
 
 Not yet present:
 
@@ -91,7 +93,7 @@ Not yet present:
 
 The next useful sequence is:
 
-1. Finish Plan 004 Stage 4 and Stage 5.
+1. Finish Plan 004 Stage 4 and Stage 5. Done; awaiting review.
 2. Review the MCP preview as a consumer: protocol correctness, graph authority,
    source-text opt-in, output bounds, refresh consistency, and local operation.
 3. Turn follow-up 004 into a small release plan.

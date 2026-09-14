@@ -1,9 +1,10 @@
 # semidx
 
 **Status: first vertical slice.** A small in-memory semantic graph exists and is
-tested against Java and Clojure fixtures. There is no persistence, no public
-surface, no published language coverage, and no conformance suite. Read every
-capability below as intended behavior, not as measured behavior.
+tested against Java, Clojure, and Zig source, and an experimental local MCP
+server can query it. There is no persistence, no public contract, no published
+language coverage, and no conformance suite. Read every capability below as
+intended behavior, not as measured behavior.
 
 semidx is designed to be an incrementally maintained semantic graph of a
 codebase that provides exact program relationships as a foundation for search,
@@ -41,6 +42,20 @@ zig build run -- fixtures/vertical-slice/java/Greeter.java
 `zig build` reports precisely what is missing and how to point it elsewhere
 (`-Dgrammars-dir=`, `-Dtree-sitter-prefix=`). The `run` command is a developer
 inspection tool, not a public interface.
+
+## Using it from an MCP client
+
+`semidx-mcp` indexes a local directory and answers graph queries over MCP stdio.
+It is an experimental preview with no stable interface, and it returns paths and
+ranges rather than source text:
+
+```sh
+zig build
+zig-out/bin/semidx-mcp --root /path/to/repository
+```
+
+See [docs/mcp/local_preview.md](docs/mcp/local_preview.md) for client
+configuration, tools, result fields, and limits.
 
 ## License
 

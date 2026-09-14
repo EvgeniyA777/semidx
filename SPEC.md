@@ -137,17 +137,29 @@ implementation guidance for one Java rule, not a Java coverage claim: it admits
 no `module` or `IMPORTS`, publishes no contract or capability matrix, and treats
 the indexed repository as a single Java classpath.
 
+A Zig frontend and a local MCP preview exist
+([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md),
+[plan](docs/plans/004_zig_frontend_and_mcp_preview.md),
+[evidence](docs/reports/004_zig_frontend_and_mcp_preview_progress.md)). The Zig
+frontend covers top-level functions and containers and same-unit bare calls,
+and reports everything else as unsupported or unresolved; this is dogfood
+coverage, not a Zig coverage claim. `semidx-mcp` is an experimental local stdio
+consumer over published snapshots
+([reference](docs/mcp/local_preview.md)). Its tool schemas are not a public
+contract, its results report `semantic_contract_version: null`, and source text
+is excluded unless the server is started with an explicit evidence-text opt-in.
+
 ## Requirements Still To Specify
 
 | Area | Work needed before the dependent implementation or publication |
 | --- | --- |
-| Implementation stack | Settled for the first slice: Zig ([ADR 001](docs/adr/001_choose_zig_implementation_language.md)), `zig build`, and local tree-sitter C sources ([ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md)). Packaging, distribution, and any long-running process mode remain to specify |
+| Implementation stack | Settled for the first slice: Zig ([ADR 001](docs/adr/001_choose_zig_implementation_language.md)), `zig build`, and local tree-sitter C sources ([ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md)). Packaging, distribution, product versioning, and any long-running process mode remain to specify ([follow-up 004](docs/followups/004_release_discipline_for_mcp_preview.md)) |
 | Initial coverage | Target languages, producer versions, admission fixtures, and measured limitations |
 | Core roster | Resolve the blocked candidates and admission evidence in CORE.md |
 | Extensions and mappings | Per-language definitions, declared mapping semantics, and evidence preservation |
 | Source identity | Discovered roots, source-unit identity, path-as-property, tombstones, and exact move correspondence are implemented for the in-memory slice. Still to specify: generated or virtual source origins, multi-root identity, and stronger evidence for move-plus-edit refactors |
 | Storage and snapshots | Representation, atomic publication, persistence, and contract-version encoding |
-| Public contracts | Schemas, resolution encoding, errors, ordering, pagination, and transport parity |
+| Public contracts | Schemas, resolution encoding, errors, ordering, pagination, and transport parity. The MCP preview's tool shapes are experimental consumer choices, not answers to these |
 | Invalidation | Unit-to-unit dependency propagation and Java package-export invalidation exist, with Java same-package type resolution as the first producer. Still to specify: further language-correct producers, name-grained or aspect-grained invalidation, and build-module or classpath boundaries for package scope |
 | Local budgets | Discovery has initial file-size, unit-count, and depth budgets with diagnostics; repository-scale tests guard affected-region work. Still to specify: benchmark repositories, memory/startup budgets, and publish/query cost budgets |
 | Optional outbound data | Destination/data consent settings and verification for projections and diagnostics |

@@ -16,8 +16,9 @@ Companion log for
 
 Session A (Stages 1–3, the Zig frontend) is complete and reviewed, and Stage
 3.5 fixed the review blocker. Session B implemented Stage 4 (the local MCP
-stdio preview); Stage 5 (documentation and handoff) follows in the same
-session. See [Stage 4](#stage-4-local-mcp-stdio-preview).
+stdio preview) and Stage 5 (dogfood, documentation, and handoff). Stages 4–5
+await review; the plan is not closed until that review is recorded here. See
+[Session B Handoff](#session-b-handoff).
 
 ## Stage Log
 
@@ -27,8 +28,8 @@ session. See [Stage 4](#stage-4-local-mcp-stdio-preview).
 | Stage 2: Zig definition facts | Completed (`575bf92`) | Named top-level `fn` declarations and top-level `const` declarations bound directly to a struct/enum/union/opaque expression are current `definition` facts with `DEFINES` from the file. Container members and every other declaration are reported as unsupported. A body edit preserves identity; a rename is identity loss. |
 | Stage 3: Zig same-unit simple calls | Completed (`50d68c4`) | Every call expression in a covered function body is recorded as `CALLS`. A bare callee is a fact only when the unit's top level declares that name exactly once, as a covered function, and no parameter, local binding, capture, or `usingnamespace` could give it another meaning; every other callee stays unresolved with its reason. No `REFERENCES` are emitted. |
 | Stage 3.5: Graph-owned relationship designators | Completed (`211a529`) | Fixes the review blocker: `Graph.addAssertion` now interns an unresolved target's designator, so no relationship keeps a slice of the frontend batch that produced it. `zig build run -- src` completes. |
-| Stage 4: Local MCP stdio preview | Implemented, awaiting review | `semidx-mcp` scans a root, publishes a snapshot, and serves six graph-backed tools over stdio to both `2026-07-28` (per-request `_meta`, `server/discover`) and `2025-06-18` (`initialize`) clients through one dispatcher. Evidence text is off by default; refresh swaps in a fully published snapshot or keeps the old one. |
-| Stage 5: Dogfood, documentation, and handoff | Pending (Session B) | |
+| Stage 4: Local MCP stdio preview | Implemented (`effbbb7`), awaiting review | `semidx-mcp` scans a root, publishes a snapshot, and serves six graph-backed tools over stdio to both `2026-07-28` (per-request `_meta`, `server/discover`) and `2025-06-18` (`initialize`) clients through one dispatcher. Evidence text is off by default; refresh swaps in a fully published snapshot or keeps the old one. |
+| Stage 5: Dogfood, documentation, and handoff | Implemented, awaiting review | `docs/mcp/local_preview.md` documents building, starting, client configuration, both protocol versions, tools, result fields, source-text rules, errors, and limits; `README.md`, `SPEC.md`, `MEMORY.md`, and the roadmap describe what now exists. A client following the document found Zig definitions in `src/` under both protocol versions. |
 
 ## Plan Readiness Gate
 
@@ -529,3 +530,86 @@ largest response, `semidx_repo_map` over `src/mcp/`, was 42 KB.
 - `serverInfo.version` is `0.0.0`; follow-up 004 owns runtime product
   versioning.
 - Client configuration and use are documented in Stage 5.
+
+## Stage 5: Dogfood, Documentation, And Handoff
+
+Changed files: new `docs/mcp/local_preview.md`; `README.md`, `SPEC.md`,
+`MEMORY.md`, `docs/design/001_project_roadmap.md` (current position only), and
+this log.
+
+Decisions taken inside the plan's boundary:
+
+- `docs/mcp/local_preview.md` is one reference-and-how-to page, as the plan
+  names one file. It follows the workspace documentation guide's pattern of
+  stating what the tool does and does not do and what a reader may and must not
+  infer, and every statement was checked against the implementation; two
+  statements were corrected in that check (the full `-32602` list, and entity
+  ids being meaningful only within one process).
+- Client configuration is shown in the `mcpServers` command-and-arguments shape
+  and described as such, without claiming any particular client's behavior
+  beyond launching a stdio command.
+- `SPEC.md` gained a paragraph recording the Zig frontend and the MCP preview
+  as implementation guidance, not coverage or contract claims, and two table
+  notes: packaging and product versioning point to follow-up 004, and the MCP
+  tool shapes are not answers to the public-contract requirements.
+- The roadmap's current-position text said the MCP preview was in progress; only
+  that text was brought up to date.
+
+Dogfood evidence (the DoD's fresh-agent check), following the document: after
+`zig build`, a script started `zig-out/bin/semidx-mcp --root .`, initialized as
+a `2025-06-18` client, and called `semidx_find_definitions` for `src/root.zig`
+(containers `Index` at line 29 and `Upkeep` at line 299, both facts); as a
+`2026-07-28` client it found `serve` in `src/mcp/stdio.zig` and mapped
+`src/core/` with truncated per-file definition lists. Exit status 0, no stdout
+after end of input, stderr only the startup and exit lines. `Server.serve`, a
+container member, is correctly absent.
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| Dogfood script above | Pass (exit 0, streams read to the end) |
+| `./scripts/check-agent-attribution.sh --all` | Pass (exit 0) |
+| `./scripts/check-memory-freshness.sh` | Pass (exit 0) after the Stage 4 commit |
+| `git diff --check` | Pass |
+
+No code changed in Stage 5, so the build and test lanes recorded for Stage 4
+stand; they were not rerun.
+
+## Session B Handoff
+
+Commits: Stage 4 `effbbb7`; Stage 5 is the commit that adds this section.
+
+For the review of Stages 4–5:
+
+- Review focus from the plan applies: MCP must not establish or relabel
+  assertions, refresh must publish complete snapshots, stdio framing and both
+  protocol versions must match the specification, and source text must stay off
+  by default. The places to read are `Server.respond`, `dispatchModern`,
+  `dispatchLegacy`, `callTool`, and `refresh` in `src/mcp/root.zig`;
+  `parse` and `checkMeta` in `src/mcp/protocol.zig`; `writeEvidence`,
+  `writeRelationship`, and `selectTargets` in `src/mcp/tools.zig`; and
+  `tests/mcp_smoke_test.zig`.
+- Deliberate choices a reviewer may disagree with: modern responses advertise
+  only `2026-07-28`; `initialize` always answers `2025-06-18`; invalid argument
+  values are tool execution errors rather than `-32602`; no `outputSchema` is
+  declared; the opt-in exposes recorded evidence text (`--allow-evidence-text`)
+  rather than range snippets read from unit contents; names, designators, paths,
+  and diagnostic messages are returned by default as graph values.
+
+Open question for review:
+
+- ADR 005 disables source text by default. Paths, entity names, designators,
+  and diagnostic messages are still source-derived data, and a client may send
+  a tool result to a hosted model. The implementation and documentation treat
+  those as graph values delivered only to the client process that launched the
+  server, and leave onward transmission to that client. Whether that reading
+  satisfies constitution §8's opt-in requirement for source-derived data sent
+  outside the machine is not settled by ADR 005's text and should be decided in
+  review rather than assumed here.
+
+Residual risk: see [Stage 4 Residual Risk](#residual-risk). Stage 5 adds none.
+
+Next: review Stages 4–5 and record the result here; on acceptance mark the plan
+and this log completed and historical. Follow-up 004 (release discipline) is
+the planned next input once the review is accepted.

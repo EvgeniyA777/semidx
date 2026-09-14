@@ -116,8 +116,10 @@ why. This is not a changelog of removed implementation; see `git log`.
   stays in `git log`.
 - `README.md` is a minimal human entry point. Its status line says "first
   vertical slice", it still states the capabilities as intended rather than
-  measured behavior, it links to the architecture document set, and it names the
-  three commands that run the slice.
+  measured behavior, it links to the architecture document set, it names the
+  three commands that run the slice, and it points MCP users to
+  [docs/mcp/local_preview.md](docs/mcp/local_preview.md), the reference for
+  building, starting, configuring, and reading `semidx-mcp`.
 - **The first Zig vertical slice is implemented.** `docs/plans/001_zig_vertical_slice.md`
   is executed and closed; `docs/reports/001_zig_vertical_slice_progress.md`
   carries the stage outcomes, exact verification commands, review findings,
@@ -397,9 +399,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   calls, Zig empty-container grammar behavior, Java classpath boundaries, and
   release discipline for the local MCP preview.
 - **Plan 004 is in progress: Stages 1–3 (the Zig frontend) are implemented and
-  reviewed; Stage 3.5 fixed the review blocker; Stage 4 (the local MCP stdio
-  preview) is implemented and awaits review; Stage 5 (documentation and
-  handoff) is next.** It onboards Zig as the next language
+  reviewed; Stage 3.5 fixed the review blocker; Stages 4–5 (the local MCP stdio
+  preview, its dogfood run, and its documentation) are implemented and await
+  review.** It onboards Zig as the next language
   frontend for dogfooding and then adds a local stdio MCP preview over published
   graph snapshots ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md),
   [plan 004](docs/plans/004_zig_frontend_and_mcp_preview.md),
