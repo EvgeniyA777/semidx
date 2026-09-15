@@ -67,7 +67,7 @@ why. This is not a changelog of removed implementation; see `git log`.
   now a kernel under an explicit 200-line budget stated in its first section: a
   rule needing more than a few lines lives in `docs/agent-policy/` or
   `.agents/skills/`, and `RULES.md` keeps one line pointing at it. It currently
-  runs 168 lines. Its Project Context section now records the real build
+  runs 169 lines. Its Project Context section now records the real build
   commands, the tree-sitter prerequisites, and what does and does not exist in
   the source tree.
 - `RULES.md`, `AGENTS.md`, and `CLAUDE.md` do not offer "documented and justified
@@ -399,7 +399,8 @@ why. This is not a changelog of removed implementation; see `git log`.
   to check whether new plans move the project toward exact graph knowledge,
   better incremental local operation, useful local graph projections, or clearer
   evidence, contracts, and release discipline.
-- **Plan 005 is drafted and ready to execute when requested.** It promotes the
+- **Plan 005 is in progress: Stages 1–4 are complete and Stage 5 (release
+  candidate handoff) is next.** It promotes the
   product-adoption path into MCP preview release readiness for
   `v0.1.0-preview.1`: product version reporting, local setup, capability matrix,
   hosted-client consent wording for source-derived graph values, dogfood proofs,
@@ -443,6 +444,18 @@ why. This is not a changelog of removed implementation; see `git log`.
   assertion ids above the old graph's and keeps revisions increasing. The
   published snapshot and the index it borrows from stay until the next refresh
   publishes the rebuilt index, reported as `entity_ids_preserved: false`.
+- **The MCP preview is proven on this repository and its gate cannot hang (Plan
+  005 Stage 4).** `zig build dogfood` copies the source units a scan of this
+  repository finds into a temporary root and runs two proofs there, never
+  editing the repository: the built `semidx-mcp` over stdio through health,
+  repository map, definition lookup, references, context, an edit, and a refresh
+  whose revision changes; and the Stage 3.5 failure-injection test
+  (`InjectedFailures` against a fresh-index oracle) with 32 allocations spread
+  over the refresh, one-shot and sticky. It is not part of `zig build test`,
+  where the in-module dogfood test reports as skipped. The stdio test client
+  shared by the smoke and dogfood tests (`tests/mcp_stdio_client.zig`) waits at
+  most 30 s for each response and for exit, then kills the child and fails
+  naming the awaited request.
 - **Plan 005 Stage 2.5 removed two false-fact rules.** A Java unqualified
   invocation is a `CALLS` fact only when the enclosing class declares exactly one
   method of that name, has no supertypes, and the call is not inside a nested

@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-14"
+updated: "2026-09-15"
 ---
 
 # Local MCP Preview
@@ -72,6 +72,7 @@ From the root of a semidx checkout:
 zig build                                  # installs zig-out/bin/semidx-mcp
 zig-out/bin/semidx-mcp --version           # semidx-mcp 0.1.0-preview.1
 zig build test-mcp                         # optional: unit tests and the stdio smoke test
+zig build dogfood                          # optional: habit loop and refresh recovery on a copy of this repository
 ```
 
 Building and indexing never use the network. `zig build` names any missing

@@ -462,6 +462,8 @@ fn writeCacheFields(s: *Stringify) Writer.Error!void {
 
 const testing = std.testing;
 const test_io = testing.io;
+/// Set only by `zig build dogfood`, which runs the tests over this repository.
+const dogfood = @import("semidx_dogfood");
 
 const modern_meta = "\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\"," ++
     "\"io.modelcontextprotocol/clientCapabilities\":{}}";
@@ -873,20 +875,30 @@ const recovery_v2 = [_][2][]const u8{
     .{ "new.zig", "pub fn fresh() void {}\n" },
 };
 
-fn writeTree(dir: std.Io.Dir, files: []const [2][]const u8) !void {
-    for ([_][]const u8{ "demo/Helper.java", "demo/Greeter.java", "a.zig", "gone.zig", "new.zig" }) |path| {
-        dir.deleteFile(test_io, path) catch |err| switch (err) {
-            error.FileNotFound => {},
-            else => return err,
-        };
-    }
-    try dir.createDirPath(test_io, "demo");
-    for (files) |file| try dir.writeFile(test_io, .{ .sub_path = file[0], .data = file[1] });
-}
+const TreeVersion = enum { before, after };
 
-/// The projection of a server started fresh on `files`.
-fn oracleProjection(arena: Allocator, dir: std.Io.Dir, root: []const u8, files: []const [2][]const u8) ![]const u8 {
-    try writeTree(dir, files);
+/// The small tree above: every kind of mutation in a handful of units, so
+/// every allocation of the refresh can be failed in turn.
+const SmallTree = struct {
+    fn write(_: SmallTree, dir: std.Io.Dir, version: TreeVersion) !void {
+        for ([_][]const u8{ "demo/Helper.java", "demo/Greeter.java", "a.zig", "gone.zig", "new.zig" }) |path| {
+            dir.deleteFile(test_io, path) catch |err| switch (err) {
+                error.FileNotFound => {},
+                else => return err,
+            };
+        }
+        try dir.createDirPath(test_io, "demo");
+        const files: []const [2][]const u8 = switch (version) {
+            .before => &recovery_v1,
+            .after => &recovery_v2,
+        };
+        for (files) |file| try dir.writeFile(test_io, .{ .sub_path = file[0], .data = file[1] });
+    }
+};
+
+/// The projection of a server started fresh on `version` of `tree`.
+fn oracleProjection(arena: Allocator, dir: std.Io.Dir, root: []const u8, tree: anytype, version: TreeVersion) ![]const u8 {
+    try tree.write(dir, version);
     var log: Writer.Allocating = .init(arena);
     var server = try Server.init(std.heap.c_allocator, test_io, .{ .root = root }, &log.writer);
     defer server.deinit();
@@ -915,7 +927,21 @@ fn refreshOnce(server: *Server, arena: Allocator) !RefreshReply {
     return .{ .completed = true, .ids_preserved = structured.get("entity_ids_preserved").?.bool };
 }
 
-fn expectRecoveryAtEveryPoint(sticky: bool) !void {
+const FailurePoints = union(enum) {
+    /// Fail every allocation of the refresh in turn.
+    every,
+    /// Fail this many allocations spread evenly over the refresh, the first
+    /// and last included. For trees whose refresh allocates too often to fail
+    /// each allocation.
+    spread: usize,
+};
+
+const RecoveryCounts = struct { points: usize, rebuilt: usize };
+
+/// Starts a server on the `before` version of `tree`, changes it to `after`,
+/// and fails allocations of the refresh that observes the change, checking
+/// the three recovery guarantees against a fresh-index oracle at each point.
+fn expectRecovery(tree: anytype, failure_points: FailurePoints, sticky: bool) !RecoveryCounts {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -924,92 +950,209 @@ fn expectRecoveryAtEveryPoint(sticky: bool) !void {
     defer tmp.cleanup();
     const root = try tmp.dir.realPathFileAlloc(test_io, ".", arena);
 
-    const expected_v1 = try oracleProjection(arena, tmp.dir, root, &recovery_v1);
-    const expected_v2 = try oracleProjection(arena, tmp.dir, root, &recovery_v2);
-    try testing.expect(!std.mem.eql(u8, expected_v1, expected_v2));
+    const expected_before = try oracleProjection(arena, tmp.dir, root, tree, .before);
+    const expected_after = try oracleProjection(arena, tmp.dir, root, tree, .after);
+    try testing.expect(!std.mem.eql(u8, expected_before, expected_after));
 
-    var points: usize = 0;
-    var rebuilt: usize = 0;
-    var offset: usize = 0;
-    while (true) : (offset += 1) {
-        try testing.expect(offset < 100_000);
-        var failures: InjectedFailures = .{ .child = std.heap.c_allocator };
-        try writeTree(tmp.dir, &recovery_v1);
-        var log: Writer.Allocating = .init(arena);
-        var server = try Server.init(failures.allocator(), test_io, .{ .root = root }, &log.writer);
-        defer server.deinit();
-        const before = server.snapshot;
-        const before_projection = try projectSnapshot(arena, &before);
-        // Copied out: the earlier snapshot's strings belong to an index a
-        // successful refresh releases.
-        const Remembered = struct { id: model.EntityId, kind: model.EntityKind, role: []const u8, name: []const u8, path: []const u8 };
-        var before_ids: std.ArrayList(Remembered) = .empty;
-        for (before.entities) |entity| {
-            try before_ids.append(arena, .{
-                .id = entity.id,
-                .kind = entity.kind,
-                .role = try arena.dupe(u8, entity.identity.role),
-                .name = try arena.dupe(u8, entity.identity.name orelse ""),
-                .path = try arena.dupe(u8, entityPath(&before, entity)),
-            });
-        }
-        const before_revision = before.revision;
-
-        try writeTree(tmp.dir, &recovery_v2);
-        failures.arm(offset, sticky);
-        const first = try refreshOnce(&server, arena);
-        failures.disarm();
-        if (!failures.fired) {
-            try testing.expect(first.completed);
-            try testing.expect(first.ids_preserved.?);
-            try testing.expectEqualStrings(expected_v2, try projectSnapshot(arena, &server.snapshot));
-            break;
-        }
-        points += 1;
-
-        // 1. The published snapshot is the one every earlier call observed,
-        // unless the refresh finished and only its response was lost.
-        const published = try projectSnapshot(arena, &server.snapshot);
-        if (server.snapshot.revision == before_revision) {
-            try testing.expectEqualStrings(before_projection, published);
-        } else {
-            try testing.expectEqualStrings(expected_v2, published);
-        }
-        if (server.retired != null or server.poisoned) rebuilt += 1;
-
-        // 2. The next successful refresh publishes what a fresh index of the
-        // tree holds.
-        // A refresh whose response was lost may already have published.
-        const second = if (server.snapshot.revision != before_revision and !server.poisoned and server.retired == null)
-            RefreshReply{ .completed = true, .ids_preserved = true }
-        else
-            try refreshOnce(&server, arena);
-        try testing.expect(second.completed);
-        try testing.expect(!server.poisoned and server.retired == null);
-        try testing.expectEqualStrings(expected_v2, try projectSnapshot(arena, &server.snapshot));
-
-        // 3. An id from the earlier snapshot never names a different entity:
-        // after a rebuild it names nothing, and otherwise it names the same
-        // entity.
-        for (before_ids.items) |old| {
-            const now = server.snapshot.entityById(old.id) orelse continue;
-            try testing.expect(second.ids_preserved.?);
-            try testing.expectEqual(old.kind, now.kind);
-            try testing.expectEqualStrings(old.role, now.identity.role);
-            try testing.expectEqualStrings(old.name, now.identity.name orelse "");
-            try testing.expectEqualStrings(old.path, entityPath(&server.snapshot, now));
-        }
+    var counts: RecoveryCounts = .{ .points = 0, .rebuilt = 0 };
+    switch (failure_points) {
+        .every => {
+            var offset: usize = 0;
+            while (true) : (offset += 1) {
+                try testing.expect(offset < 100_000);
+                if (!try expectRecoveryAt(arena, tmp.dir, root, tree, expected_after, offset, sticky, &counts)) break;
+            }
+        },
+        .spread => |wanted| {
+            try testing.expect(wanted >= 2);
+            const total = try refreshAllocations(arena, tmp.dir, root, tree, expected_after);
+            try testing.expect(total >= wanted);
+            for (0..wanted) |i| {
+                const offset = i * (total - 1) / (wanted - 1);
+                try testing.expect(try expectRecoveryAt(arena, tmp.dir, root, tree, expected_after, offset, sticky, &counts));
+            }
+        },
     }
-    try testing.expect(points > 0);
-    try testing.expect(rebuilt > 0);
+    try testing.expect(counts.points > 0);
+    try testing.expect(counts.rebuilt > 0);
+    return counts;
+}
+
+/// How many allocations a refresh from `before` to `after` makes when none
+/// fails.
+fn refreshAllocations(arena: Allocator, dir: std.Io.Dir, root: []const u8, tree: anytype, expected_after: []const u8) !usize {
+    var failures: InjectedFailures = .{ .child = std.heap.c_allocator };
+    try tree.write(dir, .before);
+    var log: Writer.Allocating = .init(arena);
+    var server = try Server.init(failures.allocator(), test_io, .{ .root = root }, &log.writer);
+    defer server.deinit();
+    try tree.write(dir, .after);
+    const start = failures.count;
+    const reply = try refreshOnce(&server, arena);
+    const total = failures.count - start;
+    try testing.expect(reply.completed);
+    try testing.expect(reply.ids_preserved.?);
+    try testing.expectEqualStrings(expected_after, try projectSnapshot(arena, &server.snapshot));
+    return total;
+}
+
+/// Checks the recovery guarantees with allocation `offset` of the refresh
+/// failing. Returns false when the refresh made fewer allocations than that.
+fn expectRecoveryAt(
+    arena: Allocator,
+    dir: std.Io.Dir,
+    root: []const u8,
+    tree: anytype,
+    expected_after: []const u8,
+    offset: usize,
+    sticky: bool,
+    counts: *RecoveryCounts,
+) !bool {
+    var failures: InjectedFailures = .{ .child = std.heap.c_allocator };
+    try tree.write(dir, .before);
+    var log: Writer.Allocating = .init(arena);
+    var server = try Server.init(failures.allocator(), test_io, .{ .root = root }, &log.writer);
+    defer server.deinit();
+    const before = server.snapshot;
+    const before_projection = try projectSnapshot(arena, &before);
+    // Copied out: the earlier snapshot's strings belong to an index a
+    // successful refresh releases.
+    const Remembered = struct { id: model.EntityId, kind: model.EntityKind, role: []const u8, name: []const u8, path: []const u8 };
+    var before_ids: std.ArrayList(Remembered) = .empty;
+    for (before.entities) |entity| {
+        try before_ids.append(arena, .{
+            .id = entity.id,
+            .kind = entity.kind,
+            .role = try arena.dupe(u8, entity.identity.role),
+            .name = try arena.dupe(u8, entity.identity.name orelse ""),
+            .path = try arena.dupe(u8, entityPath(&before, entity)),
+        });
+    }
+    const before_revision = before.revision;
+
+    try tree.write(dir, .after);
+    failures.arm(offset, sticky);
+    const first = try refreshOnce(&server, arena);
+    failures.disarm();
+    if (!failures.fired) {
+        try testing.expect(first.completed);
+        try testing.expect(first.ids_preserved.?);
+        try testing.expectEqualStrings(expected_after, try projectSnapshot(arena, &server.snapshot));
+        return false;
+    }
+    counts.points += 1;
+
+    // 1. The published snapshot is the one every earlier call observed,
+    // unless the refresh finished and only its response was lost.
+    const published = try projectSnapshot(arena, &server.snapshot);
+    if (server.snapshot.revision == before_revision) {
+        try testing.expectEqualStrings(before_projection, published);
+    } else {
+        try testing.expectEqualStrings(expected_after, published);
+    }
+    if (server.retired != null or server.poisoned) counts.rebuilt += 1;
+
+    // 2. The next successful refresh publishes what a fresh index of the
+    // tree holds.
+    // A refresh whose response was lost may already have published.
+    const second = if (server.snapshot.revision != before_revision and !server.poisoned and server.retired == null)
+        RefreshReply{ .completed = true, .ids_preserved = true }
+    else
+        try refreshOnce(&server, arena);
+    try testing.expect(second.completed);
+    try testing.expect(!server.poisoned and server.retired == null);
+    try testing.expectEqualStrings(expected_after, try projectSnapshot(arena, &server.snapshot));
+
+    // 3. An id from the earlier snapshot never names a different entity:
+    // after a rebuild it names nothing, and otherwise it names the same
+    // entity.
+    for (before_ids.items) |old| {
+        const now = server.snapshot.entityById(old.id) orelse continue;
+        try testing.expect(second.ids_preserved.?);
+        try testing.expectEqual(old.kind, now.kind);
+        try testing.expectEqualStrings(old.role, now.identity.role);
+        try testing.expectEqualStrings(old.name, now.identity.name orelse "");
+        try testing.expectEqualStrings(old.path, entityPath(&server.snapshot, now));
+    }
+    return true;
 }
 
 test "a refresh that fails at any allocation publishes nothing half-applied and the next refresh converges" {
-    try expectRecoveryAtEveryPoint(false);
+    _ = try expectRecovery(SmallTree{}, .every, false);
 }
 
 test "when rebuilding after a failed refresh also fails, the next refresh rebuilds and converges" {
-    try expectRecoveryAtEveryPoint(true);
+    _ = try expectRecovery(SmallTree{}, .every, true);
+}
+
+/// A copy of the source units a scan of this repository finds, byte for byte,
+/// and a change to it that edits, removes, and adds units.
+const RepositoryCopy = struct {
+    scan: *const semidx.source.SourceScan,
+
+    const edited_path = "src/source/discovery.zig";
+    const removed_path = "src/mcp/stdio.zig";
+    const added_path = "dogfood/added.zig";
+    const appended =
+        \\
+        \\pub fn dogfoodProbe() void {
+        \\    dogfoodProbeCallee();
+        \\}
+        \\
+        \\fn dogfoodProbeCallee() void {}
+        \\
+    ;
+    const added = "pub fn dogfoodAdded() void {}\n";
+
+    fn write(self: RepositoryCopy, dir: std.Io.Dir, version: TreeVersion) !void {
+        dir.deleteFile(test_io, added_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+        for (self.scan.units) |unit| {
+            if (std.fs.path.dirnamePosix(unit.path)) |parent| try dir.createDirPath(test_io, parent);
+            if (version == .after and std.mem.eql(u8, unit.path, removed_path)) {
+                dir.deleteFile(test_io, unit.path) catch |err| switch (err) {
+                    error.FileNotFound => {},
+                    else => return err,
+                };
+                continue;
+            }
+            if (version == .after and std.mem.eql(u8, unit.path, edited_path)) {
+                const edited = try std.mem.concat(testing.allocator, u8, &.{ unit.bytes, appended });
+                defer testing.allocator.free(edited);
+                try dir.writeFile(test_io, .{ .sub_path = unit.path, .data = edited });
+                continue;
+            }
+            try dir.writeFile(test_io, .{ .sub_path = unit.path, .data = unit.bytes });
+        }
+        if (version == .after) {
+            try dir.createDirPath(test_io, "dogfood");
+            try dir.writeFile(test_io, .{ .sub_path = added_path, .data = added });
+        }
+    }
+};
+
+test "dogfood: a refresh of a copy of this repository that fails part-way publishes nothing half-applied and the next refresh converges" {
+    const repo_root = dogfood.repo_root orelse return error.SkipZigTest;
+    var scan = try semidx.source.discovery.scan(testing.allocator, test_io, repo_root, .{});
+    defer scan.deinit();
+    for ([_][]const u8{ RepositoryCopy.edited_path, RepositoryCopy.removed_path }) |path| {
+        if (scan.unitByPath(path) == null) {
+            std.debug.print("the dogfood change names {s}, which this repository no longer has\n", .{path});
+            return error.DogfoodTreeChanged;
+        }
+    }
+    const tree: RepositoryCopy = .{ .scan = &scan };
+    for ([_]bool{ false, true }) |sticky| {
+        const counts = try expectRecovery(tree, .{ .spread = dogfood.failure_points }, sticky);
+        std.debug.print("dogfood recovery over {d} units ({s} failures): {d} failure points, {d} rebuilds\n", .{
+            scan.units.len,
+            if (sticky) "sticky" else "one-shot",
+            counts.points,
+            counts.rebuilt,
+        });
+    }
 }
 
 test {

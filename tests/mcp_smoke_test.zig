@@ -13,86 +13,13 @@ const testing = std.testing;
 const io = testing.io;
 const Value = std.json.Value;
 
-const modern_meta = "\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\"," ++
-    "\"io.modelcontextprotocol/clientCapabilities\":{},\"io.modelcontextprotocol/clientInfo\":{\"name\":\"smoke\",\"version\":\"1\"}}";
+const stdio_client = @import("mcp_stdio_client.zig");
+const Client = stdio_client.Client;
+const modern_meta = stdio_client.modern_meta;
 
 /// Text from the fixture's function bodies. The server never reads unit
 /// contents into a result, so none of it may appear.
 const fixture_body_text = [_][]const u8{ "self.name", "hello" };
-
-const Client = struct {
-    gpa: std.mem.Allocator,
-    arena: std.heap.ArenaAllocator,
-    child: std.process.Child,
-    stdin_buffer: [4096]u8,
-    stdin_writer: std.Io.File.Writer,
-    stdout_buffer: []u8,
-    stdout_reader: std.Io.File.Reader,
-    /// Every line the server wrote to stdout.
-    transcript: std.ArrayList(u8),
-
-    fn start(gpa: std.mem.Allocator, root: []const u8, stderr_file: std.Io.File) !*Client {
-        const self = try gpa.create(Client);
-        errdefer gpa.destroy(self);
-        self.gpa = gpa;
-        self.arena = .init(gpa);
-        self.transcript = .empty;
-        self.stdout_buffer = try gpa.alloc(u8, 4 << 20);
-        self.child = try std.process.spawn(io, .{
-            .argv = &.{ build_options.mcp_exe, "--root", root },
-            .stdin = .pipe,
-            .stdout = .pipe,
-            .stderr = .{ .file = stderr_file },
-        });
-        self.stdin_writer = self.child.stdin.?.writer(io, &self.stdin_buffer);
-        self.stdout_reader = self.child.stdout.?.reader(io, self.stdout_buffer);
-        return self;
-    }
-
-    fn destroy(self: *Client) void {
-        self.child.kill(io);
-        self.transcript.deinit(self.gpa);
-        self.gpa.free(self.stdout_buffer);
-        self.arena.deinit();
-        self.gpa.destroy(self);
-    }
-
-    fn sendLine(self: *Client, line: []const u8) !void {
-        try self.stdin_writer.interface.writeAll(line);
-        try self.stdin_writer.interface.writeByte('\n');
-        try self.stdin_writer.interface.flush();
-    }
-
-    /// Reads one stdout line and requires it to be a JSON-RPC response to `id`.
-    fn receive(self: *Client, id: i64) !Value {
-        const line = try self.stdout_reader.interface.takeDelimiter('\n') orelse return error.ServerClosedStdout;
-        try self.transcript.appendSlice(self.gpa, line);
-        try self.transcript.append(self.gpa, '\n');
-        const arena = self.arena.allocator();
-        const value = std.json.parseFromSliceLeaky(Value, arena, try arena.dupe(u8, line), .{}) catch |err| {
-            std.debug.print("non-protocol stdout line: {s}\n", .{line});
-            return err;
-        };
-        try testing.expectEqualStrings("2.0", value.object.get("jsonrpc").?.string);
-        try testing.expectEqual(id, value.object.get("id").?.integer);
-        return value;
-    }
-
-    fn request(self: *Client, id: i64, method: []const u8, params: []const u8) !Value {
-        const line = try std.fmt.allocPrint(self.arena.allocator(), "{{\"jsonrpc\":\"2.0\",\"id\":{d},\"method\":\"{s}\",\"params\":{s}}}", .{ id, method, params });
-        try self.sendLine(line);
-        return self.receive(id);
-    }
-
-    fn callTool(self: *Client, id: i64, name: []const u8, arguments: []const u8) !std.json.ObjectMap {
-        const params = try std.fmt.allocPrint(self.arena.allocator(), "{{{s},\"name\":\"{s}\",\"arguments\":{s}}}", .{ modern_meta, name, arguments });
-        const response = try self.request(id, "tools/call", params);
-        const result = response.object.get("result").?.object;
-        try testing.expectEqualStrings("complete", result.get("resultType").?.string);
-        try testing.expect(!result.get("isError").?.bool);
-        return result.get("structuredContent").?.object;
-    }
-};
 
 test "semidx-mcp --version prints the product version to stdout and exits" {
     const gpa = testing.allocator;
@@ -133,7 +60,7 @@ test "semidx-mcp serves both protocol eras over stdio with nothing but protocol 
     const stderr_file = try log_dir.dir.createFile(io, "stderr.log", .{});
     const client = client: {
         defer stderr_file.close(io);
-        break :client try Client.start(gpa, root, stderr_file);
+        break :client try Client.start(gpa, build_options.mcp_exe, root, &.{}, log_dir.dir, stderr_file);
     };
     defer client.destroy();
 
@@ -194,9 +121,7 @@ test "semidx-mcp serves both protocol eras over stdio with nothing but protocol 
     // A notification gets no response; the next line answers the next request.
     try client.sendLine("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/cancelled\",\"params\":{\"requestId\":5}}");
     try client.sendLine("{not json");
-    const parse_error_line = try client.stdout_reader.interface.takeDelimiter('\n') orelse return error.ServerClosedStdout;
-    try client.transcript.appendSlice(gpa, parse_error_line);
-    try client.transcript.append(gpa, '\n');
+    const parse_error_line = try client.readLine("a parse error response");
     try testing.expect(std.mem.indexOf(u8, parse_error_line, "-32700") != null);
 
     // -- 2025-06-18: initialize, then requests without _meta -----------------
@@ -225,13 +150,9 @@ test "semidx-mcp serves both protocol eras over stdio with nothing but protocol 
     try testing.expectEqual(@as(i64, 1), farewell.get("total").?.integer);
 
     // -- shutdown: close stdin, drain both streams, check the exit status ----
-    client.child.stdin.?.close(io);
-    client.child.stdin = null;
-    const trailing = try client.stdout_reader.interface.allocRemaining(gpa, .unlimited);
-    defer gpa.free(trailing);
-    try testing.expectEqualStrings("", trailing);
-    const term = try client.child.wait(io);
-    try testing.expectEqual(std.process.Child.Term{ .exited = 0 }, term);
+    const ended = try client.shutdown();
+    try testing.expectEqualStrings("", ended.trailing);
+    try testing.expectEqual(@as(u8, 0), ended.exit_code);
 
     const stderr_text = try log_dir.dir.readFileAlloc(io, "stderr.log", gpa, .limited(1 << 20));
     defer gpa.free(stderr_text);

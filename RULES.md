@@ -61,7 +61,8 @@
   APIs from earlier or later Zig releases. `zig build test-core` runs the shared
   core, `zig build test` runs the full lane, `zig build run -- <files>` runs the
   developer-only inspection command, `zig build mcp -- --root <dir>` starts the
-  local MCP stdio preview, and `zig build test-mcp` runs its tests and stdio smoke test.
+  local MCP stdio preview, `zig build test-mcp` runs its tests and stdio smoke test,
+  and `zig build dogfood` proves it on a temporary copy of this repository.
   Frontends parse through local tree-sitter C sources
   ([ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md)):
   `./scripts/setup-tree-sitter-grammars.sh` and a local tree-sitter runtime are

@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-09-14"
+updated: "2026-09-15"
 ---
 
 # 005: MCP Preview Release Readiness Progress
@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-Execution started on 2026-09-14. Stages 1, 2, 2.5, 3, and 3.5 are complete; Stage 4 is next.
+Execution started on 2026-09-14. Stages 1, 2, 2.5, 3, 3.5, and 4 are complete; Stage 5 is next.
 
 ## Stage Log
 
@@ -25,7 +25,7 @@ Execution started on 2026-09-14. Stages 1, 2, 2.5, 3, and 3.5 are complete; Stag
 | Stage 2.5: Same-unit name resolution facts (Java and Clojure) | Completed (`f0bb778`) | Two confirmed false `CALLS` facts removed: a Java call to an overloaded method is no longer a fact about the first overload, and a Clojure symbol is no longer a fact where a local binding may shadow it. Both rules now leave uncertain cases unresolved with a reason. |
 | Stage 3: Capability matrix and consent boundary | Completed (`bd0d7c6`) | `docs/spec/capability_matrix.md` states per-producer coverage, unresolved and unsupported cases, identity limits, and known overbroad and false-negative cases; README and the local preview reference carry hosted-client consent wording. |
 | Stage 3.5: Refresh failure recovery | Completed | Failure injection confirmed that a failed reconciliation poisons the index. `semidx-mcp` now discards such an index and rebuilds it from the same scan above the old ids; at each of 87 injected failure points the published snapshot stays intact, the next refresh equals a fresh index, and no old id names a different entity. |
-| Stage 4: Dogfood proofs and release gate | Pending | |
+| Stage 4: Dogfood proofs and release gate | Completed | `zig build dogfood` proves the habit loop over stdio and the Stage 3.5 recovery guarantee on a temporary copy of this repository; the stdio test client bounds every wait at 30 s and kills a hung server. |
 | Stage 5: Preview release candidate handoff | Pending | |
 
 ## Plan Readiness Gate
@@ -36,7 +36,8 @@ verification, and stop conditions are explicit; no hard fail. Two points are
 left to execution and are decided in the stage that meets them:
 
 - how Stage 4 induces a refresh failure on this repository, given that a
-  mid-reconciliation failure can only be injected in a test;
+  mid-reconciliation failure can only be injected in a test (decided in Stage 4:
+  the Stage 3.5 injection test runs on a copy of this repository);
 - what "clean worktree" means for the Stage 5 release gate, given that pinned
   grammar sources are ignored by git and not part of a checkout.
 
@@ -465,3 +466,114 @@ Residual risk:
 - Only allocation failures were injected. An analyzer or graph error surfaces
   through the same `applyScan` and `publish` error paths, so the same recovery
   applies, but no test injects one directly.
+
+## Stage 4: Dogfood Proofs And Release Gate
+
+Changed files: `build.zig`, new `tests/mcp_stdio_client.zig`, new
+`tests/mcp_dogfood_test.zig`, `tests/mcp_smoke_test.zig`, `src/mcp/root.zig`
+(tests only), `docs/agent-policy/testing.md`, `docs/mcp/local_preview.md`,
+`RULES.md`, `MEMORY.md`, this log.
+
+Decisions taken inside the plan's boundary (the proof shape was set by the
+maintainer on 2026-09-15):
+
+- **No script.** The proofs are Zig tests behind a new `zig build dogfood` step.
+  No Python or shell JSON-RPC driver was added.
+- **The proofs run on a copy, never on the repository.** Both copy exactly the
+  source units `discovery.scan` finds in this repository (paths and bytes) into a
+  temporary root, so the copy is what semidx indexes here, without build caches
+  or grammar checkouts. Scan diagnostics (for example symbolic links) are not
+  reproduced in the copy.
+- **The Stage 3.5 guarantee is shown with the Stage 3.5 mechanism.** The
+  refresh-recovery test was generalized over the tree it runs on
+  (`expectRecovery`); the small tree keeps failing every allocation, and a new
+  `dogfood:` test runs the same `InjectedFailures` injection and fresh-index
+  oracle on the repository copy. A refresh of the whole copy makes too many
+  allocations to fail each one with a full index per point, so it fails a spread
+  of them: the refresh's allocation count is measured first, then 32 offsets
+  evenly spaced over it, first and last included, one-shot and sticky. The change
+  edits `src/source/discovery.zig`, removes `src/mcp/stdio.zig`, and adds
+  `dogfood/added.zig`. Renaming or deleting the root was not used as a failure.
+- **The in-module test is gated, not duplicated.** `src/mcp/root.zig` imports a
+  `semidx_dogfood` options module. The regular MCP module sets no repository
+  root, so the dogfood test skips there (the one skipped test in `zig build test`
+  and `zig build test-mcp`). `zig build dogfood` compiles the same file with the
+  root set and a `dogfood:` test filter. `-Ddogfood-failure-points=<n>` changes
+  the spread.
+- **One stdio client.** The smoke test's bounded client moved unchanged in
+  behavior to `tests/mcp_stdio_client.zig`; it gained only the executable path and
+  extra arguments as parameters, so the dogfood test can start a second server
+  with `--allow-evidence-text`.
+- **Smoke timeout: 30 s** per response and for exit after stdin closes. The
+  executable is a build dependency of the test, so the bound never includes
+  compilation. Observed in Debug: fixture responses in milliseconds, the first
+  response over the repository copy in about 176 ms.
+- Dogfood steps are not part of `zig build test`: the recovery proof indexes the
+  whole repository about 130 times (about 11 s in Debug).
+
+### Reproducible proof
+
+```sh
+./scripts/check-zig-version.sh
+zig build dogfood --summary all
+```
+
+Observed on 2026-09-15, Debug, 56 units (631 964 bytes) copied:
+
+| Step | Call | Observed | Time, size |
+| --- | --- | --- | --- |
+| Health | `semidx_health {}` | product version `0.1.0-preview.1`, `semantic_contract_version: null`, every unit counted, all three parsers available, `unsupported_construct` diagnostics present, evidence text off | 175 ms, 6.2 KB (first response 176 ms after start) |
+| Repository map | `semidx_repo_map {"limit":1000}` | `files_total` equals copied units, not truncated, lists `scanDir` under `src/source/discovery.zig` | 13 ms, 260 KB |
+| Definition | `semidx_find_definitions {"name":"scanDir","language":"zig"}` | one `function` definition, existence a `frontend.zig` fact | < 1 ms, 1.9 KB |
+| References | `semidx_references {"entity_id":<scanDir>}` | incoming `calls` fact from `scan` | 1 ms, 4.3 KB |
+| Context | `semidx_context {"name":"scan","path":"src/source/discovery.zig"}` | outgoing fact to `scanDir`; unresolved outgoing call `root_dir.close` with an explanation and no entity; 4 unit diagnostics | 1 ms, 14.6 KB |
+| Edit + refresh | append `dogfoodProbe` calling `dogfoodProbeCallee`, then `semidx_refresh {}` | revision increased, `previous_revision` the old one, `entity_ids_preserved: true`, scan `changed: 1`, `added: 0`, `removed: 0` | 11 ms, 1.2 KB |
+| After refresh | `semidx_references` for `dogfoodProbeCallee`; `semidx_find_definitions` for `scanDir` | one current `calls` fact from `dogfoodProbe` at the new revision; `scanDir` keeps its entity id | 1 ms each |
+| Shutdown | close stdin | no trailing stdout, exit 0, all stdout lines protocol, UTF-8, stderr ends with `input closed; exiting` | — |
+| No source text | transcript search | neither a body comment of `discovery.zig` (checked present in the source first), the probe body marker, nor any `source_text` field appears | — |
+| `--allow-evidence-text` | `semidx_repo_map {"limit":1000,"definitions_per_file":500}` | health reports enabled, `max_bytes: 400`; all 351 definition evidence texts are at most 400 bytes and occur inside their evidence range in the unit source; none reached the bound, because producers record a name, as the capability matrix says | 16 ms, 301 KB |
+| Recovery, one-shot | 32 spread allocation failures in the refresh | every point: published snapshot unchanged (or equal to the fresh index when only the response was lost), next refresh equals a fresh index, no old id names another entity; 25 points rebuilt | — |
+| Recovery, sticky | same, every allocation from the point on failing | same guarantees; 25 points rebuilt | — |
+
+Evidence text truncation itself is covered by the existing unit test in
+`src/mcp/root.zig` (a recorded text longer than the bound is cut to 400 bytes
+and marked `truncated`); the repository has no such text to show it on.
+
+Risk matrix:
+
+| Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Habit loop works on a real repository (plan Stage 4) | Works on fixtures only; wrong ids, counts, or revisions at scale | Runtime smoke over stdio | Built `semidx-mcp` process | Unresolved designator, diagnostics, identity across refresh | `dogfood: the agent habit loop over a copy of this repository, through stdio` |
+| Refresh recovery holds on this repository (plan Stage 4, Stage 3.5) | Guarantee holds on a five-unit tree only | Integration with failure injection | `Server.refresh` | One-shot and sticky failures | `dogfood: a refresh of a copy of this repository that fails part-way ...`; mutation below |
+| The gate cannot hang (plan decision) | A silent server blocks the release gate | Runtime smoke | `Client.readLine`, `Client.shutdown` | Server never writes one response | mutation below |
+| Opt-in evidence text is bounded and described accurately | Text over the bound or from outside the claim | Runtime smoke | `writeEvidence` through stdio | Every definition in the repository | `dogfood: --allow-evidence-text ...` |
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Pass |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | Pass, 88/88 |
+| `zig build test --summary all` | Pass, 186 passed, 1 skipped (the gated dogfood test) |
+| `zig build test-mcp --summary all` | Pass, 18 passed, 1 skipped (the same) |
+| `zig build dogfood --summary all` | Pass, 5/5, about 14 s |
+| `zig build run -- src` | Exit 0 |
+| Mutation: `Server.recoverFrom` returns the failure without rebuilding | `zig build dogfood` fails the repository recovery test on guarantee 2 (the next refresh differs from a fresh index); restored |
+| Mutation: `Server.handleLine` never answers a request with `"id":4,` | Smoke test fails after 32 s wall time with `semidx-mcp did not produce a response to request 4 (tools/call) within 30s and was killed`, stderr shown; no `semidx-mcp` child left (`pgrep -fl zig-cache/tmp`: none). The in-process unit test that also sends id 4 crashed on the missing response, as the mutation implies; restored and `zig-out/bin/semidx-mcp` rebuilt |
+| `./scripts/check-agent-attribution.sh --all` | Pass |
+| `git diff --check` | Pass |
+
+Semantic gaps found: none new. The unresolved `root_dir.close` call and
+same-unit-only references are the Zig limits the capability matrix already
+states (follow-up 006).
+
+Residual risk:
+
+- The repository recovery proof samples 32 of the refresh's allocations, not
+  all of them; every allocation is failed only on the small tree.
+- The dogfood proofs follow this repository: if `src/source/discovery.zig`,
+  `scanDir`, `scan`, or `src/mcp/stdio.zig` move or are renamed, the tests fail
+  rather than pass vacuously; a missing path is named in the failure message.
+- The client's timeout uses `waitpid` and `kill` through libc and was verified
+  on macOS only.

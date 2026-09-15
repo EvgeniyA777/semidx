@@ -166,6 +166,16 @@ pub fn build(b: *std.Build) void {
     // imports the assembled index and nothing below it.
     const version_options = b.addOptions();
     version_options.addOption([]const u8, "product_version", manifest.version);
+    // Without a repository root the dogfood tests in the MCP module skip; only
+    // `zig build dogfood` sets one.
+    const dogfood_failure_points = b.option(
+        usize,
+        "dogfood-failure-points",
+        "How many allocations `zig build dogfood` fails, spread over one refresh of this repository (default 32)",
+    ) orelse 32;
+    const no_dogfood_options = b.addOptions();
+    no_dogfood_options.addOption(?[]const u8, "repo_root", null);
+    no_dogfood_options.addOption(usize, "failure_points", dogfood_failure_points);
     const mcp = b.addModule("semidx_mcp", .{
         .root_source_file = b.path("src/mcp/root.zig"),
         .target = target,
@@ -174,6 +184,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "semidx", .module = semidx },
             .{ .name = "semidx_version", .module = version_options.createModule() },
+            .{ .name = "semidx_dogfood", .module = no_dogfood_options.createModule() },
         },
     });
     const mcp_tests = b.addTest(.{ .root_module = mcp });
@@ -210,6 +221,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("tests/mcp_smoke_test.zig"),
             .target = target,
             .optimize = optimize,
+            // The smoke test polls the child's exit with `waitpid` so that a
+            // hung server cannot hang the test.
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "build_options", .module = smoke_options.createModule() },
             },
@@ -221,6 +235,56 @@ pub fn build(b: *std.Build) void {
     const mcp_test_step = b.step("test-mcp", "Run the MCP preview's unit tests and stdio smoke test");
     mcp_test_step.dependOn(&run_mcp_tests.step);
     mcp_test_step.dependOn(&run_mcp_smoke.step);
+
+    // Dogfood proofs over this repository. Both work on a temporary copy of
+    // the source units a scan of the repository finds; neither edits the
+    // repository. Not part of `test`: they index the whole repository many
+    // times over.
+    const dogfood_step = b.step("dogfood", "Prove the MCP preview on a copy of this repository: the stdio habit loop and refresh failure recovery");
+
+    const dogfood_options = b.addOptions();
+    dogfood_options.addOption(?[]const u8, "repo_root", b.pathFromRoot("."));
+    dogfood_options.addOption(usize, "failure_points", dogfood_failure_points);
+    const mcp_dogfood_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/mcp/root.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "semidx", .module = semidx },
+                .{ .name = "semidx_version", .module = version_options.createModule() },
+                .{ .name = "semidx_dogfood", .module = dogfood_options.createModule() },
+            },
+        }),
+        .filters = &.{"dogfood:"},
+    });
+    const run_mcp_dogfood_tests = b.addRunArtifact(mcp_dogfood_tests);
+    // The repository is read at run time, so its contents are an input no
+    // build cache knows about.
+    run_mcp_dogfood_tests.has_side_effects = true;
+    dogfood_step.dependOn(&run_mcp_dogfood_tests.step);
+
+    const stdio_dogfood_options = b.addOptions();
+    stdio_dogfood_options.addOptionPath("mcp_exe", mcp_exe.getEmittedBin());
+    stdio_dogfood_options.addOption([]const u8, "repo_root", b.pathFromRoot("."));
+    stdio_dogfood_options.addOption([]const u8, "product_version", manifest.version);
+    const stdio_dogfood = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/mcp_dogfood_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            // The stdio client polls the child's exit with `waitpid`.
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "build_options", .module = stdio_dogfood_options.createModule() },
+                .{ .name = "semidx_source", .module = source },
+            },
+        }),
+    });
+    const run_stdio_dogfood = b.addRunArtifact(stdio_dogfood);
+    run_stdio_dogfood.has_side_effects = true;
+    dogfood_step.dependOn(&run_stdio_dogfood.step);
 }
 
 fn addParserDeps(b: *std.Build, module: *std.Build.Module, deps: ParserDeps) void {
