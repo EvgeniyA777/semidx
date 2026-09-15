@@ -109,6 +109,6 @@ claim.
 | Source text | Off by default: no unit contents are ever returned. `--allow-evidence-text` adds each claim's recorded evidence text, at most 400 bytes; current producers record a name or callee there, not a body. |
 | Source-derived values | Always returned: root and unit paths, entity names, designators, ranges, ids, and diagnostic messages. They are derived from the indexed source and go to the client process that launched the server. |
 | Versions | Product version `0.1.0-preview.1` in `--version`, `serverInfo.version`, and `semidx_health`; `semantic_contract_version` is always `null`. |
-| Refresh | Publishes a new snapshot only on success. Behavior after a failure part-way through reconciliation is being made safe in Plan 005 Stage 3.5; see the [local preview reference](../mcp/local_preview.md#limits) for the current state. |
+| Refresh | Publishes a new snapshot only on success. A failure after reconciliation started never publishes a partly updated graph: the index is rebuilt from the same scan and published by the next refresh, which then reports `entity_ids_preserved: false`; ids from earlier snapshots name nothing in the rebuilt index. |
 
 The full tool and field reference is [docs/mcp/local_preview.md](../mcp/local_preview.md).

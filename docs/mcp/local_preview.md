@@ -200,12 +200,12 @@ an explanation.
 
 | Tool | Arguments (defaults) | Returns |
 | --- | --- | --- |
-| `semidx_health` | none | Product version, root, snapshot revision, unit counts by analysis state and language, entity and assertion counts, per-language parser availability and declared coverage, diagnostic counts, the last scan outcome, and whether evidence text is enabled. |
+| `semidx_health` | none | Product version, root, snapshot revision, refresh recovery state (`recovery`: rebuild count, a rebuilt index awaiting publication, a rebuild still needed), unit counts by analysis state and language, entity and assertion counts, per-language parser availability and declared coverage, diagnostic counts, the last scan outcome, and whether evidence text is enabled. |
 | `semidx_repo_map` | `path_prefix`, `language`, `limit` (100, max 1000 files), `definitions_per_file` (50, max 500) | Units sorted by path, each with its analysis state, diagnostic counts, and top-level definitions (definitions with an empty container path), plus the number of nested definitions. |
 | `semidx_find_definitions` | `name`, `path`, `language`, `role`, `freshness` (`current`), `resolution` (`any`), `limit` (50, max 500) | Definitions matching every given filter, each with its existence claim's resolution, producer, and freshness. |
 | `semidx_references` | `entity_id`, or `name` with optional `path`/`language`; `direction` (`incoming`), `freshness` (`current`), `resolution` (`any`), `limit` (100, max 1000) | The target definitions (at most 50) and the `REFERENCES`/`CALLS` relationships into them (`incoming`) or out of them (`outgoing`). A call is one occurrence and is listed once. |
 | `semidx_context` | `entity_id`, `name` (with optional `path`/`language`), or `path` alone for a source unit; `freshness` (`current`), `relationship_limit` (50, max 500) | Up to 10 focus entities, each with its unit's analysis state, incoming and outgoing relationships of every kind, the unit's diagnostics (at most 50), and the entity's last identity event. |
-| `semidx_refresh` | none | The new and previous snapshot revisions, the scan outcome (unchanged, changed, renamed, added, removed, analyzed, ambiguous renames, invalidated), unit counts, and diagnostic counts. |
+| `semidx_refresh` | none | The new and previous snapshot revisions, `entity_ids_preserved` (false when this refresh published an index rebuilt after a failure), the scan outcome (unchanged, changed, renamed, added, removed, analyzed, ambiguous renames, invalidated), unit counts, and diagnostic counts. |
 
 `freshness` is `current`, `stale`, or `any`. `resolution` is `any`, `fact`,
 `unresolved`, or `approximate`. `language` is `java`, `clojure`, or `zig`.
@@ -282,7 +282,8 @@ invalid byte replaced by U+FFFD.
 | Non-object `params` or `_meta`; non-string `io.modelcontextprotocol/protocolVersion`; `2026-07-28` request without `clientCapabilities`; `tools/call` without a string `name` or with non-object `arguments`; unknown tool; any `cursor`; `tools/list` or `tools/call` in `2025-06-18` form before `initialize`; `initialize` without a string `protocolVersion` | `-32602` |
 | `io.modelcontextprotocol/protocolVersion` other than `2026-07-28` | `-32022` with `data.supported` and `data.requested` |
 | Invalid argument value or unknown argument | Tool result with `isError: true` |
-| Refresh cannot scan, reconcile, or publish | Tool result with `isError: true`; the previous snapshot stays published |
+| Refresh cannot scan the root | Tool result with `isError: true`; the index is unchanged and the previous snapshot stays published |
+| Refresh fails while reconciling or publishing | Tool result with `isError: true` saying whether the index was rebuilt; the previous snapshot stays published, and the next refresh publishes the rebuilt index or retries the rebuild |
 
 Notifications, including malformed ones, are never answered.
 
@@ -303,9 +304,14 @@ Notifications, including malformed ones, are never answered.
   same revision.
 - Output is bounded per list, not per response: a `semidx_context` call can
   still return a large message.
-- A refresh that fails part-way through reconciliation leaves the graph partly
-  updated while the previous snapshot stays published; the next successful
-  refresh publishes the graph as it then stands.
+- A refresh that fails after reconciliation started (for example, out of
+  memory) never publishes a partly updated graph. The server discards that index
+  and rebuilds a fresh one from the same scan; the published snapshot stays the
+  previous one until the next refresh publishes the rebuilt index. A rebuilt
+  index cannot establish identity with the old one: entity ids from earlier
+  snapshots name nothing in it (they are never reused for other entities), and
+  that refresh reports `entity_ids_preserved: false`. Look targets up again by
+  name or path.
 - The product version is a preview version: tool names, arguments, and result
   fields may change between previews. Release discipline is tracked in
   [follow-up 004](../followups/004_release_discipline_for_mcp_preview.md).

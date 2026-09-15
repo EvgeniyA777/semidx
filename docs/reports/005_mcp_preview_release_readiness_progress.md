@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-Execution started on 2026-09-14. Stages 1, 2, 2.5, and 3 are complete; Stage 3.5 is next.
+Execution started on 2026-09-14. Stages 1, 2, 2.5, 3, and 3.5 are complete; Stage 4 is next.
 
 ## Stage Log
 
@@ -23,8 +23,8 @@ Execution started on 2026-09-14. Stages 1, 2, 2.5, and 3 are complete; Stage 3.5
 | Stage 1: Product version and preview identity | Completed (`db7caa6`) | `0.1.0-preview.1` is defined once in `build.zig.zon` and reported by `semidx-mcp --version`, `serverInfo.version`, and `semidx_health.product_version`; `semantic_contract_version` stays `null`. |
 | Stage 2: Install and local agent configuration | Completed (`7ad042a`) | README gives a four-step source-built path to a registered MCP server; a clean clone followed it to a first successful tool call. |
 | Stage 2.5: Same-unit name resolution facts (Java and Clojure) | Completed (`f0bb778`) | Two confirmed false `CALLS` facts removed: a Java call to an overloaded method is no longer a fact about the first overload, and a Clojure symbol is no longer a fact where a local binding may shadow it. Both rules now leave uncertain cases unresolved with a reason. |
-| Stage 3: Capability matrix and consent boundary | Completed | `docs/spec/capability_matrix.md` states per-producer coverage, unresolved and unsupported cases, identity limits, and known overbroad and false-negative cases; README and the local preview reference carry hosted-client consent wording. |
-| Stage 3.5: Refresh failure recovery | Pending | |
+| Stage 3: Capability matrix and consent boundary | Completed (`bd0d7c6`) | `docs/spec/capability_matrix.md` states per-producer coverage, unresolved and unsupported cases, identity limits, and known overbroad and false-negative cases; README and the local preview reference carry hosted-client consent wording. |
+| Stage 3.5: Refresh failure recovery | Completed | Failure injection confirmed that a failed reconciliation poisons the index. `semidx-mcp` now discards such an index and rebuilds it from the same scan above the old ids; at each of 87 injected failure points the published snapshot stays intact, the next refresh equals a fresh index, and no old id names a different entity. |
 | Stage 4: Dogfood proofs and release gate | Pending | |
 | Stage 5: Preview release candidate handoff | Pending | |
 
@@ -296,3 +296,145 @@ Verification:
 | `zig build test --summary all` (no code changed; default no-source-text tests) | Pass, 183/183 |
 | `./scripts/check-agent-attribution.sh --all` | Pass |
 | `git diff --check` | Pass |
+
+## Stage 3.5: Refresh Failure Recovery
+
+Changed files: `src/core/graph.zig` (`Graph.IdFloor`, `Graph.initAfter`,
+`Graph.idFloor`, core test), `src/root.zig` (`Index.initAfter`),
+`src/mcp/root.zig` (`Server.refresh`, `recoverFrom`, `rebuild`, tests),
+`src/mcp/tools.zig` (`Recovery` in health), `docs/mcp/local_preview.md`,
+`docs/spec/capability_matrix.md`, `MEMORY.md`.
+
+### What a failure left behind (evidence before the fix)
+
+`Index.applyScan`, its `Upkeep`, and `Graph.publish` were read first. Mutation
+is spread across the graph's entity, assertion, diagnostic, and definition
+tables, `unit_paths`, `dependencies`, and the analyzer's Java package hints
+outside the graph; `setSourceUnitBytes` frees replaced contents; only the string
+pool is append-only.
+
+A temporary failure-injection test (not committed) built an index of a small
+tree (a Java class other units resolve against, a Java dependent, two Zig
+units), then applied a rescan that renames the class, edits one Zig unit,
+removes the other, and adds one. For every allocation index `k` of that
+`applyScan` it failed allocation `k`, retried the same scan on the same index,
+published, and compared a content projection (units, entities, relationships,
+diagnostics, with freshness and resolution, without ids) against a fresh index
+of the new tree:
+
+| Outcome over 86 failure points | Count |
+| --- | --- |
+| Retry converged to the fresh-index graph | 18 |
+| Retry succeeded but `publish` refused the graph (invariant violation) | 45 |
+| Retry published a graph different from the fresh index | 23 |
+
+The first divergence (`k = 12`): the failure hit while removing `gone.zig`
+after the unit was tombstoned but before its entities were removed. The retry no
+longer saw the unit as known, so the graph kept a current `function gone`
+definition and `DEFINES` fact for a file that no longer exists. The plan's
+lost-invalidation hypothesis is therefore not the mechanism observed first, but
+the broader claim is confirmed: a failed refresh poisons later refreshes, both
+by blocking publication and by publishing wrong current facts.
+
+### Strategy
+
+Chosen: **rebuild after failure, above the old ids.** When `applyScan` or
+`publish` fails during a refresh, the server treats the index as untrusted,
+builds a fresh index from the same scan with `Index.initAfter`, and makes it the
+index. The published snapshot is not touched; the index it borrows strings from
+is kept as `retired` until the next successful refresh publishes the rebuilt
+index and releases it. If the rebuild fails too, the server is `poisoned` and
+the next refresh rebuilds before reconciling. A scan failure happens before any
+mutation and triggers no rebuild.
+
+`Graph.IdFloor` makes the unavoidable identity loss observable: a graph built
+with a floor fills the lower entity and unit ids with tombstones (never live,
+never published, never matched, carrying no assertion), starts assertion ids
+above the old ones, and starts its revision after the old one. An id from an
+earlier snapshot therefore names nothing in the rebuilt graph instead of a
+different entity, and revisions never go backwards. The refresh that publishes a
+rebuilt index reports `entity_ids_preserved: false`; `semidx_health` reports
+`recovery` (rebuild count, rebuilt index awaiting publication, rebuild still
+needed).
+
+Rejected:
+
+- Exact rollback (checkpoint before `applyScan`, restore on failure). It needs a
+  transactional boundary across every graph table, `dependencies`, the analyzer's
+  package hints, and deferred freeing of replaced unit contents; the 86-point
+  experiment showed how many partial states exist, and a missed field would
+  reintroduce silent poisoning. Rejected on risk.
+- Reconciling every refresh into a staged copy and swapping on success. A fresh
+  staged index on every refresh loses identity on successful refreshes too,
+  which the plan forbids; a deep copy of the live index carries the same
+  field-coverage risk as rollback.
+
+Consequences within the plan's boundary: no persistence, storage layer, or
+snapshot representation change; the success path of `applyScan` is unchanged, so
+affected-region work bounds and the repository-scale tests are unaffected.
+Identity is lost only for a refresh that failed, and that loss is observable.
+
+### Tests
+
+- `a graph built after another issues none of its ids and no earlier revision`
+  (core): ids and revision above the floor, tombstones publish nothing, old ids
+  resolve to nothing.
+- `a refresh that fails at any allocation publishes nothing half-applied and the
+  next refresh converges` (MCP): a one-shot allocation failure at every
+  allocation of a refresh over the tree above. For each point: (1) the published
+  snapshot is unchanged, or, when only the response was lost, equals the fresh
+  index; (2) the next successful refresh equals a fresh index of the tree; (3)
+  every entity id from the earlier snapshot names nothing when the refresh
+  reports `entity_ids_preserved: false`, and otherwise names the same entity
+  (kind, role, name, path).
+- `when rebuilding after a failed refresh also fails, the next refresh rebuilds
+  and converges` (MCP): the same with every allocation from the failure point on
+  failing, so the rebuild fails as well and the next refresh must rebuild.
+
+Both MCP tests covered 87 failure points each, 76 of which triggered a rebuild
+(counted with a temporary print, removed).
+
+Risk matrix:
+
+| Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| A failed refresh changes no answer (plan Stage 3.5) | Half-applied state published | Integration with failure injection | `Server.refresh` | Every allocation point, one-shot and sticky | both MCP recovery tests |
+| The next refresh equals a fresh index (plan Stage 3.5, constitution §5) | Poisoned index reconciled again | Integration against a fresh-index oracle | `Server.rebuild` | Rebuild itself failing | sticky-failure test |
+| Identity loss is observable, never reassignment (plan Stage 3.5, constitution §4) | Old id names another entity after rebuild | Unit + integration | `Graph.initAfter` floor | Rebuild without a floor | core floor test; mutation below |
+| Success path unchanged | Work bounds regress | Existing repository-scale tests | `Index.applyScan` untouched | — | full lane |
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| Failure-injection experiment before the fix (temporary test) | 86 points: 18 converge, 45 publish refused, 23 wrong graph |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | Pass, 88/88 |
+| `zig build test-mcp --summary all` | Pass, 18/18 |
+| `zig build test --summary all` | Pass, 186/186 |
+| Mutation: refresh reports the failure without rebuilding (previous behavior) | Both MCP recovery tests fail; restored |
+| Mutation: rebuild without the id floor (revision kept) | Both MCP recovery tests fail on guarantee 3; restored |
+
+Mistakes made while proving this, recorded because they changed the evidence:
+
+- The first no-floor mutation (`if (true) .{} else floor`) did not compile, so
+  its failure proved nothing; it was replaced by a mutation that compiles.
+- The next run failed guarantee 3 for the wrong reason: the test kept entity
+  structs whose strings belonged to an index a successful refresh releases, and
+  read freed memory. The test now copies what it compares.
+- With that fixed, the no-floor mutation passed: the check compared kind, role,
+  and unit scope, and a deterministic rebuild reproduces those for the same id.
+  The check now requires that old ids name nothing whenever the refresh reports
+  `entity_ids_preserved: false`, and otherwise compares kind, role, name, and
+  path. The mutation then failed as intended.
+
+Residual risk:
+
+- Memory freed on allocation-failure paths is not checked: the injection tests
+  run over the C allocator, because leak detection under injected failures is a
+  separate property the plan does not require.
+- A rebuild re-reads every unit, so recovery costs a full index build; it runs
+  only after a failed refresh.
+- Only allocation failures were injected. An analyzer or graph error surfaces
+  through the same `applyScan` and `publish` error paths, so the same recovery
+  applies, but no test injects one directly.

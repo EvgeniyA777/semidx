@@ -427,6 +427,17 @@ why. This is not a changelog of removed implementation; see `git log`.
   `SPEC.md`, `README.md`, and the local preview reference, which also carry the
   hosted-client consent wording. It is not a published contract coverage
   matrix.
+- **A failed refresh no longer poisons the index (Plan 005 Stage 3.5).**
+  Failure injection at every allocation of a refresh showed that a failure
+  inside `Index.applyScan` left partial state in 68 of 86 cases: publication
+  refused the retried graph in 45, and 23 published a graph different from a
+  fresh index (for example, current facts from a removed unit). `Index.applyScan`
+  is still not transactional; instead `semidx-mcp` discards an index whose
+  refresh failed after reconciliation began and rebuilds it from the same scan
+  with `Index.initAfter`, whose `Graph.IdFloor` starts entity, unit, and
+  assertion ids above the old graph's and keeps revisions increasing. The
+  published snapshot and the index it borrows from stay until the next refresh
+  publishes the rebuilt index, reported as `entity_ids_preserved: false`.
 - **Plan 005 Stage 2.5 removed two false-fact rules.** A Java unqualified
   invocation is a `CALLS` fact only when the enclosing class declares exactly one
   method of that name, has no supertypes, and the call is not inside a nested

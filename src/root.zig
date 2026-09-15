@@ -31,8 +31,14 @@ pub const Index = struct {
     analyzer: Analyzer,
 
     pub fn init(gpa: Allocator, repository_path: []const u8) !Index {
+        return initAfter(gpa, repository_path, .{});
+    }
+
+    /// An empty index that issues none of the ids an earlier index for the same
+    /// consumer issued. See `Graph.IdFloor`.
+    pub fn initAfter(gpa: Allocator, repository_path: []const u8, floor: Graph.IdFloor) !Index {
         return .{
-            .graph = try Graph.init(gpa, repository_path),
+            .graph = try Graph.initAfter(gpa, repository_path, floor),
             .analyzer = Analyzer.init(gpa, Analyzer.default_budget),
         };
     }

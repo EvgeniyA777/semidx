@@ -146,12 +146,42 @@ pub const Graph = struct {
     /// a lookup that should be keyed has become a sweep.
     unit_work: usize,
 
+    /// Identities a new graph must not hand out, because an earlier graph for
+    /// the same consumer already did.
+    ///
+    /// A graph rebuilt from scratch has no correspondence with the one it
+    /// replaces. Starting its entity, unit, and assertion ids above the old
+    /// ones, and its revision after the old one, makes that loss observable:
+    /// an id issued by the old graph names nothing in the new one instead of
+    /// silently naming a different entity, and revisions never go backwards.
+    pub const IdFloor = struct {
+        entities: u32 = 0,
+        units: u32 = 0,
+        assertions: u32 = 0,
+        revision: u64 = 1,
+    };
+
     pub fn init(gpa: Allocator, repository_path: []const u8) GraphError!Graph {
+        return initAfter(gpa, repository_path, .{});
+    }
+
+    /// The ids this graph has issued so far, as a floor for a graph that
+    /// replaces it.
+    pub fn idFloor(self: *const Graph) IdFloor {
+        return .{
+            .entities = @intCast(self.entities.items.len),
+            .units = @intCast(self.units.items.len),
+            .assertions = self.next_assertion,
+            .revision = self.revision + 1,
+        };
+    }
+
+    pub fn initAfter(gpa: Allocator, repository_path: []const u8, floor: IdFloor) GraphError!Graph {
         var self: Graph = .{
             .gpa = gpa,
             .pool = StringPool.init(gpa),
-            .revision = 1,
-            .next_assertion = 0,
+            .revision = @max(1, floor.revision),
+            .next_assertion = floor.assertions,
             .repository = @enumFromInt(0),
             .entities = .empty,
             .assertions = .empty,
@@ -166,6 +196,45 @@ pub const Graph = struct {
             .unit_work = 0,
         };
         errdefer self.deinit();
+
+        // Reserved ids are tombstones: never live, never published, never
+        // matched by correspondence, and carrying no assertion.
+        try self.entities.ensureTotalCapacity(gpa, floor.entities);
+        for (0..floor.entities) |index| {
+            self.entities.appendAssumeCapacity(.{
+                .id = @enumFromInt(@as(u32, @intCast(index))),
+                .kind = .repository,
+                .identity = .{
+                    .scope = .repository,
+                    .language = null,
+                    .role = "reserved",
+                    .name = null,
+                    .signature = null,
+                    .container_path = &.{},
+                },
+                .evidence = null,
+                .extension = model.ExtensionPayload.empty,
+                .created_revision = 0,
+                .observed_revision = 0,
+                .removed_revision = 0,
+            });
+        }
+        for (0..floor.units) |index| {
+            try self.unit_assertions.append(gpa, .empty);
+            try self.unit_diagnostics.append(gpa, .empty);
+            try self.unit_definitions.append(gpa, .empty);
+            try self.units.append(gpa, .{
+                .id = @enumFromInt(@as(u32, @intCast(index))),
+                .path = "",
+                .language = .zig,
+                .bytes = try gpa.alloc(u8, 0),
+                .content = model.contentId(""),
+                .entity = @enumFromInt(0),
+                .content_revision = 0,
+                .analysis_revision = 0,
+                .removed_revision = 0,
+            });
+        }
 
         self.repository = try self.addEntity(.{
             .kind = .repository,
@@ -1376,6 +1445,35 @@ fn addDefinition(
     );
     try graph.markAnalyzed(unit);
     return id;
+}
+
+test "a graph built after another issues none of its ids and no earlier revision" {
+    var first = try Graph.init(testing.allocator, "repo");
+    defer first.deinit();
+    _ = try first.addSourceUnit("a.src", .java, "class A {}");
+    _ = try first.addSourceUnit("b.src", .java, "class B {}");
+    var first_snapshot = try first.publish();
+    defer first_snapshot.deinit();
+    const floor = first.idFloor();
+
+    var second = try Graph.initAfter(testing.allocator, "repo", floor);
+    defer second.deinit();
+    const unit = try second.addSourceUnit("a.src", .java, "class A {}");
+
+    var snapshot = try second.publish();
+    defer snapshot.deinit();
+    try testing.expect(@intFromEnum(unit) >= floor.units);
+    try testing.expect(snapshot.revision >= floor.revision);
+    try testing.expect(snapshot.revision > first_snapshot.revision);
+    for (snapshot.entities) |entity| try testing.expect(@intFromEnum(entity.id) >= floor.entities);
+    for (snapshot.assertions) |assertion| try testing.expect(@intFromEnum(assertion.id) >= floor.assertions);
+
+    // Reserved ids publish nothing: one repository, one file, one unit.
+    try testing.expectEqual(@as(usize, 1), snapshot.units.len);
+    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .repository }));
+    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .file }));
+    for (first_snapshot.entities) |old| try testing.expect(snapshot.entityById(old.id) == null);
+    try testing.expect(snapshot.unitByPath("b.src") == null);
 }
 
 test "a graph is built and queried without any language frontend" {

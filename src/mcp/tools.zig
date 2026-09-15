@@ -171,6 +171,16 @@ pub const Status = struct {
     root: []const u8,
     languages: []const LanguageStatus,
     last_scan: semidx.Index.ScanOutcome,
+    recovery: Recovery,
+};
+
+pub const Recovery = struct {
+    /// Times the index was rebuilt after a failed refresh.
+    rebuilds: u32,
+    /// A rebuilt index exists that the next refresh publishes.
+    rebuilt_index_unpublished: bool,
+    /// A failed refresh left the index untrusted and the rebuild failed too.
+    needs_rebuild: bool,
 };
 
 pub const Context = struct {
@@ -661,6 +671,8 @@ pub fn health(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, status: Statu
     try writeDiagnosticCounts(ctx, s, null);
     try s.objectField("last_scan");
     try s.write(status.last_scan);
+    try s.objectField("recovery");
+    try s.write(status.recovery);
     try s.endObject();
 }
 

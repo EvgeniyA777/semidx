@@ -49,6 +49,14 @@ pub const Server = struct {
     log: *Writer,
     index: semidx.Index,
     snapshot: semidx.Snapshot,
+    /// The index `snapshot` borrows from, when a rebuild has replaced it and
+    /// no snapshot of the rebuilt index has been published yet.
+    retired: ?semidx.Index,
+    /// Set when a refresh failed part-way and the index could not be rebuilt.
+    /// Such an index is never reconciled again; the next refresh rebuilds it.
+    poisoned: bool,
+    /// How many times the index was rebuilt after a failed refresh.
+    rebuilds: u32,
     last_scan: semidx.Index.ScanOutcome,
     /// Set by a legacy `initialize`. Modern requests never read it.
     legacy_initialized: bool,
@@ -80,6 +88,9 @@ pub const Server = struct {
             .log = log,
             .index = index,
             .snapshot = snapshot,
+            .retired = null,
+            .poisoned = false,
+            .rebuilds = 0,
             .last_scan = outcome,
             .legacy_initialized = false,
             .message_arena = std.heap.ArenaAllocator.init(gpa),
@@ -89,6 +100,7 @@ pub const Server = struct {
     pub fn deinit(self: *Server) void {
         self.message_arena.deinit();
         self.snapshot.deinit();
+        if (self.retired) |*retired| retired.deinit();
         self.index.deinit();
         self.* = undefined;
     }
@@ -319,31 +331,49 @@ pub const Server = struct {
                 .capabilities = semidx.frontends.capabilitiesFor(language),
             };
         }
-        return .{ .root = self.options.root, .languages = statuses, .last_scan = self.last_scan };
+        return .{
+            .root = self.options.root,
+            .languages = statuses,
+            .last_scan = self.last_scan,
+            .recovery = .{
+                .rebuilds = self.rebuilds,
+                .rebuilt_index_unpublished = self.retired != null,
+                .needs_rebuild = self.poisoned,
+            },
+        };
     }
 
-    /// Rescans the root and publishes the next snapshot. On any failure the
-    /// published snapshot stays the one every earlier call observed.
+    /// Rescans the root and publishes the next snapshot.
+    ///
+    /// On any failure the published snapshot stays the one every earlier call
+    /// observed. A failure after reconciliation started can leave the index
+    /// partly updated, and a partly updated index is not trusted again: it is
+    /// replaced by an index rebuilt from the same scan. The rebuilt index
+    /// issues none of the old index's ids, so an id from an earlier snapshot
+    /// names nothing in it rather than a different entity.
     fn refresh(self: *Server, ctx: *tools.Context, s: *Stringify, arguments: ?std.json.ObjectMap) tools.Error!void {
         try tools.expectNoArguments(ctx, arguments);
         const previous = self.snapshot.revision;
 
         var found = semidx.source.discovery.scan(self.gpa, self.io, self.options.root, .{}) catch |err| {
             try self.logf("refresh: scanning {s} failed: {t}", .{ self.options.root, err });
-            return ctx.fail("refresh could not scan the root: {t}; snapshot revision {d} is still published", .{ err, previous });
+            return ctx.fail("refresh could not scan the root: {t}; the index was not changed and snapshot revision {d} is still published", .{ err, previous });
         };
         defer found.deinit();
-        const outcome = self.index.applyScan(found) catch |err| {
-            try self.logf("refresh: applying the scan failed: {t}", .{err});
-            return ctx.fail("refresh failed while applying the scan: {t}; snapshot revision {d} is still published", .{ err, previous });
-        };
-        const next = self.index.publish() catch |err| {
-            try self.logf("refresh: publishing failed: {t}", .{err});
-            return ctx.fail("refresh failed to publish: {t}; snapshot revision {d} is still published", .{ err, previous });
-        };
 
+        if (self.poisoned and !try self.rebuild(found)) {
+            return ctx.fail("an earlier refresh failed and rebuilding the index failed again; snapshot revision {d} is still published, and the next refresh retries the rebuild", .{previous});
+        }
+        const outcome = self.index.applyScan(found) catch |err| return self.recoverFrom(ctx, found, "applying the scan", err, previous);
+        const next = self.index.publish() catch |err| return self.recoverFrom(ctx, found, "publishing", err, previous);
+
+        const rebuilt = self.retired != null;
         self.snapshot.deinit();
         self.snapshot = next;
+        if (self.retired) |*retired| {
+            retired.deinit();
+            self.retired = null;
+        }
         self.last_scan = outcome;
         ctx.snapshot = &self.snapshot;
         ctx.existence = null;
@@ -351,6 +381,8 @@ pub const Server = struct {
         try tools.beginStructured(ctx, s);
         try s.objectField("previous_revision");
         try s.write(previous);
+        try s.objectField("entity_ids_preserved");
+        try s.write(!rebuilt);
         try s.objectField("scan");
         try s.write(outcome);
         try s.objectField("units");
@@ -358,6 +390,55 @@ pub const Server = struct {
         try s.objectField("diagnostics");
         try tools.writeDiagnosticCounts(ctx, s, null);
         try s.endObject();
+    }
+
+    /// Replaces a failed refresh's index with one rebuilt from the same scan,
+    /// and reports the failure with whether that recovery completed.
+    fn recoverFrom(
+        self: *Server,
+        ctx: *tools.Context,
+        found: semidx.source.SourceScan,
+        stage: []const u8,
+        err: anyerror,
+        previous: u64,
+    ) tools.Error {
+        try self.logf("refresh: {s} failed: {t}; rebuilding the index", .{ stage, err });
+        self.poisoned = true;
+        if (try self.rebuild(found)) {
+            return ctx.fail("refresh failed while {s}: {t}. The index was rebuilt from a fresh scan; snapshot revision {d} " ++
+                "is still published, and the next refresh publishes the rebuilt index, in which entity ids from " ++
+                "earlier snapshots name nothing", .{ stage, err, previous });
+        }
+        return ctx.fail("refresh failed while {s}: {t}, and rebuilding the index failed too; snapshot revision {d} " ++
+            "is still published, and the next refresh retries the rebuild", .{ stage, err, previous });
+    }
+
+    /// Builds a fresh index from `found` above the current index's ids. On
+    /// success it becomes the index; the index the published snapshot borrows
+    /// from stays alive until a snapshot of the new one replaces it.
+    fn rebuild(self: *Server, found: semidx.source.SourceScan) Writer.Error!bool {
+        const floor = self.index.graph.idFloor();
+        var fresh = semidx.Index.initAfter(self.gpa, self.options.root, floor) catch |err| {
+            try self.logf("recovery: creating a fresh index failed: {t}", .{err});
+            self.poisoned = true;
+            return false;
+        };
+        _ = fresh.applyScan(found) catch |err| {
+            try self.logf("recovery: indexing the scan into a fresh index failed: {t}", .{err});
+            fresh.deinit();
+            self.poisoned = true;
+            return false;
+        };
+        if (self.retired == null) {
+            self.retired = self.index;
+        } else {
+            self.index.deinit();
+        }
+        self.index = fresh;
+        self.poisoned = false;
+        self.rebuilds += 1;
+        try self.logf("recovery: rebuilt the index ({d} rebuilds so far)", .{self.rebuilds});
+        return true;
     }
 };
 
@@ -668,6 +749,267 @@ test "refresh publishes a new snapshot that observes edited and added units" {
     try testing.expectEqual(@as(u64, @intCast(after)), h.server.snapshot.revision);
     const still = try h.callTool(arena, "semidx_find_definitions", "{\"name\":\"added\"}");
     try testing.expectEqual(@as(i64, 1), still.object.get("structuredContent").?.object.get("total").?.integer);
+}
+
+/// Fails exactly one allocation, or every allocation from one onwards, so a
+/// test can inject a failure at each point of an operation in turn.
+const InjectedFailures = struct {
+    child: Allocator,
+    count: usize = 0,
+    fail_at: usize = std.math.maxInt(usize),
+    sticky: bool = false,
+    fired: bool = false,
+
+    fn allocator(self: *InjectedFailures) Allocator {
+        return .{ .ptr = self, .vtable = &.{
+            .alloc = alloc,
+            .resize = resize,
+            .remap = remap,
+            .free = free,
+        } };
+    }
+
+    fn arm(self: *InjectedFailures, offset: usize, sticky: bool) void {
+        self.fail_at = self.count + offset;
+        self.sticky = sticky;
+        self.fired = false;
+    }
+
+    fn disarm(self: *InjectedFailures) void {
+        self.fail_at = std.math.maxInt(usize);
+        self.sticky = false;
+    }
+
+    fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+        const self: *InjectedFailures = @ptrCast(@alignCast(ctx));
+        const index = self.count;
+        self.count += 1;
+        if (index == self.fail_at or (self.sticky and index > self.fail_at)) {
+            self.fired = true;
+            return null;
+        }
+        return self.child.rawAlloc(len, alignment, ret_addr);
+    }
+
+    fn resize(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        const self: *InjectedFailures = @ptrCast(@alignCast(ctx));
+        return self.child.rawResize(memory, alignment, new_len, ret_addr);
+    }
+
+    fn remap(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        const self: *InjectedFailures = @ptrCast(@alignCast(ctx));
+        return self.child.rawRemap(memory, alignment, new_len, ret_addr);
+    }
+
+    fn free(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+        const self: *InjectedFailures = @ptrCast(@alignCast(ctx));
+        self.child.rawFree(memory, alignment, ret_addr);
+    }
+};
+
+/// Everything a snapshot says, by content rather than by id or revision, in a
+/// stable order: two graphs of the same tree project identically.
+fn projectSnapshot(gpa: Allocator, snapshot: *const semidx.Snapshot) ![]const u8 {
+    var lines: std.ArrayList([]const u8) = .empty;
+    for (snapshot.units) |view| {
+        try lines.append(gpa, try std.fmt.allocPrint(gpa, "unit {s} {s} {t}", .{ view.path, @tagName(view.language), view.analysis() }));
+    }
+    for (snapshot.entities) |entity| {
+        try lines.append(gpa, try std.fmt.allocPrint(gpa, "entity {t} {s} {s} {s} {t}", .{
+            entity.kind,
+            entityPath(snapshot, entity),
+            entity.identity.role,
+            entity.identity.name orelse "",
+            snapshot.entityFreshness(entity),
+        }));
+    }
+    for (snapshot.assertions) |assertion| {
+        const relationship = assertion.relationship() orelse continue;
+        const source = snapshot.entityById(relationship.source).?;
+        const target = switch (relationship.target) {
+            .entity => |id| if (snapshot.entityById(id)) |found| try std.fmt.allocPrint(gpa, "{s}:{s}", .{ entityPath(snapshot, found), found.identity.name orelse found.identity.role }) else "<withdrawn>",
+            .designator => |designator| designator,
+        };
+        try lines.append(gpa, try std.fmt.allocPrint(gpa, "relationship {t} {s}:{s} -> {s} {t} {t}", .{
+            relationship.kind,
+            entityPath(snapshot, source),
+            source.identity.name orelse source.identity.role,
+            target,
+            assertion.resolution.category(),
+            snapshot.assertionFreshness(assertion),
+        }));
+    }
+    for (snapshot.diagnostics) |diagnostic| {
+        const path = if (diagnostic.unit) |id| (if (snapshot.unit(id)) |view| view.path else "<unknown unit>") else "-";
+        try lines.append(gpa, try std.fmt.allocPrint(gpa, "diagnostic {t} {s} {s}", .{ diagnostic.kind, path, diagnostic.message }));
+    }
+    std.mem.sort([]const u8, lines.items, {}, struct {
+        fn less(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.less);
+    return std.mem.join(gpa, "\n", lines.items);
+}
+
+fn entityPath(snapshot: *const semidx.Snapshot, entity: model.Entity) []const u8 {
+    const evidence = entity.evidence orelse return "-";
+    const view = snapshot.unit(evidence.unit) orelse return "<unknown unit>";
+    return view.path;
+}
+
+const recovery_v1 = [_][2][]const u8{
+    .{ "demo/Helper.java", "package demo;\nclass Helper {}\n" },
+    .{ "demo/Greeter.java", "package demo;\nclass Greeter {\n    Helper helper;\n    void go() { go2(); }\n    void go2() {}\n}\n" },
+    .{ "a.zig", "fn a() void { b(); }\nfn b() void {}\n" },
+    .{ "gone.zig", "pub fn gone() void {}\n" },
+};
+
+/// A rescan that renames a class other units resolve against, edits a unit,
+/// removes one, and adds one: every kind of mutation a refresh performs.
+const recovery_v2 = [_][2][]const u8{
+    .{ "demo/Helper.java", "package demo;\nclass Aide {}\n" },
+    .{ "demo/Greeter.java", recovery_v1[1][1] },
+    .{ "a.zig", "fn a() void { c(); }\nfn c() void {}\n" },
+    .{ "new.zig", "pub fn fresh() void {}\n" },
+};
+
+fn writeTree(dir: std.Io.Dir, files: []const [2][]const u8) !void {
+    for ([_][]const u8{ "demo/Helper.java", "demo/Greeter.java", "a.zig", "gone.zig", "new.zig" }) |path| {
+        dir.deleteFile(test_io, path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+    }
+    try dir.createDirPath(test_io, "demo");
+    for (files) |file| try dir.writeFile(test_io, .{ .sub_path = file[0], .data = file[1] });
+}
+
+/// The projection of a server started fresh on `files`.
+fn oracleProjection(arena: Allocator, dir: std.Io.Dir, root: []const u8, files: []const [2][]const u8) ![]const u8 {
+    try writeTree(dir, files);
+    var log: Writer.Allocating = .init(arena);
+    var server = try Server.init(std.heap.c_allocator, test_io, .{ .root = root }, &log.writer);
+    defer server.deinit();
+    return projectSnapshot(arena, &server.snapshot);
+}
+
+const refresh_line = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{" ++ modern_meta ++
+    ",\"name\":\"semidx_refresh\",\"arguments\":{}}}";
+
+const RefreshReply = struct {
+    completed: bool,
+    /// Present when the refresh completed.
+    ids_preserved: ?bool = null,
+};
+
+/// Sends a refresh and reports whether it completed without a tool error.
+fn refreshOnce(server: *Server, arena: Allocator) !RefreshReply {
+    var out: Writer.Allocating = .init(arena);
+    server.handleLine(refresh_line, &out.writer) catch return .{ .completed = false };
+    const written = out.written();
+    if (written.len == 0) return .{ .completed = false };
+    const response = try std.json.parseFromSliceLeaky(std.json.Value, arena, written, .{});
+    const result = response.object.get("result") orelse return .{ .completed = false };
+    if (result.object.get("isError").?.bool) return .{ .completed = false };
+    const structured = result.object.get("structuredContent").?.object;
+    return .{ .completed = true, .ids_preserved = structured.get("entity_ids_preserved").?.bool };
+}
+
+fn expectRecoveryAtEveryPoint(sticky: bool) !void {
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(test_io, ".", arena);
+
+    const expected_v1 = try oracleProjection(arena, tmp.dir, root, &recovery_v1);
+    const expected_v2 = try oracleProjection(arena, tmp.dir, root, &recovery_v2);
+    try testing.expect(!std.mem.eql(u8, expected_v1, expected_v2));
+
+    var points: usize = 0;
+    var rebuilt: usize = 0;
+    var offset: usize = 0;
+    while (true) : (offset += 1) {
+        try testing.expect(offset < 100_000);
+        var failures: InjectedFailures = .{ .child = std.heap.c_allocator };
+        try writeTree(tmp.dir, &recovery_v1);
+        var log: Writer.Allocating = .init(arena);
+        var server = try Server.init(failures.allocator(), test_io, .{ .root = root }, &log.writer);
+        defer server.deinit();
+        const before = server.snapshot;
+        const before_projection = try projectSnapshot(arena, &before);
+        // Copied out: the earlier snapshot's strings belong to an index a
+        // successful refresh releases.
+        const Remembered = struct { id: model.EntityId, kind: model.EntityKind, role: []const u8, name: []const u8, path: []const u8 };
+        var before_ids: std.ArrayList(Remembered) = .empty;
+        for (before.entities) |entity| {
+            try before_ids.append(arena, .{
+                .id = entity.id,
+                .kind = entity.kind,
+                .role = try arena.dupe(u8, entity.identity.role),
+                .name = try arena.dupe(u8, entity.identity.name orelse ""),
+                .path = try arena.dupe(u8, entityPath(&before, entity)),
+            });
+        }
+        const before_revision = before.revision;
+
+        try writeTree(tmp.dir, &recovery_v2);
+        failures.arm(offset, sticky);
+        const first = try refreshOnce(&server, arena);
+        failures.disarm();
+        if (!failures.fired) {
+            try testing.expect(first.completed);
+            try testing.expect(first.ids_preserved.?);
+            try testing.expectEqualStrings(expected_v2, try projectSnapshot(arena, &server.snapshot));
+            break;
+        }
+        points += 1;
+
+        // 1. The published snapshot is the one every earlier call observed,
+        // unless the refresh finished and only its response was lost.
+        const published = try projectSnapshot(arena, &server.snapshot);
+        if (server.snapshot.revision == before_revision) {
+            try testing.expectEqualStrings(before_projection, published);
+        } else {
+            try testing.expectEqualStrings(expected_v2, published);
+        }
+        if (server.retired != null or server.poisoned) rebuilt += 1;
+
+        // 2. The next successful refresh publishes what a fresh index of the
+        // tree holds.
+        // A refresh whose response was lost may already have published.
+        const second = if (server.snapshot.revision != before_revision and !server.poisoned and server.retired == null)
+            RefreshReply{ .completed = true, .ids_preserved = true }
+        else
+            try refreshOnce(&server, arena);
+        try testing.expect(second.completed);
+        try testing.expect(!server.poisoned and server.retired == null);
+        try testing.expectEqualStrings(expected_v2, try projectSnapshot(arena, &server.snapshot));
+
+        // 3. An id from the earlier snapshot never names a different entity:
+        // after a rebuild it names nothing, and otherwise it names the same
+        // entity.
+        for (before_ids.items) |old| {
+            const now = server.snapshot.entityById(old.id) orelse continue;
+            try testing.expect(second.ids_preserved.?);
+            try testing.expectEqual(old.kind, now.kind);
+            try testing.expectEqualStrings(old.role, now.identity.role);
+            try testing.expectEqualStrings(old.name, now.identity.name orelse "");
+            try testing.expectEqualStrings(old.path, entityPath(&server.snapshot, now));
+        }
+    }
+    try testing.expect(points > 0);
+    try testing.expect(rebuilt > 0);
+}
+
+test "a refresh that fails at any allocation publishes nothing half-applied and the next refresh converges" {
+    try expectRecoveryAtEveryPoint(false);
+}
+
+test "when rebuilding after a failed refresh also fails, the next refresh rebuilds and converges" {
+    try expectRecoveryAtEveryPoint(true);
 }
 
 test {
