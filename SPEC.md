@@ -107,11 +107,16 @@ Conformance scenario families are owned by
 adopt one of those checks specify concrete fixtures, commands, expected results,
 and publication gates here or in subordinate specifications.
 
+The current implementation's coverage, per producer and per outcome, is stated
+in the [preview capability matrix](docs/spec/capability_matrix.md). That matrix
+is unversioned implementation guidance for the local preview, not the published
+coverage matrix this section requires of a semantic contract.
+
 A first in-memory implementation slice exists
 ([plan](docs/plans/001_zig_vertical_slice.md),
 [evidence](docs/reports/001_zig_vertical_slice_progress.md)), with fixture
-coverage for two languages. There is still no capability matrix, no executable
-conformance suite, and no published coverage. The requirements above remain
+coverage for two languages. There is still no published coverage matrix, no
+executable conformance suite, and no published coverage. The requirements above remain
 requirements for later verification, not claims of passing results.
 
 The repository-scale ingestion slice is also complete

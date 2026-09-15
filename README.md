@@ -3,8 +3,10 @@
 **Status: first vertical slice.** A small in-memory semantic graph exists and is
 tested against Java, Clojure, and Zig source, and an experimental local MCP
 server can query it. There is no persistence, no public contract, no published
-language coverage, and no conformance suite. Read every capability below as
-intended behavior, not as measured behavior.
+language coverage, and no conformance suite. What each language frontend
+records, and what it leaves unresolved or unsupported, is stated in the
+[preview capability matrix](docs/spec/capability_matrix.md). Read every
+capability below as intended behavior, not as measured behavior.
 
 semidx is designed to be an incrementally maintained semantic graph of a
 codebase that provides exact program relationships as a foundation for search,
@@ -77,8 +79,18 @@ repositories: register it once per repository with a different `--root`. The
 launcher also supports `SEMIDX_ROOT=/path/to/repository` or, when the MCP client
 starts servers from inside the repository, automatic Git-root detection.
 
+**What leaves your machine.** semidx is local and opens no network connection,
+and by default returns no source text. Its results still contain values derived
+from your source — file paths, entity names, callee names, ranges, and
+diagnostic messages — and a client backed by a hosted model may send them to
+its service. semidx cannot enforce what the client does with them.
+`--allow-evidence-text` adds bounded recorded evidence text per claim; it never
+returns file contents.
+
 See [docs/mcp/local_preview.md](docs/mcp/local_preview.md) for the first calls
-to make, tools, result fields, source-text rules, and limits.
+to make, tools, result fields, source-text rules, and limits, and the
+[preview capability matrix](docs/spec/capability_matrix.md) for what each
+language covers.
 
 ## License
 

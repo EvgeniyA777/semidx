@@ -137,6 +137,26 @@ neither exists, it exits with a usage error instead of indexing an arbitrary
 directory. Prefer explicit `--root` in project `.mcp.json` files because client
 working directories are not universal.
 
+### Data Leaving The Server
+
+Read this before registering semidx with a client that uses a hosted model.
+
+- semidx itself is local: indexing and every tool call run in this process, and
+  it opens no network connection.
+- Tool results go to the MCP client that launched the server. A client backed by
+  a hosted model may send those results to its service. semidx cannot see or
+  enforce what the client does with them; that is governed by the client and
+  your agreement with its provider.
+- By default no source text is returned: no file contents, no function bodies,
+  no snippets.
+- Results always contain values derived from your source: file paths, entity
+  names, unresolved designators (callee names as written), ranges, entity ids,
+  and diagnostic messages. Registering semidx with a hosted client means those
+  values may leave your machine through that client.
+- `--allow-evidence-text` additionally returns the text each producer recorded
+  as evidence for a claim, at most 400 bytes per claim. It does not return file
+  contents. See [Source Text](#source-text).
+
 ### First Calls
 
 A useful order for an agent starting on a repository:
@@ -248,7 +268,8 @@ invalid byte replaced by U+FFFD.
   callee as written, not a declaration body.
 - Results go only to the client process that started the server. What that
   client does with them — including sending them to a hosted model — is
-  governed by the client, not by semidx.
+  governed by the client, not by semidx. See
+  [Data Leaving The Server](#data-leaving-the-server).
 
 ## Errors
 
@@ -267,7 +288,8 @@ Notifications, including malformed ones, are never answered.
 
 ## Limits
 
-- Coverage is the frontends' coverage. For Zig: top-level functions and
+- Coverage is the frontends' coverage, stated per producer in the
+  [preview capability matrix](../spec/capability_matrix.md). For Zig: top-level functions and
   containers are definitions; a bare call is a `calls` fact only when it names
   the unit's one top-level function of that name. Methods inside containers are
   not definitions, and calls through a namespace (`protocol.writeString(...)`)

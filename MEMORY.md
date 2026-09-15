@@ -420,6 +420,13 @@ why. This is not a changelog of removed implementation; see `git log`.
   preview, Zig cross-unit and member call resolution, the grammar setup
   script fetching unused and unpinned grammar sources, and Clojure lexical
   scope coverage.
+- `docs/spec/capability_matrix.md` is the SPEC-owned, unversioned preview
+  capability matrix: per producer (source ingestion, Java, Clojure, Zig, MCP
+  output) it states facts produced, unresolved and unsupported cases, identity
+  limits, and known overbroad or false-negative cases. It is linked from
+  `SPEC.md`, `README.md`, and the local preview reference, which also carry the
+  hosted-client consent wording. It is not a published contract coverage
+  matrix.
 - **Plan 005 Stage 2.5 removed two false-fact rules.** A Java unqualified
   invocation is a `CALLS` fact only when the enclosing class declares exactly one
   method of that name, has no supertypes, and the call is not inside a nested

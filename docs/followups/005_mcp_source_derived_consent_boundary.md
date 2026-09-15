@@ -59,6 +59,20 @@ path and release notes:
 - avoid implying that semidx can enforce a hosted client's onward transmission
   policy.
 
+## Progress
+
+Plan 005 Stage 3 added the consent wording to the local setup path: a "What
+leaves your machine" paragraph next to the README configuration example and a
+"Data Leaving The Server" section next to the reference's configuration example.
+Both distinguish source text from source-derived graph values, name the values
+that are always returned, state that a hosted client may forward them, describe
+exactly what `--allow-evidence-text` adds, and say semidx cannot enforce the
+client's onward transmission. The preview capability matrix repeats the boundary
+in its MCP section.
+
+Still open: whether release notes carry an explicit privacy section (Plan 005
+Stage 5) and whether a data-level allowlist is needed.
+
 ## Required Decisions
 
 - Whether the preview documentation needs a stronger warning next to hosted

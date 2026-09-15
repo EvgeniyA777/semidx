@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-Execution started on 2026-09-14. Stages 1, 2, and 2.5 are complete; Stage 3 is next.
+Execution started on 2026-09-14. Stages 1, 2, 2.5, and 3 are complete; Stage 3.5 is next.
 
 ## Stage Log
 
@@ -22,8 +22,8 @@ Execution started on 2026-09-14. Stages 1, 2, and 2.5 are complete; Stage 3 is n
 | --- | --- | --- |
 | Stage 1: Product version and preview identity | Completed (`db7caa6`) | `0.1.0-preview.1` is defined once in `build.zig.zon` and reported by `semidx-mcp --version`, `serverInfo.version`, and `semidx_health.product_version`; `semantic_contract_version` stays `null`. |
 | Stage 2: Install and local agent configuration | Completed (`7ad042a`) | README gives a four-step source-built path to a registered MCP server; a clean clone followed it to a first successful tool call. |
-| Stage 2.5: Same-unit name resolution facts (Java and Clojure) | Completed | Two confirmed false `CALLS` facts removed: a Java call to an overloaded method is no longer a fact about the first overload, and a Clojure symbol is no longer a fact where a local binding may shadow it. Both rules now leave uncertain cases unresolved with a reason. |
-| Stage 3: Capability matrix and consent boundary | Pending | |
+| Stage 2.5: Same-unit name resolution facts (Java and Clojure) | Completed (`f0bb778`) | Two confirmed false `CALLS` facts removed: a Java call to an overloaded method is no longer a fact about the first overload, and a Clojure symbol is no longer a fact where a local binding may shadow it. Both rules now leave uncertain cases unresolved with a reason. |
+| Stage 3: Capability matrix and consent boundary | Completed | `docs/spec/capability_matrix.md` states per-producer coverage, unresolved and unsupported cases, identity limits, and known overbroad and false-negative cases; README and the local preview reference carry hosted-client consent wording. |
 | Stage 3.5: Refresh failure recovery | Pending | |
 | Stage 4: Dogfood proofs and release gate | Pending | |
 | Stage 5: Preview release candidate handoff | Pending | |
@@ -247,3 +247,52 @@ Verification:
 | Mutation: Clojure unknown-head trust removed (`inner = known or head_is_fact`) | Clojure scope, fixture, and rename tests fail; restored. A first attempt at this mutation did not compile and proved nothing; it was redone. |
 | Mutation: Clojure parameter check disabled | Clojure scope test fails; restored |
 | Mutation: Clojure duplicate-declaration check disabled | Clojure scope test fails; restored |
+
+## Stage 3: Capability Matrix And Consent Boundary
+
+Changed files: new `docs/spec/capability_matrix.md`; `SPEC.md`, `README.md`,
+`docs/mcp/local_preview.md`, `docs/followups/005_mcp_source_derived_consent_boundary.md`,
+`MEMORY.md`, this log.
+
+Decisions taken inside the plan's boundary:
+
+- The matrix lives at `docs/spec/capability_matrix.md`, the location the plan
+  suggests, and `SPEC.md` names it as unversioned implementation guidance rather
+  than the published coverage matrix its contract lifecycle requires. It carries
+  no version and says every result reports `semantic_contract_version: null`.
+- Every row was written from the implementation, not from earlier reports:
+  frontend `capabilities`, the diagnostics each frontend emits, `resolveType`,
+  `invocationTarget`, `decideSymbol`, discovery budgets and exclusions. Two
+  behaviors were found while reading and are stated rather than fixed: Clojure
+  ignores a second `ns` form without a diagnostic, and the Java same-package rule
+  can record a fact across build modules that share a package name (follow-up
+  003, an existing accepted semantic limitation).
+- A legend maps each outcome (fact, unresolved, approximate, unsupported,
+  unavailable, failed, confirmed absence, stale) to where it appears in results,
+  as `CONFORMANCE.md` requires a matrix to distinguish them, and says that no
+  current producer emits approximate assertions.
+- Required statements are present: Zig references and calls are same-unit only
+  (follow-up 006); Clojure calls are narrow and symbols under forms that may bind
+  names are not facts (follow-up 008); the Java invocation rule as narrowed in
+  Stage 2.5.
+- Consent wording sits next to both configuration examples (README and the
+  reference's new "Data Leaving The Server" section) and in the matrix's MCP
+  section. It names source text and source-derived graph values separately,
+  lists the values always returned, says a hosted client may forward them, says
+  exactly what `--allow-evidence-text` adds, and says semidx cannot enforce the
+  client's onward transmission. It implies no control over a third-party client.
+- Follow-up 005 stays open: its release-notes privacy section is a Stage 5
+  decision and the data-level allowlist question is unresolved. The follow-up
+  records what Stage 3 did.
+- `SPEC.md`'s older sentence "There is still no capability matrix" was corrected
+  to "no published coverage matrix", which stays true.
+
+Verification:
+
+| Check | Result |
+| --- | --- |
+| Relative links in changed documents resolve | Pass |
+| Stable-contract wording in the matrix | None: the matrix states it is unversioned and not a contract |
+| `zig build test --summary all` (no code changed; default no-source-text tests) | Pass, 183/183 |
+| `./scripts/check-agent-attribution.sh --all` | Pass |
+| `git diff --check` | Pass |
