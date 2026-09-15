@@ -4,7 +4,7 @@ doc_type: "plan"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "ready_for_execution"
-updated: "2026-09-14"
+updated: "2026-09-15"
 ---
 
 # 005: MCP Preview Release Readiness
@@ -121,6 +121,57 @@ release after the release gate passes.
 Semantic Code Indexing is required by repository policy when available. If
 callable semidx MCP tools are unavailable in the implementation environment,
 record that fallback in the progress log and use targeted direct inspection.
+
+## Preliminary Session Evidence
+
+`ccbox` review of real ReaderLens agent sessions suggests that the refactored
+local MCP preview improves both successful-call latency and practical
+availability, but the evidence is preliminary and must not be treated as a
+release benchmark or stable performance promise.
+
+Observed pre-refactor failure modes included `CONNECT_TIMEOUT`, classpath
+failure around `semidx/runtime/index_lifecycle`, and semidx-first guard
+friction where manual search was blocked before the MCP path produced useful
+answers. In those sessions, the effective time to first useful graph-backed
+answer was often an error or timeout followed by manual `rg`, `sed`, or file
+reading.
+
+Observed post-refactor Codex sessions used the current preview tool loop:
+`semidx_health`, `semidx_repo_map`, `semidx_find_definitions`,
+`semidx_context`, `semidx_references`, and `semidx_refresh`. Successful-call
+latency in the sampled sessions improved from about 105 ms median and 205 ms
+p90 to about 26 ms median and 63 ms p90. The practical improvement is larger
+than the latency numbers alone suggest because the newer sessions received
+usable root, snapshot, definition, context, reference, and refresh answers
+instead of falling back after connection or classpath failures.
+
+The same evidence also highlights preview limits that Stage 3 and Stage 4 must
+state rather than hide:
+
+- Coverage is uneven across project surfaces. Java navigation is already useful,
+  while Docker, YAML, Markdown, README, and plan work still require targeted
+  direct inspection.
+- The Java graph is intentionally narrow. A recent health result showed many
+  more unresolved assertions than fact relationships, and context output still
+  exposes unresolved imports, unsupported constructs, fields, comments, and
+  type details outside current coverage.
+- Old and new MCP tool names can confuse agents. Historical sessions used
+  `create_index`, `resolve_context`, `expand_context`, and
+  `fetch_context_detail`; the current preview uses the `semidx_*` tools listed
+  above. Release documentation and examples must not mix the two loops.
+- Claude integration evidence is weaker than Codex integration evidence:
+  sessions showed connection timeouts, the classpath failure, and guard friction
+  while newer Codex sessions used the current preview cleanly.
+- The semidx-first guard needs a smoother unavailable-tool fallback. The rule is
+  valuable when MCP answers are available, but it should not force an agent
+  through a blocked-command cycle before targeted direct inspection.
+- Default MCP output remains a map and navigation layer, not a replacement for
+  exact file reads. Source text is absent by default, so editing still requires
+  reading the relevant files.
+- Agents need an explicit answer-quality cue for mixed tasks. Results expose
+  `fact`, `unresolved`, and unsupported states, but the preview should make it
+  easier to decide when the graph is sufficient and when direct inspection is
+  required.
 
 ## Plan-Level Decisions
 
