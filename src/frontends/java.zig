@@ -24,7 +24,10 @@ pub const capabilities: contract.Capabilities = .{
     .entity_roles = &.{ "class", "method" },
     .relationship_kinds = &.{ .defines, .references, .calls },
     .coverage_note = "top-level classes, their methods, method return types, " ++
-        "field types, and invocations inside method bodies; a simple type name " ++
+        "field types, and invocations inside method bodies, where an unqualified " ++
+        "invocation resolves only to the class's one method of that name when " ++
+        "the class has no supertypes and the call is not inside a nested class " ++
+        "body; a simple type name " ++
         "not declared in the unit resolves to the one current top-level class " ++
         "another unit declares in the same explicit package, unless a type " ++
         "parameter, member type, supertype, import, or non-class type could " ++
@@ -134,6 +137,9 @@ const MethodInfo = struct {
     name: []const u8,
     class_index: u32,
     class_name: []const u8,
+    /// Whether the enclosing class declares a superclass or interfaces, from
+    /// which a method of the invoked name could be inherited.
+    class_has_supertypes: bool,
     node: ts.Node,
 };
 
@@ -277,6 +283,8 @@ pub fn analyze(
                 .name = method_name,
                 .class_index = index,
                 .class_name = name,
+                .class_has_supertypes = node.childByFieldName("superclass") != null or
+                    node.childByFieldName("interfaces") != null,
                 .node = member,
             });
         }
@@ -342,7 +350,7 @@ pub fn analyze(
         }
 
         const body = method.node.childByFieldName("body") orelse continue;
-        try emitInvocations(builder, source, method, body, methods.items, 0);
+        try emitInvocations(builder, source, method, body, methods.items, false, 0);
     }
 }
 
@@ -606,12 +614,16 @@ fn classByIndex(classes: []const ClassInfo, index: u32) ClassInfo {
     unreachable;
 }
 
+/// `nested` is set once the walk enters a type body declared inside the method,
+/// such as an anonymous or local class: there an unqualified name may mean a
+/// method of that type rather than of the enclosing class.
 fn emitInvocations(
     builder: *contract.BatchBuilder,
     source: []const u8,
     method: MethodInfo,
     node: ts.Node,
     methods: []const MethodInfo,
+    nested: bool,
     depth: u32,
 ) !void {
     if (depth >= max_depth) {
@@ -623,13 +635,22 @@ fn emitInvocations(
     }
 
     if (std.mem.eql(u8, node.kind(), "method_invocation")) {
-        try emitInvocation(builder, source, method, node, methods);
+        try emitInvocation(builder, source, method, node, methods, nested);
     }
 
+    const inner = nested or isTypeBody(node.kind());
     var children = node.namedChildren();
     while (children.next()) |child| {
-        try emitInvocations(builder, source, method, child, methods, depth + 1);
+        try emitInvocations(builder, source, method, child, methods, inner, depth + 1);
     }
+}
+
+fn isTypeBody(kind: []const u8) bool {
+    const kinds = [_][]const u8{ "class_body", "interface_body", "enum_body", "annotation_type_body" };
+    for (kinds) |candidate| {
+        if (std.mem.eql(u8, kind, candidate)) return true;
+    }
+    return false;
 }
 
 fn emitInvocation(
@@ -638,6 +659,7 @@ fn emitInvocation(
     method: MethodInfo,
     node: ts.Node,
     methods: []const MethodInfo,
+    nested: bool,
 ) !void {
     const name_node = node.childByFieldName("name") orelse return;
     const name = try builder.dupe(name_node.text(source));
@@ -645,42 +667,77 @@ fn emitInvocation(
     // A qualified invocation names a receiver this frontend does not analyze,
     // so its target stays a designator carrying the text that was read.
     const qualified = node.childByFieldName("object") != null;
-    const resolved = if (qualified) null else findMethod(methods, method.class_name, name);
     const designator = if (qualified) try builder.dupe(node.text(source)) else name;
+    const target = try invocationTarget(builder, method, methods, name, qualified, nested);
 
     try builder.addRelationship(.{
         .kind = .calls,
         .source = .{ .entity = method.index },
-        .target = if (resolved) |index| .{ .local = index } else .{ .designator = designator },
+        .target = if (target.index) |index| .{ .local = index } else .{ .designator = designator },
         .evidence = evidenceOf(builder, node, designator),
-        .resolution = if (resolved != null)
-            .{ .fact = .{
-                .method = "unqualified invocation of a method declared in the same class",
-            } }
-        else if (qualified)
-            .{ .unresolved = .{
-                .missing = .target_entity,
-                .explanation = "the invocation is qualified by a receiver this frontend does not resolve",
-            } }
-        else
-            .{ .unresolved = .{
-                .missing = .target_entity,
-                .explanation = "no method of this name is declared in the enclosing class",
-            } },
+        .resolution = target.resolution,
     });
+}
+
+const InvocationTarget = struct {
+    index: ?u32,
+    resolution: model.Resolution,
+};
+
+/// Decides an invocation's target the way Java would select it, or leaves it
+/// unresolved with the reason.
+///
+/// Java picks among every method of the invoked name the enclosing class has,
+/// declared or inherited, by argument types. This frontend does not type
+/// arguments or read supertypes, so an unqualified invocation is a fact only
+/// when there is exactly one candidate to pick: one method of that name, in a
+/// class with no supertypes, invoked from the class's own scope. Anything else
+/// names a method without establishing which one.
+fn invocationTarget(
+    builder: *contract.BatchBuilder,
+    method: MethodInfo,
+    methods: []const MethodInfo,
+    name: []const u8,
+    qualified: bool,
+    nested: bool,
+) !InvocationTarget {
+    if (qualified) return unresolvedInvocation("the invocation is qualified by a receiver this frontend does not resolve");
+    if (nested) return unresolvedInvocation("the invocation is inside a class body declared in the method, " ++
+        "where the name may mean a method of that class");
+
+    var found: ?u32 = null;
+    var count: u32 = 0;
+    for (methods) |candidate| {
+        if (!std.mem.eql(u8, candidate.class_name, method.class_name)) continue;
+        if (!std.mem.eql(u8, candidate.name, name)) continue;
+        found = candidate.index;
+        count += 1;
+    }
+    if (count == 0) return unresolvedInvocation("no method of this name is declared in the enclosing class");
+    if (count > 1) return unresolvedInvocation(try builder.print(
+        "{d} methods of this name are declared in the enclosing class, and overloads are not resolved",
+        .{count},
+    ));
+    if (method.class_has_supertypes) return unresolvedInvocation("the enclosing class has supertypes, " ++
+        "and a method of this name it may inherit could be the target");
+    return .{
+        .index = found,
+        .resolution = .{ .fact = .{
+            .method = "unqualified invocation of the only method of this name in a class without supertypes",
+        } },
+    };
+}
+
+fn unresolvedInvocation(explanation: []const u8) InvocationTarget {
+    return .{
+        .index = null,
+        .resolution = .{ .unresolved = .{ .missing = .target_entity, .explanation = explanation } },
+    };
 }
 
 fn findClass(classes: []const ClassInfo, name: []const u8) ?u32 {
     for (classes) |class| {
         if (std.mem.eql(u8, class.name, name)) return class.index;
-    }
-    return null;
-}
-
-fn findMethod(methods: []const MethodInfo, class_name: []const u8, name: []const u8) ?u32 {
-    for (methods) |method| {
-        if (!std.mem.eql(u8, method.class_name, class_name)) continue;
-        if (std.mem.eql(u8, method.name, name)) return method.index;
     }
     return null;
 }

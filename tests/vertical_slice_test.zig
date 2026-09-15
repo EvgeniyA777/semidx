@@ -195,12 +195,20 @@ test "the clojure fixture yields the expected entities and relationships" {
         .source = namespace.id,
     }));
 
-    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+    // `greeting` sits inside `(str ...)`. This frontend cannot rule out that
+    // `str` is a macro binding `greeting` locally, so the name is not claimed
+    // as the unit's `def`, even though that is almost certainly what it means.
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{
+        .target = greeting.id,
+        .kind = .references,
+    }));
+    const greeting_reference = snapshot.firstRelationship(.{
         .kind = .references,
         .source = greet.id,
-        .target = greeting.id,
-        .resolution = .fact,
-    }));
+        .designator = "greeting",
+        .resolution = .unresolved,
+    }).?;
+    try expectExplanation(greeting_reference, "macro that binds the name locally");
     try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
         .kind = .calls,
         .source = greet.id,
@@ -438,12 +446,16 @@ test "a renamed clojure definition is reported as identity loss with its replace
 
     const salutation = after.findDefinition(clojure_path, "salutation").?;
     try testing.expectEqual(salutation.id, event.replacement.?);
+    // The reference inside `(str ...)` stays a designator for the new name;
+    // nothing is silently retargeted to either entity.
     try testing.expectEqual(@as(usize, 1), after.countRelationships(.{
         .kind = .references,
         .source = greet_before.id,
-        .target = salutation.id,
-        .resolution = .fact,
+        .designator = "salutation",
+        .resolution = .unresolved,
     }));
+    try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .target = salutation.id, .kind = .references }));
+    try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .target = greeting_before.id, .kind = .references }));
 }
 
 test "a clojure call moves from unresolved to resolved when its target appears" {
@@ -1273,6 +1285,171 @@ test "the repository-scale fixtures resolve only what a language's scoping estab
     }).?;
     try testing.expectEqual(model.ResolutionCategory.unresolved, decorate.resolution.category());
     try testing.expect(snapshot.findDefinition("clojure/demo/helper.clj", "decorate") != null);
+}
+
+// -- Plan 005: Java same-class invocation facts ------------------------------
+
+fn callFrom(snapshot: *const semidx.Snapshot, source: model.EntityId, line: u32) !model.Assertion {
+    var calls = snapshot.relationships(.{ .kind = .calls, .source = source });
+    while (calls.next()) |call| {
+        if (call.evidence.?.range.start_row + 1 == line) return call;
+    }
+    std.debug.print("no call from entity {d} on line {d}\n", .{ @intFromEnum(source), line });
+    return error.TestExpectedCall;
+}
+
+test "a java invocation is a fact only when the class leaves one method to select" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/Calls.java", .java,
+        \\package demo;
+        \\
+        \\class Plain {
+        \\    void only() {}
+        \\    void twice() {}
+        \\    void twice(String name) {}
+        \\    void run() {
+        \\        only();
+        \\        twice("x");
+        \\        new Runnable() { public void run() { only(); } };
+        \\        class Local { void go() { only(); } }
+        \\        Runnable lambda = () -> only();
+        \\    }
+        \\}
+        \\
+        \\class Child extends Plain {
+        \\    void own() {}
+        \\    void run() { own(); }
+        \\}
+        \\
+        \\class Worker implements Runnable {
+        \\    void own() {}
+        \\    public void run() { own(); }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    const only = snapshot.findDefinition("demo/Calls.java", "only").?;
+
+    var plain_run: ?model.Entity = null;
+    var runs = snapshot.entitiesMatching(.{ .kind = .definition, .name = "run" });
+    while (runs.next()) |candidate| {
+        if (std.mem.eql(u8, candidate.identity.container_path[0], "Plain")) plain_run = candidate;
+    }
+    const run = plain_run.?;
+
+    // The one method of that name, from the class's own scope and from a
+    // lambda, which keeps that scope.
+    for ([_]u32{ 8, 12 }) |line| {
+        const call = try callFrom(&snapshot, run.id, line);
+        try testing.expectEqual(model.ResolutionCategory.fact, call.resolution.category());
+        try testing.expectEqual(only.id, call.claim.relationship.target.entity);
+    }
+
+    // An overload is not selected by name.
+    const overloaded = try callFrom(&snapshot, run.id, 9);
+    try testing.expectEqualStrings("twice", overloaded.claim.relationship.target.designator);
+    try expectExplanation(overloaded, "overloads are not resolved");
+
+    // Inside an anonymous or local class the name may mean that class's method.
+    for ([_]u32{ 10, 11 }) |line| {
+        try expectExplanation(try callFrom(&snapshot, run.id, line), "class body declared in the method");
+    }
+
+    // A superclass or an interface may contribute a method of the same name.
+    var classes = snapshot.entitiesMatching(.{ .kind = .definition, .name = "run" });
+    var checked: usize = 0;
+    while (classes.next()) |candidate| {
+        const container = candidate.identity.container_path[0];
+        if (std.mem.eql(u8, container, "Plain")) continue;
+        var calls = snapshot.relationships(.{ .kind = .calls, .source = candidate.id });
+        const call = calls.next().?;
+        try expectExplanation(call, "supertypes");
+        checked += 1;
+    }
+    try testing.expectEqual(@as(usize, 2), checked);
+
+    try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+fn clojureSymbol(
+    snapshot: *const semidx.Snapshot,
+    source: model.EntityId,
+    kind: model.RelationshipKind,
+    line: u32,
+    name: []const u8,
+) !model.Assertion {
+    var found = snapshot.relationships(.{ .kind = kind, .source = source });
+    while (found.next()) |assertion| {
+        if (assertion.evidence.?.range.start_row + 1 != line) continue;
+        if (!std.mem.eql(u8, assertion.evidence.?.text, name)) continue;
+        return assertion;
+    }
+    std.debug.print("no {t} of `{s}` on line {d}\n", .{ kind, name, line });
+    return error.TestExpectedRelationship;
+}
+
+test "a clojure symbol is a fact only where nothing may bind it locally" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/scope.clj", .clojure,
+        \\(ns demo.scope)
+        \\(defn helper [] 1)
+        \\(defn twice [] 2)
+        \\(defn twice [] 3)
+        \\(defmacro shadowed [] 4)
+        \\(defn shadowed [] 5)
+        \\(defn known [x]
+        \\  (helper)
+        \\  (twice)
+        \\  (shadowed)
+        \\  (do (helper) (if x (helper) [(helper)]))
+        \\  (helper (helper))
+        \\  ((helper) (helper)))
+        \\(defn unknown [helper]
+        \\  (helper))
+        \\(defn scoped []
+        \\  (let [helper (fn [] 2)] (helper))
+        \\  (my-macro helper))
+        \\(defn arities
+        \\  ([] (helper))
+        \\  ([x] x))
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    const helper = snapshot.findDefinition("demo/scope.clj", "helper").?;
+    const known = snapshot.findDefinition("demo/scope.clj", "known").?;
+    const unknown = snapshot.findDefinition("demo/scope.clj", "unknown").?;
+    const scoped = snapshot.findDefinition("demo/scope.clj", "scoped").?;
+    const arities = snapshot.findDefinition("demo/scope.clj", "arities").?;
+
+    // Forms known to bind nothing keep the facts under them: the body itself,
+    // `do`, `if`, a vector literal, arguments of the unit's own function, and
+    // an application whose head is not a symbol.
+    try testing.expectEqual(@as(usize, 8), snapshot.countRelationships(.{
+        .source = known.id,
+        .target = helper.id,
+        .resolution = .fact,
+    }));
+
+    try expectExplanation(try clojureSymbol(&snapshot, known.id, .calls, 9, "twice"), "more than once");
+    try expectExplanation(try clojureSymbol(&snapshot, known.id, .calls, 10, "shadowed"), "more than once");
+    try expectExplanation(try clojureSymbol(&snapshot, unknown.id, .calls, 15, "helper"), "parameter");
+    try expectExplanation(try clojureSymbol(&snapshot, scoped.id, .calls, 17, "helper"), "binds the name locally");
+    try expectExplanation(try clojureSymbol(&snapshot, scoped.id, .references, 18, "helper"), "binds the name locally");
+    try expectExplanation(try clojureSymbol(&snapshot, arities.id, .calls, 20, "helper"), "several arities");
+
+    for ([_]model.EntityId{ unknown.id, scoped.id, arities.id }) |source| {
+        try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .source = source, .resolution = .fact, .reference_query = true }));
+    }
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
 }
 
 // -- Plan 003: Java same-package type resolution ------------------------------

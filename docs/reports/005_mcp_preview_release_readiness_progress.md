@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-Execution started on 2026-09-14. Stages 1–2 are complete; Stage 3 is next.
+Execution started on 2026-09-14. Stages 1, 2, and 2.5 are complete; Stage 3 is next.
 
 ## Stage Log
 
@@ -22,6 +22,7 @@ Execution started on 2026-09-14. Stages 1–2 are complete; Stage 3 is next.
 | --- | --- | --- |
 | Stage 1: Product version and preview identity | Completed (`db7caa6`) | `0.1.0-preview.1` is defined once in `build.zig.zon` and reported by `semidx-mcp --version`, `serverInfo.version`, and `semidx_health.product_version`; `semantic_contract_version` stays `null`. |
 | Stage 2: Install and local agent configuration | Completed (`7ad042a`) | README gives a four-step source-built path to a registered MCP server; a clean clone followed it to a first successful tool call. |
+| Stage 2.5: Same-unit name resolution facts (Java and Clojure) | Completed | Two confirmed false `CALLS` facts removed: a Java call to an overloaded method is no longer a fact about the first overload, and a Clojure symbol is no longer a fact where a local binding may shadow it. Both rules now leave uncertain cases unresolved with a reason. |
 | Stage 3: Capability matrix and consent boundary | Pending | |
 | Stage 3.5: Refresh failure recovery | Pending | |
 | Stage 4: Dogfood proofs and release gate | Pending | |
@@ -174,3 +175,75 @@ Addendum verification:
 | `./scripts/check-agent-attribution.sh --all` | Pass |
 | `./scripts/check-memory-freshness.sh` | Pass |
 | `git diff --check` on the addendum-owned files | Pass |
+
+Finding recorded while reading the addendum (not changed here): the launcher
+treats `--root=/path` as an explicit root and passes it through, but
+`semidx-mcp` accepts only `--root <dir>` as two arguments, so that spelling
+exits 2 with "unknown argument".
+
+## Stage 2.5: Same-Unit Name Resolution Facts (Java And Clojure)
+
+Changed files: `src/frontends/java.zig`, `src/frontends/clojure.zig`,
+`tests/vertical_slice_test.zig`, `docs/plans/005_mcp_preview_release_readiness.md`,
+new `docs/followups/008_clojure_lexical_scope_coverage.md`,
+`docs/followups/README.md`, `MEMORY.md`.
+
+How it was found. While gathering capability-matrix facts, two probes through
+`semidx-mcp` over scratch files showed wrong facts:
+
+- `class Over { void greet() {} void greet(String n) {} void run() { greet("x"); } }`
+  recorded `run CALLS greet()` (the no-argument overload) as a fact.
+- `(defn helper [] 1) (defn run [] (let [helper (fn [] 2)] (helper)))` recorded
+  `run CALLS helper` (the top-level `defn`) as a fact.
+
+Both limitations were listed in report 001 as "no overload resolution" and "no
+local bindings", but their consequence — a fact with the wrong target — was not
+stated. The maintainer decided both are preview blockers for false precision;
+the plan was amended (Plan-Level Decisions, Stage 2.5).
+
+Decisions taken inside the plan's boundary:
+
+- **Java.** An unqualified invocation is a fact only when the enclosing class
+  declares exactly one method of that name, has no superclass or interfaces, and
+  the call is not inside a class, interface, enum, or annotation body declared in
+  the method (node shapes read with `tree-sitter parse` on the pinned grammar:
+  anonymous and local classes both expose `class_body`). Lambdas keep the class
+  scope. Unresolved explanations name overloads, supertypes, or a nested class
+  body. The capability note was updated to say so.
+- **Clojure.** A symbol is a fact only when it names the unit's one top-level
+  declaration whose head starts with `def` (so a `defmacro` or second `defn` of
+  the name blocks it), is not a parameter of the enclosing definition (parameter
+  vector read at any destructuring depth), the definition has a single parameter
+  vector, and every enclosing form is known to bind nothing: the body, `do`,
+  `if`, collection literals, calls of the unit's own definitions, and
+  applications with a non-symbol head (only a symbol can name a macro).
+  Anything else — including `clojure.core` functions such as `str`, since a
+  namespace may exclude or replace them — stays unresolved as "a form this
+  frontend cannot rule out as a macro that binds the name locally". This is
+  deliberately conservative; precise scope is follow-up 008.
+- Fixture expectations changed in two Clojure tests, both because
+  `(str greeting "!")` no longer yields a fact: the fixture test now asserts the
+  unresolved reference and its explanation, and the rename test asserts the
+  reference stays a designator for `salutation` and no reference targets either
+  entity. Their intent — honest resolution and no silent retarget — is unchanged.
+
+Risk matrix:
+
+| Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Java facts only with one selectable method (constitution §3) | Overload, inherited method, or nested class method misattributed | Integration (frontend through reconcile) | `java.invocationTarget` | Overload, superclass, interface, anonymous class, local class; lambda and unique method stay facts | `a java invocation is a fact only when the class leaves one method to select`; three mutations |
+| Clojure facts only where no binding is possible (constitution §3) | Parameter, `let`, macro, duplicate, or multi-arity binding misattributed | Integration | `clojure.decideSymbol`, `walkForm` trust | `let`, unknown macro, parameter, duplicate `defn`, `defmacro`, multi-arity; eight facts in known contexts | `a clojure symbol is a fact only where nothing may bind it locally`; three mutations |
+| No regression elsewhere | Fixture and edit-history tests change meaning | Fixture | Existing tests | Two expectations updated with reasons above | Full lane |
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test --summary all` | Pass, 183/183 (181 before the stage) |
+| Mutation: Java overload count check disabled | Java test fails; restored |
+| Mutation: Java nested-body check disabled | Java test fails; restored |
+| Mutation: Java supertype check disabled | Java test fails; restored |
+| Mutation: Clojure unknown-head trust removed (`inner = known or head_is_fact`) | Clojure scope, fixture, and rename tests fail; restored. A first attempt at this mutation did not compile and proved nothing; it was redone. |
+| Mutation: Clojure parameter check disabled | Clojure scope test fails; restored |
+| Mutation: Clojure duplicate-declaration check disabled | Clojure scope test fails; restored |

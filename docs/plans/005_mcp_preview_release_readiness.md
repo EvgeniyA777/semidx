@@ -160,6 +160,22 @@ bounded timeout and kills its child on expiry.
 and calls do not block the preview; the capability matrix and release notes
 must name them.
 
+**False facts found during this plan are decided one by one.** Probes while
+preparing the capability matrix confirmed two same-unit name-resolution rules
+that record a `CALLS` fact with the wrong target. The maintainer decided on
+2026-09-14, and clarified the same day that incompleteness is acceptable and
+false precision is not:
+
+- Java: an unqualified invocation resolves to the first method of that name in
+  the enclosing class, so a call to an overloaded method can be a fact about the
+  wrong overload. This is fixed in Stage 2.5 and blocks the preview.
+- Clojure: a symbol resolves to a same-unit `def`/`defn` of that name even when a
+  local binding (for example `let`) shadows it. The frontend must stop producing
+  such facts before the preview. Because macros may bind names with any syntax,
+  the preview rule suppresses facts wherever a binding cannot be ruled out
+  (Stage 2.5). Precise lexical scope for `let`, `fn`, and core macros is deferred
+  as coverage work in follow-up 008.
+
 ## Stages
 
 ### Stage 1: Product Version And Preview Identity
@@ -228,6 +244,50 @@ Done when:
 - Documentation does not promise binary packages, package-manager installs, CI
   release artifacts, persistence, or stable schemas.
 
+### Stage 2.5: Same-Unit Name Resolution Facts (Java And Clojure)
+
+Purpose: stop the Java and Clojure frontends from recording a fact whose target
+the language would not select. Release blocker.
+
+Likely files:
+
+- `src/frontends/java.zig` (`emitInvocations`, `emitInvocation`, `findMethod`)
+- `src/frontends/clojure.zig` (`walkForm`, `emitDesignation`, `findDef`)
+- `tests/vertical_slice_test.zig` or frontend tests
+- `docs/reports/005_mcp_preview_release_readiness_progress.md`
+
+Required behavior:
+
+- An unqualified invocation in a covered method body is a `CALLS` fact only
+  when the enclosing top-level class declares exactly one method of that name,
+  the class declares no superclass and no interfaces, and the invocation is not
+  inside a class, interface, enum, or record body nested in the method (an
+  anonymous or local class).
+- Every other unqualified invocation stays an unresolved `CALLS` whose
+  explanation names the reason: overloads, possible inherited methods, or a
+  nested class body. Qualified invocations keep their current behavior.
+- Invocations inside lambdas keep the enclosing class's scope and follow the
+  rule above.
+- The rule narrows facts; it adds no new fact and no approximate assertion.
+- Clojure: a symbol is a fact only when it names the unit's one top-level
+  `def`-like declaration of that name, it is not a parameter of the enclosing
+  definition, the definition has a single parameter vector, and every form
+  enclosing the symbol in the body is known to bind nothing. Every other symbol
+  stays unresolved with its reason.
+
+Done when:
+
+- A test covers an overloaded name, a class with a superclass, a class with
+  interfaces, an anonymous class body, a local class, a lambda, and the unique
+  same-class method that stays a fact.
+- Mutations restoring the first-by-name lookup and removing the nested-body
+  check each make a test fail.
+- A Clojure test covers `let` shadowing, a parameter, an unknown macro, a
+  duplicate or `defmacro` declaration, a multi-arity definition, and the known
+  contexts that keep facts; mutations removing each check make it fail.
+- The Java fixture and edit-history tests still pass, or any changed expectation
+  is explained in the progress log.
+
 ### Stage 3: Capability Matrix And Consent Boundary
 
 Purpose: make trust boundaries visible before the preview is promoted.
@@ -275,6 +335,9 @@ Done when:
 
 - Capability claims in README and MCP docs are backed by the matrix.
 - The matrix names same-unit-only Zig references and calls.
+- The matrix states the Java and Clojure rules as narrowed in Stage 2.5: Clojure
+  calls are narrow, and a symbol under a form that may bind names is not
+  resolved as a fact; precise lexical scope is follow-up 008.
 - The matrix avoids stable-contract wording.
 - Consent wording names both source text and source-derived graph values.
 - Default no-source-text tests still pass.
@@ -398,7 +461,8 @@ Required behavior:
   - the current install path is source-built;
   - source text is off by default;
   - known limitations are expected and visible, including same-unit-only Zig
-    references and calls (follow-up 006).
+    references and calls (follow-up 006) and Clojure symbols left unresolved
+    wherever a local binding cannot be ruled out (follow-up 008).
 - Run the full release gate from a clean worktree:
   - `zig build test-core -Dgrammars-dir=/nonexistent --summary all`;
   - `zig build test --summary all`;
@@ -461,7 +525,8 @@ Stop and update the progress log before continuing if:
 
 - Use Claude Opus 5 or an equivalently strong code-review-capable model for the
   whole plan.
-- Keep the stages in order. Stages 1-3 make the preview legible; Stage 3.5 makes
+- Keep the stages in order. Stage 2.5 removes known false facts before the
+  matrix describes Java and Clojure. Stages 1-3 make the preview legible; Stage 3.5 makes
   refresh trustworthy; Stage 4 proves it; Stage 5 packages the release-candidate
   handoff.
 - Review after Stage 3 if the capability matrix or consent language changes

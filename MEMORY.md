@@ -417,8 +417,19 @@ why. This is not a changelog of removed implementation; see `git log`.
   [docs/followups/README.md](docs/followups/README.md): Zig logical-negation
   calls, Zig empty-container grammar behavior, Java classpath boundaries,
   release discipline plus hosted-client consent wording for the local MCP
-  preview, Zig cross-unit and member call resolution, and the grammar setup
-  script fetching unused and unpinned grammar sources.
+  preview, Zig cross-unit and member call resolution, the grammar setup
+  script fetching unused and unpinned grammar sources, and Clojure lexical
+  scope coverage.
+- **Plan 005 Stage 2.5 removed two false-fact rules.** A Java unqualified
+  invocation is a `CALLS` fact only when the enclosing class declares exactly one
+  method of that name, has no supertypes, and the call is not inside a nested
+  class body. A Clojure symbol is a fact only when it names the unit's one
+  top-level `def`-like declaration, is not a parameter, sits in a single-arity
+  definition, and every enclosing form is known to bind nothing (body, `do`,
+  `if`, collection literals, calls of same-unit definitions, non-symbol-head
+  applications); under `let`, `fn`, `str`, or any other symbol-headed form it
+  stays unresolved. Incomplete by design; precise Clojure scope is follow-up
+  008.
 - **Plan 004 is complete: Stages 1–3 (the Zig frontend) are implemented and
   reviewed; Stage 3.5 fixed the review blocker; Stages 4–5 (the local MCP stdio
   preview, its dogfood run, and its documentation) were accepted by final review.**
