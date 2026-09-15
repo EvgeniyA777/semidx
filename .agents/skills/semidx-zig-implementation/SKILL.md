@@ -8,6 +8,10 @@ description: "Work on semidx's Zig implementation, build, tests, or frontend/cor
 Use this skill when modifying or reviewing the Zig implementation in `src/`,
 `tests/`, `build.zig`, or implementation-facing fixtures.
 
+Target Zig version: 0.16.0 exactly. All source, build scripts, examples, tests,
+and agent-generated changes must target and be verified against Zig 0.16.0. Do
+not assume APIs from earlier or later Zig releases remain valid.
+
 ## Read First
 
 - Read `MEMORY.md` for current implementation reality before changing behavior.
@@ -63,6 +67,8 @@ Use this skill when modifying or reviewing the Zig implementation in `src/`,
 
 Choose the smallest meaningful probe first, then broaden based on risk:
 
+- Toolchain pin:
+  `./scripts/check-zig-version.sh`.
 - Core-only model, graph, freshness, snapshot, or reconcile change:
   `zig build test-core --summary all`.
 - Proof that core stayed parser-independent:

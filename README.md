@@ -24,10 +24,11 @@ requirements, and [CONFORMANCE.md](CONFORMANCE.md) for verification scenarios.
 
 ## Running it
 
-The slice needs [Zig](https://ziglang.org) 0.16 or newer. Its shared core needs
+The slice targets [Zig](https://ziglang.org) 0.16.0 exactly. Its shared core needs
 nothing else:
 
 ```sh
+./scripts/check-zig-version.sh
 zig build test-core
 ```
 
@@ -52,7 +53,7 @@ graph queries over MCP stdio. It is an experimental preview with no stable
 interface and no published semantic contract, and it returns paths and ranges
 rather than source text. It is built from source; there are no binary packages.
 
-1. Install [Zig](https://ziglang.org) 0.16 or newer, `git`, and a tree-sitter
+1. Install [Zig](https://ziglang.org) 0.16.0, `git`, and a tree-sitter
    runtime that provides `tree_sitter/api.h` and `libtree-sitter.a` (on macOS,
    `brew install tree-sitter`; elsewhere, install it under a prefix and pass
    `-Dtree-sitter-prefix=<prefix>` to `zig build`).

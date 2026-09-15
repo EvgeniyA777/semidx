@@ -268,6 +268,11 @@ why. This is not a changelog of removed implementation; see `git log`.
   dependencies; nothing is fetched at build or index time. A missing prerequisite
   fails `zig build` with a message naming the script and both override flags
   (`-Dgrammars-dir=`, `-Dtree-sitter-prefix=`).
+- The target Zig toolchain is exact: Zig 0.16.0. `.zigversion` records it,
+  `build.zig.zon` currently agrees through `minimum_zig_version = "0.16.0"`,
+  and `./scripts/check-zig-version.sh` fails unless the selected `zig` is
+  exactly 0.16.0. Do not rely on examples or APIs from earlier or later Zig
+  releases unless they are verified against 0.16.0.
 - Git-hygiene scripts under `scripts/` and `scripts/git-hooks/` enforce
   attribution policy, memory freshness, and the constitution freeze seal.
   `.github/workflows/agent-attribution.yml` enforces attribution policy in CI.

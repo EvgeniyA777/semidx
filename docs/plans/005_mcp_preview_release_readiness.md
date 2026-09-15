@@ -133,6 +133,11 @@ tree-sitter runtime already required by the project.
 MCP server must report `0.1.0-preview.1` as the product version. MCP structured
 results must continue to report `semantic_contract_version: null`.
 
+**The preview targets Zig 0.16.0 exactly.** Release work, examples, build
+scripts, and generated changes must be verified against Zig 0.16.0. Do not use
+Zig APIs from earlier or later releases unless they are checked against that
+target.
+
 **The public promise is local, bounded, honest context.** The preview should
 optimize for installability, trust, visible limits, and reproducible dogfood
 proofs, not for more language breadth.
@@ -224,9 +229,10 @@ Likely files:
 Required behavior:
 
 - Document the clean-checkout path:
-  - install Zig 0.16 or newer;
+  - install Zig 0.16.0;
   - install or point at a local tree-sitter runtime;
   - run `./scripts/setup-tree-sitter-grammars.sh`;
+  - run `./scripts/check-zig-version.sh`;
   - run `zig build`;
   - start `zig-out/bin/semidx-mcp --root /path/to/repository`.
 - State that the indexed root is the user's local working copy, not the remote
@@ -464,6 +470,7 @@ Required behavior:
     references and calls (follow-up 006) and Clojure symbols left unresolved
     wherever a local binding cannot be ruled out (follow-up 008).
 - Run the full release gate from a clean worktree:
+  - `./scripts/check-zig-version.sh`;
   - `zig build test-core -Dgrammars-dir=/nonexistent --summary all`;
   - `zig build test --summary all`;
   - `zig build test-mcp --summary all`, with the smoke timeout in place;

@@ -48,6 +48,33 @@ left to execution and are decided in the stage that meets them:
   located by targeted direct reads of the files the plan names.
 - Toolchain: Zig 0.16.0, tree-sitter runtime from `/opt/homebrew`.
 
+## Toolchain Pin Addendum
+
+On 2026-09-15 the target Zig version was made exact rather than open-ended:
+Zig 0.16.0 is the only supported toolchain for this preview release path.
+
+Changed files: `.zigversion`, `scripts/check-zig-version.sh`, `RULES.md`,
+`README.md`, `docs/mcp/local_preview.md`, `docs/agent-policy/tooling.md`,
+`.agents/skills/semidx-zig-implementation/SKILL.md`,
+`docs/plans/005_mcp_preview_release_readiness.md`, `MEMORY.md`.
+
+Decision:
+
+- `.zigversion` records the target version.
+- `build.zig.zon` already has `minimum_zig_version = "0.16.0"`; the check script
+  verifies that it still agrees with `.zigversion`.
+- The release gate now starts with `./scripts/check-zig-version.sh`.
+- A build-time exact-version guard is intentionally deferred while `build.zig`
+  has in-progress Stage 4 smoke-timeout changes. Add it in that coherent build
+  change if the team wants the build itself to reject other Zig versions.
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `zig version` | `0.16.0` |
+| `./scripts/check-zig-version.sh` | Pass; `Zig version 0.16.0 matches semidx target` |
+
 ## Stage 1: Product Version And Preview Identity
 
 Changed files: `build.zig.zon`, `build.zig`, `src/mcp/protocol.zig`,

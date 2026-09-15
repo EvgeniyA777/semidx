@@ -56,12 +56,12 @@
 - This repository is `semidx`, defined by `ARCHITECTURE_CONSTITUTION.md`: an
   incrementally maintained semantic graph of a codebase, with search, agents,
   IDEs, and impact analysis as consumers.
-- The implementation language is Zig
-  ([ADR 001](docs/adr/001_choose_zig_implementation_language.md)) and the build
-  tool is Zig's own. `zig build test-core` runs the shared core, `zig build test`
-  runs the full lane, `zig build run -- <files>` runs the developer-only
-  inspection command, `zig build mcp -- --root <dir>` starts the local MCP stdio
-  preview, and `zig build test-mcp` runs its tests and stdio smoke test.
+- The implementation language target is Zig 0.16.0
+  ([ADR 001](docs/adr/001_choose_zig_implementation_language.md)); do not assume
+  APIs from earlier or later Zig releases. `zig build test-core` runs the shared
+  core, `zig build test` runs the full lane, `zig build run -- <files>` runs the
+  developer-only inspection command, `zig build mcp -- --root <dir>` starts the
+  local MCP stdio preview, and `zig build test-mcp` runs its tests and stdio smoke test.
   Frontends parse through local tree-sitter C sources
   ([ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md)):
   `./scripts/setup-tree-sitter-grammars.sh` and a local tree-sitter runtime are

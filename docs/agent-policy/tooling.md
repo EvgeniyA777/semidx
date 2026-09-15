@@ -146,8 +146,15 @@ edit carries a required safety step. The safety step is not optional.
 The implementation language is Zig
 ([ADR 001](../adr/001_choose_zig_implementation_language.md)).
 
+The target version is Zig 0.16.0 exactly, recorded in `.zigversion` and
+`build.zig.zon`. All Zig source, build scripts, examples, tests, and
+agent-generated changes must target Zig 0.16.0. Do not rely on code examples or
+standard-library APIs from earlier or later Zig releases unless they are checked
+against Zig 0.16.0.
+
 | Need | What to use |
 | --- | --- |
+| Verify the selected toolchain | `./scripts/check-zig-version.sh` — fails unless `zig version` is exactly `0.16.0` and `build.zig.zon` agrees. |
 | Probe after a shared-core edit | `zig build test-core` — compiles and runs `src/core/` alone, with no parser dependency, so it is the fastest signal. |
 | Probe after any other code edit | `zig build test` — the full lane. Required before committing a change to a frontend, the adapter, `build.zig`, or a fixture. |
 | Syntax and formatting check | `zig fmt --check build.zig src tests`; drop `--check` to fix. |
@@ -156,6 +163,8 @@ The implementation language is Zig
 
 - The probe after a Zig edit is required, not optional. A compile error is cheap
   to find now and expensive to leave.
+- When using external examples, documentation, or memory for Zig APIs, first
+  verify that the API shape is valid on Zig 0.16.0.
 - `zig build` fails loudly when the tree-sitter prerequisites are missing and
   names both override flags. Do not work around that message by editing
   `build.zig`; run `./scripts/setup-tree-sitter-grammars.sh` or point the flags

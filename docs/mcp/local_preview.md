@@ -56,7 +56,7 @@ You must not infer:
 
 The preview is built from source. Prerequisites:
 
-- Zig 0.16 or newer.
+- Zig 0.16.0 exactly. Run `./scripts/check-zig-version.sh` before building.
 - `git` and network access once, for the grammar setup script.
 - A tree-sitter runtime providing `tree_sitter/api.h` and `libtree-sitter.a`.
   `zig build` looks under `/opt/homebrew`, `/usr/local`, and `/usr`; on macOS
@@ -68,6 +68,7 @@ From the root of a semidx checkout:
 
 ```sh
 ./scripts/setup-tree-sitter-grammars.sh   # once; clones pinned grammar sources into .tree-sitter-grammars/
+./scripts/check-zig-version.sh             # fails unless `zig version` is 0.16.0
 zig build                                  # installs zig-out/bin/semidx-mcp
 zig-out/bin/semidx-mcp --version           # semidx-mcp 0.1.0-preview.1
 zig build test-mcp                         # optional: unit tests and the stdio smoke test
