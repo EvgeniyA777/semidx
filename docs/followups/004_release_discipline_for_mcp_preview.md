@@ -2,9 +2,10 @@
 title: "Release discipline for MCP preview"
 doc_type: "follow_up"
 lifecycle: "active"
-status: "open"
-agent_action: "use_as_input_for_future_plan_only"
-updated: "2026-09-14"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
+updated: "2026-09-16"
 ---
 
 # Release Discipline For MCP Preview
@@ -77,3 +78,21 @@ the user's local working copy, not the remote repository that supplied semidx.
 - Run the MCP smoke added by Plan 004 Stage 4.
 - Verify default MCP output does not include source text.
 - Verify attribution, memory freshness, formatting, and whitespace gates.
+
+## Resolution
+
+Completed by
+[Plan 005](../plans/005_mcp_preview_release_readiness.md) and its
+[progress log](../reports/005_mcp_preview_release_readiness_progress.md).
+
+Plan 005 established the preview product version, source-built release shape,
+stable local launcher, local setup docs, capability matrix, release notes,
+hosted-client source-data wording, and release gate for `v0.1.0-preview.1`.
+The release candidate remains source-built and local-only; no Git tag, binary
+artifact, package-manager publication, signing, or CI release automation was
+created.
+
+The completed release gate includes Zig 0.16.0 verification, parser-free core
+tests, the full test lane, MCP tests, formatting, developer inspection output,
+dogfood over a temporary copy of this repository, attribution, memory freshness,
+and whitespace checks.

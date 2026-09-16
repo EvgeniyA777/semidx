@@ -399,19 +399,17 @@ why. This is not a changelog of removed implementation; see `git log`.
   to check whether new plans move the project toward exact graph knowledge,
   better incremental local operation, useful local graph projections, or clearer
   evidence, contracts, and release discipline.
-- **Plan 005 is in progress: Stages 1–4 are complete and Stage 5 (release
-  candidate handoff) is next.** It promotes the
-  product-adoption path into MCP preview release readiness for
-  `v0.1.0-preview.1`: product version reporting, local setup, capability matrix,
-  hosted-client consent wording for source-derived graph values, dogfood proofs,
-  release notes, and a release-candidate handoff. Two Plan 004 residual risks
-  are release requirements there: a failed `semidx_refresh` must not poison
-  later answers or refreshes (Stage 3.5, a release blocker proven by failure
-  injection, because `Index.applyScan` is not transactional), and the MCP smoke
-  test must time out and kill its child instead of hanging the gate (Stage 4).
-  Same-unit-only Zig references ship as a visible matrix limitation. It keeps
-  `semantic_contract_version: null` and does not authorize persistence, HTTP,
-  stable schemas, package-manager distribution, or wider language semantics.
+- **Plan 005 is complete and `v0.1.0-preview.1` is release-candidate ready, but
+  not tagged.** It completed product version reporting, source-built setup, the
+  stable local launcher, capability matrix, hosted-client consent wording,
+  refresh recovery, bounded MCP smoke/dogfood proofs, release notes, and the
+  release-candidate handoff. The final Stage 5 gate ran from a clean worktree on
+  2026-09-16: Zig 0.16.0 check, parser-free core tests, full tests, MCP tests,
+  formatting, `zig build run -- src`, `zig build dogfood`, attribution, memory
+  freshness, and whitespace checks all passed. The preview still reports
+  `semantic_contract_version: null`, ships same-unit-only Zig references as a
+  visible limitation, and does not authorize persistence, HTTP, stable schemas,
+  package-manager distribution, binary artifacts, or wider language semantics.
 - **Plans 006–008 are the planned post-preview adoption sequence.** Plan 006
   deepens Zig dogfood semantic coverage for semidx's own code, starting with
   container member functions and the smallest exact same-repository qualified
@@ -431,10 +429,8 @@ why. This is not a changelog of removed implementation; see `git log`.
 - Current open follow-ups are indexed in
   [docs/followups/README.md](docs/followups/README.md): Zig logical-negation
   calls, Zig empty-container grammar behavior, Java classpath boundaries,
-  release discipline plus hosted-client consent wording for the local MCP
-  preview, Zig cross-unit and member call resolution, the grammar setup
-  script fetching unused and unpinned grammar sources, and Clojure lexical
-  scope coverage.
+  Zig cross-unit and member call resolution, the grammar setup script fetching
+  unused and unpinned grammar sources, and Clojure lexical scope coverage.
 - `docs/spec/capability_matrix.md` is the SPEC-owned, unversioned preview
   capability matrix: per producer (source ingestion, Java, Clojure, Zig, MCP
   output) it states facts produced, unresolved and unsupported cases, identity
@@ -544,11 +540,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   the sessions, Claude Opus 5 for Stages 1–4, one-time network access for the
   grammar fetch, and reading the `2026-07-28` MCP specification rather than
   relying on model memory.
-  The final review accepted returning graph values to the launching local client
-  as non-blocking for the local preview, while tracking hosted-client onward
-  transmission and consent wording as
-  [follow-up 005](docs/followups/005_mcp_source_derived_consent_boundary.md)
-  before a preview release.
+  Plan 005 resolved the hosted-client onward-transmission wording for the
+  preview release in README, local preview docs, the capability matrix, and
+  release notes; broader optional outbound-data policy remains future SPEC work.
 - `scripts/git-hooks/pre-push` still carries an inert block that refreshes
   `docs/code-context.md` through a Clojure alias when `deps.edn` exists. Both
   files went with the removed implementation, so the block never runs; remove it

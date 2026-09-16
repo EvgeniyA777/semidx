@@ -1,10 +1,10 @@
 ---
 title: "MCP preview release readiness progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
-updated: "2026-09-15"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
+updated: "2026-09-16"
 ---
 
 # 005: MCP Preview Release Readiness Progress
@@ -14,7 +14,9 @@ Companion log for
 
 ## Current Status
 
-Execution started on 2026-09-14. Stages 1, 2, 2.5, 3, 3.5, and 4 are complete; Stage 5 is next.
+Execution started on 2026-09-14 and completed on 2026-09-16. All stages are
+complete. The repository is ready for an explicit `v0.1.0-preview.1` tag request
+from the final Stage 5 closure commit.
 
 ## Stage Log
 
@@ -26,7 +28,7 @@ Execution started on 2026-09-14. Stages 1, 2, 2.5, 3, 3.5, and 4 are complete; S
 | Stage 3: Capability matrix and consent boundary | Completed (`bd0d7c6`) | `docs/spec/capability_matrix.md` states per-producer coverage, unresolved and unsupported cases, identity limits, and known overbroad and false-negative cases; README and the local preview reference carry hosted-client consent wording. |
 | Stage 3.5: Refresh failure recovery | Completed | Failure injection confirmed that a failed reconciliation poisons the index. `semidx-mcp` now discards such an index and rebuilds it from the same scan above the old ids; at each of 87 injected failure points the published snapshot stays intact, the next refresh equals a fresh index, and no old id names a different entity. |
 | Stage 4: Dogfood proofs and release gate | Completed | `zig build dogfood` proves the habit loop over stdio and the Stage 3.5 recovery guarantee on a temporary copy of this repository; the stdio test client bounds every wait at 30 s and kills a hung server. |
-| Stage 5: Preview release candidate handoff | Pending | |
+| Stage 5: Preview release candidate handoff | Completed | Release notes were added, the full release gate passed from a clean worktree, the roadmap and memory were updated, and follow-ups 004 and 005 were closed. |
 
 ## Plan Readiness Gate
 
@@ -309,9 +311,10 @@ Decisions taken inside the plan's boundary:
   lists the values always returned, says a hosted client may forward them, says
   exactly what `--allow-evidence-text` adds, and says semidx cannot enforce the
   client's onward transmission. It implies no control over a third-party client.
-- Follow-up 005 stays open: its release-notes privacy section is a Stage 5
-  decision and the data-level allowlist question is unresolved. The follow-up
-  records what Stage 3 did.
+- Historical note: Follow-up 005 stayed open after Stage 3 because release-note
+  privacy wording was a Stage 5 decision and the data-level allowlist question
+  still needed disposition. Stage 5 closed the preview-release boundary and
+  recorded any future allowlist as a separate optional-outbound-data requirement.
 - `SPEC.md`'s older sentence "There is still no capability matrix" was corrected
   to "no published coverage matrix", which stays true.
 
@@ -577,3 +580,86 @@ Residual risk:
   rather than pass vacuously; a missing path is named in the failure message.
 - The client's timeout uses `waitpid` and `kill` through libc and was verified
   on macOS only.
+
+## Stage 5: Preview Release Candidate Handoff
+
+Changed files: `docs/releases/v0.1.0-preview.1.md`,
+`docs/plans/005_mcp_preview_release_readiness.md`,
+`docs/reports/005_mcp_preview_release_readiness_progress.md`,
+`docs/design/001_project_roadmap.md`,
+`docs/followups/004_release_discipline_for_mcp_preview.md`,
+`docs/followups/005_mcp_source_derived_consent_boundary.md`,
+`docs/followups/README.md`, `docs/mcp/local_preview.md`, and `MEMORY.md`.
+
+Outcome:
+
+- Added release notes for `v0.1.0-preview.1` that state this is a local MCP
+  preview, source-built, usable by the maintainer and local agents, and not a
+  stable semantic contract.
+- The release notes include the source-data boundary: source text is off by
+  default, source-derived graph values are returned to the launching client, a
+  hosted client may forward those values, and `--allow-evidence-text` is an
+  explicit bounded opt-in.
+- The release notes name the visible preview limits, including same-unit-only
+  Zig references/calls and conservative Clojure unresolved symbols.
+- The roadmap now records the actual M5 state as release-candidate ready rather
+  than in-progress implementation.
+- Follow-up 004 was marked completed: Plan 005 now documents the preview product
+  version, source-built release shape, runtime version reporting, release gate,
+  release notes, and no-stable-contract boundary.
+- Follow-up 005 was marked completed for the preview release: README/local
+  preview/capability-matrix consent wording was already present, Stage 5 added
+  release-note privacy wording, and no-source-text/default evidence-text tests
+  cover the implemented boundary. A future data-level allowlist would be a new
+  optional-outbound-data requirement, not a blocker for this preview.
+- The plan and progress log were marked completed and historical. No Git tag was
+  created.
+
+Release gate run from a clean worktree on 2026-09-16:
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Pass; `Zig version 0.16.0 matches semidx target` |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | Pass; 5/5 steps, 88/88 tests |
+| `zig build test --summary all` | Pass; 20/20 steps, 186/187 tests passed, 1 skipped |
+| `zig build test-mcp --summary all` | Pass; 9/9 steps, 18/19 tests passed, 1 skipped |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build run -- src` | Pass; exit 0 |
+| `zig build dogfood --summary all` | Pass; 10/10 steps, 5/5 tests |
+| `./scripts/check-agent-attribution.sh --all` | Pass |
+| `./scripts/check-memory-freshness.sh` | Pass |
+| `git diff --check` | Pass |
+
+Dogfood observations from the Stage 5 run:
+
+| Observation | Value |
+| --- | --- |
+| Copied source units | 56 |
+| Copied bytes | 632,095 |
+| First MCP response | 367 ms after start |
+| `semidx_health {}` | 365 ms, 6,179 bytes |
+| `semidx_repo_map {"limit":1000}` | 26 ms, 260,109 bytes |
+| `semidx_context {"name":"scan","path":"src/source/discovery.zig"}` | 3 ms, 14,591 bytes |
+| `semidx_refresh {}` after one edit | 21 ms, 1,213 bytes |
+| Evidence-text opt-in check | 351 definition evidence texts checked, 0 cut at the 400-byte bound |
+| Recovery proof | 32 one-shot and 32 sticky failure points; 25 rebuilds in each mode |
+
+Skipped checks: none. The skipped tests reported by `zig build test` and
+`zig build test-mcp` are the dogfood tests intentionally gated out of those
+lanes; `zig build dogfood` runs them.
+
+Residual risk:
+
+- The release candidate is source-built only; no tag, binary artifact, package
+  manager publication, signing, or CI release automation was created.
+- No stable semantic contract, stable schema set, persistence, HTTP transport,
+  resources, prompts, subscriptions, file watching, or daemon lifecycle exists.
+- MCP responses are bounded per list rather than per whole response; the
+  repository-map dogfood call is still large.
+- Zig cross-unit/member calls, Clojure lexical scope, Java classpath boundaries,
+  and unused grammar setup behavior remain open follow-ups.
+
+Next action:
+
+- A reviewer may cut `v0.1.0-preview.1` from the final Stage 5 closure commit
+  after explicitly requesting a release tag.

@@ -315,5 +315,7 @@ Notifications, including malformed ones, are never answered.
   that refresh reports `entity_ids_preserved: false`. Look targets up again by
   name or path.
 - The product version is a preview version: tool names, arguments, and result
-  fields may change between previews. Release discipline is tracked in
-  [follow-up 004](../followups/004_release_discipline_for_mcp_preview.md).
+  fields may change between previews. The first preview release-candidate notes
+  are [v0.1.0-preview.1](../releases/v0.1.0-preview.1.md), with release-gate
+  evidence recorded in the
+  [Plan 005 progress log](../reports/005_mcp_preview_release_readiness_progress.md#stage-5-preview-release-candidate-handoff).

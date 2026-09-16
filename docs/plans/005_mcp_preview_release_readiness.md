@@ -1,10 +1,10 @@
 ---
 title: "MCP preview release readiness"
 doc_type: "plan"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "ready_for_execution"
-updated: "2026-09-15"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
+updated: "2026-09-16"
 ---
 
 # 005: MCP Preview Release Readiness

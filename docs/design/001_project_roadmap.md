@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-14"
+updated: "2026-09-16"
 ---
 
 # Project Roadmap
@@ -35,9 +35,9 @@ semantic truth.
 
 ## Current Position
 
-As of 2026-09-14, the Zig dogfood frontend and the first local MCP preview are
-implemented and reviewed. The project is preparing the first local MCP preview
-release candidate, `v0.1.0-preview.1`.
+As of 2026-09-16, the Zig dogfood frontend and the first local MCP preview are
+implemented and reviewed. The first local MCP preview release candidate,
+`v0.1.0-preview.1`, is ready for an explicit tag request.
 
 Implemented:
 
@@ -60,9 +60,10 @@ Implemented:
   over stdio to `2026-07-28` and `2025-06-18` clients with source text off by
   default, documented in [the local preview reference](../mcp/local_preview.md).
 
-In progress:
+Ready to tag:
 
-- Plan 005: MCP preview release readiness for `v0.1.0-preview.1`.
+- Plan 005 completed the MCP preview release-candidate handoff for
+  `v0.1.0-preview.1`. No release tag has been created.
 
 Not yet present:
 
@@ -84,7 +85,7 @@ Not yet present:
 | M2: Repository-scale local graph | Done | Move from hand-picked files to repository scans and incremental maintenance. | Scan/edit/remove paths preserve consistent graph state and bounded affected-region work. |
 | M3: First cross-unit semantic value | Done | Establish one language-correct cross-unit fact without admitting modules/imports prematurely. | Java same-package type references resolve under the narrow rule. |
 | M4: Dogfood language and local MCP preview | Done | Make semidx useful to its own development loop and to local agents. | Zig dogfood works; `semidx-mcp` answers graph-backed tools over stdio with source text off by default. |
-| M5: Preview release | Active | Make one installable semidx usable against many local repository roots. | `v0.1.0-preview.1` is cut with release gates and local setup docs, without a stable semantic contract promise. |
+| M5: Preview release | Candidate ready | Make one source-built semidx usable against many local repository roots. | `v0.1.0-preview.1` can be cut from the completed release-candidate handoff after an explicit tag request, without a stable semantic contract promise. |
 | M6: Stable local CLI/MCP product | Later | Stabilize the local user-facing product surface. | `v0.1.0` is cut with documented CLI/MCP behavior, install path, version reporting, and support boundaries. |
 | M7: Published semantic contract | Later | Version the semantic model exposed to consumers. | SPEC/CORE publish contract versioning, schema shape, capability matrix, and migration rules. |
 | M8: Deeper semantic coverage | Later | Expand exact graph value without collapsing unsupported or unresolved states. | New language or relationship coverage lands through focused plans, ADRs where needed, and conformance evidence. |
@@ -94,13 +95,14 @@ Not yet present:
 
 The next useful sequence is:
 
-1. Execute [Plan 005](../plans/005_mcp_preview_release_readiness.md), the MCP
-   preview release-readiness plan.
-2. Make product versioning, local setup, capability limits, hosted-client
-   consent wording, and real dogfood proofs visible.
-3. Cut `v0.1.0-preview.1` only after the release gates pass from a clean
-   checkout.
-4. Use the MCP preview while developing semidx itself and collect evidence for
+1. Cut `v0.1.0-preview.1` only after an explicit release-tag request.
+2. Execute [Plan 006](../plans/006_zig_dogfood_semantic_coverage.md) to deepen
+   Zig dogfood semantic coverage.
+3. Execute [Plan 007](../plans/007_mcp_response_budget_and_schema_ergonomics.md)
+   to make MCP responses cheaper for agents.
+4. Execute [Plan 008](../plans/008_habit_loop_release_gate.md) to turn the
+   agent habit loop into the next repeatable local release gate.
+5. Use the MCP preview while developing semidx itself and collect evidence for
    the next semantic expansion.
 
 After the preview is usable, prioritize work that increases exact graph value

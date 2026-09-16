@@ -2,9 +2,10 @@
 title: "MCP source-derived consent boundary"
 doc_type: "follow_up"
 lifecycle: "active"
-status: "open"
-agent_action: "use_as_input_for_future_plan_only"
-updated: "2026-09-14"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
+updated: "2026-09-16"
 ---
 
 # MCP Source-Derived Consent Boundary
@@ -86,3 +87,25 @@ Stage 5) and whether a data-level allowlist is needed.
 - Keep the default no-source-text MCP tests from Plan 004.
 - If a data-level allowlist is added, test every default-off field and every
   opt-in field independently.
+
+## Resolution
+
+Completed by
+[Plan 005](../plans/005_mcp_preview_release_readiness.md) and the
+[`v0.1.0-preview.1` release notes](../releases/v0.1.0-preview.1.md).
+
+The preview setup path, local MCP reference, capability matrix, and release
+notes distinguish source text from source-derived graph values. They state that
+semidx itself is local, that default MCP output excludes source text, that graph
+values still go to the launching client, that a hosted client may forward those
+values, and that semidx cannot enforce the client's onward transmission policy.
+
+`--allow-evidence-text` remains the only implemented data-level opt-in. It is
+documented as bounded to 400 bytes per claim and currently records names or
+designators rather than source bodies. The Plan 005 dogfood gate verified that
+default output does not include source text and that evidence-text opt-in stays
+within the bound.
+
+No broader data-level allowlist was added for this preview. If needed, that is a
+future optional-outbound-data requirement rather than unresolved release
+readiness for `v0.1.0-preview.1`.
