@@ -412,6 +412,15 @@ why. This is not a changelog of removed implementation; see `git log`.
   Same-unit-only Zig references ship as a visible matrix limitation. It keeps
   `semantic_contract_version: null` and does not authorize persistence, HTTP,
   stable schemas, package-manager distribution, or wider language semantics.
+- **Plans 006–008 are the planned post-preview adoption sequence.** Plan 006
+  deepens Zig dogfood semantic coverage for semidx's own code, starting with
+  container member functions and the smallest exact same-repository qualified
+  call subset that can be proven from graph-established evidence. Plan 007 then
+  budgets MCP responses and schema ergonomics so agents can use compact default
+  orientation before focused calls. Plan 008 turns the agent habit loop into a
+  repeatable local release gate with clear pass/fail evidence, while still
+  reporting `semantic_contract_version: null` and excluding persistence, HTTP,
+  package distribution, and remote services.
 - `scripts/semidx-mcp.sh` is the stable local launcher for agents. It execs the
   built `zig-out/bin/semidx-mcp`, passes through explicit `--root`, `--help`,
   and `--version`, and otherwise indexes `SEMIDX_ROOT`, the current Git root, or
