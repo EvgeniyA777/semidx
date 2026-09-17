@@ -733,6 +733,70 @@ test "tool results carry resolution, freshness, producer, and the snapshot revis
     try testing.expect(bounded_result.get("truncated").?.bool);
 }
 
+test "the default repository map is compact, and a full map recovers every unit and entity field" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.init(false, "");
+    defer h.deinit();
+
+    const compact = (try h.callTool(arena, "semidx_repo_map", "{}")).object.get("structuredContent").?.object;
+    const compact_bytes = h.out.written().len;
+    try testing.expect(std.mem.indexOf(u8, h.out.written(), "start_byte") == null);
+    try testing.expect(std.mem.indexOf(u8, h.out.written(), "file_entity_id") == null);
+    const compact_file = compact.get("files").?.array.items[0].object;
+    const compact_unit = compact_file.get("unit").?.object;
+    try testing.expectEqualStrings("greeter.zig", compact_unit.get("path").?.string);
+    try testing.expectEqualStrings("zig", compact_unit.get("language").?.string);
+    try testing.expectEqualStrings("current", compact_unit.get("analysis").?.string);
+    try testing.expect(compact_file.get("diagnostics").?.object.get("unsupported_construct").?.integer > 0);
+    try testing.expectEqual(@as(i64, 2), compact_file.get("top_level_definitions_total").?.integer);
+    try testing.expect(!compact_file.get("definitions_truncated").?.bool);
+    try testing.expectEqual(@as(i64, 0), compact_file.get("nested_definitions_total").?.integer);
+    for (compact_file.get("definitions").?.array.items) |item| {
+        const definition = item.object;
+        try testing.expect(definition.get("id") != null);
+        try testing.expectEqualStrings("function", definition.get("role").?.string);
+        try testing.expect(definition.get("name") != null);
+        try testing.expectEqualStrings("current", definition.get("freshness").?.string);
+        const range = definition.get("range").?.object;
+        try testing.expect(range.get("start_line").?.integer <= range.get("end_line").?.integer);
+        try testing.expectEqual(@as(usize, 2), range.count());
+        try testing.expect(definition.get("evidence") == null and definition.get("kind") == null);
+    }
+    const compact_budget = compact.get("budget").?.object;
+    try testing.expectEqualStrings("compact", compact_budget.get("detail").?.string);
+    try testing.expectEqual(@as(i64, 100), compact_budget.get("limit").?.integer);
+    try testing.expectEqual(@as(i64, 50), compact_budget.get("definitions_per_file").?.integer);
+
+    const full = (try h.callTool(arena, "semidx_repo_map", "{\"detail\":\"full\"}")).object.get("structuredContent").?.object;
+    try testing.expect(h.out.written().len > compact_bytes);
+    const full_file = full.get("files").?.array.items[0].object;
+    const full_unit = full_file.get("unit").?.object;
+    for ([_][]const u8{ "id", "path", "language", "analysis", "file_entity_id", "content_revision", "analysis_revision" }) |field| {
+        try testing.expect(full_unit.get(field) != null);
+    }
+    for (full_file.get("definitions").?.array.items) |item| {
+        const definition = item.object;
+        for ([_][]const u8{ "id", "kind", "language", "role", "name", "freshness", "evidence" }) |field| {
+            try testing.expect(definition.get(field) != null);
+        }
+        const evidence = definition.get("evidence").?.object;
+        try testing.expectEqualStrings("greeter.zig", evidence.get("unit").?.object.get("path").?.string);
+        try testing.expectEqual(@as(usize, 6), evidence.get("range").?.object.count());
+    }
+    try testing.expectEqualStrings("full", full.get("budget").?.object.get("detail").?.string);
+
+    // Item bounds report what was cut, per file and per list.
+    const bounded = (try h.callTool(arena, "semidx_repo_map", "{\"definitions_per_file\":1}")).object.get("structuredContent").?.object;
+    const bounded_file = bounded.get("files").?.array.items[0].object;
+    try testing.expectEqual(@as(usize, 1), bounded_file.get("definitions").?.array.items.len);
+    try testing.expectEqual(@as(i64, 2), bounded_file.get("top_level_definitions_total").?.integer);
+    try testing.expect(bounded_file.get("definitions_truncated").?.bool);
+    try testing.expectEqual(@as(i64, 1), bounded.get("budget").?.object.get("definitions_per_file").?.integer);
+}
+
 test "no tool result carries source text unless evidence text was opted into, and then bounded" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
@@ -745,6 +809,7 @@ test "no tool result carries source text unless evidence text was opted into, an
     const calls = [_][2][]const u8{
         .{ "semidx_health", "{}" },
         .{ "semidx_repo_map", "{}" },
+        .{ "semidx_repo_map", "{\"detail\":\"full\"}" },
         .{ "semidx_find_definitions", "{}" },
         .{ "semidx_references", "{\"name\":\"greeting\",\"direction\":\"both\"}" },
         .{ "semidx_context", "{\"name\":\"greeting\"}" },

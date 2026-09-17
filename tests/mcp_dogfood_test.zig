@@ -7,7 +7,9 @@
 //! The repository itself is never edited.
 //!
 //! Timing and size notes are printed for the progress log. They are
-//! observations, not bounds the test enforces.
+//! observations, not bounds the test enforces, except the Plan 007 budget
+//! gates: the default repository map and context transcripts are at most half
+//! of the same calls with `detail: "full"` over the same snapshot.
 
 const std = @import("std");
 const build_options = @import("build_options");
@@ -104,16 +106,29 @@ fn startServer(gpa: std.mem.Allocator, root: []const u8, extra_args: []const []c
 
 /// Calls a tool and prints how long it took and how large its result was.
 fn timedCall(client: *Client, id: i64, name: []const u8, arguments: []const u8) !ObjectMap {
+    var bytes: usize = undefined;
+    return sizedCall(client, id, name, arguments, &bytes);
+}
+
+/// `timedCall`, also returning the transcript bytes of the response.
+fn sizedCall(client: *Client, id: i64, name: []const u8, arguments: []const u8, bytes: *usize) !ObjectMap {
     const started = std.Io.Timestamp.now(io, .awake);
     const before = client.transcript.items.len;
     const result = try client.callTool(id, name, arguments);
+    bytes.* = client.transcript.items.len - before;
     std.debug.print("dogfood: {s} {s}: {d} ms, {d} bytes\n", .{
         name,
         arguments,
         started.untilNow(io, .awake).toMilliseconds(),
-        client.transcript.items.len - before,
+        bytes.*,
     });
     return result;
+}
+
+/// A Plan 007 budget gate: the compact transcript is at most half the full one.
+fn expectAtMostHalf(what: []const u8, compact_bytes: usize, full_bytes: usize) !void {
+    std.debug.print("dogfood: budget: {s}: compact {d} bytes, full {d} bytes ({d}%)\n", .{ what, compact_bytes, full_bytes, compact_bytes * 100 / full_bytes });
+    try testing.expect(compact_bytes * 2 <= full_bytes);
 }
 
 fn revisionOf(result: ObjectMap) i64 {
@@ -159,7 +174,14 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     try testing.expect(diagnostics.get("unsupported_construct").?.integer > 0);
 
     // -- repository map --------------------------------------------------------
-    const map = try timedCall(client, 2, "semidx_repo_map", "{\"limit\":1000}");
+    var map_bytes: usize = undefined;
+    const map = try sizedCall(client, 2, "semidx_repo_map", "{\"limit\":1000}", &map_bytes);
+    try testing.expectEqualStrings("compact", map.get("budget").?.object.get("detail").?.string);
+    var full_map_bytes: usize = undefined;
+    const full_map = try sizedCall(client, 20, "semidx_repo_map", "{\"limit\":1000,\"detail\":\"full\"}", &full_map_bytes);
+    try testing.expectEqual(first_revision, revisionOf(full_map));
+    try testing.expectEqual(map.get("files_total").?.integer, full_map.get("files_total").?.integer);
+    try expectAtMostHalf("semidx_repo_map limit 1000", map_bytes, full_map_bytes);
     try testing.expectEqual(first_revision, revisionOf(map));
     try testing.expectEqual(@as(i64, @intCast(copy.units)), map.get("files_total").?.integer);
     try testing.expect(!map.get("truncated").?.bool);
@@ -366,7 +388,7 @@ test "dogfood: --allow-evidence-text over a copy of this repository returns boun
 
     // Every definition's evidence carries at most the bound, and the text it
     // carries is source from inside the evidence range, not anything else.
-    const map = try timedCall(client, 2, "semidx_repo_map", "{\"limit\":1000,\"definitions_per_file\":500}");
+    const map = try timedCall(client, 2, "semidx_repo_map", "{\"limit\":1000,\"definitions_per_file\":500,\"detail\":\"full\"}");
     try testing.expect(!map.get("truncated").?.bool);
     var checked: usize = 0;
     var truncated: usize = 0;

@@ -14,9 +14,10 @@ Companion log for
 
 ## Current Status
 
-Stages 1 and 2 are complete: the baseline output inventory and budget gates
-are recorded, and tool schemas are generated from the same argument
-declarations the validator reads. Stages 3 to 5 are pending.
+Stages 1 to 3 are complete: the baseline output inventory and budget gates
+are recorded, tool schemas are generated from the same argument declarations
+the validator reads, and the repository map is compact by default. Stages 4
+and 5 are pending.
 
 ## Stage Log
 
@@ -24,7 +25,7 @@ declarations the validator reads. Stages 3 to 5 are pending.
 | --- | --- | --- |
 | Stage 1: Response inventory and budget targets | Completed | Baseline transcript and structured sizes per tool over this repository, the fields that dominate `repo_map` and `context`, and the hard gates versus observations below. No behavior change. |
 | Stage 2: Tool schema and argument validation cleanup | Completed | Each tool's arguments are declared once as `Param` values; the advertised JSON Schema is generated from them at compile time, and `Args(tool)` reads types, enum values, defaults, and maxima from the same declarations. The advertised `tools/list` is unchanged. |
-| Stage 3: Compact repository map | Pending | |
+| Stage 3: Compact repository map | Completed | `semidx_repo_map` takes `detail` (`compact` default, `full`) and reports `budget`. Over this repository the default map with `limit` 1000 is 152,579 transcript bytes against 322,104 for `full` (47%, gate at most 50%). |
 | Stage 4: Focused context budgeting | Pending | |
 | Stage 5: Documentation and habit loop update | Pending | |
 
@@ -163,6 +164,50 @@ Verification:
 - `zig fmt src/mcp`: clean.
 - `zig build test-mcp --summary all`: 19 of 20 passed, 1 skipped (the dogfood
   recovery test, which runs only under `zig build dogfood`).
+
+## Stage 3: Compact Repository Map
+
+Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig`,
+`tests/mcp_dogfood_test.zig`, `docs/mcp/local_preview.md`, this log.
+
+- `detail` is a shared declared argument (`compact` default, `full`).
+- Compact: each file's `unit` has `id`, `path`, `language`, `analysis`; each
+  top-level definition has `id`, `role`, `name`, `freshness`, and
+  `range: {start_line, end_line}`. Diagnostic counts, the three per-file totals
+  and truncation flags, `files_total`, and `truncated` are unchanged.
+- Full: exactly the pre-plan fields (unit revisions and `file_entity_id`,
+  definitions as brief entities with `evidence`), plus `budget`.
+- `budget: {detail, limit, definitions_per_file}` names what was applied.
+- Under `--allow-evidence-text` a compact listed definition keeps its
+  `source_text`; the opt-in is not narrowed by the detail level.
+
+**Deviation from the Stage 1 shape rule, recorded:** a compact listed
+definition carries `range` directly instead of `evidence.range`. Its evidence
+unit is the file it is listed under, so the wrapper only repeated structure.
+With the wrapper the compact map was 164,173 of 320,845 bytes (51%), above the
+gate set before implementation; the gate was kept and the shape changed.
+Everything else compact renders is a subset of the full fields.
+
+Tests:
+
+- `root.zig` "the default repository map is compact, and a full map recovers
+  every unit and entity field": compact field sets (no `start_byte`, no
+  `file_entity_id`, no `evidence` or `kind` on definitions), full field sets
+  (seven unit fields, seven entity fields, six range fields), full larger than
+  compact, `budget` values, and `definitions_per_file: 1` reporting
+  `definitions_truncated` with the total.
+- The source-text test also calls `semidx_repo_map` with `detail: "full"`.
+- `mcp_dogfood_test.zig`: the budget gate compares the default map with
+  `detail: "full"` over one snapshot; the evidence-text dogfood reads
+  `evidence.range` from a full map.
+
+Verification:
+
+- `zig fmt src tests`: clean.
+- `zig build test-mcp --summary all`: 20 of 21 passed, 1 skipped (dogfood
+  recovery, run by `zig build dogfood`).
+- `zig build dogfood --summary all`: 5 of 5 passed; repository map budget
+  gate at 47%.
 
 ## Residual Risk
 

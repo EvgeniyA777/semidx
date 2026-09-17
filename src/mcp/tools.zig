@@ -84,6 +84,10 @@ fn choiceParam(comptime E: type, comptime name: []const u8, comptime default: ?E
 const FreshnessArg = enum { current, stale, any };
 const ResolutionArg = enum { any, fact, unresolved, approximate };
 const DirectionArg = enum { incoming, outgoing, both };
+/// How much of each value a result renders. `full` is every recorded field.
+/// `compact` renders a subset of the same fields with the same names and
+/// types.
+const DetailArg = enum { compact, full };
 
 /// Arguments shared by several tools.
 const shared_params = struct {
@@ -93,6 +97,8 @@ const shared_params = struct {
     const entity_id: Param = .{ .name = "entity_id", .type = .entity_id };
     const name: Param = .{ .name = "name", .type = .string };
     const path: Param = .{ .name = "path", .type = .string };
+    const detail = choiceParam(DetailArg, "detail", .compact, "compact (default) renders a subset of the full fields for orientation; " ++
+        "full renders every recorded field.");
 };
 
 /// Renders a JSON string literal at compile time.
@@ -147,6 +153,7 @@ pub const definitions = [_]Definition{
         shared_params.language,
         countParam("limit", 100, 1000, "Maximum files."),
         countParam("definitions_per_file", 50, 500, null),
+        shared_params.detail,
     }),
     define(.semidx_find_definitions, "Find definitions", "Find definition entities by exact name, root-relative path, language, and role, with the " ++
         "producer, resolution, and freshness of each definition's existence claim.", &.{
@@ -415,20 +422,25 @@ pub fn beginStructured(ctx: *Context, s: *Stringify) Error!void {
     try s.write(null);
 }
 
-fn writeRange(s: *Stringify, range: model.SourceRange) Error!void {
+/// Lines are 1-based; columns and bytes, rendered only in full, are 0-based.
+fn writeRange(s: *Stringify, range: model.SourceRange, detail: DetailArg) Error!void {
     try s.beginObject();
     try s.objectField("start_line");
     try s.write(range.start_row + 1);
-    try s.objectField("start_column");
-    try s.write(range.start_column);
+    if (detail == .full) {
+        try s.objectField("start_column");
+        try s.write(range.start_column);
+    }
     try s.objectField("end_line");
     try s.write(range.end_row + 1);
-    try s.objectField("end_column");
-    try s.write(range.end_column);
-    try s.objectField("start_byte");
-    try s.write(range.start_byte);
-    try s.objectField("end_byte");
-    try s.write(range.end_byte);
+    if (detail == .full) {
+        try s.objectField("end_column");
+        try s.write(range.end_column);
+        try s.objectField("start_byte");
+        try s.write(range.start_byte);
+        try s.objectField("end_byte");
+        try s.write(range.end_byte);
+    }
     try s.endObject();
 }
 
@@ -475,7 +487,7 @@ fn writeUnitRef(ctx: *Context, s: *Stringify, id: model.SourceUnitId) Error!void
     try s.endObject();
 }
 
-pub fn writeUnit(ctx: *Context, s: *Stringify, view: semidx.core.graph.SourceUnitView) Error!void {
+pub fn writeUnit(ctx: *Context, s: *Stringify, view: semidx.core.graph.SourceUnitView, detail: DetailArg) Error!void {
     _ = ctx;
     try s.beginObject();
     try s.objectField("id");
@@ -486,6 +498,7 @@ pub fn writeUnit(ctx: *Context, s: *Stringify, view: semidx.core.graph.SourceUni
     try s.write(@tagName(view.language));
     try s.objectField("analysis");
     try s.write(@tagName(view.analysis()));
+    if (detail == .compact) return s.endObject();
     try s.objectField("file_entity_id");
     try s.write(@intFromEnum(view.entity));
     try s.objectField("content_revision");
@@ -504,7 +517,12 @@ fn writeEvidence(ctx: *Context, s: *Stringify, evidence: ?model.SourceEvidence) 
     try s.objectField("unit");
     try writeUnitRef(ctx, s, observed.unit);
     try s.objectField("range");
-    try writeRange(s, observed.range);
+    try writeRange(s, observed.range, .full);
+    try writeSourceText(ctx, s, observed);
+    try s.endObject();
+}
+
+fn writeSourceText(ctx: *Context, s: *Stringify, observed: model.SourceEvidence) Error!void {
     if (ctx.evidence_text) {
         var end = @min(observed.text.len, max_evidence_text_bytes);
         while (end > 0 and end < observed.text.len and (observed.text[end] & 0xC0) == 0x80) end -= 1;
@@ -516,28 +534,44 @@ fn writeEvidence(ctx: *Context, s: *Stringify, evidence: ?model.SourceEvidence) 
         try s.write(end < observed.text.len);
         try s.endObject();
     }
-    try s.endObject();
 }
 
-const Detail = enum { brief, full };
+const EntityShape = enum {
+    /// Id, role, name, freshness, and `range` lines in place of `evidence`:
+    /// a definition listed under its unit, which gives its kind, language,
+    /// and evidence unit. Recorded evidence text stays under the opt-in.
+    listed,
+    brief,
+    full,
+};
 
-fn writeEntity(ctx: *Context, s: *Stringify, entity: model.Entity, detail: Detail) Error!void {
+fn writeEntity(ctx: *Context, s: *Stringify, entity: model.Entity, shape: EntityShape) Error!void {
     try s.beginObject();
     try s.objectField("id");
     try s.write(@intFromEnum(entity.id));
-    try s.objectField("kind");
-    try s.write(@tagName(entity.kind));
-    try s.objectField("language");
-    if (entity.identity.language) |language| try s.write(@tagName(language)) else try s.write(null);
+    if (shape != .listed) {
+        try s.objectField("kind");
+        try s.write(@tagName(entity.kind));
+        try s.objectField("language");
+        if (entity.identity.language) |language| try s.write(@tagName(language)) else try s.write(null);
+    }
     try s.objectField("role");
     try protocol.writeString(s, entity.identity.role);
     try s.objectField("name");
     if (entity.identity.name) |name| try protocol.writeString(s, name) else try s.write(null);
     try s.objectField("freshness");
     try s.write(@tagName(ctx.snapshot.entityFreshness(entity)));
+    if (shape == .listed) {
+        if (entity.evidence) |observed| {
+            try s.objectField("range");
+            try writeRange(s, observed.range, .compact);
+            try writeSourceText(ctx, s, observed);
+        }
+        return s.endObject();
+    }
     try s.objectField("evidence");
     try writeEvidence(ctx, s, entity.evidence);
-    if (detail == .full) {
+    if (shape == .full) {
         try s.objectField("container_path");
         try s.beginArray();
         for (entity.identity.container_path) |segment| try protocol.writeString(s, segment);
@@ -786,6 +820,7 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     const language = try args.choice(model.Language, "language");
     const limit = try args.count("limit");
     const per_file = try args.count("definitions_per_file");
+    const detail = try args.choice(DetailArg, "detail");
     const snapshot = ctx.snapshot;
 
     var order: std.ArrayList(usize) = .empty;
@@ -807,7 +842,7 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
         const view = snapshot.units[i];
         try s.beginObject();
         try s.objectField("unit");
-        try writeUnit(ctx, s, view);
+        try writeUnit(ctx, s, view, detail);
         try s.objectField("diagnostics");
         try writeDiagnosticCounts(ctx, s, view.id);
 
@@ -822,7 +857,7 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
                 continue;
             }
             top_level += 1;
-            if (top_level <= per_file) try writeEntity(ctx, s, entity, .brief);
+            if (top_level <= per_file) try writeEntity(ctx, s, entity, if (detail == .full) .brief else .listed);
         }
         try s.endArray();
         try s.objectField("top_level_definitions_total");
@@ -838,6 +873,8 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     try s.write(order.items.len);
     try s.objectField("truncated");
     try s.write(order.items.len > limit);
+    try s.objectField("budget");
+    try s.write(.{ .detail = detail, .limit = limit, .definitions_per_file = per_file });
     try s.endObject();
 }
 
@@ -990,7 +1027,7 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
         };
         try s.objectField("unit");
         if (unit_id) |id| {
-            if (snapshot.unit(id)) |view| try writeUnit(ctx, s, view) else try s.write(null);
+            if (snapshot.unit(id)) |view| try writeUnit(ctx, s, view, .full) else try s.write(null);
         } else try s.write(null);
 
         const passes = [_]struct { name: []const u8, filter: Snapshot.RelationshipFilter }{
