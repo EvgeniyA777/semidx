@@ -294,6 +294,9 @@ pub const Context = struct {
     snapshot: *const Snapshot,
     /// Whether evidence text may be rendered.
     evidence_text: bool,
+    /// Identifies the server process. Revision numbers start again in a new
+    /// process, so a cursor also names the process that issued it.
+    instance: u64 = 0,
     /// Why a call failed, reported as a tool execution error.
     failure: ?[]const u8 = null,
     existence: ?std.AutoHashMapUnmanaged(model.EntityId, usize) = null,
@@ -576,6 +579,7 @@ const Hints = struct {
 /// the encoding as opaque; the server only ever honors a cursor whose tool,
 /// revision, and arguments match the call it arrives with.
 const Cursor = struct {
+    instance: u64,
     tool: Tool,
     revision: u64,
     arguments: u64,
@@ -585,7 +589,7 @@ const Cursor = struct {
     const Base64 = std.base64.url_safe_no_pad;
 
     fn encode(self: Cursor, arena: Allocator) Allocator.Error![]const u8 {
-        const payload = try std.fmt.allocPrint(arena, "{d}.{d}.{x:0>16}.{d}", .{ @intFromEnum(self.tool), self.revision, self.arguments, self.position });
+        const payload = try std.fmt.allocPrint(arena, "{x:0>16}.{d}.{d}.{x:0>16}.{d}", .{ self.instance, @intFromEnum(self.tool), self.revision, self.arguments, self.position });
         const out = try arena.alloc(u8, prefix.len + Base64.Encoder.calcSize(payload.len));
         @memcpy(out[0..prefix.len], prefix);
         _ = Base64.Encoder.encode(out[prefix.len..], payload);
@@ -600,12 +604,13 @@ const Cursor = struct {
         const payload = try arena.alloc(u8, size);
         Base64.Decoder.decode(payload, encoded) catch return null;
         var fields = std.mem.splitScalar(u8, payload, '.');
+        const instance = std.fmt.parseInt(u64, fields.next() orelse return null, 16) catch return null;
         const tool = std.fmt.parseInt(u8, fields.next() orelse return null, 10) catch return null;
         const revision = std.fmt.parseInt(u64, fields.next() orelse return null, 10) catch return null;
         const arguments = std.fmt.parseInt(u64, fields.next() orelse return null, 16) catch return null;
         const position = std.fmt.parseInt(usize, fields.next() orelse return null, 10) catch return null;
         if (fields.next() != null or tool >= std.enums.values(Tool).len) return null;
-        return .{ .tool = @enumFromInt(tool), .revision = revision, .arguments = arguments, .position = position };
+        return .{ .instance = instance, .tool = @enumFromInt(tool), .revision = revision, .arguments = arguments, .position = position };
     }
 };
 
@@ -655,6 +660,9 @@ fn canonicalArguments(comptime tool: Tool, map: ?ObjectMap) u64 {
 fn cursorPosition(ctx: *Context, comptime tool: Tool, args: Args(tool)) Error!usize {
     const text = try args.string("cursor") orelse return 0;
     const cursor = try Cursor.decode(ctx.arena, text) orelse return ctx.fail("cursor is not one this server issued", .{});
+    if (cursor.instance != ctx.instance) {
+        return ctx.fail("cursor was issued by another server process; repeat the call without cursor", .{});
+    }
     if (cursor.tool != tool) {
         return ctx.fail("cursor was issued by {t}, not {t}; pass it to {t}", .{ cursor.tool, tool, cursor.tool });
     }
@@ -681,7 +689,7 @@ fn writePage(ctx: *Context, s: *Stringify, comptime tool: Tool, args: Args(tool)
     try s.write(position);
     const next = position + returned;
     if (next >= total) return;
-    const cursor: Cursor = .{ .tool = tool, .revision = ctx.snapshot.revision, .arguments = canonicalArguments(tool, args.map), .position = next };
+    const cursor: Cursor = .{ .instance = ctx.instance, .tool = tool, .revision = ctx.snapshot.revision, .arguments = canonicalArguments(tool, args.map), .position = next };
     try s.objectField("next_cursor");
     try s.write(try cursor.encode(ctx.arena));
     try hints.add(ctx.arena, list, .@"continue", &.{"cursor"});

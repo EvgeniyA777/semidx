@@ -35,7 +35,8 @@ pub const Options = struct {
 const instructions = "semidx answers from an in-memory semantic graph of the configured root. " ++
     "Every relationship carries its resolution (fact, unresolved, approximate), freshness, and producer; " ++
     "an unresolved designator is a name the graph could not resolve, not a relationship to a definition of that name. " ++
-    "Results carry paths and ranges, not source text. Call semidx_refresh after editing files.";
+    "Results carry paths and ranges, not source text. Start orientation with semidx_outline, then semidx_repo_map for one path_prefix; " ++
+    "when a result is cut, follow its narrowing_hints. Call semidx_refresh after editing files.";
 
 /// How long a client may cache the tool list and discovery result. The tool
 /// set is fixed for the lifetime of the binary.
@@ -60,6 +61,9 @@ pub const Server = struct {
     last_scan: semidx.Index.ScanOutcome,
     /// Set by a legacy `initialize`. Modern requests never read it.
     legacy_initialized: bool,
+    /// Random per process, so a cursor from an earlier process, whose
+    /// revision numbers may repeat, is refused.
+    instance: u64,
     message_arena: std.heap.ArenaAllocator,
 
     /// Scans `options.root` and publishes the first snapshot.
@@ -81,6 +85,9 @@ pub const Server = struct {
         });
         try log.flush();
 
+        var instance: [8]u8 = undefined;
+        io.random(&instance);
+
         return .{
             .gpa = gpa,
             .io = io,
@@ -93,6 +100,7 @@ pub const Server = struct {
             .rebuilds = 0,
             .last_scan = outcome,
             .legacy_initialized = false,
+            .instance = std.mem.readInt(u64, &instance, .little),
             .message_arena = std.heap.ArenaAllocator.init(gpa),
         };
     }
@@ -274,6 +282,7 @@ pub const Server = struct {
             .arena = arena,
             .snapshot = &self.snapshot,
             .evidence_text = self.options.evidence_text,
+            .instance = self.instance,
         };
         const outcome = switch (tool) {
             .semidx_health => tools.health(&ctx, &body_stringify, arguments, try self.status(arena)),
@@ -1293,6 +1302,12 @@ test "cursors walk a result in pages over one snapshot and fail clearly across r
     try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", other_arguments)), "different arguments") != null);
     try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", "{\"cursor\":\"sdx1.bm9wZQ\"}")), "not one this server issued") != null);
     try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", "{\"cursor\":\"abc\"}")), "not one this server issued") != null);
+
+    // A cursor from another server process is refused, whatever its revision.
+    const instance = h.server.instance;
+    h.server.instance +%= 1;
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", rest_body)), "another server process") != null);
+    h.server.instance = instance;
 
     // After a refresh publishes a new revision, the old cursor fails.
     try h.tmp.dir.writeFile(test_io, .{ .sub_path = "added.zig", .data = "pub fn added() void {}\n" });
