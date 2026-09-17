@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-14"
+updated: "2026-09-17"
 ---
 
 # semidx Glossary
@@ -27,6 +27,12 @@ constraints. Repeating them here would give them two owners. Look them up
 there.
 
 ## Terms
+
+**analysis context** — Frontend input built from current graph facts and other
+analysis-side evidence so a frontend can decide whether a source construct
+resolves exactly, stays unresolved, or is outside coverage. Analysis context is
+not itself graph authority: only assertions emitted and reconciled into the
+graph become observable graph claims.
 
 **capability matrix** — The published statement of what `semidx` can and cannot
 analyze, per language, producer version, and entity or relationship kind,
@@ -53,6 +59,10 @@ something about another source unit. A change to the provider obliges the
 dependent to be reanalyzed. The record says nothing by itself about import
 semantics, module membership, or program availability.
 
+**dependent source unit** — A source unit whose analysis result declared that it
+read information supplied by another source unit. When the provider changes, the
+dependent is a candidate for reanalysis even if its own bytes did not change.
+
 **definition introduction** — A narrower claim that a container directly
 introduces a program definition. For example, a file may introduce a class,
 namespace, function, or variable definition, and a class may introduce a method.
@@ -60,9 +70,28 @@ This is intentionally distinct from containment: a repository containing a file
 does not by itself introduce the file as a program definition. Relationship
 names and admission status are owned by [CORE.md](CORE.md).
 
+**detail level** — A preview-tool output mode that controls how much graph
+detail a consumer asks for. Detail levels may change the shape and size of an
+experimental consumer response, but they do not change the semantic model or the
+resolution of any assertion.
+
+**dogfood** — Evidence gathered by running `semidx` on this repository or a
+temporary copy of it. Dogfood checks are useful because they exercise real
+project patterns, but they are still evidence for the current implementation,
+not a broad language-support claim.
+
 **edge** — The graph's representation of a relationship. Use it only where the
 representation itself is the subject; the relationship is the thing being
 modeled, the edge is how it is stored.
+
+**evidence text** — Bounded source text recorded with an assertion as evidence
+for what the producer observed, such as a name or callee. MCP output omits it by
+default; enabling it is separate from returning arbitrary source bodies.
+
+**external target** — A relationship target entity that was established outside
+the source unit currently being analyzed and supplied to the frontend through
+analysis context. Reconciliation must still validate that the target is current,
+compatible with the relationship kind, and backed by a dependency declaration.
 
 **fingerprint** — One possible mechanism for recognizing that some aspect of an
 entity's meaning changed. A future design may use semantic revisions,
@@ -83,10 +112,34 @@ compiler API, a language server, a static analyzer, or a custom extractor.
 Frontends differ in coverage and in how much they resolve. They do not define
 the model they feed.
 
+**habit loop** — The repeatable local agent workflow for using the MCP preview:
+start with graph-backed orientation, follow focused definition or context calls,
+read exact files only where needed, and refresh after edits before trusting new
+graph answers.
+
 **identity correspondence** — Evidence that an entity or source unit observed
 before and after a change is the same semantic thing. Exact correspondence may
 be recorded as established; heuristic evidence may be recorded only without
 pretending it is a fact.
+
+**identity event** — A recorded outcome of reconciliation for an entity or
+source unit, such as preserved, created, removed, or lost. It makes identity
+preservation or identity loss observable instead of hiding it as an unrelated
+delete/create sequence.
+
+**import alias** — Frontend-local evidence that a source-language alias refers
+to an imported source unit or package under a frontend's covered rules. An
+import alias is not a graph relationship by itself and does not admit `IMPORTS`
+or `module`; those candidates are owned by [CORE.md](CORE.md).
+
+**invalidation** — The process of deciding which source units must be
+reanalyzed because a source change may affect assertions they previously
+produced. Invalidation is driven by changed contents, dependency declarations,
+and producer-specific context such as package exports.
+
+**local MCP preview** — The experimental local stdio MCP consumer over published
+graph snapshots. It is a preview tool surface, not a published semantic
+contract, and it does not define graph semantics.
 
 **projection** — A derived view that is not a source of truth: a lexical index,
 a vector index, an embedding window, a rendered snippet, or a rendered subgraph.
@@ -98,13 +151,48 @@ relationship.
 **provenance** — The record of what produced an assertion: source ingestion, a
 frontend, an analyzer, exact system resolution, or another recorded method.
 
+**provider source unit** — A source unit whose current graph facts were read by
+another unit's analysis. Provider changes can invalidate dependents through
+dependency declarations or producer-specific export tracking.
+
+**release candidate** — A repository state that has passed the named local gate
+for a planned release but has not necessarily been tagged or distributed.
+
+**release gate** — The documented set of verification commands, runtime smoke
+checks, documentation checks, and residual-risk review required before a release
+or preview handoff may be considered ready.
+
 **resolution level** — How far an assertion's semantic claim was established.
 The categories are constitutionally distinct; the concrete enumerated values and
 their encoding are schema requirements owned by [SPEC.md](SPEC.md).
 
+**response budget** — A preview-tool constraint on response size or shape,
+expressed through item limits, detail levels, include flags, and explicit
+metadata rather than by cutting JSON bytes. Response budgets keep consumer
+context usable without changing graph authority.
+
+**semantic contract** — A future published promise about the semantic model,
+schema shape, capability matrix, and migration behavior exposed to consumers.
+The current preview reports `semantic_contract_version: null`; publication and
+migration procedures are owned by [SPEC.md](SPEC.md).
+
 **snapshot** — One consistent state of the graph: the state a query is answered
 against. A consumer never observes a graph assembled from more than one
 snapshot.
+
+**source-derived graph values** — Paths, names, designators, ranges, ids,
+diagnostic messages, and other values returned from the graph that are derived
+from local source without being source text. Sending them to a hosted consumer is
+still outbound source-derived data and requires the user's configured
+destination and consent boundary.
+
+**source ingestion** — The producer path that discovers source units and records
+source-organization facts such as repository/file entities and containment. It
+does not by itself establish program relationships.
+
+**source text** — The literal contents of source files or snippets from them.
+Source text is distinct from source-derived graph values and from bounded
+evidence text.
 
 **source unit** — An independently addressable source input presented to
 analysis, such as a discovered file. Its identity is allocated by the graph and
@@ -124,6 +212,16 @@ and stop answering queries that did not ask for them.
 **symbol** — A named entity, one a frontend can address by a stable name. A
 symbol is a subset of entities: anonymous constructs are entities but not
 symbols.
+
+**tool schema** — A consumer-interface schema that advertises the accepted
+arguments for an experimental tool surface such as MCP. Tool schemas describe
+how to ask for graph projections; they are not semantic schemas and do not
+define graph meaning.
+
+**truncation** — An explicit report that a bounded result omitted additional
+items. Truncation must say which result set was bounded and preserve enough
+metadata for the consumer to decide whether to make a narrower or more detailed
+follow-up query.
 
 ## Document Ownership
 
