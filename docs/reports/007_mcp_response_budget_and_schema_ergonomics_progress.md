@@ -326,6 +326,99 @@ Self-review of the diff from `efbc8b3` with `semidx-code-review`:
 
 No open finding.
 
+## Post-Closure Assessment
+
+Recorded on 2026-09-17 after the closure commit, at the user's request.
+
+### Live Server Check
+
+The repository's `.mcp.json` server was restarted on the Plan 007 binary and
+exercised from an agent session (snapshot revision 86):
+
+- `semidx_health`: product version `0.1.0-preview.2`, all three parsers
+  available; the 3 `analysis_failed` units are the intentionally unparsable
+  `fixtures/vertical-slice/*/edits/05_unparsable.*` fixtures.
+- `semidx_repo_map {"path_prefix":"src/mcp/main"}`: compact unit and definition
+  fields, `range` lines, and `budget`.
+- `semidx_context` for `fail` in `src/mcp/main.zig` with `diagnostic_limit: 1`:
+  the focus end is `{id}`, the four unresolved calls keep
+  `category: unresolved`, `missing`, and their designators, every claim carries
+  `producer.name` and `freshness`, and `budget` echoes the limit.
+- The same call with `detail: "full"` and `relationship_limit: 1`: resolution
+  `method` and `explanation`, producer versions, byte offsets, and `extension`
+  are back; incoming (3) and outgoing (4) report truncation separately.
+- `semidx_find_definitions` with `detail`: refused with
+  `unknown argument "detail"`, as its declaration has none.
+
+### Structured Size Before And After
+
+What an agent reads is the structured result. The client used in this session
+showed one JSON copy per call; whether other clients also surface the text
+block is not known.
+
+| Call | Before | After (compact) | Reduction |
+| --- | ---: | ---: | ---: |
+| `semidx_repo_map`, whole repository (66 units) | 146 KB | 70 KB | 2.1x |
+| `semidx_context` for `health`, limit 500 | 70 KB | 28 KB | 2.5x |
+| `semidx_context` for `scan` | 10.6 KB | 5.4 KB | 2.0x |
+
+Token counts were not measured; JSON of this shape is roughly 3 to 4 bytes per
+token, so the whole-repository compact map is on the order of 20,000 tokens.
+
+### Better
+
+- **Cost of the common loop** (map one directory, find, context) fell 2 to 2.5
+  times.
+- **Readability.** The largest waste was repetition: the focus entity with its
+  full evidence inside every relationship, and the same `explanation` sentence
+  repeated dozens of times. Compact output keeps what an agent acts on: who
+  calls, at which line, what is called, and whether each claim is a fact.
+- **Authority unchanged.** Unresolved claims stay unresolved with a designator,
+  and every claim keeps producer and freshness, proven by tests.
+- **Schema drift removed.** Advertised schemas and validation derive from one
+  declaration; a mismatch fails compilation or the schema test.
+- **Visible budgets.** `budget` states which limits shaped a result.
+
+### Worse Or Debatable
+
+- **Unresolved reasons are hidden by default.** Compact keeps `missing` but not
+  `explanation`; understanding why a call is unresolved takes a second
+  `detail: "full"` call, an extra step for review and impact analysis.
+- **Breaking default shape.** A client reading `start_byte`,
+  `producer.version`, or unit revisions from default responses no longer gets
+  them. Acceptable for a preview with no contract, but a break.
+- **One shape exception.** A compact repository map definition carries `range`
+  instead of `evidence`, so code parsing both levels needs a branch.
+- **More arguments to know.** An agent unaware of `detail` fails safe (compact)
+  but may miss unresolved explanations.
+
+### Not Solved
+
+- **Whole-repository cold start is still heavy.** The plan's Definition of Done
+  says the repository map should be cheap enough for default cold-start use.
+  That holds with a `path_prefix` (about 12 KB structured for `src/mcp/`), not
+  for an unfiltered map, which stays linear in repository size. This DoD item is
+  met only partially; pagination was non-scope.
+- **`semidx_references` is unchanged** (about 57 KB on the wire for
+  `protocol.writeString`), repeating the target entity in every relationship.
+- **Response size is bounded per list, not per response.**
+- **Wire duplication** of the structured result as text remains.
+
+### Summary
+
+| Criterion | Assessment |
+| --- | --- |
+| Cost of the typical loop | Clearly better, 2 to 2.5 times smaller |
+| Usefulness of default answers | Better: less noise, everything needed to act kept |
+| Depth by default | Slightly worse: unresolved reasons need a second call |
+| Whole-repository cold start | Better, still heavy |
+| Reliability of schemas and validation | Substantially better |
+| Compatibility of default shapes | Worse: breaking change |
+
+Highest-value follow-ups: a compact level for `semidx_references`, and a way to
+walk a large repository in portions, which needs its own plan or a revisit of
+the pagination non-scope.
+
 ## Drift Control
 
 - Constitution §1, §3, §7, §8: MCP remains a projection; compact rendering
