@@ -21,7 +21,9 @@ It is one command inside a release gate, not the whole release gate, and not a
 release: running it cuts no tag, publishes nothing, and publishes no semantic
 contract. `semantic_contract_version` is `null` in every result it checks.
 What it proves is current preview behavior, described in
-[Local MCP preview](local_preview.md); it is not a stable interface.
+[Local MCP preview](local_preview.md); it is not a stable interface. This
+document owns the terms *hard gate*, *observation*, and *gate profile* as used
+for the gate.
 
 ## Operation
 
@@ -112,17 +114,22 @@ bound that stays stable across those.
 Each passing profile prints lines prefixed `gate:`:
 
 ```text
-gate: profile repository-copy: root <kind>, <n> source units, <bytes> bytes
-gate: hard pass call_sequence
+gate: profile fixture: first response <ms> ms after start
+gate: hard pass refresh_revision: <before> -> <after>
 ...
+gate: observation root: temporary directory of <n> fixtures/vertical-slice files (<bytes> bytes) and tool.py
 gate: observation semidx_health {}: <ms> ms, <bytes> bytes
 ...
-gate: observation refresh: revision <a> -> <b>, changed <n>, added <n>, removed <n>
+gate: observation refresh: revision <a> -> <b>, changed <n>, added <n>, removed <n>, analyzed <n>, entity ids preserved <bool>
 ```
 
-`hard` lines are the gates above; `observation` lines are the values above. A
-release candidate cites the command, its result, and these lines; see the
-current plan's progress log for the recorded run.
+`hard pass` lines name the gates above with what they saw; `observation` lines
+are the values above. The Zig build runner shows each test's stderr under a
+`failed command:` heading even when the test passes: the build summary and the
+exit status are the result. A release candidate cites the command, its result,
+and these lines; the
+[Plan 008 progress log](../reports/008_habit_loop_release_gate_progress.md#stage-4-release-candidate-evidence)
+records the first run.
 
 ## What The Gate Does Not Prove
 

@@ -73,6 +73,7 @@ zig build                                  # installs zig-out/bin/semidx-mcp
 zig-out/bin/semidx-mcp --version           # semidx-mcp 0.1.0-preview.2
 zig build test-mcp                         # optional: unit tests and the stdio smoke test
 zig build dogfood                          # optional: habit loop and refresh recovery on a copy of this repository
+zig build preview-gate                     # optional: the habit loop gate, dogfood plus a small fixture profile
 ```
 
 Building and indexing never use the network. `zig build` names any missing
@@ -409,3 +410,5 @@ Notifications, including malformed ones, are never answered.
   [v0.1.0-preview.1](../releases/v0.1.0-preview.1.md) notes describe the tree
   before it, with release-gate evidence recorded in the
   [Plan 005 progress log](../reports/005_mcp_preview_release_readiness_progress.md#stage-5-preview-release-candidate-handoff).
+  What the habit loop gate proves, and what it does not, is specified in
+  [Habit loop gate](habit_loop_gate.md).
