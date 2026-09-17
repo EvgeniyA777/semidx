@@ -1,0 +1,150 @@
+---
+title: "Zig dogfood semantic coverage progress"
+doc_type: "progress_log"
+lifecycle: "active"
+status: "in_progress"
+agent_action: "reference_for_context"
+updated: "2026-09-16"
+---
+
+# 006: Zig Dogfood Semantic Coverage Progress
+
+Companion log for
+[docs/plans/006_zig_dogfood_semantic_coverage.md](../plans/006_zig_dogfood_semantic_coverage.md),
+implementing
+[ADR 006](../adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md).
+
+## Current Status
+
+Stage 1 is complete. Stages 2 to 5 are pending.
+
+## Stage Log
+
+| Stage | Status | Outcome |
+| --- | --- | --- |
+| Stage 1: Coverage probes and fixture design | Completed | Fixtures for member functions, nested containers, local import aliases, exact and unresolved qualified calls, and provider edits; expected graph deltas and risk matrix recorded below. No behavior change. |
+| Stage 2: Container member function definitions | Pending | |
+| Stage 3: Local Zig import alias context | Pending | |
+| Stage 4: Exact qualified call facts | Pending | |
+| Stage 5: Dogfood and documentation | Pending | |
+
+## Plan Readiness Gate
+
+Applied on 2026-09-16 before Stage 1. Plan 005 is completed, so the start rule
+holds. Scope, non-scope, stage order, verification commands, and DoD are
+explicit and tied to ADR 006; no hard fail.
+
+One execution risk the plan does not name, recorded here instead of reopening
+the plan because Stage 3 already admits `src/root.zig` changes when existing
+dependency propagation cannot keep dependents current:
+
+- **Analysis order inside one batch.** `Index.applyScan` registers and analyzes
+  each added unit in turn, and `Upkeep.finish` skips a dependent that was
+  analyzed anywhere in the batch. On a first scan an importer analyzed before
+  its provider is registered finds no unit at the import path and declares no
+  dependency; an importer analyzed after the provider is registered but before
+  it is analyzed declares one that is never honoured. Either way a scan would
+  yield graphs that depend on path order. Stage 3 resolves this in `Index`.
+- **Provider moves.** A scan rename is not a dependency seed today. An alias
+  resolves by path, so a provider moved away from the import path must
+  reanalyze its importers, or a current fact would survive the path that
+  established it. Stage 3 resolves this in `Index`.
+
+## Risk Matrix
+
+| Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| ADR 006: direct member functions of covered top-level containers are definitions | Members stay invisible, or become top-level definitions | Frontend unit test and fixture test | `src/frontends/zig.zig` through `Analyzer.indexUnit` | Nested containers, fields, member declarations other than `fn`, members of containers inside function bodies stay unsupported | Stage 2 tests in `src/frontends/root.zig` and `tests/vertical_slice_test.zig` |
+| Member identity: unit scope, role, name, container names; never ranges | Body edit or reordering breaks identity; rename or container rename hidden as unrelated change | Fixture edit-history test | Reconciliation of member drafts | `edits/08_member_renamed.zig` and `edits/09_container_renamed.zig` are identity loss | Stage 2 fixture tests |
+| Local import path rule: lexical, root-bounded, exact bytes | Root escape, case-folded, package, or malformed import establishes an alias | Pure unit test of the path normalizer plus fixture test | `zig.zig` path resolution and `Graph.unitByPath` | `../../../outside.zig`, `Wire.zig`, `std`, escape sequences, absolute paths, empty segments | Stage 3 tests |
+| Every established alias declares a provider dependency | Provider edits never reach importers | Integration test over `Index` | `BatchBuilder.addDependency` through `reconcile.integrate` | Unresolved call through an established alias still declares; unestablished alias declares none | Stage 3 tests |
+| Scan order does not change the graph | Importer analyzed before its provider keeps unresolved calls or unhonoured dependencies | Integration test with `Tree.rescan` | `Index.applyScan` and `Upkeep.finish` | Importer path sorts before its provider | Stage 3 test |
+| `alias.foo(...)` is a fact only for one current exported provider callable | False cross-unit fact | Fixture test | Frontend decision plus `reconcile.checkExternalTargets` | Non-`pub`, duplicate provider name, missing name, `alias.Container.foo`, shadowing parameter, duplicate alias, non-import alias, stale provider | Stage 4 tests |
+| Member bodies use the same narrow call rules | Receiver or container-scope calls resolved by name | Fixture test | Member body walk | `self.flush()`, bare call to a container member name | Stage 4 tests |
+| Provider changes reanalyze dependents | Stale current fact after provider rename, removal, or visibility change; resolvable call left unresolved after export addition | Integration test | `Upkeep` dependency propagation | Unrelated units are not reanalyzed by a provider body edit | Stage 4 tests with `imports/edits/*` |
+| MCP renders the new values without source text and without deciding semantics | Dogfood shows no delta, or source text leaks | Runtime smoke | `zig build dogfood` | `semantic_contract_version` stays `null`; no `source_text` without the flag | Stage 5 dogfood test |
+
+## Stage 1: Coverage Probes And Fixture Design
+
+Changed files:
+
+- `fixtures/vertical-slice/zig/imports/wire.zig`,
+  `fixtures/vertical-slice/zig/imports/session.zig`,
+  `fixtures/vertical-slice/zig/imports/support/util.zig` (new);
+- `fixtures/vertical-slice/zig/imports/edits/wire_01_body_edit.zig`,
+  `wire_02_added_export.zig`, `wire_03_renamed_export.zig`,
+  `wire_04_export_made_private.zig` (new);
+- `fixtures/vertical-slice/zig/edits/07_member_body_edit.zig`,
+  `08_member_renamed.zig`, `09_container_renamed.zig` (new);
+- this progress log.
+
+Every new fixture parses without `ERROR` or `MISSING` nodes under the pinned
+grammar (checked with `tree-sitter parse` against
+`.tree-sitter-grammars/tree-sitter-zig`).
+
+### Expected Graph Deltas
+
+The existing `zig/greeter.zig` fixture already carries a representative
+semidx pattern: `Greeter.greet` is a `pub fn` member of a top-level struct,
+like `Server.handleLine` in `src/mcp/root.zig`. The import fixture mirrors
+`protocol.writeString(...)` calls from `src/mcp/tools.zig`.
+
+Member definitions (Stage 2):
+
+| Declaration | Expected |
+| --- | --- |
+| `greeter.zig` `Greeter.greet` | `definition` fact, role `function`, `container_path` `["Greeter"]`, `DEFINES` from `Greeter` |
+| `session.zig` `Session.send`, `Session.flush`, `Session.reset` | same shape under `["Session"]` |
+| `session.zig` `Session.Nested`, `Session.Nested.deep`, fields | unsupported construct diagnostics, no definitions |
+| `wire.zig` `Frame.encode` | definition under `["Frame"]` |
+| `edits/07_member_body_edit.zig` | every definition id preserved |
+| `edits/08_member_renamed.zig` | `Greeter.greet` identity lost, replaced by `Greeter.welcome` |
+| `edits/09_container_renamed.zig` | `Greeter` and its member lose identity; replacements `Welcomer` and `Welcomer.greet` |
+
+Calls (Stages 3 and 4), from `imports/session.zig` unless stated:
+
+| Call | Expected |
+| --- | --- |
+| `run`: `wire.writeString(text)` | `CALLS` fact to `wire.zig` `writeString`, provider dependency on `wire.zig` |
+| `run`: `util.clean()` | fact to `support/util.zig` `clean` via `./support/../support/util.zig` |
+| `support/util.zig` `clean`: `session.run("")` | fact to `session.zig` `run` via `../session.zig` |
+| `Session.send`: `wire.writeString(text)` | fact (member body) |
+| `Session.send`: `self.flush()` | unresolved: qualifier is a parameter |
+| `Session.flush`: `helper()` | fact to top-level `helper` |
+| `Session.flush`: `reset()` | unresolved: the enclosing container declares a member of that name |
+| `run`: `wire.hidden()` | unresolved: the provider has no `pub fn` of that name declared once at its top level (it is not `pub`) |
+| `run`: `wire.twice()` | unresolved for the same reason (the provider declares `twice` twice) |
+| `run`: `wire.flushAll()` | unresolved; a fact after `wire_02_added_export.zig` |
+| `run`: `wire.Frame.encode(undefined)` | unresolved: qualifier is not a bare alias |
+| `run`: `std.debug.print(...)` | unresolved: qualifier is not a bare alias |
+| `run`: `outside.run()` | unresolved: import path escapes the root |
+| `run`: `upper.run()` | unresolved: no indexed unit at `zig/imports/Wire.zig` |
+| `run`: `absent.run()` | unresolved: no indexed unit at the path |
+| `run`: `twin.run()` | unresolved: alias name declared more than once |
+| `run`: `copy.writeString(text)` | unresolved: `copy` is not an `@import` alias |
+| `shadowed`: `wire.writeString("x")` | unresolved: qualifier is a parameter |
+
+Provider edits of `imports/wire.zig`:
+
+| Edit | Expected in `session.zig` without editing it |
+| --- | --- |
+| `wire_01_body_edit.zig` | `writeString` id preserved; facts still target it |
+| `wire_02_added_export.zig` | `wire.flushAll()` becomes a fact |
+| `wire_03_renamed_export.zig` | `wire.writeString` calls become unresolved; no current fact targets the lost entity |
+| `wire_04_export_made_private.zig` | `wire.writeString` calls become unresolved |
+
+Dependencies: `session.zig` depends on `wire.zig` and `support/util.zig` only;
+`support/util.zig` depends on `session.zig`. `outside`, `upper`, `absent`, and
+`twin` establish no alias and declare nothing. `std` is not a local import.
+
+Baseline before implementation: none of the member definitions above exist,
+and every qualified call is unresolved with "the callee is not a bare name".
+No red baseline was committed.
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Zig 0.16.0 matches. |
+| `tree-sitter parse` over every new fixture | No `ERROR` or `MISSING` node. |
+| `zig build test --summary all` | 20/20 steps; 186/187 passed, 1 skipped. The skip is the pre-existing environment-dependent `src/mcp/root.zig` dogfood-root test. The fixture discovery test now also registers the new fixtures and stays green. |
