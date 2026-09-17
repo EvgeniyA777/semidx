@@ -1302,6 +1302,140 @@ test "cursors walk a result in pages over one snapshot and fail clearly across r
     try testing.expect(std.mem.indexOf(u8, stale, "without cursor") != null);
 }
 
+test "context traversal is explicit, bounded, renders each entity once, and keeps every edge's resolution" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    // `a` calls `b` and `c`; `b` calls `c` and back to `a`; `c` calls `b` and
+    // an unresolved designator: a cycle and a repeated neighbor.
+    try h.init(false, "const std = @import(\"std\");\n\n" ++
+        "pub fn a() void {\n    b();\n    c();\n}\n\n" ++
+        "fn b() void {\n    c();\n    a();\n}\n\n" ++
+        "fn c() void {\n    b();\n    std.debug.print(\"x\", .{});\n}\n");
+    defer h.deinit();
+
+    const Shape = struct {
+        /// How many times each entity id is rendered with a name, anywhere.
+        fn renderings(value: std.json.Value, counts: *std.AutoHashMapUnmanaged(i64, usize), a: Allocator) !void {
+            switch (value) {
+                .object => |object| {
+                    if (object.get("id")) |id| {
+                        if (object.get("name") != null) (try counts.getOrPutValue(a, id.integer, 0)).value_ptr.* += 1;
+                    }
+                    var fields = object.iterator();
+                    while (fields.next()) |field| try renderings(field.value_ptr.*, counts, a);
+                },
+                .array => |array| for (array.items) |item| try renderings(item, counts, a),
+                else => {},
+            }
+        }
+    };
+
+    // Depth 1 with the defaults spelled out renders exactly the default call.
+    _ = try h.callTool(arena, "semidx_context", "{\"name\":\"a\"}");
+    const default_text = try arena.dupe(u8, h.out.written());
+    _ = try h.callTool(arena, "semidx_context", "{\"name\":\"a\",\"depth\":1,\"direction\":\"both\"}");
+    try testing.expectEqualStrings(default_text, h.out.written());
+    try testing.expect(std.mem.indexOf(u8, default_text, "\"traversal\"") == null);
+
+    // A direction omits the other list rather than reporting it empty.
+    const outgoing_only = (try h.callTool(arena, "semidx_context", "{\"name\":\"a\",\"direction\":\"outgoing\"}")).object.get("structuredContent").?.object;
+    const outgoing_focus = outgoing_only.get("focus").?.array.items[0].object;
+    try testing.expect(outgoing_focus.get("incoming") == null and outgoing_focus.get("incoming_total") == null);
+    try testing.expectEqual(@as(i64, 2), outgoing_focus.get("outgoing_total").?.integer);
+
+    for ([_][]const u8{ "{\"name\":\"a\",\"direction\":\"outgoing\",\"depth\":2}", "{\"name\":\"a\",\"direction\":\"outgoing\",\"depth\":3}" }) |arguments| {
+        const result = try h.callTool(arena, "semidx_context", arguments);
+        const structured = result.object.get("structuredContent").?.object;
+        const a_id = structured.get("focus").?.array.items[0].object.get("entity").?.object.get("id").?.integer;
+        const traversal = structured.get("traversal").?.object;
+        try testing.expectEqualStrings("outgoing", traversal.get("direction").?.string);
+        // From `b`: b->c and b->a; from `c`: c->b and c->print. Nothing new is
+        // reached, so depth 3 lists the same edges and ends.
+        const edges = traversal.get("edges").?.array.items;
+        try testing.expectEqual(@as(usize, 4), edges.len);
+        try testing.expectEqual(@as(i64, 4), traversal.get("edges_total").?.integer);
+        try testing.expect(!traversal.get("edges_truncated").?.bool);
+        try testing.expectEqual(@as(i64, 2), traversal.get("reached_total").?.integer);
+        var unresolved = false;
+        for (edges) |item| {
+            const edge = item.object;
+            try testing.expectEqual(@as(i64, 2), edge.get("distance").?.integer);
+            try testing.expect(edge.get("from").?.integer != a_id);
+            try testing.expectEqualStrings("outgoing", edge.get("direction").?.string);
+            try testing.expectEqualStrings("frontend.zig", edge.get("producer").?.object.get("name").?.string);
+            try testing.expectEqualStrings("current", edge.get("freshness").?.string);
+            // Every end was rendered earlier, so it is named by id alone.
+            try testing.expectEqual(@as(usize, 1), edge.get("source").?.object.count());
+            const target = edge.get("target").?.object;
+            if (std.mem.eql(u8, "unresolved", edge.get("resolution").?.object.get("category").?.string)) {
+                try testing.expectEqualStrings("std.debug.print", target.get("designator").?.string);
+                try testing.expect(target.get("entity") == null);
+                try testing.expect(edge.get("resolution").?.object.get("missing") != null);
+                unresolved = true;
+            } else {
+                try testing.expectEqualStrings("fact", edge.get("resolution").?.object.get("category").?.string);
+                try testing.expectEqual(@as(usize, 1), target.get("entity").?.object.count());
+            }
+        }
+        try testing.expect(unresolved);
+        // Each entity is rendered with its fields once in the whole response.
+        var counts: std.AutoHashMapUnmanaged(i64, usize) = .empty;
+        try Shape.renderings(result.object.get("structuredContent").?, &counts, arena);
+        try testing.expectEqual(@as(usize, 3), counts.count());
+        var ids = counts.iterator();
+        while (ids.next()) |entry| try testing.expectEqual(@as(usize, 1), entry.value_ptr.*);
+        try testing.expect(!structured.get("budget_exhausted").?.bool);
+        try testing.expectEqual(traversal.get("depth").?.integer, structured.get("budget").?.object.get("depth").?.integer);
+    }
+
+    // Both directions reach the defining file and the repository, and each
+    // relationship is listed once however many ends reach it.
+    const both = (try h.callTool(arena, "semidx_context", "{\"name\":\"a\",\"depth\":3}")).object.get("structuredContent").?.object;
+    var assertion_ids: std.AutoHashMapUnmanaged(i64, void) = .empty;
+    const both_focus = both.get("focus").?.array.items[0].object;
+    for ([_][]const u8{ "incoming", "outgoing" }) |list| {
+        for (both_focus.get(list).?.array.items) |item| try testing.expect(!(try assertion_ids.getOrPut(arena, item.object.get("assertion_id").?.integer)).found_existing);
+    }
+    var max_distance: i64 = 0;
+    for (both.get("traversal").?.object.get("edges").?.array.items) |item| {
+        try testing.expect(!(try assertion_ids.getOrPut(arena, item.object.get("assertion_id").?.integer)).found_existing);
+        max_distance = @max(max_distance, item.object.get("distance").?.integer);
+    }
+    try testing.expectEqual(@as(i64, 3), max_distance);
+
+    // The per-entity limit cuts traversal edges and says so.
+    const cut = (try h.callTool(arena, "semidx_context", "{\"name\":\"a\",\"direction\":\"outgoing\",\"depth\":2,\"relationship_limit\":1}")).object.get("structuredContent").?.object;
+    const cut_traversal = cut.get("traversal").?.object;
+    try testing.expect(cut_traversal.get("edges_truncated").?.bool);
+    try expectHint(cut, "edges", "lower", &.{"depth"});
+    try expectHint(cut, "edges", "raise", &.{"relationship_limit"});
+
+    // A budget refusal leaves no entity named by an id it never rendered.
+    const tight = try h.callTool(arena, "semidx_context", "{\"name\":\"a\",\"depth\":3,\"max_response_bytes\":1200}");
+    const tight_structured = tight.object.get("structuredContent").?.object;
+    try testing.expect(tight_structured.get("budget_exhausted").?.bool);
+    var tight_counts: std.AutoHashMapUnmanaged(i64, usize) = .empty;
+    try Shape.renderings(tight.object.get("structuredContent").?, &tight_counts, arena);
+    const Ids = struct {
+        fn check(value: std.json.Value, rendered: *std.AutoHashMapUnmanaged(i64, usize)) !void {
+            switch (value) {
+                .object => |object| {
+                    if (object.count() == 1) {
+                        if (object.get("id")) |id| try testing.expect(rendered.contains(id.integer));
+                    }
+                    var fields = object.iterator();
+                    while (fields.next()) |field| try check(field.value_ptr.*, rendered);
+                },
+                .array => |array| for (array.items) |item| try check(item, rendered),
+                else => {},
+            }
+        }
+    };
+    try Ids.check(tight.object.get("structuredContent").?, &tight_counts);
+}
+
 test "a worst-case multi-focus context cannot exceed the default response budget silently" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();

@@ -354,6 +354,29 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
         try gate.observe("  {d} from {s}", .{ bucket.facts, bucket.path });
     }
 
+    // A two-step impact neighborhood: who calls the callers of `writeString`.
+    var impact_bytes: usize = undefined;
+    const impact = try gate.sizedCall(29, "semidx_context", "{\"name\":\"" ++ imported_name ++ "\",\"path\":\"" ++ imported_path ++ "\",\"direction\":\"incoming\",\"depth\":2}", &impact_bytes);
+    const impact_traversal = impact.get("traversal").?.object;
+    var second_step_facts: usize = 0;
+    for (impact_traversal.get("edges").?.array.items) |edge| {
+        try testing.expectEqual(@as(i64, 2), edge.object.get("distance").?.integer);
+        try testing.expectEqualStrings("incoming", edge.object.get("direction").?.string);
+        try testing.expect(edge.object.get("producer").?.object.get("name") != null);
+        try testing.expect(edge.object.get("freshness") != null);
+        if (std.mem.eql(u8, "fact", category(edge))) second_step_facts += 1;
+    }
+    try testing.expect(second_step_facts > 0);
+    try gate.observe("traversal: {s} incoming depth 2: {d} edges of {d} ({d} facts), {d} entities reached, budget exhausted {}, {d} bytes", .{
+        imported_name,
+        impact_traversal.get("edges").?.array.items.len,
+        impact_traversal.get("edges_total").?.integer,
+        second_step_facts,
+        impact_traversal.get("reached_total").?.integer,
+        impact.get("budget_exhausted").?.bool,
+        impact_bytes,
+    });
+
     // An import of a package stays unresolved: `std` is not a local file.
     var importer_context_bytes: usize = undefined;
     const importer_context = try gate.sizedCall(23, "semidx_context", "{\"name\":\"" ++ importer_caller ++ "\",\"path\":\"" ++ importer_path ++ "\",\"relationship_limit\":500,\"max_response_bytes\":2000000}", &importer_context_bytes);

@@ -26,7 +26,8 @@ gates, and the shape decisions later stages follow are recorded below.
 | Stage 3: Truncation guidance | Completed (`ce55c9f`) | Cut lists in `semidx_repo_map`, `semidx_find_definitions`, `semidx_references`, and `semidx_context` carry `narrowing_hints` naming declared arguments to narrow or raise; complete results carry none. |
 | Stage 4: Repository outline | Completed (`49304c3`) | New `semidx_outline` lists the directories and files directly under a directory with unit, language, analysis, diagnostic, and definition counts and no definition entities. The root outline of this repository is 4,610 transcript bytes against 157,047 for the compact whole-repository map (2%). It is step 2 of the gate's required call sequence. |
 | Stage 5: Whole-response budget | Completed (`755f879`) | Every list tool takes `max_response_bytes` (32,000 default, 2,000,000 max), appends whole items only while the structured result stays within it, and reports `budget_exhausted`, `omitted_by_budget`, and `response` hints. The default whole-repository map now returns 31,355 structured bytes with 68 files selected and reports the rest omitted. |
-| Stage 6: Revision-bound cursors | Completed | `semidx_outline`, `semidx_repo_map`, `semidx_find_definitions`, and `semidx_references` take `cursor` and return `offset` and, while items remain, `next_cursor`. A cursor from another tool, snapshot revision, or argument set is a tool error naming the mismatch. The new `response_budget` hard gate walks the default whole-repository map: 68 files over 3 pages. |
+| Stage 6: Revision-bound cursors | Completed (`d57d886`) | `semidx_outline`, `semidx_repo_map`, `semidx_find_definitions`, and `semidx_references` take `cursor` and return `offset` and, while items remain, `next_cursor`. A cursor from another tool, snapshot revision, or argument set is a tool error naming the mismatch. The new `response_budget` hard gate walks the default whole-repository map: 68 files over 3 pages. |
+| Stage 7: Bounded graph traversal | Completed | `semidx_context` takes `direction` (`both` default) and `depth` (1 default, max 3). Depth 1 output is unchanged; depth 2 and 3 add `traversal.edges` with `distance` and `from`, render every entity once and name it by id afterwards, list each relationship once, and never expand an entity twice. Over this repository `writeString` incoming at depth 2 lists 52 second-step call facts reaching 31 entities. |
 
 ## Plan Readiness Gate
 
@@ -363,3 +364,40 @@ Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig` (tests),
 | `zig fmt --check build.zig src tests` | Pass |
 | `zig build test-mcp --summary all` | Pass; 27 passed, 1 skipped. New test: for outline, map, definitions, and references, walking pages at `limit` 1 and at `max_response_bytes` 1 returns exactly the items of one unbounded call, in order, with a constant total, `offset` equal to the items already seen, and no `continue` hint on the last page; `limit` may change between pages; a cursor passed to another tool, with other arguments, invented, or after a refresh that published a new revision is a tool error naming the mismatch. |
 | `zig build preview-gate --summary all` | Pass; 14/14 steps, 6/6 tests; `response_budget`: 68 files over 3 pages, largest page 70,877 transcript bytes |
+
+## Stage 7: Bounded Graph Traversal
+
+Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig` (test),
+`tests/mcp_dogfood_test.zig`, this log.
+
+- `semidx_context` takes `direction` (`incoming`, `outgoing`, `both` default)
+  and `depth` (1 default, maximum 3). A direction that excludes a list omits
+  that list and its total and truncation fields instead of reporting it empty.
+- At depth 1 nothing else changes: a call with `depth: 1` and
+  `direction: "both"` renders byte for byte the call without them (tested),
+  apart from `budget`, which now also names `direction` and `depth` in both.
+- At depth 2 and 3, `Context.rendered` is set: every relationship end is
+  rendered in full at its first occurrence in the response and as `{id}`
+  afterwards, and an item the budget refuses rolls its first renderings back,
+  so no `{id}` names an entity the response never rendered. A focus entity
+  keeps its own focus rendering.
+- `traversal` lists `edges` found from the entities the focus lists reached,
+  step by step up to `depth`: each carries `direction`, `distance`, and
+  `from`, plus the relationship's resolution, producer, freshness, and
+  evidence. A relationship already listed (in a focus list or at an earlier
+  step, from either end) is not listed again; an entity is expanded at most
+  once (focus entities never), so cycles end; designators are never followed.
+  `relationship_limit` applies per expanded entity and direction.
+  `edges_total` counts the relationships of the expanded entities,
+  `edges_truncated` compares it with the edges listed, and `reached_total`
+  counts distinct non-focus entities reached. Traversal truncation has its own
+  `edges` hints (raise `relationship_limit`, narrow `direction`, lower
+  `depth`) and `omitted_by_budget.edges`, separate from the focus lists'.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-mcp --summary all` | Pass; 28 passed, 1 skipped. New test over a cycle (`a`->`b`->`a`), a repeated neighbor (`c` from `a` and `b`), and an unresolved call: depth 1 unchanged; `direction` omits a list; depth 2 and 3 list the same four second-step edges and end; every end in them is `{id}`; each of the three entities is rendered with fields exactly once; the unresolved edge keeps its designator and `missing`; with both directions each relationship is listed once and the traversal reaches distance 3; `relationship_limit` 1 cuts edges with `edges` hints; under a 1,200-byte budget no `{id}` names an unrendered entity. |
+| `zig build preview-gate --summary all` | Pass; 14/14 steps, 6/6 tests; `writeString` incoming depth 2: 52 of 52 edges, all facts, 31 entities reached, 66,972 transcript bytes, budget not exhausted |

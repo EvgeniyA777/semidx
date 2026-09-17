@@ -200,13 +200,18 @@ pub const definitions = [_]Definition{
     }),
     define(.semidx_context, "Graph context", "Return a bounded graph neighborhood around an entity (entity_id), a definition name, or a " ++
         "source unit (path): the entity, its unit's analysis state, incoming and outgoing relationships of every " ++
-        "kind, the unit's diagnostics, and the entity's last identity event.", &.{
+        "kind, the unit's diagnostics, and the entity's last identity event; with depth 2 or 3, also the relationships " ++
+        "of the entities those reach.", &.{
         shared_params.entity_id,
         shared_params.name,
         shared_params.path,
         shared_params.language,
         shared_params.freshness,
-        countParam("relationship_limit", 50, 500, "Maximum incoming and, separately, outgoing relationships per focus entity."),
+        choiceParam(DirectionArg, "direction", .both, "Which relationships to list and follow: into each entity, out of it, or both (default)."),
+        countParam("depth", 1, 3, "Steps to follow relationships from each focus entity. 1 (default) is the focus's own relationships; " ++
+            "2 and 3 add a traversal of the entities they reach, each rendered once and named by id afterwards."),
+        countParam("relationship_limit", 50, 500, "Maximum incoming and, separately, outgoing relationships per focus entity, " ++
+            "and per entity a traversal expands."),
         countParam("diagnostic_limit", 50, 500, "Maximum diagnostics per focus entity's unit."),
         shared_params.detail,
         shared_params.max_response_bytes,
@@ -301,6 +306,12 @@ pub const Context = struct {
     /// Set when the budget refused an item. No later item is appended, so what
     /// a list returns is always a prefix of what it selected.
     budget_exhausted: bool = false,
+    /// Set for a traversal: every entity rendered in full so far, so each is
+    /// rendered once and named by `{id}` afterwards.
+    rendered: ?std.AutoHashMapUnmanaged(model.EntityId, void) = null,
+    /// Entities added to `rendered` since the current item began, undone when
+    /// the budget refuses the item.
+    rendered_journal: std.ArrayList(model.EntityId) = .empty,
 
     pub fn fail(self: *Context, comptime fmt: []const u8, args: anytype) Error {
         self.failure = try std.fmt.allocPrint(self.arena, fmt, args);
@@ -315,6 +326,7 @@ pub const Context = struct {
         if (self.budget_exhausted) return null;
         var scratch: Writer.Allocating = .init(self.arena);
         var inner: Stringify = .{ .writer = &scratch.writer };
+        self.rendered_journal.clearRetainingCapacity();
         try @call(.auto, render, .{ self, &inner } ++ args);
         const rendered = scratch.written();
         if (self.max_response_bytes) |max| {
@@ -322,11 +334,24 @@ pub const Context = struct {
             // buffer holds everything written so far; +1 for a separator.
             if (self.admitted != 0 and s.writer.end + rendered.len + 1 > max) {
                 self.budget_exhausted = true;
+                if (self.rendered) |*set| {
+                    for (self.rendered_journal.items) |id| _ = set.remove(id);
+                }
                 return null;
             }
         }
         self.admitted += 1;
         return rendered;
+    }
+
+    /// Whether `id` is rendered in full elsewhere in this traversal response,
+    /// and so is named by `{id}`. Marks it rendered when it is not.
+    fn renderOnce(self: *Context, id: model.EntityId) Allocator.Error!bool {
+        if (self.rendered) |*set| {
+            if ((try set.getOrPut(self.arena, id)).found_existing) return true;
+            try self.rendered_journal.append(self.arena, id);
+        }
+        return false;
     }
 
     /// `item`, appended to the array open at `s`. Returns whether it was.
@@ -935,16 +960,25 @@ fn writeEntityRef(ctx: *Context, s: *Stringify, id: model.EntityId, shape: Entit
     try s.endObject();
 }
 
+/// Where a traversal found a relationship: the step it was found at and the
+/// entity whose relationships were being expanded.
+const Step = struct { distance: u32, from: model.EntityId };
+
 /// A compact relationship renders an end already in view (a context focus or
 /// a references target) as its id alone and the other end as a compact
-/// entity. Every detail level keeps the claim's resolution category, producer
-/// name, and freshness.
-fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, direction: ?[]const u8, detail: DetailArg, in_view: []const model.EntityId) Error!void {
+/// entity. In a traversal every end is rendered in full once in the response
+/// and named by id afterwards. Every detail level keeps the claim's resolution
+/// category, producer name, and freshness.
+fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, direction: ?[]const u8, detail: DetailArg, in_view: []const model.EntityId, step: ?Step) Error!void {
     const relationship = assertion.relationship().?;
     const end = struct {
-        fn shape(d: DetailArg, view: []const model.EntityId, id: model.EntityId) EntityShape {
-            if (d == .full) return .brief;
-            return if (std.mem.indexOfScalar(model.EntityId, view, id) != null) .id else .compact;
+        fn write(c: *Context, w: *Stringify, d: DetailArg, view: []const model.EntityId, id: model.EntityId) Error!void {
+            const shape: EntityShape = if (c.rendered != null)
+                (if (try c.renderOnce(id)) .id else if (d == .full) .brief else .compact)
+            else if (d == .full)
+                .brief
+            else if (std.mem.indexOfScalar(model.EntityId, view, id) != null) .id else .compact;
+            try writeEntityRef(c, w, id, shape);
         }
     };
     try s.beginObject();
@@ -954,16 +988,22 @@ fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, d
         try s.objectField("direction");
         try s.write(value);
     }
+    if (step) |found| {
+        try s.objectField("distance");
+        try s.write(found.distance);
+        try s.objectField("from");
+        try s.write(@intFromEnum(found.from));
+    }
     try s.objectField("kind");
     try s.write(@tagName(relationship.kind));
     try s.objectField("source");
-    try writeEntityRef(ctx, s, relationship.source, end.shape(detail, in_view, relationship.source));
+    try end.write(ctx, s, detail, in_view, relationship.source);
     try s.objectField("target");
     try s.beginObject();
     switch (relationship.target) {
         .entity => |id| {
             try s.objectField("entity");
-            try writeEntityRef(ctx, s, id, end.shape(detail, in_view, id));
+            try end.write(ctx, s, detail, in_view, id);
         },
         .designator => |designator| {
             try s.objectField("designator");
@@ -1560,7 +1600,7 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
                 if ((try seen.getOrPut(ctx.arena, assertion.id)).found_existing) continue;
                 total += 1;
                 if (total <= position or total > position + limit) continue;
-                if (try ctx.append(s, writeRelationship, .{ assertion, @as(?[]const u8, pass.name), detail, @as([]const model.EntityId, in_view.items) })) returned += 1 else omitted += 1;
+                if (try ctx.append(s, writeRelationship, .{ assertion, @as(?[]const u8, pass.name), detail, @as([]const model.EntityId, in_view.items), @as(?Step, null) })) returned += 1 else omitted += 1;
             }
         }
     }
@@ -1602,6 +1642,8 @@ const max_focus: usize = 10;
 pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     const args = try Args(.semidx_context).init(ctx, arguments);
     const freshness = freshnessFilter(try args.choice(FreshnessArg, "freshness"));
+    const direction = try args.choice(DirectionArg, "direction");
+    const depth = try args.count("depth");
     const limit = try args.count("relationship_limit");
     const diagnostic_limit = try args.count("diagnostic_limit");
     const detail = try args.choice(DetailArg, "detail");
@@ -1610,11 +1652,22 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     const targets = try selectTargets(ctx, args, freshness, true);
     const snapshot = ctx.snapshot;
     const shown = targets[0..@min(targets.len, max_focus)];
+    // Depth 1 renders what it rendered before traversal existed.
+    if (depth > 1) ctx.rendered = .empty;
 
     var hints: Hints = .{};
     var returned_focus: usize = 0;
     var omitted_relationships: usize = 0;
     var omitted_diagnostics: usize = 0;
+    // Traversal state: entities reached so far (focus included), relationships
+    // already listed, and the entities the next step expands.
+    var visited: std.AutoHashMapUnmanaged(model.EntityId, void) = .empty;
+    var listed: std.AutoHashMapUnmanaged(model.AssertionId, void) = .empty;
+    var frontier: std.ArrayList(model.EntityId) = .empty;
+    // Every focus entity has its own focus block, so a traversal never
+    // expands one again.
+    for (shown) |entity| try visited.put(ctx.arena, entity.id, {});
+
     try beginStructured(ctx, s);
     try s.objectField("focus");
     try s.beginArray();
@@ -1623,6 +1676,7 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
         // under the same budget.
         const rendered = try ctx.item(s, writeEntity, .{ entity, if (detail == .full) EntityShape.full else EntityShape.focus }) orelse break;
         returned_focus += 1;
+        _ = try ctx.renderOnce(entity.id);
         try s.beginObject();
         try s.objectField("entity");
         try writeRaw(s, rendered);
@@ -1636,11 +1690,8 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
             if (snapshot.unit(id)) |view| try writeUnit(ctx, s, view, detail) else try s.write(null);
         } else try s.write(null);
 
-        const passes = [_]struct { name: []const u8, filter: Snapshot.RelationshipFilter }{
-            .{ .name = "incoming", .filter = .{ .target = entity.id, .freshness = freshness } },
-            .{ .name = "outgoing", .filter = .{ .source = entity.id, .freshness = freshness } },
-        };
-        for (passes) |pass| {
+        for (relationshipPasses(entity.id, direction, freshness)) |pass| {
+            if (!pass.enabled) continue;
             var n: usize = 0;
             var returned: usize = 0;
             try s.objectField(pass.name);
@@ -1649,14 +1700,22 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
             while (found.next()) |assertion| {
                 n += 1;
                 if (n > limit) continue;
-                if (try ctx.append(s, writeRelationship, .{ assertion, @as(?[]const u8, null), detail, @as([]const model.EntityId, &.{entity.id}) })) returned += 1 else omitted_relationships += 1;
+                if (!try ctx.append(s, writeRelationship, .{ assertion, @as(?[]const u8, null), detail, @as([]const model.EntityId, &.{entity.id}), @as(?Step, null) })) {
+                    omitted_relationships += 1;
+                    continue;
+                }
+                returned += 1;
+                if (depth > 1) try reach(ctx, &visited, &listed, &frontier, assertion, pass.incoming);
             }
             try s.endArray();
-            try s.objectField(if (pass.name[0] == 'i') "incoming_total" else "outgoing_total");
+            try s.objectField(if (pass.incoming) "incoming_total" else "outgoing_total");
             try s.write(n);
-            try s.objectField(if (pass.name[0] == 'i') "incoming_truncated" else "outgoing_truncated");
+            try s.objectField(if (pass.incoming) "incoming_truncated" else "outgoing_truncated");
             try s.write(returned < n);
-            if (n > limit) try hints.add(ctx.arena, pass.name, .raise, raisable(.semidx_context, "relationship_limit", limit));
+            if (n > limit) {
+                try hints.add(ctx.arena, pass.name, .raise, raisable(.semidx_context, "relationship_limit", limit));
+                if (direction == .both) try hints.add(ctx.arena, pass.name, .narrow, &.{"direction"});
+            }
         }
 
         var diagnostics: usize = 0;
@@ -1698,18 +1757,81 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     try s.write(targets.len);
     try s.objectField("focus_truncated");
     try s.write(returned_focus < targets.len);
+
+    var omitted_edges: usize = 0;
+    if (depth > 1) {
+        try s.objectField("traversal");
+        try s.beginObject();
+        try s.objectField("depth");
+        try s.write(depth);
+        try s.objectField("direction");
+        try s.write(@tagName(direction));
+        var edges_total: usize = 0;
+        var edges_returned: usize = 0;
+        var cut_by_limit = false;
+        try s.objectField("edges");
+        try s.beginArray();
+        var distance: u32 = 2;
+        while (distance <= depth and frontier.items.len != 0) : (distance += 1) {
+            const expanding = try frontier.toOwnedSlice(ctx.arena);
+            for (expanding) |node| {
+                for (relationshipPasses(node, direction, freshness)) |pass| {
+                    if (!pass.enabled) continue;
+                    var n: usize = 0;
+                    var found = snapshot.relationships(pass.filter);
+                    while (found.next()) |assertion| {
+                        // A relationship listed from its other end, or at an
+                        // earlier step, is not listed again.
+                        if (listed.contains(assertion.id)) continue;
+                        n += 1;
+                        edges_total += 1;
+                        if (n > limit) {
+                            cut_by_limit = true;
+                            continue;
+                        }
+                        const step: Step = .{ .distance = distance, .from = node };
+                        if (!try ctx.append(s, writeRelationship, .{ assertion, @as(?[]const u8, pass.name), detail, @as([]const model.EntityId, &.{}), @as(?Step, step) })) {
+                            omitted_edges += 1;
+                            continue;
+                        }
+                        edges_returned += 1;
+                        try reach(ctx, &visited, &listed, &frontier, assertion, pass.incoming);
+                    }
+                }
+            }
+        }
+        try s.endArray();
+        try s.objectField("edges_total");
+        try s.write(edges_total);
+        try s.objectField("edges_truncated");
+        try s.write(edges_returned < edges_total);
+        try s.objectField("reached_total");
+        try s.write(visited.count() - shown.len);
+        try s.endObject();
+        if (cut_by_limit) {
+            try hints.add(ctx.arena, "edges", .raise, raisable(.semidx_context, "relationship_limit", limit));
+            if (direction == .both) try hints.add(ctx.arena, "edges", .narrow, &.{"direction"});
+            try hints.add(ctx.arena, "edges", .lower, &.{"depth"});
+        }
+    }
+
     try writeBudgetOutcome(ctx, s, .{
         .focus = shown.len - returned_focus,
         .relationships = omitted_relationships,
         .diagnostics = omitted_diagnostics,
+        .edges = omitted_edges,
     });
     const narrow_focus = try std.mem.concat(ctx.arena, []const u8, &.{ &.{"entity_id"}, try args.unset(&.{ "path", "language" }) });
     if (targets.len > max_focus) {
         try hints.add(ctx.arena, "focus", .narrow, narrow_focus);
     }
     if (ctx.budget_exhausted) {
-        if (targets.len > 1) try hints.add(ctx.arena, "response", .narrow, narrow_focus);
+        var narrow: std.ArrayList([]const u8) = .empty;
+        if (targets.len > 1) try narrow.appendSlice(ctx.arena, narrow_focus);
+        if (direction == .both) try narrow.append(ctx.arena, "direction");
+        try hints.add(ctx.arena, "response", .narrow, narrow.items);
         var lower: std.ArrayList([]const u8) = .empty;
+        if (depth > 1) try lower.append(ctx.arena, "depth");
         if (limit > 1) try lower.append(ctx.arena, "relationship_limit");
         if (diagnostic_limit > 1) try lower.append(ctx.arena, "diagnostic_limit");
         try hints.add(ctx.arena, "response", .lower, lower.items);
@@ -1717,8 +1839,53 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     }
     try hints.write(s);
     try s.objectField("budget");
-    try s.write(.{ .detail = detail, .relationship_limit = limit, .diagnostic_limit = diagnostic_limit, .focus_limit = max_focus, .max_response_bytes = max_bytes });
+    try s.write(.{
+        .detail = detail,
+        .direction = direction,
+        .depth = depth,
+        .relationship_limit = limit,
+        .diagnostic_limit = diagnostic_limit,
+        .focus_limit = max_focus,
+        .max_response_bytes = max_bytes,
+    });
     try s.endObject();
+}
+
+const RelationshipPass = struct {
+    name: []const u8,
+    incoming: bool,
+    enabled: bool,
+    filter: Snapshot.RelationshipFilter,
+};
+
+/// The relationships into and out of `id`, each enabled when `direction`
+/// includes it.
+fn relationshipPasses(id: model.EntityId, direction: DirectionArg, freshness: ?model.Freshness) [2]RelationshipPass {
+    return .{
+        .{ .name = "incoming", .incoming = true, .enabled = direction != .outgoing, .filter = .{ .target = id, .freshness = freshness } },
+        .{ .name = "outgoing", .incoming = false, .enabled = direction != .incoming, .filter = .{ .source = id, .freshness = freshness } },
+    };
+}
+
+/// Records a listed relationship and queues the entity at its far end for the
+/// next traversal step, once. A designator is not an entity and is never
+/// followed.
+fn reach(
+    ctx: *Context,
+    visited: *std.AutoHashMapUnmanaged(model.EntityId, void),
+    listed: *std.AutoHashMapUnmanaged(model.AssertionId, void),
+    frontier: *std.ArrayList(model.EntityId),
+    assertion: model.Assertion,
+    incoming: bool,
+) Allocator.Error!void {
+    try listed.put(ctx.arena, assertion.id, {});
+    const relationship = assertion.relationship().?;
+    const far: model.EntityId = if (incoming) relationship.source else switch (relationship.target) {
+        .entity => |id| id,
+        .designator => return,
+    };
+    if ((try visited.getOrPut(ctx.arena, far)).found_existing) return;
+    try frontier.append(ctx.arena, far);
 }
 
 test "every tool schema is one line of valid JSON naming exactly the declared arguments" {
