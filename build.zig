@@ -285,6 +285,33 @@ pub fn build(b: *std.Build) void {
     const run_stdio_dogfood = b.addRunArtifact(stdio_dogfood);
     run_stdio_dogfood.has_side_effects = true;
     dogfood_step.dependOn(&run_stdio_dogfood.step);
+
+    // The habit loop gate (docs/mcp/habit_loop_gate.md): the dogfood proofs
+    // are its repository-copy profile, and the fixture profile runs the same
+    // loop over a small controlled root copied from fixtures/vertical-slice.
+    const gate_step = b.step("preview-gate", "Run the habit loop gate: the repository-copy and fixture profiles of the MCP preview");
+    gate_step.dependOn(dogfood_step);
+
+    const fixture_gate_options = b.addOptions();
+    fixture_gate_options.addOptionPath("mcp_exe", mcp_exe.getEmittedBin());
+    fixture_gate_options.addOption([]const u8, "fixtures_dir", b.pathFromRoot("fixtures/vertical-slice"));
+    fixture_gate_options.addOption([]const u8, "product_version", manifest.version);
+    const fixture_gate = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/mcp_fixture_gate_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            // The stdio client polls the child's exit with `waitpid`.
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "build_options", .module = fixture_gate_options.createModule() },
+            },
+        }),
+    });
+    const run_fixture_gate = b.addRunArtifact(fixture_gate);
+    // The fixtures are read at run time.
+    run_fixture_gate.has_side_effects = true;
+    gate_step.dependOn(&run_fixture_gate.step);
 }
 
 fn addParserDeps(b: *std.Build, module: *std.Build.Module, deps: ParserDeps) void {
