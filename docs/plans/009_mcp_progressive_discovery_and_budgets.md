@@ -2,8 +2,8 @@
 title: "MCP progressive discovery and response budgets"
 doc_type: "plan"
 lifecycle: "active"
-status: "planned"
-agent_action: "ready_for_execution"
+status: "in_progress"
+agent_action: "reference_for_context"
 updated: "2026-09-17"
 ---
 
