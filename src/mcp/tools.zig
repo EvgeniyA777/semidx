@@ -100,6 +100,8 @@ const shared_params = struct {
     const path: Param = .{ .name = "path", .type = .string };
     const detail = choiceParam(DetailArg, "detail", .compact, "compact (default) renders a subset of the full fields for orientation; " ++
         "full renders every recorded field.");
+    const max_response_bytes = countParam("max_response_bytes", 32_000, 2_000_000, "Stop appending whole items once the structured " ++
+        "result would exceed this many bytes; the first item is always returned, and the result reports budget_exhausted.");
 };
 
 /// Renders a JSON string literal at compile time.
@@ -154,6 +156,7 @@ pub const definitions = [_]Definition{
         .{ .name = "path_prefix", .type = .string, .description = "Root-relative, '/'-separated directory; omit for the root." },
         shared_params.language,
         countParam("limit", 100, 1000, "Maximum entries."),
+        shared_params.max_response_bytes,
     }),
     define(.semidx_repo_map, "Repository map", "List indexed source units with their analysis state and the top-level definitions the graph " ++
         "records in each. Bounded; results report truncation.", &.{
@@ -162,6 +165,7 @@ pub const definitions = [_]Definition{
         countParam("limit", 100, 1000, "Maximum files."),
         countParam("definitions_per_file", 50, 500, null),
         shared_params.detail,
+        shared_params.max_response_bytes,
     }),
     define(.semidx_find_definitions, "Find definitions", "Find definition entities by exact name, root-relative path, language, and role, with the " ++
         "producer, resolution, and freshness of each definition's existence claim.", &.{
@@ -172,6 +176,7 @@ pub const definitions = [_]Definition{
         shared_params.freshness,
         shared_params.resolution,
         countParam("limit", 50, 500, null),
+        shared_params.max_response_bytes,
     }),
     define(.semidx_references, "References and calls", "Return the REFERENCES and CALLS relationships recorded for a definition, identified by " ++
         "entity_id or by exact name. A call is one occurrence and is listed once. Incoming relationships target the " ++
@@ -185,6 +190,7 @@ pub const definitions = [_]Definition{
         shared_params.resolution,
         countParam("limit", 100, 1000, null),
         shared_params.detail,
+        shared_params.max_response_bytes,
     }),
     define(.semidx_context, "Graph context", "Return a bounded graph neighborhood around an entity (entity_id), a definition name, or a " ++
         "source unit (path): the entity, its unit's analysis state, incoming and outgoing relationships of every " ++
@@ -197,6 +203,7 @@ pub const definitions = [_]Definition{
         countParam("relationship_limit", 50, 500, "Maximum incoming and, separately, outgoing relationships per focus entity."),
         countParam("diagnostic_limit", 50, 500, "Maximum diagnostics per focus entity's unit."),
         shared_params.detail,
+        shared_params.max_response_bytes,
     }),
     define(.semidx_refresh, "Refresh index", "Rescan the configured root, reconcile the changes into the graph, and publish the next " ++
         "snapshot. Later calls observe the new snapshot; a failed refresh keeps the previous one.", &.{}),
@@ -279,10 +286,48 @@ pub const Context = struct {
     /// Why a call failed, reported as a tool execution error.
     failure: ?[]const u8 = null,
     existence: ?std.AutoHashMapUnmanaged(model.EntityId, usize) = null,
+    /// The response budget of a list tool: whole items stop being appended
+    /// once the next one would take the structured result past this many
+    /// bytes. Null for a tool without one.
+    max_response_bytes: ?usize = null,
+    /// Items appended under the budget so far.
+    admitted: usize = 0,
+    /// Set when the budget refused an item. No later item is appended, so what
+    /// a list returns is always a prefix of what it selected.
+    budget_exhausted: bool = false,
 
     pub fn fail(self: *Context, comptime fmt: []const u8, args: anytype) Error {
         self.failure = try std.fmt.allocPrint(self.arena, fmt, args);
         return error.ToolFailed;
+    }
+
+    /// Renders one whole list item on its own with `render(ctx, s, args...)`
+    /// and returns its JSON when appending it at `s` keeps the structured
+    /// result within the budget, or null when it does not. The first item of
+    /// a response is always returned, so a continuation always advances.
+    fn item(self: *Context, s: *Stringify, comptime render: anytype, args: anytype) Error!?[]const u8 {
+        if (self.budget_exhausted) return null;
+        var scratch: Writer.Allocating = .init(self.arena);
+        var inner: Stringify = .{ .writer = &scratch.writer };
+        try @call(.auto, render, .{ self, &inner } ++ args);
+        const rendered = scratch.written();
+        if (self.max_response_bytes) |max| {
+            // Every tool result is rendered into one allocating writer, whose
+            // buffer holds everything written so far; +1 for a separator.
+            if (self.admitted != 0 and s.writer.end + rendered.len + 1 > max) {
+                self.budget_exhausted = true;
+                return null;
+            }
+        }
+        self.admitted += 1;
+        return rendered;
+    }
+
+    /// `item`, appended to the array open at `s`. Returns whether it was.
+    fn append(self: *Context, s: *Stringify, comptime render: anytype, args: anytype) Error!bool {
+        const rendered = try self.item(s, render, args) orelse return false;
+        try writeRaw(s, rendered);
+        return true;
     }
 
     /// The latest existence assertion recorded for each entity.
@@ -491,6 +536,24 @@ const Hints = struct {
         try s.endArray();
     }
 };
+
+/// Writes JSON already rendered by `Context.item` as the next value at `s`.
+fn writeRaw(s: *Stringify, rendered: []const u8) Error!void {
+    try s.beginWriteRaw();
+    try s.writer.writeAll(rendered);
+    s.endWriteRaw();
+}
+
+/// `budget_exhausted`, and when it is true, `omitted_by_budget`: how many
+/// items each list selected within its own limit but did not return.
+fn writeBudgetOutcome(ctx: *Context, s: *Stringify, omitted: anytype) Error!void {
+    try s.objectField("budget_exhausted");
+    try s.write(ctx.budget_exhausted);
+    if (ctx.budget_exhausted) {
+        try s.objectField("omitted_by_budget");
+        try s.write(omitted);
+    }
+}
 
 /// `name` alone when the call's value for it is below its declared maximum.
 fn raisable(comptime tool: Tool, comptime name: []const u8, current: u32) []const []const u8 {
@@ -1041,6 +1104,8 @@ pub fn outline(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     const prefix = std.mem.trimEnd(u8, try args.string("path_prefix") orelse "", "/");
     const language = try args.choice(model.Language, "language");
     const limit = try args.count("limit");
+    const max_bytes = try args.count("max_response_bytes");
+    ctx.max_response_bytes = max_bytes;
     const directory = if (prefix.len == 0) "" else try std.mem.concat(ctx.arena, u8, &.{ prefix, "/" });
 
     const counts = try unitCounts(ctx);
@@ -1075,37 +1140,50 @@ pub fn outline(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     try protocol.writeString(s, directory);
     try s.objectField("entries");
     try s.beginArray();
-    for (entries.items[0..@min(entries.items.len, limit)]) |entry| {
-        try s.beginObject();
-        try s.objectField("name");
-        try protocol.writeString(s, entry.name);
-        try s.objectField("path");
-        try protocol.writeString(s, try std.mem.concat(ctx.arena, u8, &.{ directory, entry.name, if (entry.unit == null) "/" else "" }));
-        try s.objectField("type");
-        try s.write(if (entry.unit == null) "directory" else "file");
-        if (entry.unit) |view| {
-            try s.objectField("unit");
-            try writeUnit(ctx, s, view, .compact);
-        }
-        try s.objectField("counts");
-        try entry.counts.write(s, entry.unit == null);
-        try s.endObject();
+    const page = entries.items[0..@min(entries.items.len, limit)];
+    var returned: usize = 0;
+    for (page) |entry| {
+        if (!try ctx.append(s, writeOutlineEntry, .{ directory, entry })) break;
+        returned += 1;
     }
     try s.endArray();
     try s.objectField("entries_total");
     try s.write(entries.items.len);
     try s.objectField("truncated");
-    try s.write(entries.items.len > limit);
+    try s.write(returned < entries.items.len);
     try s.objectField("totals");
     try totals.write(s, true);
+    try writeBudgetOutcome(ctx, s, .{ .entries = page.len - returned });
     var hints: Hints = .{};
+    const narrow = try std.mem.concat(ctx.arena, []const u8, &.{ &.{"path_prefix"}, try args.unset(&.{"language"}) });
     if (entries.items.len > limit) {
-        try hints.add(ctx.arena, "entries", .narrow, try std.mem.concat(ctx.arena, []const u8, &.{ &.{"path_prefix"}, try args.unset(&.{"language"}) }));
+        try hints.add(ctx.arena, "entries", .narrow, narrow);
         try hints.add(ctx.arena, "entries", .raise, raisable(.semidx_outline, "limit", limit));
+    }
+    if (ctx.budget_exhausted) {
+        try hints.add(ctx.arena, "response", .narrow, narrow);
+        try hints.add(ctx.arena, "response", .raise, raisable(.semidx_outline, "max_response_bytes", max_bytes));
     }
     try hints.write(s);
     try s.objectField("budget");
-    try s.write(.{ .limit = limit });
+    try s.write(.{ .limit = limit, .max_response_bytes = max_bytes });
+    try s.endObject();
+}
+
+fn writeOutlineEntry(ctx: *Context, s: *Stringify, directory: []const u8, entry: OutlineEntry) Error!void {
+    try s.beginObject();
+    try s.objectField("name");
+    try protocol.writeString(s, entry.name);
+    try s.objectField("path");
+    try protocol.writeString(s, try std.mem.concat(ctx.arena, u8, &.{ directory, entry.name, if (entry.unit == null) "/" else "" }));
+    try s.objectField("type");
+    try s.write(if (entry.unit == null) "directory" else "file");
+    if (entry.unit) |view| {
+        try s.objectField("unit");
+        try writeUnit(ctx, s, view, .compact);
+    }
+    try s.objectField("counts");
+    try entry.counts.write(s, entry.unit == null);
     try s.endObject();
 }
 
@@ -1116,6 +1194,8 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     const limit = try args.count("limit");
     const per_file = try args.count("definitions_per_file");
     const detail = try args.choice(DetailArg, "detail");
+    const max_bytes = try args.count("max_response_bytes");
+    ctx.max_response_bytes = max_bytes;
     const snapshot = ctx.snapshot;
 
     var order: std.ArrayList(usize) = .empty;
@@ -1134,36 +1214,13 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     try beginStructured(ctx, s);
     try s.objectField("files");
     try s.beginArray();
-    for (order.items[0..@min(order.items.len, limit)]) |i| {
-        const view = snapshot.units[i];
-        try s.beginObject();
-        try s.objectField("unit");
-        try writeUnit(ctx, s, view, detail);
-        try s.objectField("diagnostics");
-        try writeDiagnosticCounts(ctx, s, view.id);
-
-        var top_level: usize = 0;
-        var nested: usize = 0;
-        try s.objectField("definitions");
-        try s.beginArray();
-        var found = snapshot.entitiesMatching(.{ .kind = .definition, .scope = .{ .unit = view.id } });
-        while (found.next()) |entity| {
-            if (entity.identity.container_path.len != 0) {
-                nested += 1;
-                continue;
-            }
-            top_level += 1;
-            if (top_level <= per_file) try writeEntity(ctx, s, entity, if (detail == .full) .brief else .listed);
-        }
-        try s.endArray();
-        try s.objectField("top_level_definitions_total");
-        try s.write(top_level);
-        try s.objectField("definitions_truncated");
-        try s.write(top_level > per_file);
-        try s.objectField("nested_definitions_total");
-        try s.write(nested);
-        try s.endObject();
-        if (top_level > per_file) {
+    const page = order.items[0..@min(order.items.len, limit)];
+    var returned: usize = 0;
+    for (page) |i| {
+        var definitions_truncated = false;
+        if (!try ctx.append(s, writeMapFile, .{ snapshot.units[i], detail, per_file, &definitions_truncated })) break;
+        returned += 1;
+        if (definitions_truncated) {
             try hints.add(ctx.arena, "definitions", .raise, raisable(.semidx_repo_map, "definitions_per_file", per_file));
         }
     }
@@ -1171,15 +1228,55 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     try s.objectField("files_total");
     try s.write(order.items.len);
     try s.objectField("truncated");
-    try s.write(order.items.len > limit);
+    try s.write(returned < order.items.len);
+    try writeBudgetOutcome(ctx, s, .{ .files = page.len - returned });
+    const narrow = try args.unset(&.{ "path_prefix", "language" });
     if (order.items.len > limit) {
-        try hints.add(ctx.arena, "files", .narrow, try args.unset(&.{ "path_prefix", "language" }));
+        try hints.add(ctx.arena, "files", .narrow, narrow);
         try hints.add(ctx.arena, "files", .raise, raisable(.semidx_repo_map, "limit", limit));
+    }
+    if (ctx.budget_exhausted) {
+        try hints.add(ctx.arena, "response", .narrow, narrow);
+        try hints.add(ctx.arena, "response", .raise, raisable(.semidx_repo_map, "max_response_bytes", max_bytes));
+        try hints.add(ctx.arena, "response", .lower, if (per_file > 1) &.{"definitions_per_file"} else &.{});
     }
     try hints.write(s);
     try s.objectField("budget");
-    try s.write(.{ .detail = detail, .limit = limit, .definitions_per_file = per_file });
+    try s.write(.{ .detail = detail, .limit = limit, .definitions_per_file = per_file, .max_response_bytes = max_bytes });
     try s.endObject();
+}
+
+/// One repository map file: its unit, diagnostic counts, and top-level
+/// definitions. Sets `definitions_truncated` when `per_file` cut them.
+fn writeMapFile(ctx: *Context, s: *Stringify, view: semidx.core.graph.SourceUnitView, detail: DetailArg, per_file: u32, definitions_truncated: *bool) Error!void {
+    try s.beginObject();
+    try s.objectField("unit");
+    try writeUnit(ctx, s, view, detail);
+    try s.objectField("diagnostics");
+    try writeDiagnosticCounts(ctx, s, view.id);
+
+    var top_level: usize = 0;
+    var nested: usize = 0;
+    try s.objectField("definitions");
+    try s.beginArray();
+    var found = ctx.snapshot.entitiesMatching(.{ .kind = .definition, .scope = .{ .unit = view.id } });
+    while (found.next()) |entity| {
+        if (entity.identity.container_path.len != 0) {
+            nested += 1;
+            continue;
+        }
+        top_level += 1;
+        if (top_level <= per_file) try writeEntity(ctx, s, entity, if (detail == .full) .brief else .listed);
+    }
+    try s.endArray();
+    try s.objectField("top_level_definitions_total");
+    try s.write(top_level);
+    try s.objectField("definitions_truncated");
+    try s.write(top_level > per_file);
+    try s.objectField("nested_definitions_total");
+    try s.write(nested);
+    try s.endObject();
+    definitions_truncated.* = top_level > per_file;
 }
 
 pub fn findDefinitions(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
@@ -1194,11 +1291,15 @@ pub fn findDefinitions(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Erro
     };
     const resolution = try args.choice(ResolutionArg, "resolution");
     const limit = try args.count("limit");
+    const max_bytes = try args.count("max_response_bytes");
+    ctx.max_response_bytes = max_bytes;
 
     try beginStructured(ctx, s);
     try s.objectField("definitions");
     try s.beginArray();
     var total: usize = 0;
+    var returned: usize = 0;
+    var omitted: usize = 0;
     var found = ctx.snapshot.entitiesMatching(filter);
     while (found.next()) |entity| {
         if (resolution != .any) {
@@ -1206,23 +1307,29 @@ pub fn findDefinitions(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Erro
             if (!resolutionMatches(resolution, existence.resolution)) continue;
         }
         total += 1;
-        if (total <= limit) try writeEntity(ctx, s, entity, .full);
+        if (total > limit) continue;
+        if (try ctx.append(s, writeEntity, .{ entity, EntityShape.full })) returned += 1 else omitted += 1;
     }
     try s.endArray();
     try s.objectField("total");
     try s.write(total);
     try s.objectField("truncated");
-    try s.write(total > limit);
+    try s.write(returned < total);
+    try writeBudgetOutcome(ctx, s, .{ .definitions = omitted });
     var hints: Hints = .{};
+    const unset = try args.unset(&.{ "name", "path", "language", "role" });
+    const narrow = if (resolution == .any) try std.mem.concat(ctx.arena, []const u8, &.{ unset, &.{"resolution"} }) else unset;
     if (total > limit) {
-        const unset = try args.unset(&.{ "name", "path", "language", "role" });
-        const narrow = if (resolution == .any) try std.mem.concat(ctx.arena, []const u8, &.{ unset, &.{"resolution"} }) else unset;
         try hints.add(ctx.arena, "definitions", .narrow, narrow);
         try hints.add(ctx.arena, "definitions", .raise, raisable(.semidx_find_definitions, "limit", limit));
     }
+    if (ctx.budget_exhausted) {
+        try hints.add(ctx.arena, "response", .narrow, narrow);
+        try hints.add(ctx.arena, "response", .raise, raisable(.semidx_find_definitions, "max_response_bytes", max_bytes));
+    }
     try hints.write(s);
     try s.objectField("budget");
-    try s.write(.{ .limit = limit });
+    try s.write(.{ .limit = limit, .max_response_bytes = max_bytes });
     try s.endObject();
 }
 
@@ -1275,24 +1382,34 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
     const resolution = try args.choice(ResolutionArg, "resolution");
     const limit = try args.count("limit");
     const detail = try args.choice(DetailArg, "detail");
+    const max_bytes = try args.count("max_response_bytes");
+    ctx.max_response_bytes = max_bytes;
     const targets = try selectTargets(ctx, args, freshness, false);
     const shown_targets = targets[0..@min(targets.len, max_targets)];
-    // Compact names a relationship end that is a listed target by id alone.
-    const in_view = try ctx.arena.alloc(model.EntityId, if (detail == .compact) shown_targets.len else 0);
-    for (in_view, shown_targets[0..in_view.len]) |*id, target| id.* = target.id;
 
     try beginStructured(ctx, s);
     try s.objectField("targets");
     try s.beginArray();
-    for (shown_targets) |target| try writeEntity(ctx, s, target, if (detail == .full) .full else .focus);
+    // Compact names a relationship end that is a returned target by id alone.
+    // A target the budget refused leaves the budget exhausted, so no
+    // relationship is rendered after it.
+    var in_view: std.ArrayList(model.EntityId) = .empty;
+    for (shown_targets) |target| {
+        if (!try ctx.append(s, writeEntity, .{ target, if (detail == .full) EntityShape.full else EntityShape.focus })) break;
+        try in_view.append(ctx.arena, target.id);
+    }
+    const returned_targets = in_view.items.len;
+    if (detail == .full) in_view.clearRetainingCapacity();
     try s.endArray();
     try s.objectField("targets_total");
     try s.write(targets.len);
     try s.objectField("targets_truncated");
-    try s.write(targets.len > max_targets);
+    try s.write(returned_targets < targets.len);
 
     var seen: std.AutoHashMapUnmanaged(model.AssertionId, void) = .empty;
     var total: usize = 0;
+    var returned: usize = 0;
+    var omitted: usize = 0;
     try s.objectField("relationships");
     try s.beginArray();
     for (shown_targets) |target| {
@@ -1309,7 +1426,8 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
                 // still one occurrence.
                 if ((try seen.getOrPut(ctx.arena, assertion.id)).found_existing) continue;
                 total += 1;
-                if (total <= limit) try writeRelationship(ctx, s, assertion, pass.name, detail, in_view);
+                if (total > limit) continue;
+                if (try ctx.append(s, writeRelationship, .{ assertion, @as(?[]const u8, pass.name), detail, @as([]const model.EntityId, in_view.items) })) returned += 1 else omitted += 1;
             }
         }
     }
@@ -1317,24 +1435,30 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
     try s.objectField("relationships_total");
     try s.write(total);
     try s.objectField("truncated");
-    try s.write(total > limit);
+    try s.write(returned < total);
+    try writeBudgetOutcome(ctx, s, .{ .targets = shown_targets.len - returned_targets, .relationships = omitted });
     var hints: Hints = .{};
     // `path` and `language` qualify a name; with `entity_id` they are refused.
     const by_name = !args.given("entity_id");
+    const narrow_targets = try std.mem.concat(ctx.arena, []const u8, &.{ &.{"entity_id"}, try args.unset(&.{ "path", "language" }) });
     if (targets.len > max_targets and by_name) {
-        try hints.add(ctx.arena, "targets", .narrow, try std.mem.concat(ctx.arena, []const u8, &.{ &.{"entity_id"}, try args.unset(&.{ "path", "language" }) }));
+        try hints.add(ctx.arena, "targets", .narrow, narrow_targets);
     }
+    var narrow: std.ArrayList([]const u8) = .empty;
+    if (by_name) try narrow.appendSlice(ctx.arena, try args.unset(&.{ "path", "language" }));
+    if (direction == .both) try narrow.append(ctx.arena, "direction");
+    if (resolution == .any) try narrow.append(ctx.arena, "resolution");
     if (total > limit) {
-        var narrow: std.ArrayList([]const u8) = .empty;
-        if (by_name) try narrow.appendSlice(ctx.arena, try args.unset(&.{ "path", "language" }));
-        if (direction == .both) try narrow.append(ctx.arena, "direction");
-        if (resolution == .any) try narrow.append(ctx.arena, "resolution");
         try hints.add(ctx.arena, "relationships", .narrow, narrow.items);
         try hints.add(ctx.arena, "relationships", .raise, raisable(.semidx_references, "limit", limit));
     }
+    if (ctx.budget_exhausted) {
+        try hints.add(ctx.arena, "response", .narrow, if (returned_targets < shown_targets.len and by_name) narrow_targets else narrow.items);
+        try hints.add(ctx.arena, "response", .raise, raisable(.semidx_references, "max_response_bytes", max_bytes));
+    }
     try hints.write(s);
     try s.objectField("budget");
-    try s.write(.{ .detail = detail, .limit = limit, .target_limit = max_targets });
+    try s.write(.{ .detail = detail, .limit = limit, .target_limit = max_targets, .max_response_bytes = max_bytes });
     try s.endObject();
 }
 
@@ -1346,17 +1470,27 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     const limit = try args.count("relationship_limit");
     const diagnostic_limit = try args.count("diagnostic_limit");
     const detail = try args.choice(DetailArg, "detail");
+    const max_bytes = try args.count("max_response_bytes");
+    ctx.max_response_bytes = max_bytes;
     const targets = try selectTargets(ctx, args, freshness, true);
     const snapshot = ctx.snapshot;
+    const shown = targets[0..@min(targets.len, max_focus)];
 
     var hints: Hints = .{};
+    var returned_focus: usize = 0;
+    var omitted_relationships: usize = 0;
+    var omitted_diagnostics: usize = 0;
     try beginStructured(ctx, s);
     try s.objectField("focus");
     try s.beginArray();
-    for (targets[0..@min(targets.len, max_focus)]) |entity| {
+    for (shown) |entity| {
+        // The focus entity is the item that admits a focus; its lists follow
+        // under the same budget.
+        const rendered = try ctx.item(s, writeEntity, .{ entity, if (detail == .full) EntityShape.full else EntityShape.focus }) orelse break;
+        returned_focus += 1;
         try s.beginObject();
         try s.objectField("entity");
-        try writeEntity(ctx, s, entity, if (detail == .full) .full else .focus);
+        try writeRaw(s, rendered);
 
         const unit_id: ?model.SourceUnitId = switch (entity.identity.scope) {
             .unit => |id| id,
@@ -1373,36 +1507,40 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
         };
         for (passes) |pass| {
             var n: usize = 0;
+            var returned: usize = 0;
             try s.objectField(pass.name);
             try s.beginArray();
             var found = snapshot.relationships(pass.filter);
             while (found.next()) |assertion| {
                 n += 1;
-                if (n <= limit) try writeRelationship(ctx, s, assertion, null, detail, &.{entity.id});
+                if (n > limit) continue;
+                if (try ctx.append(s, writeRelationship, .{ assertion, @as(?[]const u8, null), detail, @as([]const model.EntityId, &.{entity.id}) })) returned += 1 else omitted_relationships += 1;
             }
             try s.endArray();
             try s.objectField(if (pass.name[0] == 'i') "incoming_total" else "outgoing_total");
             try s.write(n);
             try s.objectField(if (pass.name[0] == 'i') "incoming_truncated" else "outgoing_truncated");
-            try s.write(n > limit);
+            try s.write(returned < n);
             if (n > limit) try hints.add(ctx.arena, pass.name, .raise, raisable(.semidx_context, "relationship_limit", limit));
         }
 
         var diagnostics: usize = 0;
+        var returned_diagnostics: usize = 0;
         try s.objectField("diagnostics");
         try s.beginArray();
         if (unit_id) |id| {
             for (snapshot.diagnostics) |diagnostic| {
                 if (diagnostic.unit != id) continue;
                 diagnostics += 1;
-                if (diagnostics <= diagnostic_limit) try writeDiagnostic(ctx, s, diagnostic, detail);
+                if (diagnostics > diagnostic_limit) continue;
+                if (try ctx.append(s, writeDiagnostic, .{ diagnostic, detail })) returned_diagnostics += 1 else omitted_diagnostics += 1;
             }
         }
         try s.endArray();
         try s.objectField("diagnostics_total");
         try s.write(diagnostics);
         try s.objectField("diagnostics_truncated");
-        try s.write(diagnostics > diagnostic_limit);
+        try s.write(returned_diagnostics < diagnostics);
         if (diagnostics > diagnostic_limit) try hints.add(ctx.arena, "diagnostics", .raise, raisable(.semidx_context, "diagnostic_limit", diagnostic_limit));
 
         try s.objectField("last_identity_event");
@@ -1424,13 +1562,27 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     try s.objectField("focus_total");
     try s.write(targets.len);
     try s.objectField("focus_truncated");
-    try s.write(targets.len > max_focus);
+    try s.write(returned_focus < targets.len);
+    try writeBudgetOutcome(ctx, s, .{
+        .focus = shown.len - returned_focus,
+        .relationships = omitted_relationships,
+        .diagnostics = omitted_diagnostics,
+    });
+    const narrow_focus = try std.mem.concat(ctx.arena, []const u8, &.{ &.{"entity_id"}, try args.unset(&.{ "path", "language" }) });
     if (targets.len > max_focus) {
-        try hints.add(ctx.arena, "focus", .narrow, try std.mem.concat(ctx.arena, []const u8, &.{ &.{"entity_id"}, try args.unset(&.{ "path", "language" }) }));
+        try hints.add(ctx.arena, "focus", .narrow, narrow_focus);
+    }
+    if (ctx.budget_exhausted) {
+        if (targets.len > 1) try hints.add(ctx.arena, "response", .narrow, narrow_focus);
+        var lower: std.ArrayList([]const u8) = .empty;
+        if (limit > 1) try lower.append(ctx.arena, "relationship_limit");
+        if (diagnostic_limit > 1) try lower.append(ctx.arena, "diagnostic_limit");
+        try hints.add(ctx.arena, "response", .lower, lower.items);
+        try hints.add(ctx.arena, "response", .raise, raisable(.semidx_context, "max_response_bytes", max_bytes));
     }
     try hints.write(s);
     try s.objectField("budget");
-    try s.write(.{ .detail = detail, .relationship_limit = limit, .diagnostic_limit = diagnostic_limit, .focus_limit = max_focus });
+    try s.write(.{ .detail = detail, .relationship_limit = limit, .diagnostic_limit = diagnostic_limit, .focus_limit = max_focus, .max_response_bytes = max_bytes });
     try s.endObject();
 }
 

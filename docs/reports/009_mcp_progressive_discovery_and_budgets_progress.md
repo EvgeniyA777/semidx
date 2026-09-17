@@ -24,7 +24,8 @@ gates, and the shape decisions later stages follow are recorded below.
 | Stage 1: Evidence refresh and budget targets | Completed (`1f95838`) | Baseline structured and transcript sizes over this repository at `2353145`, one real-client observation, hard gates, soft observations, and the default response budget target. No behavior change. |
 | Stage 2: Compact `semidx_references` | Completed (`9f4f3c2`) | `semidx_references` takes `detail` (`compact` default, `full`). Compact renders each listed target once, with its existence claim, and names a relationship end that is a listed target by `{id}`; the other end, resolution, producer, and evidence are compact. `writeString` at `limit` 1000: 24,716 transcript bytes against 56,964 full (43%), now a `compact_budget` hard gate. |
 | Stage 3: Truncation guidance | Completed (`ce55c9f`) | Cut lists in `semidx_repo_map`, `semidx_find_definitions`, `semidx_references`, and `semidx_context` carry `narrowing_hints` naming declared arguments to narrow or raise; complete results carry none. |
-| Stage 4: Repository outline | Completed | New `semidx_outline` lists the directories and files directly under a directory with unit, language, analysis, diagnostic, and definition counts and no definition entities. The root outline of this repository is 4,610 transcript bytes against 157,047 for the compact whole-repository map (2%). It is step 2 of the gate's required call sequence. |
+| Stage 4: Repository outline | Completed (`49304c3`) | New `semidx_outline` lists the directories and files directly under a directory with unit, language, analysis, diagnostic, and definition counts and no definition entities. The root outline of this repository is 4,610 transcript bytes against 157,047 for the compact whole-repository map (2%). It is step 2 of the gate's required call sequence. |
+| Stage 5: Whole-response budget | Completed | Every list tool takes `max_response_bytes` (32,000 default, 2,000,000 max), appends whole items only while the structured result stays within it, and reports `budget_exhausted`, `omitted_by_budget`, and `response` hints. The default whole-repository map now returns 31,355 structured bytes with 68 files selected and reports the rest omitted. |
 
 ## Plan Readiness Gate
 
@@ -279,3 +280,51 @@ Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig` (dispatch and tests),
 | `zig fmt --check build.zig src tests` | Pass |
 | `zig build test-mcp --summary all` | Pass; 24 passed, 1 skipped |
 | `zig build preview-gate --summary all` | Pass; 14/14 steps, 6/6 tests; outline 4,610 bytes (repository copy) and 4,458 bytes (fixture) |
+
+## Stage 5: Whole-Response Budget
+
+Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig` (tests),
+`tests/mcp_dogfood_test.zig`, this log.
+
+- `Context.item` renders one whole item into its own buffer and returns it
+  only when the tool's result writer, plus the item, stays within
+  `max_response_bytes`; `Context.append` writes it into the open array. The
+  first item of a response is always admitted. Once an item is refused,
+  `budget_exhausted` is set and every later item is refused without being
+  rendered, so each list returns a prefix of its selection.
+- Items: an outline entry, a map file (with its bounded definitions), a
+  definition, a references target, a relationship, a context focus entity
+  (which admits the focus and its lists), and a context diagnostic. The fixed
+  fields that follow the last item (totals, hints, budget) are not counted;
+  over this repository they add a few hundred bytes.
+- Each budgeted result reports `budget_exhausted`, and when it is true
+  `omitted_by_budget` with the count per list of items selected within the
+  list's own limit but not returned (`entries`; `files`; `definitions`;
+  `targets` and `relationships`; `focus`, `relationships`, and
+  `diagnostics`). Every `truncated` flag now compares returned with total, so
+  a list cut by the budget is never reported complete. Budget exhaustion adds
+  `response` hints (raise `max_response_bytes`; narrow; lower per-item limits
+  where they help).
+- The dogfood compact-versus-full comparisons and the evidence-text full map
+  pass `max_response_bytes` 2,000,000 so neither side is cut.
+
+### Sizes After Stage 5
+
+Same method as Stage 1, this repository at revision 90 of the working tree
+(`src/mcp/tools.zig` has grown, so absolute sizes differ from the baseline).
+
+| Call | Transcript bytes | Structured bytes | Outcome |
+| --- | ---: | ---: | --- |
+| `semidx_repo_map` `{}` | 67,537 | 31,355 | `budget_exhausted`, `truncated` |
+| `semidx_find_definitions` `{}` | 69,559 | 32,264 | `budget_exhausted`, `truncated` |
+| `semidx_context` `init` | 59,847 | 27,833 | fits |
+| `semidx_context` `health`, `relationship_limit` 500 | 61,117 | 28,171 | fits |
+| `semidx_references` `writeString`, `limit` 1000 | 27,891 | 12,730 | fits |
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-mcp --summary all` | Pass; 26 passed, 1 skipped. New tests: every budgeted tool at `max_response_bytes` 1 returns one item, valid JSON, `truncated`, and exact `omitted_by_budget`; defaults over a small root are not exhausted; a twelve-unit multi-focus context stays within 34,000 text bytes by default, reports exhaustion, and every returned list's `truncated` equals returned < total. |
+| `zig build preview-gate --summary all` | Pass; 14/14 steps, 6/6 tests; `compact_budget` 47% / 43% / 39% |

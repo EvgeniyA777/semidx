@@ -166,10 +166,10 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
 
     // -- repository map --------------------------------------------------------
     var map_bytes: usize = undefined;
-    const map = try gate.sizedCall(2, "semidx_repo_map", "{\"limit\":1000}", &map_bytes);
+    const map = try gate.sizedCall(2, "semidx_repo_map", "{\"limit\":1000,\"max_response_bytes\":2000000}", &map_bytes);
     try testing.expectEqualStrings("compact", map.get("budget").?.object.get("detail").?.string);
     var full_map_bytes: usize = undefined;
-    const full_map = try gate.sizedCall(20, "semidx_repo_map", "{\"limit\":1000,\"detail\":\"full\"}", &full_map_bytes);
+    const full_map = try gate.sizedCall(20, "semidx_repo_map", "{\"limit\":1000,\"detail\":\"full\",\"max_response_bytes\":2000000}", &full_map_bytes);
     try testing.expectEqual(first_revision, revisionOf(full_map));
     try testing.expectEqual(map.get("files_total").?.integer, full_map.get("files_total").?.integer);
     try expectAtMostHalf(&gate, "semidx_repo_map limit 1000", map_bytes, full_map_bytes);
@@ -278,11 +278,11 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     // Before Plan 006 every `protocol.writeString(...)` was an unresolved
     // designator, so references listed only same-unit callers.
     var imported_bytes: usize = undefined;
-    const imported = try gate.sizedCall(22, "semidx_references", "{\"name\":\"" ++ imported_name ++ "\",\"path\":\"" ++ imported_path ++ "\",\"limit\":1000}", &imported_bytes);
+    const imported = try gate.sizedCall(22, "semidx_references", "{\"name\":\"" ++ imported_name ++ "\",\"path\":\"" ++ imported_path ++ "\",\"limit\":1000,\"max_response_bytes\":2000000}", &imported_bytes);
     try testing.expect(!imported.get("truncated").?.bool);
     try testing.expectEqualStrings("compact", imported.get("budget").?.object.get("detail").?.string);
     var full_imported_bytes: usize = undefined;
-    const full_imported = try gate.sizedCall(27, "semidx_references", "{\"name\":\"" ++ imported_name ++ "\",\"path\":\"" ++ imported_path ++ "\",\"limit\":1000,\"detail\":\"full\"}", &full_imported_bytes);
+    const full_imported = try gate.sizedCall(27, "semidx_references", "{\"name\":\"" ++ imported_name ++ "\",\"path\":\"" ++ imported_path ++ "\",\"limit\":1000,\"detail\":\"full\",\"max_response_bytes\":2000000}", &full_imported_bytes);
     try testing.expectEqual(imported.get("relationships_total").?.integer, full_imported.get("relationships_total").?.integer);
     try expectAtMostHalf(&gate, "semidx_references writeString limit 1000", imported_bytes, full_imported_bytes);
     // Every caller is classified: the named importer, the unit itself, and any
@@ -325,9 +325,9 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
 
     // An import of a package stays unresolved: `std` is not a local file.
     var importer_context_bytes: usize = undefined;
-    const importer_context = try gate.sizedCall(23, "semidx_context", "{\"name\":\"" ++ importer_caller ++ "\",\"path\":\"" ++ importer_path ++ "\",\"relationship_limit\":500}", &importer_context_bytes);
+    const importer_context = try gate.sizedCall(23, "semidx_context", "{\"name\":\"" ++ importer_caller ++ "\",\"path\":\"" ++ importer_path ++ "\",\"relationship_limit\":500,\"max_response_bytes\":2000000}", &importer_context_bytes);
     var full_importer_context_bytes: usize = undefined;
-    const full_importer_context = try gate.sizedCall(25, "semidx_context", "{\"name\":\"" ++ importer_caller ++ "\",\"path\":\"" ++ importer_path ++ "\",\"relationship_limit\":500,\"detail\":\"full\"}", &full_importer_context_bytes);
+    const full_importer_context = try gate.sizedCall(25, "semidx_context", "{\"name\":\"" ++ importer_caller ++ "\",\"path\":\"" ++ importer_path ++ "\",\"relationship_limit\":500,\"detail\":\"full\",\"max_response_bytes\":2000000}", &full_importer_context_bytes);
     try testing.expectEqual(importer_context.get("focus_total").?.integer, full_importer_context.get("focus_total").?.integer);
     try expectAtMostHalf(&gate, "semidx_context health relationship_limit 500", importer_context_bytes, full_importer_context_bytes);
     var package_call_unresolved = false;
@@ -397,7 +397,7 @@ test "dogfood: --allow-evidence-text over a copy of this repository returns boun
 
     // Every definition's evidence carries at most the bound, and the text it
     // carries is source from inside the evidence range, not anything else.
-    const map = try client.callTool(2, "semidx_repo_map", "{\"limit\":1000,\"definitions_per_file\":500,\"detail\":\"full\"}");
+    const map = try client.callTool(2, "semidx_repo_map", "{\"limit\":1000,\"definitions_per_file\":500,\"detail\":\"full\",\"max_response_bytes\":2000000}");
     try testing.expect(!map.get("truncated").?.bool);
     var checked: usize = 0;
     var truncated: usize = 0;

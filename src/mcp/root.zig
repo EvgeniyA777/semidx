@@ -1122,6 +1122,131 @@ test "the outline lists a directory's children with exact counts and no definiti
     }
 }
 
+test "the response budget appends whole items, keeps valid JSON, and reports what it omitted" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.init(false, "const std = @import(\"std\");\n\npub fn shout() void {\n    std.debug.print(\"x\", .{});\n    loud();\n}\n\nfn loud() void {}\n");
+    defer h.deinit();
+
+    const Budgeted = struct {
+        /// Checks the text block is the structured result and returns it.
+        fn call(harness: *Harness, a: Allocator, tool: []const u8, arguments: []const u8) !std.json.ObjectMap {
+            const result = try harness.callTool(a, tool, arguments);
+            try testing.expect(!result.object.get("isError").?.bool);
+            const text = result.object.get("content").?.array.items[0].object.get("text").?.string;
+            const reparsed = try std.json.parseFromSliceLeaky(std.json.Value, a, text, .{});
+            try testing.expect(reparsed == .object);
+            return result.object.get("structuredContent").?.object;
+        }
+        fn exhausted(structured: std.json.ObjectMap, list: []const u8, expected_omitted: i64) !void {
+            try testing.expect(structured.get("budget_exhausted").?.bool);
+            try testing.expectEqual(expected_omitted, structured.get("omitted_by_budget").?.object.get(list).?.integer);
+            try testing.expectEqual(@as(i64, 1), structured.get("budget").?.object.get("max_response_bytes").?.integer);
+            try expectHint(structured, "response", "raise", &.{"max_response_bytes"});
+        }
+    };
+
+    // Defaults fit: the budget is reported and nothing is omitted.
+    for ([_][2][]const u8{
+        .{ "semidx_outline", "{}" },
+        .{ "semidx_repo_map", "{}" },
+        .{ "semidx_find_definitions", "{}" },
+        .{ "semidx_references", "{\"name\":\"shout\",\"direction\":\"both\"}" },
+        .{ "semidx_context", "{\"name\":\"shout\"}" },
+    }) |call| {
+        const fits = try Budgeted.call(&h, arena, call[0], call[1]);
+        try testing.expect(!fits.get("budget_exhausted").?.bool);
+        try testing.expect(fits.get("omitted_by_budget") == null);
+        try testing.expectEqual(@as(i64, 32_000), fits.get("budget").?.object.get("max_response_bytes").?.integer);
+    }
+
+    // A budget smaller than any item still returns the first one, and every
+    // list that lost items says so.
+    const outline = try Budgeted.call(&h, arena, "semidx_outline", "{\"max_response_bytes\":1}");
+    try testing.expectEqual(@as(usize, 1), outline.get("entries").?.array.items.len);
+    try testing.expectEqual(@as(i64, 2), outline.get("entries_total").?.integer);
+    try testing.expect(outline.get("truncated").?.bool);
+    try Budgeted.exhausted(outline, "entries", 1);
+
+    const map = try Budgeted.call(&h, arena, "semidx_repo_map", "{\"max_response_bytes\":1}");
+    try testing.expectEqual(@as(usize, 1), map.get("files").?.array.items.len);
+    try testing.expectEqual(@as(i64, 2), map.get("files_total").?.integer);
+    try testing.expect(map.get("truncated").?.bool);
+    try Budgeted.exhausted(map, "files", 1);
+    try expectHint(map, "response", "narrow", &.{ "path_prefix", "language" });
+
+    const definitions = try Budgeted.call(&h, arena, "semidx_find_definitions", "{\"max_response_bytes\":1}");
+    try testing.expectEqual(@as(usize, 1), definitions.get("definitions").?.array.items.len);
+    try testing.expectEqual(@as(i64, 4), definitions.get("total").?.integer);
+    try testing.expect(definitions.get("truncated").?.bool);
+    try Budgeted.exhausted(definitions, "definitions", 3);
+
+    const refs = try Budgeted.call(&h, arena, "semidx_references", "{\"name\":\"shout\",\"direction\":\"both\",\"max_response_bytes\":1}");
+    try testing.expectEqual(@as(usize, 1), refs.get("targets").?.array.items.len);
+    try testing.expect(!refs.get("targets_truncated").?.bool);
+    try testing.expectEqual(@as(usize, 0), refs.get("relationships").?.array.items.len);
+    try testing.expectEqual(@as(i64, 2), refs.get("relationships_total").?.integer);
+    try testing.expect(refs.get("truncated").?.bool);
+    try Budgeted.exhausted(refs, "relationships", 2);
+    try testing.expectEqual(@as(i64, 0), refs.get("omitted_by_budget").?.object.get("targets").?.integer);
+
+    const context = try Budgeted.call(&h, arena, "semidx_context", "{\"name\":\"shout\",\"max_response_bytes\":1}");
+    const focus = context.get("focus").?.array.items[0].object;
+    try testing.expectEqual(@as(usize, 0), focus.get("outgoing").?.array.items.len);
+    try testing.expectEqual(@as(i64, 2), focus.get("outgoing_total").?.integer);
+    try testing.expect(focus.get("outgoing_truncated").?.bool);
+    try testing.expect(focus.get("incoming_truncated").?.bool);
+    try testing.expect(!context.get("focus_truncated").?.bool);
+    try Budgeted.exhausted(context, "relationships", 3);
+    try expectHint(context, "response", "lower", &.{ "relationship_limit", "diagnostic_limit" });
+}
+
+test "a worst-case multi-focus context cannot exceed the default response budget silently" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.init(false, "");
+    defer h.deinit();
+
+    // Twelve units each define `same` with sixty unresolved calls: ten focus
+    // entities at fifty relationships each render far more than the default.
+    var body: std.ArrayList(u8) = .empty;
+    try body.appendSlice(arena, "pub fn same() void {\n");
+    for (0..60) |i| try body.print(arena, "    value.call{d}();\n", .{i});
+    try body.appendSlice(arena, "}\n");
+    for (0..12) |i| {
+        const path = try std.fmt.allocPrint(arena, "same{d:0>2}.zig", .{i});
+        try h.tmp.dir.writeFile(test_io, .{ .sub_path = path, .data = body.items });
+    }
+    try testing.expect(!(try h.callTool(arena, "semidx_refresh", "{}")).object.get("isError").?.bool);
+
+    const result = try h.callTool(arena, "semidx_context", "{\"name\":\"same\"}");
+    const text = result.object.get("content").?.array.items[0].object.get("text").?.string;
+    const structured = result.object.get("structuredContent").?.object;
+    // The fixed closing fields follow the last item, within a small margin.
+    try testing.expect(text.len <= 32_000 + 2_000);
+    try testing.expect(structured.get("budget_exhausted").?.bool);
+    try testing.expectEqual(@as(i64, 12), structured.get("focus_total").?.integer);
+    try testing.expect(structured.get("focus_truncated").?.bool);
+    const omitted = structured.get("omitted_by_budget").?.object;
+    try testing.expect(omitted.get("focus").?.integer + omitted.get("relationships").?.integer > 0);
+    // No list looks complete while items remain.
+    for (structured.get("focus").?.array.items) |item| {
+        const focus = item.object;
+        for ([_][3][]const u8{ .{ "incoming", "incoming_total", "incoming_truncated" }, .{ "outgoing", "outgoing_total", "outgoing_truncated" }, .{ "diagnostics", "diagnostics_total", "diagnostics_truncated" } }) |list| {
+            const returned: i64 = @intCast(focus.get(list[0]).?.array.items.len);
+            try testing.expectEqual(returned < focus.get(list[1]).?.integer, focus.get(list[2]).?.bool);
+        }
+    }
+
+    const unbounded = (try h.callTool(arena, "semidx_context", "{\"name\":\"same\",\"max_response_bytes\":2000000}")).object.get("structuredContent").?.object;
+    try testing.expect(!unbounded.get("budget_exhausted").?.bool);
+    try testing.expectEqual(@as(usize, 10), unbounded.get("focus").?.array.items.len);
+}
+
 /// The `arguments` of the hint for `list` and `action`, or null for none.
 fn hintArguments(structured: std.json.ObjectMap, list: []const u8, action: []const u8) ?[]const std.json.Value {
     const hints = structured.get("narrowing_hints") orelse return null;
