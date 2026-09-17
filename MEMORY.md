@@ -166,7 +166,9 @@ documents that own history, rationale, and evidence.
   [docs/plans/006_zig_dogfood_semantic_coverage.md](docs/plans/006_zig_dogfood_semantic_coverage.md).
   It should implement ADR 006 through fixtures first, then member definitions,
   local import alias collection with provider dependencies, exact cross-unit
-  `alias.foo(...)` calls, dogfood proof, and closure docs.
+  `alias.foo(...)` calls, dogfood proof, and closure docs. It deliberately
+  records missing-provider-file imports as a false negative until the importer is
+  reanalyzed, not as a false fact.
 - Plan 007 should improve MCP response budgeting and schema ergonomics without
   treating MCP convenience as graph authority:
   [docs/plans/007_mcp_response_budget_and_schema_ergonomics.md](docs/plans/007_mcp_response_budget_and_schema_ergonomics.md).

@@ -326,6 +326,11 @@ Required behavior:
   before closure.
 - Update capability and local preview docs to state the exact new Zig subset and
   the remaining false negatives.
+- Record this named residual risk in the progress log and capability matrix
+  known false negatives: if a Zig unit imports a relative file that does not
+  exist yet, no provider dependency is declared; adding that provider later does
+  not reanalyze the importer until the importer changes or is otherwise
+  reanalyzed. This is an unresolved false negative, not a false fact.
 - Keep follow-up reports open when only part of their scope is resolved; add a
   dated note for the resolved portion rather than inventing a partial status.
 - Update `MEMORY.md` by replacing the compact Plan 006 entry with implemented
