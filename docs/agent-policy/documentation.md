@@ -70,6 +70,27 @@ updated: "2026-09-17"
   `superseded_by` references, README indexes, and progress-log references in the
   same commit.
 
+## README Stewardship
+
+The root `README.md` is the public project presentation and routing entry point.
+It should help search engines classify the project, help AI agents find the
+right next document or MCP workflow, and help humans understand why the project
+matters.
+
+Do not use the README as a progress log, release gate, staged-plan checklist,
+proof-command archive, or implementation evidence store. Update it only when
+public positioning, quick start behavior, current preview status, user-facing
+MCP setup, or canonical documentation routing changes.
+
+Proof workflows, release-gate commands, stage evidence, and plan-specific
+checklists belong in their owning reference, plan, report, release, or policy
+document. The README may link to that owner, but must not accumulate a local
+copy of the evidence.
+
+Before editing the README, identify which presentation plane the change improves:
+search classification, AI-agent onboarding, or human project comprehension. If a
+change improves none of those, put it in the owning document instead.
+
 ## Frontmatter
 
 - Non-system working documents under `bugs/`, `ideas/`, `notes/`, `plans/`,

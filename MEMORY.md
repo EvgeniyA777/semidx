@@ -179,6 +179,9 @@ documents that own history, rationale, and evidence.
   [docs/agent-policy/documentation.md](docs/agent-policy/documentation.md):
   source-of-truth edits, ADRs, staged plans, release handoffs, and plan closure
   must check the relevant owners and either align them or record residual risk.
+- The root README is the public project presentation and routing entry point.
+  Proof workflows, release gates, stage evidence, and plan-specific checklists
+  stay in their owning references, plans, reports, releases, or policies.
 - `MEMORY.md` is intentionally bounded. Compress stale detail into links to
   ADRs, reports, plans, follow-ups, specs, or implementation files instead of
   appending history.
