@@ -16,7 +16,7 @@ implementing
 
 ## Current Status
 
-Stages 1 to 3 are complete. Stages 4 and 5 are pending.
+Stages 1 to 4 are complete. Stage 5 is pending.
 
 ## Stage Log
 
@@ -25,7 +25,7 @@ Stages 1 to 3 are complete. Stages 4 and 5 are pending.
 | Stage 1: Coverage probes and fixture design | Completed | Fixtures for member functions, nested containers, local import aliases, exact and unresolved qualified calls, and provider edits; expected graph deltas and risk matrix recorded below. No behavior change. |
 | Stage 2: Container member function definitions | Completed | Named `fn` declarations directly inside covered top-level containers are `function` definitions with `container_path` and `container DEFINES member`; their bodies are reported as not analyzed. A renamed container reports its members' loss with replacements through a new generic reconciliation fallback. |
 | Stage 3: Local Zig import alias context | Completed | Exact top-level `const alias = @import("relative.zig")` declarations naming one indexed Zig unit establish an alias and declare a provider dependency; every other file import is reported with its reason. `Index` now registers a scan's additions before analyzing any, reanalyzes a unit read before a provider analyzed later in the same batch, and treats a moved unit as a dependency seed. |
-| Stage 4: Exact qualified call facts | Pending | |
+| Stage 4: Exact qualified call facts | Completed | `alias.foo(...)` through an established local import alias is a cross-unit `CALLS` fact to the one exported `pub fn` of that name in a current provider; member bodies are analyzed under the same rules with the container's names in scope. Provider body edits, added exports, renames, visibility changes, broken analysis, and removal all update the importer without editing it. |
 | Stage 5: Dogfood and documentation | Pending | |
 
 ## Plan Readiness Gate
@@ -248,3 +248,58 @@ Mutation checks, run and reverted:
 - Without `addDependency` for an established alias, six import tests fail.
 - Not run: analyzing additions as they are registered. The importer-before-
   provider test asserts the dependency that such ordering would lose.
+
+## Stage 4: Exact Qualified Call Facts
+
+Changed files: `src/frontends/zig.zig`, `src/frontends/root.zig`,
+`tests/vertical_slice_test.zig`, `docs/spec/capability_matrix.md`, this log.
+
+Decisions taken inside the plan's boundary:
+
+- **Exported callable.** The provider's own frontend decides it, because only
+  that analysis sees the unit's whole top-level namespace, including uncovered
+  declarations: a covered top-level `fn` written with `pub`, whose name the top
+  level declares exactly once (read in a pre-pass over every top-level
+  declaration), in a unit without `usingnamespace`, carries
+  `zig.export = callable`. `pub extern fn` counts; members never do.
+- The analyzer reads a current provider's exports from the graph: live
+  top-level `function` definitions labelled exported whose existence
+  `Graph.currentDefinitionFact` finds as a current `frontend.zig` fact. A
+  provider that is not current offers none. `reconcile.checkExternalTargets`
+  still re-checks every external target at integration.
+- `alias.foo(...)` is decided only for a `field_expression` callee whose object
+  and member are both identifiers. The qualifier is unresolved when a
+  parameter or local binding, a member of the enclosing container, or a
+  `usingnamespace` could give it another meaning; when it is not an import
+  alias; when it is a package import; when its import was declined (the
+  explanation carries the reason); when the provider is not current; and when
+  the provider exports no single function of that name.
+- Member bodies are walked like top-level bodies. A bare name or a qualifier
+  that the enclosing container declares (fields included) stays unresolved,
+  and a container `usingnamespace` leaves every call in its members
+  unresolved. The Stage 2 "member bodies not analyzed" diagnostic is gone.
+- The generic explanation for other callees is now "the callee is not a bare
+  name or a name qualified by a local import alias"; `Shape.make`-style calls
+  say the qualifier is not a top-level `@import` alias.
+- No `REFERENCES`, `module`, `IMPORTS`, or approximate assertion is added; the
+  fixture test asserts zero approximate assertions.
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | 89/89 passed. |
+| `zig fmt --check build.zig src tests` | Clean. |
+| `zig build test --summary all` | 20/20 steps; 203/204 passed, 1 skipped (pre-existing environment-dependent test). New: export label rules; member-body call rules with container scope and container `usingnamespace`; the fixture fact/unresolved table (5 facts, 13 named unresolved calls, incoming counts, evidence, dependency); provider body edit (identity preserved, importer and its coarse dependent reanalyzed, unrelated unit not), added export, renamed export, private export, stale provider, removed provider. |
+
+Mutation checks, run and reverted:
+
+- Never labelling exports: four tests fail, one aborts.
+- Ignoring a parameter or local that shadows a qualifier: the member-body test
+  and the fixture table test fail.
+- Ignoring container member names for bare calls: the same two tests fail.
+
+A provider body edit reanalyzes the importer and, transitively, units that
+depend on the importer (`support/util.zig` in the fixture), because
+dependency propagation is coarse and transitive. That is existing, documented
+behavior, not new; unrelated units are not reanalyzed.

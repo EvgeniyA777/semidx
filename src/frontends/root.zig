@@ -162,13 +162,43 @@ pub const Analyzer = struct {
             const id = graph.unitByPath(path) orelse continue;
             const record = graph.unit(id) orelse continue;
             if (!record.isLive() or record.language != .zig) continue;
+            const current = record.analysis() == .current;
             try providers.append(allocator, .{
                 .path = path,
                 .unit = id,
-                .current = record.analysis() == .current,
+                .current = current,
+                .exports = if (current) try zigExports(graph, id, allocator) else &.{},
             });
         }
         return .{ .repository = true, .providers = providers.items };
+    }
+
+    /// The functions a Zig unit currently exports: live top-level function
+    /// definitions it labels exported, whose existence the Zig frontend
+    /// recorded as a current fact.
+    fn zigExports(
+        graph: *core.Graph,
+        unit: model.SourceUnitId,
+        allocator: Allocator,
+    ) ![]const zig.Export {
+        var definitions: std.ArrayList(model.EntityId) = .empty;
+        try graph.definitionsInUnit(unit, &definitions, allocator);
+
+        var exports: std.ArrayList(zig.Export) = .empty;
+        for (definitions.items) |id| {
+            const entity = graph.entity(id).?;
+            if (entity.identity.language != .zig) continue;
+            if (!std.mem.eql(u8, entity.identity.role, "function")) continue;
+            if (entity.identity.container_path.len != 0) continue;
+            const name = entity.identity.name orelse continue;
+            if (!std.mem.eql(u8, entity.extension.namespace, "zig")) continue;
+            const label = entity.extension.get(zig.export_label.key) orelse continue;
+            if (!std.mem.eql(u8, label, zig.export_label.value)) continue;
+            const fact = graph.currentDefinitionFact(id) orelse continue;
+            if (!std.mem.eql(u8, fact.producer.name, zig.capabilities.producer.name)) continue;
+            try exports.append(allocator, .{ .name = name, .entity = id });
+        }
+        return exports.items;
     }
 
     fn javaContext(
@@ -602,7 +632,7 @@ test "a bare zig call resolves only to the unit's one top-level function of that
     try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
 
     try expectZigCallUnresolved(&snapshot, "main", "std.debug.print", "not a bare name");
-    try expectZigCallUnresolved(&snapshot, "main", "Shape.make", "not a bare name");
+    try expectZigCallUnresolved(&snapshot, "main", "Shape.make", "not a top-level `@import` alias");
     try expectZigCallUnresolved(&snapshot, "main", "param", "local binding");
     try expectZigCallUnresolved(&snapshot, "main", "local", "local binding");
     try expectZigCallUnresolved(&snapshot, "main", "capture", "local binding");
@@ -743,8 +773,8 @@ test "only direct member functions of a covered zig container become member defi
     }
     try testing.expectEqual(@as(usize, 5), snapshot.countEntities(.{ .kind = .definition }));
     // Members are reported per kind: a field, a nested declaration, a test;
-    // the two member bodies; and the container in `run`'s body.
-    try testing.expectEqual(@as(usize, 5), snapshot.countDiagnostics(.unsupported_construct));
+    // and the container in `run`'s body.
+    try testing.expectEqual(@as(usize, 4), snapshot.countDiagnostics(.unsupported_construct));
     try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .kind = .calls }));
 }
 
@@ -947,4 +977,112 @@ test "a zig unit analyzed without a graph establishes no import alias" {
         if (std.mem.indexOf(u8, diagnostic.message, "without repository context") != null) reported = true;
     }
     try testing.expect(reported);
+}
+
+test "a zig unit exports only a top-level pub fn whose name it declares once" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    _ = try indexZig(&analyzer, &graph,
+        \\pub fn open() void {}
+        \\fn closed() void {}
+        \\pub fn twice() void {}
+        \\pub const twice = 1;
+        \\pub extern fn external() void;
+        \\pub const Shape = struct {
+        \\    size: u8,
+        \\    pub fn member() void {}
+        \\};
+        \\
+    );
+    const using = try graph.addSourceUnit("using.zig", .zig,
+        \\pub usingnamespace @import("other.zig");
+        \\pub fn open() void {}
+        \\
+    );
+    _ = try analyzer.indexUnit(&graph, using);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    for ([_][]const u8{ "open", "external" }) |name| {
+        try testing.expectEqualStrings("callable", snapshot.findDefinition("probe.zig", name).?.extension.get("zig.export").?);
+    }
+    for ([_][]const u8{ "closed", "twice", "member", "Shape" }) |name| {
+        try testing.expect(snapshot.findDefinition("probe.zig", name).?.extension.get("zig.export") == null);
+    }
+    try testing.expect(snapshot.findDefinition("using.zig", "open").?.extension.get("zig.export") == null);
+}
+
+test "calls in a zig member body follow the same narrow rules, with the container's names in scope" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const wire = try graph.addSourceUnit("wire.zig", .zig, "pub fn send() void {}\npub fn reset() void {}\n");
+    _ = try analyzer.indexUnit(&graph, wire);
+    const main = try graph.addSourceUnit("probe.zig", .zig,
+        \\const wire = @import("wire.zig");
+        \\fn helper() void {}
+        \\fn size() void {}
+        \\const Server = struct {
+        \\    size: u8,
+        \\    const reset = 0;
+        \\    fn run(self: Server) void {
+        \\        helper();
+        \\        size();
+        \\        wire.send();
+        \\        self.stop();
+        \\        const local = wire;
+        \\        local.send();
+        \\    }
+        \\    fn stop(wire: u8) void {
+        \\        wire.send();
+        \\    }
+        \\};
+        \\const Mixed = struct {
+        \\    usingnamespace @import("other.zig");
+        \\    fn go() void {
+        \\        helper();
+        \\        wire.send();
+        \\    }
+        \\};
+        \\const Shadow = struct {
+        \\    const wire = 1;
+        \\    fn go() void {
+        \\        wire.send();
+        \\    }
+        \\};
+        \\
+    );
+    _ = try analyzer.indexUnit(&graph, main);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    const send = snapshot.findDefinition("wire.zig", "send").?;
+    const helper = snapshot.findDefinition("probe.zig", "helper").?;
+    const run = snapshot.findDefinition("probe.zig", "run").?;
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{ .kind = .calls, .source = run.id, .target = helper.id, .resolution = .fact }));
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{ .kind = .calls, .source = run.id, .target = send.id, .resolution = .fact }));
+    try expectZigCallUnresolved(&snapshot, "run", "size", "enclosing container declares a member");
+    try expectZigCallUnresolved(&snapshot, "run", "self.stop", "qualifier is a parameter or local binding");
+    try expectZigCallUnresolved(&snapshot, "run", "local.send", "qualifier is a parameter or local binding");
+    try expectZigCallUnresolved(&snapshot, "stop", "wire.send", "qualifier is a parameter or local binding");
+
+    // The two `go` members are told apart by their container.
+    var goes = snapshot.entitiesMatching(.{ .kind = .definition, .path = "probe.zig", .name = "go" });
+    var checked: usize = 0;
+    while (goes.next()) |go| : (checked += 1) {
+        const container = go.identity.container_path[0];
+        var calls = snapshot.relationships(.{ .kind = .calls, .source = go.id });
+        while (calls.next()) |call| {
+            try testing.expect(!call.resolution.isFact());
+            const fragment = if (std.mem.eql(u8, container, "Mixed")) "container has a `usingnamespace`" else "declares a member with the qualifier's name";
+            try testing.expect(std.mem.indexOf(u8, call.resolution.unresolved.explanation, fragment) != null);
+        }
+    }
+    try testing.expectEqual(@as(usize, 2), checked);
+    try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
 }

@@ -2017,8 +2017,8 @@ test "the zig fixture yields its top-level functions and containers as definitio
         .resolution = .fact,
     }));
     try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .kind = .defines, .source = file.id, .target = member.id }));
-    // Its body is not analyzed yet, and says so.
-    try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, "1 member function bodies inside top-level containers were not analyzed"));
+    // Its body is analyzed like any covered function's, and holds no call.
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .kind = .calls, .source = member.id }));
     try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
     try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.confirmed_absence));
 }
@@ -2557,4 +2557,214 @@ test "a zig provider added after its importer is not noticed until the importer 
     try tree.write("a/importer.zig", importer_zig ++ "\n");
     _ = try tree.rescan();
     try testing.expect(dependsOn(&tree.index, "a/importer.zig", "b/provider.zig"));
+}
+
+const session_path = imports_dir ++ "session.zig";
+const wire_path = imports_dir ++ "wire.zig";
+const util_path = imports_dir ++ "support/util.zig";
+
+/// The one current definition named `name` in the unit at `path`, directly in
+/// `container` when one is given and at the top level otherwise.
+fn definitionIn(snapshot: *const semidx.Snapshot, path: []const u8, container: ?[]const u8, name: []const u8) ?model.Entity {
+    var found = snapshot.entitiesMatching(.{ .kind = .definition, .path = path, .name = name });
+    while (found.next()) |entity| {
+        const containers = entity.identity.container_path;
+        if (container) |expected| {
+            if (containers.len == 1 and std.mem.eql(u8, containers[0], expected)) return entity;
+        } else if (containers.len == 0) {
+            return entity;
+        }
+    }
+    return null;
+}
+
+fn callFacts(snapshot: *const semidx.Snapshot, from: model.Entity, to: model.Entity) usize {
+    return snapshot.countRelationships(.{ .kind = .calls, .source = from.id, .target = to.id, .resolution = .fact });
+}
+
+fn expectUnresolvedCall(snapshot: *const semidx.Snapshot, from: model.Entity, designator: []const u8, fragment: []const u8) !void {
+    var calls = snapshot.relationships(.{ .kind = .calls, .source = from.id, .designator = designator });
+    const call = calls.next() orelse {
+        std.debug.print("no current call `{s}` from `{s}`\n", .{ designator, from.identity.name.? });
+        return error.TestExpectedCall;
+    };
+    try testing.expect(!call.resolution.isFact());
+    const explanation = call.resolution.unresolved.explanation;
+    if (std.mem.indexOf(u8, explanation, fragment) == null) {
+        std.debug.print("call `{s}`: expected \"{s}\" in \"{s}\"\n", .{ designator, fragment, explanation });
+        return error.TestUnexpectedExplanation;
+    }
+}
+
+test "exact local-import calls are cross-unit facts and every other qualified call stays unresolved" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try writeImportFixtures(&tree);
+    _ = try tree.rescan();
+
+    var snapshot = try tree.index.publish();
+    defer snapshot.deinit();
+    const run = definitionIn(&snapshot, session_path, null, "run").?;
+    const shadowed = definitionIn(&snapshot, session_path, null, "shadowed").?;
+    const helper = definitionIn(&snapshot, session_path, null, "helper").?;
+    const send = definitionIn(&snapshot, session_path, "Session", "send").?;
+    const flush = definitionIn(&snapshot, session_path, "Session", "flush").?;
+    const write_string = definitionIn(&snapshot, wire_path, null, "writeString").?;
+    const clean = definitionIn(&snapshot, util_path, null, "clean").?;
+
+    try testing.expectEqual(@as(usize, 1), callFacts(&snapshot, run, write_string));
+    try testing.expectEqual(@as(usize, 1), callFacts(&snapshot, run, clean));
+    try testing.expectEqual(@as(usize, 1), callFacts(&snapshot, clean, run));
+    try testing.expectEqual(@as(usize, 1), callFacts(&snapshot, send, write_string));
+    try testing.expectEqual(@as(usize, 1), callFacts(&snapshot, flush, helper));
+    try testing.expectEqual(@as(usize, 5), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+
+    // A cross-unit fact carries the Zig producer, a current freshness, the
+    // caller's own evidence, and a dependency on the unit it reached into.
+    var facts = snapshot.relationships(.{ .kind = .calls, .target = write_string.id });
+    var fact_count: usize = 0;
+    while (facts.next()) |fact| : (fact_count += 1) {
+        try testing.expect(fact.resolution.isFact());
+        try testing.expectEqualStrings("frontend.zig", fact.producer.name);
+        try testing.expectEqual(model.Freshness.current, snapshot.assertionFreshness(fact));
+        const evidence = fact.evidence.?;
+        try testing.expectEqual(snapshot.unitByPath(session_path).?.id, evidence.unit);
+        try testing.expectEqualStrings("wire.writeString", evidence.text);
+    }
+    // Each resolved occurrence answers an all-references query once.
+    try testing.expectEqual(@as(usize, 2), fact_count);
+    try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .target = write_string.id, .reference_query = true }));
+    try testing.expect(dependsOn(&tree.index, session_path, wire_path));
+
+    try expectUnresolvedCall(&snapshot, send, "self.flush", "qualifier is a parameter or local binding");
+    try expectUnresolvedCall(&snapshot, flush, "reset", "enclosing container declares a member");
+    try expectUnresolvedCall(&snapshot, run, "wire.hidden", "no current top-level `pub fn`");
+    try expectUnresolvedCall(&snapshot, run, "wire.twice", "no current top-level `pub fn`");
+    try expectUnresolvedCall(&snapshot, run, "wire.flushAll", "no current top-level `pub fn`");
+    try expectUnresolvedCall(&snapshot, run, "wire.Frame.encode", "not a bare name or a name qualified by a local import alias");
+    try expectUnresolvedCall(&snapshot, run, "std.debug.print", "not a bare name or a name qualified by a local import alias");
+    try expectUnresolvedCall(&snapshot, run, "outside.run", "the path escapes the indexed root");
+    try expectUnresolvedCall(&snapshot, run, "upper.run", "no indexed Zig source unit has the path `zig/imports/Wire.zig`");
+    try expectUnresolvedCall(&snapshot, run, "absent.run", "no indexed Zig source unit has the path `zig/imports/absent.zig`");
+    try expectUnresolvedCall(&snapshot, run, "twin.run", "declares this name more than once");
+    try expectUnresolvedCall(&snapshot, run, "copy.writeString", "not a top-level `@import` alias");
+    try expectUnresolvedCall(&snapshot, shadowed, "wire.writeString", "qualifier is a parameter or local binding");
+
+    // Calls in the nested container's member are not recorded, and the
+    // nested container is reported instead.
+    try testing.expect(definitionIn(&snapshot, session_path, "Nested", "deep") == null);
+    try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, "`variable_declaration` declared inside a top-level container"));
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "provider edits update local-import calls without editing the importer" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try writeImportFixtures(&tree);
+    const greeter = try loadFixture(testing.allocator, zig_path);
+    defer testing.allocator.free(greeter);
+    try tree.write(zig_path, greeter);
+    _ = try tree.rescan();
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const run = definitionIn(&before, session_path, null, "run").?;
+    const send = definitionIn(&before, session_path, "Session", "send").?;
+    const write_string = definitionIn(&before, wire_path, null, "writeString").?;
+
+    // A body edit keeps the target's identity and the facts reaching it. The
+    // importer and, through the coarse dependency on it, `util.zig` are read
+    // again; the unrelated unit is not.
+    try writeFixtureInto(&tree, "wire_01_body_edit.zig");
+    const body_edit = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), body_edit.changed);
+    try testing.expectEqual(@as(usize, 2), body_edit.invalidated);
+    try testing.expectEqual(@as(usize, 3), body_edit.analyzed);
+    {
+        var after = try tree.index.publish();
+        defer after.deinit();
+        try testing.expectEqual(write_string.id, definitionIn(&after, wire_path, null, "writeString").?.id);
+        try testing.expectEqual(@as(usize, 1), callFacts(&after, run, write_string));
+        try testing.expectEqual(@as(usize, 1), callFacts(&after, send, write_string));
+    }
+
+    // An export the importer already calls appears: the call becomes a fact.
+    try writeFixtureInto(&tree, "wire_02_added_export.zig");
+    _ = try tree.rescan();
+    {
+        var after = try tree.index.publish();
+        defer after.deinit();
+        const flush_all = definitionIn(&after, wire_path, null, "flushAll").?;
+        try testing.expectEqual(@as(usize, 1), callFacts(&after, run, flush_all));
+    }
+
+    // Renamed: identity is lost, and no current fact names the lost entity.
+    try writeFixtureInto(&tree, "wire_03_renamed_export.zig");
+    _ = try tree.rescan();
+    {
+        var after = try tree.index.publish();
+        defer after.deinit();
+        try testing.expect(after.entityById(write_string.id) == null);
+        try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .target = write_string.id }));
+        try expectUnresolvedCall(&after, run, "wire.writeString", "no current top-level `pub fn`");
+        try expectUnresolvedCall(&after, send, "wire.writeString", "no current top-level `pub fn`");
+    }
+
+    // No longer `pub`: not exported, so not a target.
+    try writeFixtureInto(&tree, "wire_04_export_made_private.zig");
+    _ = try tree.rescan();
+    {
+        var after = try tree.index.publish();
+        defer after.deinit();
+        const private = definitionIn(&after, wire_path, null, "writeString").?;
+        try testing.expect(private.extension.get("zig.export") == null);
+        try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .kind = .calls, .target = private.id }));
+        try expectUnresolvedCall(&after, run, "wire.writeString", "no current top-level `pub fn`");
+    }
+
+    // Back to the original, then broken: a provider whose analysis is not
+    // current offers no target, and its stale definitions are not called.
+    try writeFixtureInto(&tree, "../wire.zig");
+    _ = try tree.rescan();
+    const restored = blk: {
+        var after = try tree.index.publish();
+        defer after.deinit();
+        const restored = definitionIn(&after, wire_path, null, "writeString").?;
+        try testing.expectEqual(@as(usize, 1), callFacts(&after, run, restored));
+        break :blk restored;
+    };
+    try tree.write(wire_path, "pub fn writeString( usize {\n");
+    const broken = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), broken.changed);
+    try testing.expectEqual(@as(usize, 2), broken.invalidated);
+    {
+        var after = try tree.index.publish();
+        defer after.deinit();
+        try testing.expectEqual(semidx.core.graph.UnitAnalysis.stale, after.unitByPath(wire_path).?.analysis());
+        try expectUnresolvedCall(&after, run, "wire.writeString", "analysis is not current");
+        try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .kind = .calls, .target = restored.id }));
+        // The call into the other provider is untouched.
+        try testing.expectEqual(@as(usize, 1), callFacts(&after, run, definitionIn(&after, util_path, null, "clean").?));
+    }
+
+    // Removed: the alias no longer names a unit.
+    try tree.remove(wire_path);
+    const removed = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), removed.removed);
+    {
+        var after = try tree.index.publish();
+        defer after.deinit();
+        try expectUnresolvedCall(&after, run, "wire.writeString", "no indexed Zig source unit has the path `zig/imports/wire.zig`");
+        try testing.expectEqual(@as(usize, 1), callFacts(&after, run, definitionIn(&after, util_path, null, "clean").?));
+    }
+}
+
+/// Writes `imports/edits/<name>` over the provider `wire.zig` in the tree.
+fn writeFixtureInto(tree: *Tree, name: []const u8) !void {
+    const gpa = testing.allocator;
+    const fixture = try std.mem.concat(gpa, u8, &.{ imports_dir, "edits/", name });
+    defer gpa.free(fixture);
+    const source = try loadFixture(gpa, fixture);
+    defer gpa.free(source);
+    try tree.write(wire_path, source);
 }

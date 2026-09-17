@@ -13,21 +13,28 @@
 //! - a named `fn` declared directly inside such a container, as a `function`
 //!   definition whose identity carries the container's name
 //!   ([ADR 006](../../docs/adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md)); and
-//! - inside a covered top-level function body, every call expression: a call
-//!   whose callee is a bare name is a `CALLS` fact only when that name can mean
-//!   nothing but the one top-level function of that name in the same unit.
+//! - inside the body of every covered function, top-level or member, every
+//!   call expression:
+//!   - a bare callee `foo(...)` is a `CALLS` fact only when that name can mean
+//!     nothing but the one top-level function of that name in the same unit;
+//!   - a qualified callee `alias.foo(...)` is a `CALLS` fact only when `alias`
+//!     is a local import alias and the unit it names currently exports exactly
+//!     one function `foo`.
 //!
 //! A top-level `const alias = @import("relative/path.zig");` that names exactly
 //! one indexed Zig unit is a local import alias. It is analysis context, not an
 //! entity or a relationship, and establishing one declares a dependency on the
-//! unit it names. Every other import is reported or left uncovered.
+//! unit it names. Every other import is reported or left uncovered. A unit
+//! exports a function when it is a covered top-level `pub fn` whose name the
+//! unit's top level declares once, in a unit without `usingnamespace`; the
+//! definition carries the label `zig.export = callable`.
 //!
 //! Not covered: other top-level constants and variables (imports, aliases,
 //! values), tests, `comptime` blocks, `usingnamespace`, container fields and
 //! every container member other than a named `fn`, containers nested in
-//! containers or in function bodies, the bodies of member functions, builtin
-//! calls, and names that are not called. Nothing here resolves a container's
-//! namespace, imports, fields, or methods.
+//! containers or in function bodies, builtin calls, and names that are not
+//! called. Nothing here resolves a container's namespace, fields, methods,
+//! receivers, or package imports.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -50,11 +57,13 @@ pub const capabilities: contract.Capabilities = .{
     .coverage_note = "named top-level `fn` declarations, top-level `const` " ++
         "declarations bound directly to a struct, enum, union, or opaque " ++
         "expression, and named `fn` declarations directly inside those " ++
-        "containers; call expressions in top-level functions' bodies, where a " ++
-        "bare callee name resolves only to the unit's one top-level function of " ++
-        "that name and every other callee stays unresolved; member function " ++
-        "bodies, other container members, nested containers, builtin calls, and " ++
-        "every other declaration are unsupported",
+        "containers; call expressions in those functions' bodies, where a bare " ++
+        "callee name resolves only to the unit's one top-level function of that " ++
+        "name, `alias.name` resolves only when `alias` is a top-level " ++
+        "`@import` of a relative path naming one indexed Zig unit that exports " ++
+        "exactly one top-level `pub fn` of that name, and every other callee " ++
+        "stays unresolved; other container members, nested containers, builtin " ++
+        "calls, and every other declaration are unsupported",
 };
 
 /// What an `@import` string names, read lexically against the importing unit's
@@ -101,6 +110,12 @@ pub fn resolveImportPath(
     return .{ .file = try std.mem.join(allocator, "/", segments.items) };
 }
 
+/// A function a provider unit exports, read from its current definition facts.
+pub const Export = struct {
+    name: []const u8,
+    entity: model.EntityId,
+};
+
 /// The indexed Zig unit one local import path names, as the analyzer read it
 /// from the graph before this unit was analyzed.
 pub const Provider = struct {
@@ -109,7 +124,12 @@ pub const Provider = struct {
     /// Whether the unit's analysis is current. A pending, stale, or failed
     /// provider still establishes the alias, but offers nothing to resolve to.
     current: bool,
+    /// The provider's current exported functions. Empty unless `current`.
+    exports: []const Export,
 };
+
+/// The label a definition carries when its unit exports it as a callable.
+pub const export_label: model.ExtensionLabel = .{ .key = "zig.export", .value = "callable" };
 
 /// What the analyzer hands the Zig frontend about the rest of the repository.
 pub const Context = struct {
@@ -267,20 +287,30 @@ const CoveredContainer = struct {
     value: ts.Node,
 };
 
+/// The declarations of the container a member function sits in. A name in the
+/// member's body may mean one of them rather than a top-level declaration.
+const ContainerScope = struct {
+    names: []const []const u8,
+    using_namespace: bool,
+};
+
 /// A covered function whose body is walked for calls.
 const FunctionBody = struct {
     index: u32,
     declaration: ts.Node,
     body: ts.Node,
+    /// Set for a member function of a covered top-level container.
+    container: ?ContainerScope,
 };
 
-/// What the call walk of one unit needs to decide a bare callee name.
+/// What the call walk of one unit needs to decide a callee.
 const CallScope = struct {
     source: []const u8,
     names: []const TopLevelName,
     /// `usingnamespace` can bring declarations of any name into the unit's
-    /// namespace, so no bare name is decided while one is present.
+    /// namespace, so no name is decided while one is present.
     using_namespace: bool,
+    aliases: []const Alias,
 };
 
 pub fn analyze(
@@ -316,6 +346,13 @@ pub fn analyze(
     defer imports.deinit(gpa);
     var using_namespace = false;
 
+    // Every name the top level declares, read before any definition is
+    // recorded, so that an exported function is known to be the only
+    // declaration of its name.
+    var declared: std.ArrayList([]const u8) = .empty;
+    defer declared.deinit(gpa);
+    const declares_using_namespace = try collectDeclaredNames(gpa, root, source, &declared);
+
     var members = root.namedChildren();
     while (members.next()) |member| {
         const kind = member.kind();
@@ -327,14 +364,23 @@ pub fn analyze(
                 continue;
             };
             const name = try builder.dupe(name_node.text(source));
-            const index = try addDefinition(builder, scope, member, name, "function", &.{}, &.{
-                .{ .key = "zig.construct", .value = "function" },
-            }, "named top-level `fn` declaration in the analyzed source unit");
+            const exported = isPub(member) and !declares_using_namespace and countOf(declared.items, name) == 1;
+            const labels = [_]model.ExtensionLabel{ .{ .key = "zig.construct", .value = "function" }, export_label };
+            const index = try addDefinition(
+                builder,
+                scope,
+                member,
+                name,
+                "function",
+                &.{},
+                if (exported) &labels else labels[0..1],
+                "named top-level `fn` declaration in the analyzed source unit",
+            );
             try addDefines(builder, member, name, index);
             definitions += 1;
             try names.append(gpa, .{ .name = name, .function = index });
             if (member.childByFieldName("body")) |body| {
-                try bodies.append(gpa, .{ .index = index, .declaration = member, .body = body });
+                try bodies.append(gpa, .{ .index = index, .declaration = member, .body = body, .container = null });
             }
             continue;
         }
@@ -380,9 +426,9 @@ pub fn analyze(
 
     // Members come after every top-level declaration, so a unit's top-level
     // definitions keep the batch order they had before members were covered.
-    var unanalyzed_member_bodies: u32 = 0;
     for (containers.items) |container| {
         const path = try builder.dupeSlice(&.{container.name});
+        const container_scope = try containerScope(builder, source, container.value);
         var inner = container.value.namedChildren();
         while (inner.next()) |inner_member| {
             const kind = inner_member.kind();
@@ -409,7 +455,14 @@ pub fn analyze(
                     .method = "declared directly inside this top-level container",
                 } },
             });
-            if (inner_member.childByFieldName("body") != null) unanalyzed_member_bodies += 1;
+            if (inner_member.childByFieldName("body")) |body| {
+                try bodies.append(gpa, .{
+                    .index = index,
+                    .declaration = inner_member,
+                    .body = body,
+                    .container = container_scope,
+                });
+            }
         }
     }
 
@@ -417,6 +470,7 @@ pub fn analyze(
         .source = source,
         .names = names.items,
         .using_namespace = using_namespace,
+        .aliases = aliases,
     };
     var too_deep = false;
     for (bodies.items) |function| {
@@ -429,12 +483,6 @@ pub fn analyze(
 
     try uncovered.report(builder);
     try reportDeclinedAliases(builder, aliases);
-    if (unanalyzed_member_bodies > 0) {
-        try builder.addDiagnostic(.unsupported_construct, try builder.print(
-            "{d} member function bodies inside top-level containers were not analyzed for calls",
-            .{unanalyzed_member_bodies},
-        ));
-    }
     if (too_deep) {
         try builder.addDiagnostic(
             .unsupported_construct,
@@ -447,6 +495,69 @@ pub fn analyze(
             "the source unit parsed and declares no top-level function or container",
         );
     }
+}
+
+/// Appends every name the unit's top level declares, covered or not, and
+/// returns whether the top level has a `usingnamespace` declaration.
+fn collectDeclaredNames(
+    gpa: Allocator,
+    root: ts.Node,
+    source: []const u8,
+    out: *std.ArrayList([]const u8),
+) Allocator.Error!bool {
+    var using_namespace = false;
+    var members = root.namedChildren();
+    while (members.next()) |member| {
+        const kind = member.kind();
+        if (std.mem.eql(u8, kind, "function_declaration")) {
+            if (member.childByFieldName("name")) |name| try out.append(gpa, name.text(source));
+        } else if (std.mem.eql(u8, kind, "variable_declaration")) {
+            if (declaredIdentifier(member)) |identifier| try out.append(gpa, identifier.text(source));
+        } else if (std.mem.eql(u8, kind, "using_namespace_declaration")) {
+            using_namespace = true;
+        }
+    }
+    return using_namespace;
+}
+
+/// Every name a container declares directly, fields included, and whether it
+/// has a `usingnamespace` declaration. Counting fields can only leave more
+/// names undecided.
+fn containerScope(builder: *contract.BatchBuilder, source: []const u8, value: ts.Node) !ContainerScope {
+    var names: std.ArrayList([]const u8) = .empty;
+    var using_namespace = false;
+    var members = value.namedChildren();
+    while (members.next()) |member| {
+        const kind = member.kind();
+        if (std.mem.eql(u8, kind, "function_declaration") or std.mem.eql(u8, kind, "container_field")) {
+            if (member.childByFieldName("name")) |name| try names.append(builder.allocator(), name.text(source));
+        } else if (std.mem.eql(u8, kind, "variable_declaration")) {
+            if (declaredIdentifier(member)) |identifier| try names.append(builder.allocator(), identifier.text(source));
+        } else if (std.mem.eql(u8, kind, "using_namespace_declaration")) {
+            using_namespace = true;
+        }
+    }
+    return .{ .names = names.items, .using_namespace = using_namespace };
+}
+
+fn countOf(names: []const []const u8, name: []const u8) usize {
+    var count: usize = 0;
+    for (names) |entry| {
+        if (std.mem.eql(u8, entry, name)) count += 1;
+    }
+    return count;
+}
+
+/// Whether a declaration is written with `pub`.
+fn isPub(node: ts.Node) bool {
+    const count = node.childCount();
+    var index: u32 = 0;
+    while (index < count) : (index += 1) {
+        const token = node.childAt(index) orelse continue;
+        if (token.isNamed()) continue;
+        if (std.mem.eql(u8, token.kind(), "pub")) return true;
+    }
+    return false;
 }
 
 /// Decides whether one import declaration establishes a local import alias
@@ -688,26 +799,25 @@ fn emitCall(
     call: ts.Node,
     callee: ts.Node,
 ) !void {
-    const simple = std.mem.eql(u8, callee.kind(), "identifier");
     const designator = try builder.dupe(callee.text(scope.source));
     if (designator.len == 0) return;
 
-    const decision: CallDecision = if (simple)
-        decideName(scope, locals, designator)
-    else
-        .{ .unresolved = "the callee is not a bare name; field, namespace, method, and computed callees are not resolved" };
-
+    const decision = try decideCallee(builder, scope, function, locals, callee);
     try builder.addRelationship(.{
         .kind = .calls,
         .source = .{ .entity = function.index },
         .target = switch (decision) {
             .function => |index| .{ .local = index },
+            .external => |target| .{ .external = target },
             .unresolved => .{ .designator = designator },
         },
         .evidence = evidenceOf(builder, call, designator),
         .resolution = switch (decision) {
             .function => .{ .fact = .{
                 .method = "bare callee naming the one top-level declaration of that name in the analyzed source unit, a function",
+            } },
+            .external => .{ .fact = .{
+                .method = "callee qualified by a top-level `@import` alias of a relative Zig file path, naming the one exported top-level `pub fn` of that name in the imported source unit",
             } },
             .unresolved => |explanation| .{ .unresolved = .{
                 .missing = .target_entity,
@@ -719,13 +829,41 @@ fn emitCall(
 
 const CallDecision = union(enum) {
     function: u32,
+    external: contract.ExternalTarget,
     unresolved: []const u8,
 };
 
-fn decideName(scope: CallScope, locals: []const []const u8, name: []const u8) CallDecision {
-    for (locals) |local| {
-        if (std.mem.eql(u8, local, name)) {
-            return .{ .unresolved = "a parameter or local binding in the enclosing function has this name" };
+fn decideCallee(
+    builder: *contract.BatchBuilder,
+    scope: CallScope,
+    function: FunctionBody,
+    locals: []const []const u8,
+    callee: ts.Node,
+) !CallDecision {
+    const kind = callee.kind();
+    if (std.mem.eql(u8, kind, "identifier")) {
+        return decideName(scope, function, locals, callee.text(scope.source));
+    }
+    if (std.mem.eql(u8, kind, "field_expression")) {
+        const qualifier = callee.childByFieldName("object");
+        const member = callee.childByFieldName("member");
+        if (qualifier != null and member != null and std.mem.eql(u8, qualifier.?.kind(), "identifier")) {
+            return decideQualified(builder, scope, function, locals, qualifier.?.text(scope.source), member.?.text(scope.source));
+        }
+    }
+    return .{ .unresolved = "the callee is not a bare name or a name qualified by a local import alias; field, method, namespace, and computed callees are not resolved" };
+}
+
+fn decideName(scope: CallScope, function: FunctionBody, locals: []const []const u8, name: []const u8) CallDecision {
+    if (countOf(locals, name) != 0) {
+        return .{ .unresolved = "a parameter or local binding in the enclosing function has this name" };
+    }
+    if (function.container) |container| {
+        if (container.using_namespace) {
+            return .{ .unresolved = "the enclosing container has a `usingnamespace` declaration, which can bring another declaration of this name into scope" };
+        }
+        if (countOf(container.names, name) != 0) {
+            return .{ .unresolved = "the enclosing container declares a member of this name, and container members are not resolved as call targets" };
         }
     }
     if (scope.using_namespace) {
@@ -733,19 +871,74 @@ fn decideName(scope: CallScope, locals: []const []const u8, name: []const u8) Ca
     }
 
     var matches: u32 = 0;
-    var function: ?u32 = null;
+    var target: ?u32 = null;
     for (scope.names) |entry| {
         if (!std.mem.eql(u8, entry.name, name)) continue;
         matches += 1;
-        function = entry.function;
+        target = entry.function;
     }
     return switch (matches) {
         0 => .{ .unresolved = "no top-level declaration of this name exists in the analyzed source unit" },
-        1 => if (function) |index|
+        1 => if (target) |index|
             .{ .function = index }
         else
             .{ .unresolved = "the one top-level declaration of this name is not a covered function" },
         else => .{ .unresolved = "more than one top-level declaration in the analyzed source unit has this name" },
+    };
+}
+
+/// Decides `qualifier.member(...)` under ADR 006: only a local import alias
+/// qualifies a name another unit's analysis established.
+fn decideQualified(
+    builder: *contract.BatchBuilder,
+    scope: CallScope,
+    function: FunctionBody,
+    locals: []const []const u8,
+    qualifier: []const u8,
+    member: []const u8,
+) !CallDecision {
+    if (countOf(locals, qualifier) != 0) {
+        return .{ .unresolved = "the qualifier is a parameter or local binding in the enclosing function, and calls through values are not resolved" };
+    }
+    if (function.container) |container| {
+        if (container.using_namespace) {
+            return .{ .unresolved = "the enclosing container has a `usingnamespace` declaration, which can bring another declaration of the qualifier's name into scope" };
+        }
+        if (countOf(container.names, qualifier) != 0) {
+            return .{ .unresolved = "the enclosing container declares a member with the qualifier's name" };
+        }
+    }
+    if (scope.using_namespace) {
+        return .{ .unresolved = "the unit has a `usingnamespace` declaration, which can bring another declaration of the qualifier's name into scope" };
+    }
+
+    const alias = for (scope.aliases) |alias| {
+        if (std.mem.eql(u8, alias.declaration.alias, qualifier)) break alias;
+    } else return .{ .unresolved = "the qualifier is not a top-level `@import` alias of a Zig file" };
+
+    const provider = switch (alias.state) {
+        .package => return .{ .unresolved = "the qualifier is bound to a package or builtin `@import`, which is not resolved" },
+        .declined => |reason| return .{ .unresolved = try builder.print(
+            "the qualifier's `@import` establishes no local import alias: {s}",
+            .{reason},
+        ) },
+        .established => |provider| provider,
+    };
+    if (!provider.current) {
+        return .{ .unresolved = "the imported source unit's analysis is not current, so it offers no target" };
+    }
+
+    var matches: u32 = 0;
+    var target: ?model.EntityId = null;
+    for (provider.exports) |candidate| {
+        if (!std.mem.eql(u8, candidate.name, member)) continue;
+        matches += 1;
+        target = candidate.entity;
+    }
+    return switch (matches) {
+        0 => .{ .unresolved = "the imported source unit has no current top-level `pub fn` of this name that its top level declares once" },
+        1 => .{ .external = .{ .entity = target.?, .provider = provider.unit } },
+        else => .{ .unresolved = "the imported source unit exports more than one current function of this name" },
     };
 }
 
