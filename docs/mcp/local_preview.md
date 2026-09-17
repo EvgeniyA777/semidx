@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-15"
+updated: "2026-09-17"
 ---
 
 # Local MCP Preview
@@ -161,15 +161,23 @@ Read this before registering semidx with a client that uses a hosted model.
 
 ### First Calls
 
-A useful order for an agent starting on a repository:
+A useful order for an agent starting on a repository. Every step uses the
+default compact [detail level](#detail-levels-and-budgets):
 
 1. `semidx_health`: is every unit `current`, and which languages have parsers?
 2. `semidx_repo_map` with a `path_prefix`: which files and top-level
-   definitions exist?
+   definitions exist, and at which lines?
 3. `semidx_find_definitions` with a `name`: where is a definition introduced?
 4. `semidx_references` or `semidx_context` on it: what calls it, what does it
    call, and which of those claims are facts?
 5. `semidx_refresh` after editing files, before trusting later answers.
+
+Ask for `detail: "full"` only for the one entity whose resolution methods,
+unresolved explanations, producer versions, or byte offsets you need, for
+example to review a claim or plan an impact analysis. Avoid a whole-repository
+`semidx_repo_map` with `detail: "full"` and a large `limit` as a first call:
+over this repository it is about 320 KB on the wire, against about 150 KB
+compact and 10 to 30 KB for one source directory as `path_prefix`.
 
 ### Protocol Versions
 
@@ -196,9 +204,12 @@ JSON, and `isError: false`.
 
 ## Tools
 
-Every list is bounded and reports its total and whether it was truncated.
-Invalid argument values are returned as a tool result with `isError: true` and
-an explanation.
+Every list is bounded and reports its total and whether it was truncated, and
+every tool that returns lists reports the limits it applied in `budget`.
+Invalid argument values, wrong argument types, and unknown arguments are
+returned as a tool result with `isError: true` and an explanation. Each tool's
+`inputSchema` in `tools/list` names exactly the arguments, types, enum values,
+defaults, and maxima the server validates.
 
 | Tool | Arguments (defaults) | Returns |
 | --- | --- | --- |
@@ -211,6 +222,7 @@ an explanation.
 
 `freshness` is `current`, `stale`, or `any`. `resolution` is `any`, `fact`,
 `unresolved`, or `approximate`. `language` is `java`, `clojure`, or `zig`.
+`detail` is `compact` or `full`.
 `role` is the frontend's role for a definition: for Zig `function` or
 `container`. A Zig member function has role `function` and a one-element
 `container_path`; `semidx_repo_map` counts it as nested.
@@ -227,6 +239,10 @@ Every structured result carries:
 The product version (`0.1.0-preview.2`) is reported by `--version`, in
 `serverInfo.version`, and as `product_version` in `semidx_health`. It versions
 the binary and its behavior; it is not a semantic contract version.
+
+The values below are described at the `full` detail level. `semidx_repo_map`
+and `semidx_context` render a subset of them by default; see
+[Detail Levels And Budgets](#detail-levels-and-budgets).
 
 An **entity** carries `id`, `kind` (`repository`, `file`, `definition`),
 `language`, `role`, `name`, `freshness`, and `evidence`. Full entities (from
@@ -259,6 +275,49 @@ and `revision`.
 
 Strings that are not valid UTF-8 in the source tree are returned with each
 invalid byte replaced by U+FFFD.
+
+## Detail Levels And Budgets
+
+`semidx_repo_map` and `semidx_context` take `detail`. Like every other argument
+and field here, detail levels are experimental preview ergonomics, not a
+published semantic contract: `semantic_contract_version` stays `null`, and the
+graph values behind both levels are the same.
+
+- **`full`** renders every field described in [Result Fields](#result-fields).
+- **`compact`** (the default) renders a subset of the same fields under the
+  same names and JSON types, with one exception: a definition listed by
+  `semidx_repo_map` carries `range` directly instead of `evidence`, because
+  its unit is the file it is listed under.
+
+What compact keeps and drops:
+
+| Value | Compact keeps | Compact drops |
+| --- | --- | --- |
+| Unit (`semidx_repo_map` file, `semidx_context` focus unit) | `id`, `path`, `language`, `analysis` | `file_entity_id`, `content_revision`, `analysis_revision` |
+| Repository map definition | `id`, `role`, `name`, `freshness`, `range` (`start_line`, `end_line`) | `kind`, `language`, `evidence` |
+| Context focus entity | `id`, `kind`, `language`, `role`, `name`, `freshness`, `evidence`, `container_path`, `existence` (`resolution`, `producer`, `freshness`) | `extension`, `created_revision`, `observed_revision`, existence `assertion_id` and `revision` |
+| Relationship in context | `assertion_id`, `kind`, `source`, `target`, `resolution`, `producer`, `freshness`, `evidence`. The focus end is `{"id": …}` alone; the other end has `id`, `kind`, `role`, `name`, `freshness`, `evidence`; a designator target is unchanged. | `revision`; `language` of the other end |
+| Resolution | `category`; `missing` when unresolved; `confidence` when approximate | `method`, `explanation`, `basis` |
+| Producer | `name` | `version` |
+| Evidence | `unit.path`, `range.start_line`, `range.end_line`, and `source_text` under `--allow-evidence-text` | `unit.id`, columns, byte offsets |
+| Diagnostic in context | `kind`, `producer`, `message` | `unit` (the focus unit), `revision` |
+
+Compact never changes a claim: an unresolved claim still has category
+`unresolved` and a designator target, and every relationship still carries its
+producer and freshness. The evidence-text opt-in applies at both levels.
+
+`budget` names what bounded the result:
+
+| Tool | `budget` |
+| --- | --- |
+| `semidx_repo_map` | `detail`, `limit`, `definitions_per_file` |
+| `semidx_find_definitions` | `limit` |
+| `semidx_references` | `limit`, `target_limit` (50) |
+| `semidx_context` | `detail`, `relationship_limit`, `diagnostic_limit`, `focus_limit` (10) |
+
+Budgets select whole items before rendering. A result is never cut in the
+middle; the list that lost items says so through its `…_total` and
+`…_truncated` fields.
 
 ## Source Text
 
@@ -314,8 +373,14 @@ Notifications, including malformed ones, are never answered.
 - The graph lives in memory and is rebuilt on every start. Edits are observed
   only after `semidx_refresh`. A refresh with no source changes publishes the
   same revision.
-- Output is bounded per list, not per response: a `semidx_context` call can
-  still return a large message.
+- Output is bounded per list, not per response. Compact defaults keep common
+  calls small, but a `semidx_context` with a high `relationship_limit` on a
+  call-heavy function, a `semidx_references` for a widely called function, or
+  a whole-repository map can still return a large message: over this
+  repository the compact context of `health` in `src/mcp/tools.zig` at limit
+  500 is about 60 KB. Every tool result also repeats its structured object as JSON text for
+  clients without structured-content support, which roughly doubles its size
+  on the wire.
 - A refresh that fails after reconciliation started (for example, out of
   memory) never publishes a partly updated graph. The server discards that index
   and rebuilds a fresh one from the same scan; the published snapshot stays the

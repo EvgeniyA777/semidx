@@ -116,6 +116,13 @@ documents that own history, rationale, and evidence.
 - MCP results return graph values only by default: ids, paths, ranges, kinds,
   relationships, and per-claim resolution, freshness, and producer.
   `semantic_contract_version` is still `null`.
+- Tool arguments are declared once in `src/mcp/tools.zig`; the advertised
+  schema and the validator both derive from them. `semidx_repo_map` and
+  `semidx_context` default to `detail: "compact"` (a subset of fields that
+  keeps each claim's resolution category, producer name, freshness, and
+  location) and take `detail: "full"`; list tools report `budget`. Responses
+  are bounded per list, not per response
+  ([detail levels](docs/mcp/local_preview.md#detail-levels-and-budgets)).
 - `semidx_refresh` keeps the previous snapshot on failure. If a refresh fails
   after reconciliation starts, the server discards that index and rebuilds from
   the same scan to avoid publishing partial state.
@@ -185,12 +192,7 @@ documents that own history, rationale, and evidence.
 
 ## Near-Term Priorities
 
-- Plan 007 is the next implementation plan: MCP response budgeting and schema
-  ergonomics without treating MCP convenience as graph authority
-  ([plan](docs/plans/007_mcp_response_budget_and_schema_ergonomics.md)). Plan
-  006 made call-heavy Zig `semidx_context` responses larger (see its
-  [residual risk](docs/reports/006_zig_dogfood_semantic_coverage_progress.md#residual-risk)).
-- Plan 008 should make the agent habit loop a repeatable local release gate:
+- Plan 008 is the next implementation plan: it should make the agent habit loop a repeatable local release gate:
   [docs/plans/008_habit_loop_release_gate.md](docs/plans/008_habit_loop_release_gate.md).
 - The next Java ADR candidate should be multi-module classpath boundaries before
   Java facts are widened. This is the sharper exactness risk because independent
@@ -224,6 +226,8 @@ documents that own history, rationale, and evidence.
   current candidate: [docs/releases/v0.1.0-preview.2.md](docs/releases/v0.1.0-preview.2.md).
 - Plan 006 Zig dogfood coverage:
   [docs/reports/006_zig_dogfood_semantic_coverage_progress.md](docs/reports/006_zig_dogfood_semantic_coverage_progress.md).
+- Plan 007 MCP response budgets and schema ergonomics:
+  [docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md](docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md).
 - Active follow-ups:
   [docs/followups/README.md](docs/followups/README.md).
 - Product direction:

@@ -602,8 +602,6 @@ fn writeEntity(ctx: *Context, s: *Stringify, entity: model.Entity, shape: Entity
         try s.beginArray();
         for (entity.identity.container_path) |segment| try protocol.writeString(s, segment);
         try s.endArray();
-    }
-    if (shape == .focus or shape == .full) {
         try s.objectField("existence");
         if (try ctx.existenceOf(entity.id)) |assertion| {
             try s.beginObject();

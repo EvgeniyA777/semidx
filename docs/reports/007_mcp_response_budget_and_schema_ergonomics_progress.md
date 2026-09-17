@@ -1,9 +1,9 @@
 ---
 title: "MCP response budget and schema ergonomics progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-17"
 ---
 
@@ -14,10 +14,11 @@ Companion log for
 
 ## Current Status
 
-Stages 1 to 4 are complete: the baseline output inventory and budget gates
-are recorded, tool schemas are generated from the same argument declarations
-the validator reads, and the repository map and graph context are compact by
-default with a full detail level. Stage 5 is pending.
+Plan 007 is complete. Stages 1 to 5 are implemented and verified: tool
+schemas are generated from the argument declarations the validator reads, the
+repository map and graph context are compact by default with a full detail
+level, list tools report their budgets, and the preview reference teaches the
+compact habit loop. The closure lanes pass; residual risks are recorded below.
 
 ## Stage Log
 
@@ -27,7 +28,7 @@ default with a full detail level. Stage 5 is pending.
 | Stage 2: Tool schema and argument validation cleanup | Completed | Each tool's arguments are declared once as `Param` values; the advertised JSON Schema is generated from them at compile time, and `Args(tool)` reads types, enum values, defaults, and maxima from the same declarations. The advertised `tools/list` is unchanged. |
 | Stage 3: Compact repository map | Completed | `semidx_repo_map` takes `detail` (`compact` default, `full`) and reports `budget`. Over this repository the default map with `limit` 1000 is 152,579 transcript bytes against 322,104 for `full` (47%, gate at most 50%). |
 | Stage 4: Focused context budgeting | Completed | `semidx_context` takes `detail` and `diagnostic_limit` and reports `budget`; `semidx_find_definitions` and `semidx_references` report the limits they applied. The default context for `health` in `src/mcp/tools.zig` at limit 500 is 60,962 transcript bytes against 153,194 for `full` (39%, gate at most 50%). |
-| Stage 5: Documentation and habit loop update | Pending | |
+| Stage 5: Documentation and habit loop update | Completed | The local preview reference documents `detail`, `diagnostic_limit`, every compact field, and `budget`, and recommends compact orientation before one focused full call; the capability matrix, the exploration skill, and `MEMORY.md` state the new bounds. |
 
 ## Plan Readiness Gate
 
@@ -262,6 +263,84 @@ Verification:
   (repository map) and 39% (context).
 - `zig build test --summary all`: 206 of 207 passed, 1 skipped.
 
+## Stage 5: Documentation And Habit Loop Update
+
+Changed files: `docs/mcp/local_preview.md`, `docs/spec/capability_matrix.md`,
+`.agents/skills/semidx-code-exploration/SKILL.md`, `MEMORY.md`,
+`src/mcp/tools.zig` (review cleanup), the Plan 007 frontmatter, this log.
+
+- `docs/mcp/local_preview.md`: First Calls uses compact defaults and names the
+  large-output call pattern to avoid; the tool table documents every new
+  argument with its default; a new "Detail Levels And Budgets" section lists
+  what compact keeps and drops per value, the one shape exception, `budget`
+  per tool, and that detail levels are experimental preview ergonomics, not a
+  semantic contract; Limits records the remaining large-output cases and the
+  envelope duplication.
+- `docs/spec/capability_matrix.md`: the MCP Bounds row states the compact
+  default, `budget`, and that responses are still not size-bounded.
+- `.agents/skills/semidx-code-exploration/SKILL.md`: keep compact detail and
+  ask for full on one target only.
+- `MEMORY.md`: current MCP argument and detail reality; Plan 008 is next.
+- `README.md` names no MCP call pattern and was not changed. Release notes for
+  `v0.1.0-preview.2` are historical and were not changed.
+
+### Final Output Observations
+
+`zig build dogfood` over a copy of 66 units (746,700 bytes), transcript bytes:
+
+| Call | Before (`efbc8b3`) | Compact default | `detail: "full"` |
+| --- | ---: | ---: | ---: |
+| `semidx_repo_map {"limit":1000}` | 314,779 | 152,595 (47% of full) | 322,120 |
+| `semidx_context` `scan` in `src/source/discovery.zig` | 22,947 | 11,793 | 23,140 |
+| `semidx_context` `health` in `src/mcp/tools.zig`, limit 500 | 150,632 | 60,962 (39% of full) | 153,194 |
+| `semidx_references` `protocol.writeString`, limit 1000 | 56,824 | unchanged rendering | |
+| `semidx_repo_map {"path_prefix":"src/mcp/"}` | | 25,641 | |
+
+Full sizes grew slightly over the baseline because the source copied grew
+during the plan and `budget` was added.
+
+## Closure Verification
+
+Run on the final tree:
+
+- `./scripts/check-zig-version.sh`: 0.16.0 matches.
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build test --summary all`: 206 of 207 passed, 1 skipped (the dogfood
+  recovery test, run only by `zig build dogfood`); this includes
+  `zig build test-mcp`'s unit tests and stdio smoke test.
+- `zig build dogfood --summary all`: 5 of 5 passed; budget gates at 47%
+  (repository map) and 39% (context).
+
+## Review Findings
+
+Self-review of the diff from `efbc8b3` with `semidx-code-review`:
+
+- **Fixed (cosmetic):** `writeEntity` had two consecutive blocks guarded by the
+  same `focus or full` condition; merged. Verified by the closure lanes above.
+- **Rejected:** compact output hiding authority. Every compact claim keeps
+  `resolution.category`, `producer.name`, and `freshness`; an unresolved claim
+  keeps `missing` and its designator and names no entity (Stage 4 test).
+- **Rejected:** evidence text escaping the opt-in through a new path. Compact
+  listed definitions and compact evidence call the same `writeSourceText`,
+  which checks the opt-in; the source-text test covers both detail levels.
+
+No open finding.
+
+## Drift Control
+
+- Constitution §1, §3, §7, §8: MCP remains a projection; compact rendering
+  omits sub-fields but never changes a claim's category, producer, or
+  freshness, and adds no network or source-text path.
+- `SPEC.md`: tool shapes remain experimental; `semantic_contract_version` stays
+  `null`. No change needed.
+- `docs/mcp/local_preview.md`, `docs/spec/capability_matrix.md`, `MEMORY.md`,
+  and the exploration skill: updated in Stage 5.
+- `docs/agent-policy/tooling.md`: names the tools and flow, not arguments;
+  aligned without change.
+- Plan 008: already expects a compact `semidx_repo_map`; aligned.
+- `GLOSSARY.md`: "detail level" and "budget" are MCP preview argument and field
+  names owned by `docs/mcp/local_preview.md`, not durable project vocabulary.
+
 ## Residual Risk
 
 - **Envelope duplication.** Every `tools/call` result repeats its structured
@@ -269,3 +348,15 @@ Verification:
   Both supported protocol eras recommend that fallback for clients without
   structured-content support, so this plan leaves it; removing or shortening it
   is a protocol decision for a later plan.
+- **Per-response size is still unbounded.** Budgets bound lists, not whole
+  messages: a high `relationship_limit` on a call-heavy function, up to 10
+  focus entities each with its own lists, or a widely called function in
+  `semidx_references` can still produce tens of kilobytes or more.
+- **`semidx_references` has no compact level.** Its relationships repeat the
+  target entity in full; Plan 007 scoped detail levels to `semidx_repo_map`
+  and `semidx_context`.
+- **The budget gates are ratios over this repository.** They catch a compact
+  default growing toward full; they do not bound absolute sizes as the
+  repository grows.
+- **Compact omits prose an agent may need.** Resolution methods and unresolved
+  explanations need a `detail: "full"` call; the reference says so.

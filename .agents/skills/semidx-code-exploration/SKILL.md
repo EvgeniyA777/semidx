@@ -18,6 +18,9 @@ This repository skill adds semidx-specific evidence requirements.
    -> semidx_references or semidx_context
    ```
 
+   Keep the default compact `detail`; ask for `detail: "full"` only on the one
+   target whose resolution explanations, producer versions, or byte offsets
+   the task needs ([detail levels](../../../docs/mcp/local_preview.md#detail-levels-and-budgets)).
 3. Verify reported root path, snapshot revision, language counts, parser
    availability, analysis state, and diagnostics.
 4. Refine broad results with concrete `path`, `path_prefix`, `language`, `role`,
