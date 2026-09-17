@@ -48,7 +48,7 @@ inspection tool, not a public interface.
 
 ## Using it from an MCP client
 
-`semidx-mcp` (preview `0.1.0-preview.1`) indexes a local directory and answers
+`semidx-mcp` (preview `0.1.0-preview.2`) indexes a local directory and answers
 graph queries over MCP stdio. It is an experimental preview with no stable
 interface and no published semantic contract, and it returns paths and ranges
 rather than source text. It is built from source; there are no binary packages.

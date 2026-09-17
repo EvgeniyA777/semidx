@@ -456,6 +456,10 @@ describing Zig coverage (2026-09-17):
   Plan 006 while `build.zig.zon` still reports `0.1.0-preview.1`. The release
   notes are not edited here: which tree a tag describes is a release decision,
   left open for an explicit tag request.
+- Release decision, 2026-09-17: the maintainer chose to raise the product
+  version to `0.1.0-preview.2` for the Plan 006 behavior. See
+  [v0.1.0-preview.2](../releases/v0.1.0-preview.2.md); the preview.1 notes are
+  marked superseded and still describe `e36693a`.
 - Left as written, because they record their own moment: plans and reports 004
   and 005, the Plan 006 plan body, and ADR 006 (accepted; its "Plan 006 may"
   consequences are the decision, and this log is the implementation evidence).

@@ -9,7 +9,7 @@ updated: "2026-09-17"
 
 # Preview Capability Matrix
 
-What the `0.1.0-preview.1` implementation records, per producer, and what it
+What the `0.1.0-preview.2` implementation records, per producer, and what it
 does not. Owned by [SPEC.md](../../SPEC.md#coverage-and-conformance).
 
 This is an **unversioned preview matrix**. It describes current implementation
@@ -109,7 +109,7 @@ claim.
 | Bounds | Every list has a limit and reports its total and whether it was truncated. Responses as a whole are not size-bounded. |
 | Source text | Off by default: no unit contents are ever returned. `--allow-evidence-text` adds each claim's recorded evidence text, at most 400 bytes; current producers record a name or callee there, not a body. |
 | Source-derived values | Always returned: root and unit paths, entity names, designators, ranges, ids, and diagnostic messages. They are derived from the indexed source and go to the client process that launched the server. |
-| Versions | Product version `0.1.0-preview.1` in `--version`, `serverInfo.version`, and `semidx_health`; `semantic_contract_version` is always `null`. |
+| Versions | Product version `0.1.0-preview.2` in `--version`, `serverInfo.version`, and `semidx_health`; `semantic_contract_version` is always `null`. |
 | Refresh | Publishes a new snapshot only on success. A failure after reconciliation started never publishes a partly updated graph: the index is rebuilt from the same scan and published by the next refresh, which then reports `entity_ids_preserved: false`; ids from earlier snapshots name nothing in the rebuilt index. |
 
 The full tool and field reference is [docs/mcp/local_preview.md](../mcp/local_preview.md).

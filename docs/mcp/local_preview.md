@@ -70,7 +70,7 @@ From the root of a semidx checkout:
 ./scripts/setup-tree-sitter-grammars.sh   # once; clones pinned grammar sources into .tree-sitter-grammars/
 ./scripts/check-zig-version.sh             # fails unless `zig version` is 0.16.0
 zig build                                  # installs zig-out/bin/semidx-mcp
-zig-out/bin/semidx-mcp --version           # semidx-mcp 0.1.0-preview.1
+zig-out/bin/semidx-mcp --version           # semidx-mcp 0.1.0-preview.2
 zig build test-mcp                         # optional: unit tests and the stdio smoke test
 zig build dogfood                          # optional: habit loop and refresh recovery on a copy of this repository
 ```
@@ -224,7 +224,7 @@ Every structured result carries:
 | `snapshot.revision` | The graph revision every value in this result was read from. |
 | `semantic_contract_version` | Always `null`: no semantic contract is published. |
 
-The product version (`0.1.0-preview.1`) is reported by `--version`, in
+The product version (`0.1.0-preview.2`) is reported by `--version`, in
 `serverInfo.version`, and as `product_version` in `semidx_health`. It versions
 the binary and its behavior; it is not a semantic contract version.
 
@@ -325,7 +325,9 @@ Notifications, including malformed ones, are never answered.
   that refresh reports `entity_ids_preserved: false`. Look targets up again by
   name or path.
 - The product version is a preview version: tool names, arguments, and result
-  fields may change between previews. The first preview release-candidate notes
-  are [v0.1.0-preview.1](../releases/v0.1.0-preview.1.md), with release-gate
-  evidence recorded in the
+  fields may change between previews. The current release-candidate notes are
+  [v0.1.0-preview.2](../releases/v0.1.0-preview.2.md), which add the Plan 006
+  Zig coverage. The earlier
+  [v0.1.0-preview.1](../releases/v0.1.0-preview.1.md) notes describe the tree
+  before it, with release-gate evidence recorded in the
   [Plan 005 progress log](../reports/005_mcp_preview_release_readiness_progress.md#stage-5-preview-release-candidate-handoff).

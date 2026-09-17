@@ -119,9 +119,10 @@ documents that own history, rationale, and evidence.
 - `scripts/semidx-mcp.sh` is the stable local launcher for agents. The older
   `scripts/start-mcp-server.sh` and `scripts/mcp-stdio.sh` remain compatibility
   aliases.
-- Plan 005 made `v0.1.0-preview.1` release-candidate ready, but it is not tagged.
-  Its handoff and release notes predate Plan 006, while `build.zig.zon` still
-  says `0.1.0-preview.1`; a tag request must choose the tree it describes.
+- The product version is `0.1.0-preview.2` (`build.zig.zon`): the preview.1
+  surface plus Plan 006 Zig coverage
+  ([release notes](docs/releases/v0.1.0-preview.2.md)). Plan 005's
+  `v0.1.0-preview.1` handoff describes the tree at `e36693a`. Neither is tagged.
 
 ## What Does Not Exist
 
@@ -214,7 +215,8 @@ documents that own history, rationale, and evidence.
   [docs/reports/004_zig_frontend_and_mcp_preview_progress.md](docs/reports/004_zig_frontend_and_mcp_preview_progress.md).
 - Plan 005 release readiness:
   [docs/reports/005_mcp_preview_release_readiness_progress.md](docs/reports/005_mcp_preview_release_readiness_progress.md)
-  and [docs/releases/v0.1.0-preview.1.md](docs/releases/v0.1.0-preview.1.md).
+  and [docs/releases/v0.1.0-preview.1.md](docs/releases/v0.1.0-preview.1.md);
+  current candidate: [docs/releases/v0.1.0-preview.2.md](docs/releases/v0.1.0-preview.2.md).
 - Plan 006 Zig dogfood coverage:
   [docs/reports/006_zig_dogfood_semantic_coverage_progress.md](docs/reports/006_zig_dogfood_semantic_coverage_progress.md).
 - Active follow-ups:
