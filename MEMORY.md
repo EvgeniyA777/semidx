@@ -46,12 +46,12 @@ documents that own history, rationale, and evidence.
   narrow Zig frontend and the local MCP stdio preview as a consumer, not a
   semantic contract.
 - [ADR 006](docs/adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md)
-  admits the Plan 006 Zig dogfood extension: direct member functions inside
-  covered top-level containers may become definitions, their bodies may later be
-  analyzed under the same exact narrow call rules, and exact-case relative local
-  `@import` aliases may declare provider dependencies and support exact
-  `alias.foo(...)` `CALLS` facts without admitting `module`, `IMPORTS`,
-  dispatch, arbitrary member lookup, or package imports.
+  admits the Zig dogfood extension Plan 006 implemented: direct member functions
+  inside covered top-level containers are definitions whose bodies use the same
+  exact narrow call rules, and exact-case relative local `@import` aliases
+  declare provider dependencies and support exact `alias.foo(...)` `CALLS`
+  facts, without admitting `module`, `IMPORTS`, dispatch, arbitrary member
+  lookup, or package imports.
 
 ## Implementation Reality
 
@@ -88,10 +88,23 @@ documents that own history, rationale, and evidence.
 - Java same-package external references are graph facts only when ADR 004's
   exact rule holds and the provider unit dependency is declared. Provider
   removal, rename, or relevant export change reanalyzes dependents.
-- Zig currently covers source discovery, top-level `fn` definitions, top-level
-  container declarations bound directly to struct/enum/union/opaque expressions,
-  and same-unit bare calls under narrow shadowing checks. Plan 006 is the next
-  widening step.
+- Zig covers top-level `fn` definitions, top-level container declarations bound
+  directly to struct/enum/union/opaque expressions, and named `fn` members
+  directly inside them (`container_path` = container name). In every covered
+  body, a bare call resolves to the unit's one top-level function of that name,
+  and `alias.foo(...)` resolves to the one `zig.export = callable` top-level
+  `pub fn foo` of the unit a top-level `const alias = @import("relative.zig")`
+  names, with a provider dependency. Receivers, values, package imports, nested
+  namespaces, and container-member targets stay unresolved
+  ([capability matrix](docs/spec/capability_matrix.md#zig)).
+- `Index.applyScan` registers every added unit before analyzing any, and
+  `Upkeep` reanalyzes a unit that read a provider analyzed later in the same
+  batch; scan renames and `Index.renameUnit` seed dependency propagation. So a
+  scan's graph does not depend on path order. `Index.addUnit` one unit at a time
+  still does for Zig importers added before their providers.
+- Reconciliation reports a renamed container's members as identity loss with a
+  same-name replacement under the new container (`sameNameElsewhere`), for
+  every frontend, instead of removal plus creation.
 - `semidx-mcp` is the experimental local stdio preview. It scans one local root,
   publishes one snapshot, serves both the current `2026-07-28` stateless MCP
   shape and the legacy initialized `2025-06-18` shape, and exposes
@@ -124,7 +137,7 @@ documents that own history, rationale, and evidence.
 - No Clojure namespace or lexical-scope model beyond the current conservative
   same-unit rules.
 - No Zig package imports, namespace/container/member lookup beyond ADR 006's
-  admitted future subset, receiver dispatch, fields, locals, comptime semantics,
+  implemented subset, receiver dispatch, fields, locals, comptime semantics,
   generics, or nested-container semantics.
 - No executable conformance suite yet; conformance remains documented scenario
   material unless a requirement adopts a specific check.
@@ -155,23 +168,20 @@ documents that own history, rationale, and evidence.
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java same-package currently treats the indexed repository as one classpath;
   definition renames are identity loss; a file moved and changed in one rescan
-  loses identity; dependency invalidation is intentionally coarse; unit ids and
-  interned strings are not reclaimed while the graph lives; `Snapshot` string
-  borrowing and default-current query discipline are conventions rather than
-  type-enforced boundaries.
+  loses identity; dependency invalidation is intentionally coarse and
+  transitive; a Zig importer of a relative file that did not exist when it was
+  analyzed is not reanalyzed when the file appears (unresolved, never false);
+  unit ids and interned strings are not reclaimed while the graph lives;
+  `Snapshot` string borrowing and default-current query discipline are
+  conventions rather than type-enforced boundaries.
 
 ## Near-Term Priorities
 
-- Plan 006 is the next implementation plan:
-  [docs/plans/006_zig_dogfood_semantic_coverage.md](docs/plans/006_zig_dogfood_semantic_coverage.md).
-  It should implement ADR 006 through fixtures first, then member definitions,
-  local import alias collection with provider dependencies, exact cross-unit
-  `alias.foo(...)` calls, dogfood proof, and closure docs. It deliberately
-  records missing-provider-file imports as a false negative until the importer is
-  reanalyzed, not as a false fact.
-- Plan 007 should improve MCP response budgeting and schema ergonomics without
-  treating MCP convenience as graph authority:
-  [docs/plans/007_mcp_response_budget_and_schema_ergonomics.md](docs/plans/007_mcp_response_budget_and_schema_ergonomics.md).
+- Plan 007 is the next implementation plan: MCP response budgeting and schema
+  ergonomics without treating MCP convenience as graph authority
+  ([plan](docs/plans/007_mcp_response_budget_and_schema_ergonomics.md)). Plan
+  006 made call-heavy Zig `semidx_context` responses larger (see its
+  [residual risk](docs/reports/006_zig_dogfood_semantic_coverage_progress.md#residual-risk)).
 - Plan 008 should make the agent habit loop a repeatable local release gate:
   [docs/plans/008_habit_loop_release_gate.md](docs/plans/008_habit_loop_release_gate.md).
 - The next Java ADR candidate should be multi-module classpath boundaries before
@@ -203,6 +213,8 @@ documents that own history, rationale, and evidence.
 - Plan 005 release readiness:
   [docs/reports/005_mcp_preview_release_readiness_progress.md](docs/reports/005_mcp_preview_release_readiness_progress.md)
   and [docs/releases/v0.1.0-preview.1.md](docs/releases/v0.1.0-preview.1.md).
+- Plan 006 Zig dogfood coverage:
+  [docs/reports/006_zig_dogfood_semantic_coverage_progress.md](docs/reports/006_zig_dogfood_semantic_coverage_progress.md).
 - Active follow-ups:
   [docs/followups/README.md](docs/followups/README.md).
 - Product direction:

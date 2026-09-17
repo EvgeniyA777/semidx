@@ -4,7 +4,7 @@ doc_type: "specification"
 lifecycle: "active"
 status: "draft"
 agent_action: "reference_for_context"
-updated: "2026-09-14"
+updated: "2026-09-17"
 ---
 
 # semidx Requirements
@@ -146,9 +146,15 @@ A Zig frontend and a local MCP preview exist
 ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md),
 [plan](docs/plans/004_zig_frontend_and_mcp_preview.md),
 [evidence](docs/reports/004_zig_frontend_and_mcp_preview_progress.md)). The Zig
-frontend covers top-level functions and containers and same-unit bare calls,
-and reports everything else as unsupported or unresolved; this is dogfood
-coverage, not a Zig coverage claim. `semidx-mcp` is an experimental local stdio
+frontend covers top-level functions and containers, functions declared directly
+inside those containers, same-unit bare calls, and calls qualified by a local
+relative `@import` alias to the one function the imported unit exports, with a
+dependency on that unit
+([ADR 006](docs/adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md),
+[plan](docs/plans/006_zig_dogfood_semantic_coverage.md),
+[evidence](docs/reports/006_zig_dogfood_semantic_coverage_progress.md)). It
+reports everything else as unsupported or unresolved and admits no `module` or
+`IMPORTS`; this is dogfood coverage, not a Zig coverage claim. `semidx-mcp` is an experimental local stdio
 consumer over published snapshots
 ([reference](docs/mcp/local_preview.md)). Its tool schemas are not a public
 contract, its results report `semantic_contract_version: null`, and source text

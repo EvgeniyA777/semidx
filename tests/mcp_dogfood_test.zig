@@ -27,6 +27,19 @@ const definition_path = "src/source/discovery.zig";
 const definition_name = "scanDir";
 const caller_name = "scan";
 
+/// Plan 006 deltas. `Server.handleLine` is a member function of a top-level
+/// container; `tools.zig` calls `protocol.writeString` through
+/// `const protocol = @import("protocol.zig")`.
+const member_path = "src/mcp/root.zig";
+const member_container = "Server";
+const member_name = "handleLine";
+const imported_path = "src/mcp/protocol.zig";
+const imported_name = "writeString";
+const importer_path = "src/mcp/tools.zig";
+/// A top-level function in `importer_path` that calls both
+/// `protocol.writeString` and a `std` function.
+const importer_caller = "health";
+
 /// Appended to `definition_path` in the copy: one new function calling another.
 const probe_marker = "semidx-dogfood-probe-body";
 const appended = "\npub fn dogfoodProbe() void {\n" ++
@@ -183,8 +196,12 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
 
     // -- context: the caller also calls through a value, which stays unresolved --
     const context = try timedCall(client, 5, "semidx_context", "{\"name\":\"" ++ caller_name ++ "\",\"path\":\"" ++ definition_path ++ "\"}");
-    try testing.expectEqual(@as(i64, 1), context.get("focus_total").?.integer);
-    const focus = context.get("focus").?.array.items[0].object;
+    // Since Plan 006 the name also matches the `scan` member of the unit's test
+    // `Tree` container; the top-level function is the one without a container.
+    try testing.expectEqual(@as(i64, 2), context.get("focus_total").?.integer);
+    const focus = for (context.get("focus").?.array.items) |item| {
+        if (item.object.get("entity").?.object.get("container_path").?.array.items.len == 0) break item.object;
+    } else return error.TestExpectedTopLevelFocus;
     var unresolved_designator: ?[]const u8 = null;
     var fact_to_definition = false;
     for (focus.get("outgoing").?.array.items) |relationship| {
@@ -206,6 +223,70 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
         unresolved_designator.?,
         focus.get("diagnostics_total").?.integer,
     });
+
+    // -- Plan 006: a member function of a top-level container is a definition ---
+    // Before Plan 006 it was an unsupported container member. The repository
+    // map counts it as nested rather than as a top-level definition.
+    var member_unit_nested: i64 = 0;
+    for (map.get("files").?.array.items) |file| {
+        if (!std.mem.eql(u8, member_path, file.object.get("unit").?.object.get("path").?.string)) continue;
+        member_unit_nested = file.object.get("nested_definitions_total").?.integer;
+        for (file.object.get("definitions").?.array.items) |top_level| {
+            try testing.expect(!std.mem.eql(u8, member_name, top_level.object.get("name").?.string));
+        }
+    }
+    try testing.expect(member_unit_nested > 0);
+    const member = try timedCall(client, 21, "semidx_find_definitions", "{\"name\":\"" ++ member_name ++ "\",\"path\":\"" ++ member_path ++ "\"}");
+    try testing.expectEqual(@as(i64, 1), member.get("total").?.integer);
+    const member_definition = member.get("definitions").?.array.items[0].object;
+    const member_containers = member_definition.get("container_path").?.array.items;
+    try testing.expectEqual(@as(usize, 1), member_containers.len);
+    try testing.expectEqualStrings(member_container, member_containers[0].string);
+    try testing.expectEqualStrings("fact", member_definition.get("existence").?.object.get("resolution").?.object.get("category").?.string);
+    try testing.expectEqualStrings("frontend.zig", member_definition.get("existence").?.object.get("producer").?.object.get("name").?.string);
+    std.debug.print("dogfood: {s}.{s} is a definition; {d} nested definitions in {s}\n", .{ member_container, member_name, member_unit_nested, member_path });
+
+    // -- Plan 006: a call through a local relative import is a cross-unit fact ---
+    // Before Plan 006 every `protocol.writeString(...)` was an unresolved
+    // designator, so references listed only same-unit callers.
+    const imported = try timedCall(client, 22, "semidx_references", "{\"name\":\"" ++ imported_name ++ "\",\"path\":\"" ++ imported_path ++ "\",\"limit\":1000}");
+    try testing.expect(!imported.get("truncated").?.bool);
+    var cross_unit_facts: usize = 0;
+    var same_unit_facts: usize = 0;
+    for (imported.get("relationships").?.array.items) |relationship| {
+        try testing.expectEqualStrings("calls", relationship.object.get("kind").?.string);
+        try testing.expectEqualStrings("fact", category(relationship));
+        try testing.expectEqualStrings("current", relationship.object.get("freshness").?.string);
+        try testing.expectEqualStrings("frontend.zig", relationship.object.get("producer").?.object.get("name").?.string);
+        const caller_path = relationship.object.get("evidence").?.object.get("unit").?.object.get("path").?.string;
+        if (std.mem.eql(u8, caller_path, importer_path)) {
+            cross_unit_facts += 1;
+        } else if (std.mem.eql(u8, caller_path, imported_path)) {
+            same_unit_facts += 1;
+        }
+    }
+    try testing.expect(cross_unit_facts > 0);
+    try testing.expect(same_unit_facts > 0);
+    std.debug.print("dogfood: {s} in {s} has {d} call facts from {s} and {d} from its own unit\n", .{ imported_name, imported_path, cross_unit_facts, importer_path, same_unit_facts });
+
+    // An import of a package stays unresolved: `std` is not a local file.
+    const importer_context = try timedCall(client, 23, "semidx_context", "{\"name\":\"" ++ importer_caller ++ "\",\"path\":\"" ++ importer_path ++ "\",\"relationship_limit\":500}");
+    var package_call_unresolved = false;
+    var imported_call_fact = false;
+    const importer_focus = for (importer_context.get("focus").?.array.items) |item| {
+        if (item.object.get("entity").?.object.get("container_path").?.array.items.len == 0) break item.object;
+    } else return error.TestExpectedTopLevelFocus;
+    for (importer_focus.get("outgoing").?.array.items) |relationship| {
+        const target = relationship.object.get("target").?.object;
+        if (target.get("designator")) |designator| {
+            if (std.mem.startsWith(u8, designator.string, "std.")) package_call_unresolved = true;
+        } else if (std.mem.eql(u8, "fact", category(relationship))) {
+            const target_path = target.get("entity").?.object.get("evidence").?.object.get("unit").?.object.get("path").?.string;
+            if (std.mem.eql(u8, target_path, imported_path)) imported_call_fact = true;
+        }
+    }
+    try testing.expect(imported_call_fact);
+    try testing.expect(package_call_unresolved);
 
     // -- edit the copy, refresh, and observe the new revision --------------------
     const edited = try std.mem.concat(arena, u8, &.{ copy.definition_source, appended });

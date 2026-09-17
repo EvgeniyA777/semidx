@@ -212,7 +212,8 @@ an explanation.
 `freshness` is `current`, `stale`, or `any`. `resolution` is `any`, `fact`,
 `unresolved`, or `approximate`. `language` is `java`, `clojure`, or `zig`.
 `role` is the frontend's role for a definition: for Zig `function` or
-`container`.
+`container`. A Zig member function has role `function` and a one-element
+`container_path`; `semidx_repo_map` counts it as nested.
 
 ## Result Fields
 
@@ -292,14 +293,23 @@ Notifications, including malformed ones, are never answered.
 ## Limits
 
 - Coverage is the frontends' coverage, stated per producer in the
-  [preview capability matrix](../spec/capability_matrix.md). For Zig: top-level functions and
-  containers are definitions; a bare call is a `calls` fact only when it names
-  the unit's one top-level function of that name. Methods inside containers are
-  not definitions, and calls through a namespace (`protocol.writeString(...)`)
-  or on a value stay unresolved designators, so callers in other files do not
-  appear in `semidx_references`. Calls under logical negation (`!helper()`)
-  stay unresolved ([follow-up 001](../followups/001_zig_logical_negation_calls.md)),
-  and a unit with an empty container body fails analysis
+  [preview capability matrix](../spec/capability_matrix.md). For Zig: top-level
+  functions, top-level containers, and functions declared directly inside those
+  containers are definitions
+  ([ADR 006](../adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md)).
+  In their bodies, a bare call is a `calls` fact only when it names the unit's
+  one top-level function of that name, and `alias.foo(...)` is a cross-unit
+  `calls` fact only when `alias` is a top-level
+  `const alias = @import("relative/path.zig")` naming one indexed Zig unit that
+  exports exactly one top-level `pub fn foo`. So `semidx_references` lists
+  callers of such a function from files that import it that way. Calls through
+  receivers or values (`self.handle()`), package imports (`std.…`), nested
+  namespaces, and container members stay unresolved designators. An importer of
+  a file that did not exist when it was analyzed is not reanalyzed when the
+  file appears; refresh after editing the importer. Calls under logical negation
+  (`!helper()`) stay unresolved
+  ([follow-up 001](../followups/001_zig_logical_negation_calls.md)), and a unit
+  with an empty container body fails analysis
   ([follow-up 002](../followups/002_zig_empty_container_grammar.md)).
 - The graph lives in memory and is rebuilt on every start. Edits are observed
   only after `semidx_refresh`. A refresh with no source changes publishes the

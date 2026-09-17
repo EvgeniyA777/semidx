@@ -25,10 +25,23 @@ and [ADR 005](../adr/005_add_zig_frontend_and_local_mcp_preview.md).
 now admits the narrow member-definition and local-import call rules that a future
 implementation plan may apply.
 
-## Current Behavior
+## Progress Notes
 
-The Zig frontend resolves only a bare call to the unit's one top-level function
-of that name. Everything else stays honest but incomplete:
+- **2026-09-17, [Plan 006](../plans/006_zig_dogfood_semantic_coverage.md)**
+  resolved part of this scope under ADR 006: direct member functions of
+  top-level containers are definitions, their bodies are analyzed, and
+  `alias.foo(...)` through a top-level `@import` of a relative path is a
+  cross-unit `CALLS` fact to the one exported `pub fn` of that name, with a
+  provider dependency ([evidence](../reports/006_zig_dogfood_semantic_coverage_progress.md)).
+  Still open: calls through receivers and values (`self.index.publish()`),
+  nested namespaces (`alias.Container.foo()`), container-member targets,
+  package imports, and the missing-provider-file false negative. The section
+  below records the behavior found in Plan 004.
+
+## Behavior Found In Plan 004
+
+The Zig frontend resolved only a bare call to the unit's one top-level function
+of that name. Everything else stayed honest but incomplete:
 
 - Declarations inside containers, such as `Server.handleLine`, are not
   definitions, and their bodies are not walked, so calls made inside methods

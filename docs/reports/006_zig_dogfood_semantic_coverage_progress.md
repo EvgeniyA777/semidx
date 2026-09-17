@@ -1,10 +1,10 @@
 ---
 title: "Zig dogfood semantic coverage progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
-updated: "2026-09-16"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
+updated: "2026-09-17"
 ---
 
 # 006: Zig Dogfood Semantic Coverage Progress
@@ -16,7 +16,7 @@ implementing
 
 ## Current Status
 
-Stages 1 to 4 are complete. Stage 5 is pending.
+Plan 006 is complete. Stages 1 to 5 are implemented and verified; the closure lane passes, and the self-review below found no open defect. Residual risks are recorded below.
 
 ## Stage Log
 
@@ -26,7 +26,7 @@ Stages 1 to 4 are complete. Stage 5 is pending.
 | Stage 2: Container member function definitions | Completed | Named `fn` declarations directly inside covered top-level containers are `function` definitions with `container_path` and `container DEFINES member`; their bodies are reported as not analyzed. A renamed container reports its members' loss with replacements through a new generic reconciliation fallback. |
 | Stage 3: Local Zig import alias context | Completed | Exact top-level `const alias = @import("relative.zig")` declarations naming one indexed Zig unit establish an alias and declare a provider dependency; every other file import is reported with its reason. `Index` now registers a scan's additions before analyzing any, reanalyzes a unit read before a provider analyzed later in the same batch, and treats a moved unit as a dependency seed. |
 | Stage 4: Exact qualified call facts | Completed | `alias.foo(...)` through an established local import alias is a cross-unit `CALLS` fact to the one exported `pub fn` of that name in a current provider; member bodies are analyzed under the same rules with the container's names in scope. Provider body edits, added exports, renames, visibility changes, broken analysis, and removal all update the importer without editing it. |
-| Stage 5: Dogfood and documentation | Pending | |
+| Stage 5: Dogfood and documentation | Completed | `zig build dogfood` proves both deltas on a copy of this repository: `Server.handleLine` is a member definition, and `protocol.writeString` has 19 cross-unit call facts from `src/mcp/tools.zig`. Capability matrix, local preview reference, `SPEC.md`, follow-up 006, and `MEMORY.md` state the implemented subset and its false negatives. |
 
 ## Plan Readiness Gate
 
@@ -303,3 +303,137 @@ A provider body edit reanalyzes the importer and, transitively, units that
 depend on the importer (`support/util.zig` in the fixture), because
 dependency propagation is coarse and transitive. That is existing, documented
 behavior, not new; unrelated units are not reanalyzed.
+
+## Stage 5: Dogfood And Documentation
+
+Changed files: `tests/mcp_dogfood_test.zig`, `docs/spec/capability_matrix.md`,
+`docs/mcp/local_preview.md`, `SPEC.md`, `MEMORY.md`,
+`docs/followups/006_zig_cross_unit_and_member_calls.md`,
+`docs/followups/README.md`, `docs/plans/006_zig_dogfood_semantic_coverage.md`,
+this log.
+
+Dogfood checks added to the habit-loop test:
+
+- **Member definition.** `semidx_find_definitions` for `handleLine` in
+  `src/mcp/root.zig` returns one current `frontend.zig` fact with
+  `container_path = ["Server"]`; the repository map lists it among the unit's
+  nested definitions (30), not its top-level ones. Before Plan 006 it was an
+  unsupported container member.
+- **Exact qualified call.** `semidx_references` for `writeString` in
+  `src/mcp/protocol.zig` returns only current `calls` facts from
+  `frontend.zig`: 19 from `src/mcp/tools.zig` (through
+  `const protocol = @import("protocol.zig")`) and 3 from its own unit. Before
+  Plan 006 the follow-up recorded only the 3 same-unit callers.
+- `semidx_context` for `health` in `src/mcp/tools.zig` shows an outgoing fact
+  into `src/mcp/protocol.zig` beside unresolved `std.…` calls.
+- The existing context check for `scan` in `src/source/discovery.zig` now
+  matches two definitions (the top-level function and the `scan` member of the
+  unit's test `Tree` container), so it selects the one without a container.
+
+Output-size and latency observations (Debug build, 66 units, 714,844 bytes;
+observations, not gates or benchmarks):
+
+| Call | Observation |
+| --- | --- |
+| `semidx_health {}` | 639 ms to first response, 6,683 bytes |
+| `semidx_repo_map {"limit":1000}` | 39 ms, 314,779 bytes (members are counted, not listed) |
+| `semidx_find_definitions` `handleLine` | 0 ms, 2,104 bytes |
+| `semidx_references` `writeString`, limit 1000 | 7 ms, 56,824 bytes |
+| `semidx_context` `scan` | 10 ms, 22,947 bytes |
+| `semidx_context` `health`, relationship limit 500 | 20 ms, 150,632 bytes |
+| `semidx_refresh {}` after one edit | 31 ms, 1,213 bytes |
+| `semidx_repo_map` with `--allow-evidence-text`, 500 per file | 56 ms, 364,277 bytes; 423 definition evidence texts, none cut |
+
+Plan 005 recorded 260,109 bytes for the repository map and 14,591 bytes for the
+`scan` context over 56 units. The unit count differs (Plan 006 added 10 fixture
+files), so these rows are not a like-for-like delta.
+
+Graph delta, measured with the developer command built from the pre-plan
+revision `46b7ec0` (via `git archive` into a scratch directory) and from the
+final tree, over the same inputs:
+
+| Input | Revision | Definitions | Facts | Unresolved | Approximate |
+| --- | --- | --- | --- | --- | --- |
+| `src` (25 units) | `46b7ec0` | 294 | 844 | 1,354 | 0 |
+| `src` (25 units) | final | 537 | 1,645 | 2,134 | 0 |
+| repository (66 units) | `46b7ec0` | 467 | 1,350 | 1,721 | 0 |
+| repository (66 units) | final | 750 | 2,257 | 2,604 | 0 |
+
+Unresolved assertions grew because member bodies are now analyzed, and most of
+their calls go through receivers or values. Every run exited 0 with its whole
+output consumed and no non-printable bytes.
+
+Plan 007 check: Plan 007 records no numeric budget assumption that these results
+contradict; its premise, that whole responses are unbudgeted, still holds. Plan
+007 is not edited; the larger call-heavy context is recorded as residual risk.
+
+## Closure Verification
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Zig 0.16.0 matches. |
+| `zig fmt --check build.zig src tests` | Clean. |
+| `zig build test-core --summary all` | 5/5 steps; 89/89 passed. |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | 5/5 steps; 89/89 passed. |
+| `zig build test --summary all` | 20/20 steps; 203/204 passed, 1 skipped (the pre-existing environment-dependent `src/mcp/root.zig` dogfood-root test). |
+| `zig build test-mcp --summary all` | 9/9 steps; 18/19 passed, 1 skipped (the same test). |
+| `zig build dogfood --summary all` | 10/10 steps; 5/5 passed; refresh recovery over 66 units: 32 failure points, 28 rebuilds, one-shot and sticky. |
+
+Not run: a mutation check of the dogfood assertions themselves. Their frontend
+behavior is mutation-checked in Stages 2 to 4.
+
+## Review Findings
+
+Findings-first self-review of the final diff (no separate reviewer):
+
+| Finding | Disposition |
+| --- | --- |
+| The new dogfood context check for `health` read `focus[0]`, which a same-named member would silently replace. | Fixed: it selects the focus entity without a container, like the `scan` check. |
+| The existing dogfood `scan` context check assumed one match; member coverage made it two. | Fixed in Stage 5 (see above). |
+| `sameNameElsewhere` can pair a removed declaration with an unrelated new one of the same name and role under a different container. | Accepted: the pairing is recorded as the existing unresolved identity correspondence, never a fact, and only when no same-slot replacement exists. |
+| Scan renames now seed propagation for every language, so a moved Java provider reanalyzes its Java dependents. | Accepted: redundant but correct; Java bindings do not read paths. |
+| `Index.addUnit` one unit at a time does not revisit a Zig importer added before its provider. The developer command does this for individual file arguments (1,401 facts over `src` files versus 1,645 for the `src` directory). | Accepted as residual risk: same class as the named missing-provider risk, unresolved rather than false. Scans, which the MCP preview uses, are order-independent. |
+
+## Residual Risk
+
+- **Missing provider file (named by the plan).** If a Zig unit imports a
+  relative file that does not exist yet, no provider dependency is declared.
+  Adding that provider later, or moving a unit onto that path, does not
+  reanalyze the importer until the importer changes or is otherwise
+  reanalyzed. Calls through that alias stay unresolved meanwhile: a false
+  negative, not a false fact. Tested by "a zig provider added after its
+  importer is not noticed until the importer is reanalyzed".
+- **One-at-a-time additions.** The same false negative applies to
+  `Index.addUnit` when an importer is added before its provider outside a scan.
+- **Coarse, transitive invalidation.** A provider body edit reanalyzes its
+  importers and their dependents in turn (`support/util.zig` in the fixture),
+  though no exported name changed.
+- **Larger call-heavy responses.** Cross-unit facts carry full target entity
+  references; `semidx_context` for a call-heavy Zig function reached 150 KB at
+  `relationship_limit: 500`. Input for Plan 007.
+- **Remaining false negatives** stay in
+  [follow-up 006](../followups/006_zig_cross_unit_and_member_calls.md), which
+  stays open with a dated note: receiver and value calls, nested namespaces,
+  container-member targets, and package imports.
+
+## Drift Control
+
+- `ARCHITECTURE_CONSTITUTION.md`: not edited. New facts are frontend-established
+  (section 3), member identity uses containment names and renamed containers
+  report loss with replacement (section 4), provider changes and moves
+  reanalyze dependents and scan order no longer changes the graph (section 5),
+  Zig vocabulary stays in `zig.*` labels (section 6), and MCP decides nothing
+  (section 7).
+- ADR 006: aligned; every planned check it lists has a test named above.
+- `CORE.md`: aligned; no kind added. `module` and `IMPORTS` remain unadmitted.
+- `SPEC.md`: updated (Zig coverage paragraph).
+- `CONFORMANCE.md`: aligned; "a rename is recorded as identity loss naming its
+  replacement" now also holds for container renames.
+- `GLOSSARY.md`: aligned; "import alias" and "provider source unit" already
+  exist, and "exported callable" is owned by ADR 006.
+- `docs/spec/capability_matrix.md` and `docs/mcp/local_preview.md`: updated
+  with the implemented subset, the named residual risk, and the remaining false
+  negatives; `semantic_contract_version` is still `null`.
+- `MEMORY.md`: the Plan 006 priority entry is replaced by implemented reality.
+- Follow-up 006: open, with a dated note for the resolved portion.
+- Plan 007: not edited; see Residual Risk.
