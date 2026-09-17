@@ -1,10 +1,10 @@
 ---
 title: "Grammar setup fetches unused and unpinned sources"
 doc_type: "follow_up"
-lifecycle: "active"
-status: "open"
-agent_action: "use_as_input_for_future_plan_only"
-updated: "2026-09-14"
+lifecycle: "completed"
+status: "fixed"
+agent_action: "historical_reference_only"
+updated: "2026-09-17"
 ---
 
 # Grammar Setup Fetches Unused And Unpinned Sources
@@ -53,3 +53,28 @@ removing them may affect other consumers of the script.
 - Running the setup script twice fetches no moving reference.
 - If product and tooling setup are split, the product path clones only the
   grammars `build.zig` compiles.
+
+## Resolution
+
+Fixed as a direct implementation task on 2026-09-17.
+
+- `scripts/setup-tree-sitter-grammars.sh` no longer clones
+  `tree-sitter-typescript` or `tree-sitter-elixir`. No script, build step, or
+  document in the repository read their paths or environment variables.
+- The script keeps a `PRODUCT_GRAMMARS` list and fails before any network access
+  when it disagrees with `grammar_checkouts` in `build.zig`.
+- An existing checkout whose pinned full commit id is already present is not
+  fetched again, so a rerun resolves no moving reference and needs no network.
+- Existing `.tree-sitter-grammars/` directories keep any previously cloned
+  unused checkouts; the script does not delete them.
+
+Verification:
+
+- A fresh `git clone` of the repository with this script, then the setup script
+  with default paths, then `zig build test` passed; `.tree-sitter-grammars/`
+  held only the Java, Clojure, and Zig checkouts at their pinned commits.
+- A second run with `GIT_ALLOW_PROTOCOL=file` (HTTPS fetch fails with
+  `transport 'https' not allowed`) succeeded and left the same three commits
+  checked out.
+- A copy of `build.zig` with an extra entry in `grammar_checkouts` made the
+  script exit 1 before creating the grammars directory.

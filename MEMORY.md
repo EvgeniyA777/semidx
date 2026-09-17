@@ -64,6 +64,9 @@ documents that own history, rationale, and evidence.
 - Build prerequisites are local files: pinned tree-sitter grammar sources and a
   local tree-sitter runtime exposing `tree_sitter/api.h` and
   `libtree-sitter.a`. `build.zig.zon` declares no fetched dependencies.
+  `./scripts/setup-tree-sitter-grammars.sh` fetches only the grammars
+  `build.zig` compiles, each at a pinned commit, and fails if its list disagrees
+  with `grammar_checkouts`; a rerun with the commits present needs no network.
 - `src/core/` is parser-free Zig core: model, strings, source registry,
   frontend contract, graph, dependencies, reconcile, and index orchestration.
   `zig build test-core` must pass with `-Dgrammars-dir=/nonexistent`.

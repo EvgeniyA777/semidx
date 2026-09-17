@@ -29,7 +29,6 @@ evidence would make it ready to implement or close.
 | [002](002_zig_empty_container_grammar.md) | open | `upstream_limitation` | [Plan 004 report](../reports/004_zig_frontend_and_mcp_preview_progress.md#stage-2-zig-definition-facts) | The pinned Zig grammar reports empty container bodies as parse errors. |
 | [003](003_java_classpath_boundaries.md) | open | `semantic_limitation` | [Plan 003 report](../reports/003_java_package_type_resolution_progress.md#residual-risk) | Java same-package resolution treats the repository as one classpath. |
 | [006](006_zig_cross_unit_and_member_calls.md) | open | `coverage_gap` | [Plan 004 report](../reports/004_zig_frontend_and_mcp_preview_progress.md#residual-risk) | Zig calls through receivers, values, nested namespaces, container members, and package imports stay unresolved; local-import calls were resolved by Plan 006. |
-| [007](007_grammar_setup_fetches_unused_unpinned_sources.md) | open | `release_readiness` | [Plan 005 report](../reports/005_mcp_preview_release_readiness_progress.md#stage-2-install-and-local-agent-configuration) | The grammar setup script clones two unused grammars, one at an unpinned `main`. |
 | [008](008_clojure_lexical_scope_coverage.md) | open | `coverage_gap` | [Plan 005 report](../reports/005_mcp_preview_release_readiness_progress.md#stage-25-same-unit-name-resolution-facts-java-and-clojure) | Clojure symbols under forms that may bind names stay unresolved until lexical scope is modeled. |
 
 ## Completed Follow-ups
@@ -38,3 +37,4 @@ evidence would make it ready to implement or close.
 | --- | --- | --- | --- | --- |
 | [004](004_release_discipline_for_mcp_preview.md) | completed | `release_readiness` | [Plan 005](../plans/005_mcp_preview_release_readiness.md) | Preview release discipline, source-built release notes, and release gate were completed for `v0.1.0-preview.1`. |
 | [005](005_mcp_source_derived_consent_boundary.md) | completed | `release_readiness` | [Plan 005](../plans/005_mcp_preview_release_readiness.md) | Hosted-client consent wording and default no-source-text evidence were completed for the preview release. |
+| [007](007_grammar_setup_fetches_unused_unpinned_sources.md) | fixed | `release_readiness` | [Follow-up 007 resolution](007_grammar_setup_fetches_unused_unpinned_sources.md#resolution) | The grammar setup script fetches only the pinned grammars `build.zig` compiles and checks its list against `build.zig`. |
