@@ -88,11 +88,19 @@ test "semidx-mcp serves both protocol eras over stdio with nothing but protocol 
         try testing.expect(language.object.get("parser").?.object.get("available").?.bool);
     }
 
+    // The top-level `greet` and the `greet` member of `Greeter`, told apart by
+    // their container path.
     const definitions = try client.callTool(4, "semidx_find_definitions", "{\"name\":\"greet\",\"language\":\"zig\"}");
-    try testing.expectEqual(@as(i64, 1), definitions.get("total").?.integer);
-    const greet = definitions.get("definitions").?.array.items[0].object;
-    try testing.expectEqualStrings("greeter.zig", greet.get("evidence").?.object.get("unit").?.object.get("path").?.string);
-    try testing.expectEqualStrings("fact", greet.get("existence").?.object.get("resolution").?.object.get("category").?.string);
+    try testing.expectEqual(@as(i64, 2), definitions.get("total").?.integer);
+    var members: usize = 0;
+    for (definitions.get("definitions").?.array.items) |item| {
+        const greet = item.object;
+        try testing.expectEqualStrings("greeter.zig", greet.get("evidence").?.object.get("unit").?.object.get("path").?.string);
+        try testing.expectEqualStrings("fact", greet.get("existence").?.object.get("resolution").?.object.get("category").?.string);
+        const container_path = greet.get("container_path").?.array.items;
+        if (container_path.len == 1 and std.mem.eql(u8, "Greeter", container_path[0].string)) members += 1;
+    }
+    try testing.expectEqual(@as(usize, 1), members);
 
     const context = try client.callTool(5, "semidx_context", "{\"name\":\"announce\"}");
     const focus = context.get("focus").?.array.items[0].object;

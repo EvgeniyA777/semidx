@@ -9,16 +9,20 @@
 //!
 //! - a named top-level `fn` declaration, as a `function` definition;
 //! - a top-level `const` whose value is written directly as a `struct`,
-//!   `enum`, `union`, or `opaque` expression, as a `container` definition; and
-//! - inside a covered function body, every call expression: a call whose
-//!   callee is a bare name is a `CALLS` fact only when that name can mean
+//!   `enum`, `union`, or `opaque` expression, as a `container` definition;
+//! - a named `fn` declared directly inside such a container, as a `function`
+//!   definition whose identity carries the container's name
+//!   ([ADR 006](../../docs/adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md)); and
+//! - inside a covered top-level function body, every call expression: a call
+//!   whose callee is a bare name is a `CALLS` fact only when that name can mean
 //!   nothing but the one top-level function of that name in the same unit.
 //!
 //! Not covered: other top-level constants and variables (imports, aliases,
-//! values), tests, `comptime` blocks, `usingnamespace`, everything declared
-//! inside a container, builtin calls, and names that are not called. A
-//! container's members are Zig declarations in their own namespace, and nothing
-//! here resolves that namespace, imports, fields, or methods.
+//! values), tests, `comptime` blocks, `usingnamespace`, container fields and
+//! every container member other than a named `fn`, containers nested in
+//! containers or in function bodies, the bodies of member functions, builtin
+//! calls, and names that are not called. Nothing here resolves a container's
+//! namespace, imports, fields, or methods.
 
 const std = @import("std");
 
@@ -30,19 +34,21 @@ const contract = core.contract;
 
 pub const grammar: ts.Grammar = .zig;
 
-pub const version = std.fmt.comptimePrint("plan-004+ts-abi{d}", .{ts.runtime_abi_version});
+pub const version = std.fmt.comptimePrint("plan-006+ts-abi{d}", .{ts.runtime_abi_version});
 
 pub const capabilities: contract.Capabilities = .{
     .language = .zig,
     .producer = .{ .name = "frontend.zig", .version = version },
     .entity_roles = &.{ "function", "container" },
     .relationship_kinds = &.{ .defines, .calls },
-    .coverage_note = "named top-level `fn` declarations and top-level `const` " ++
+    .coverage_note = "named top-level `fn` declarations, top-level `const` " ++
         "declarations bound directly to a struct, enum, union, or opaque " ++
-        "expression; call expressions in those functions' bodies, where a bare " ++
-        "callee name resolves only to the unit's one top-level function of that " ++
-        "name and every other callee stays unresolved; members of containers, " ++
-        "builtin calls, and every other declaration are unsupported",
+        "expression, and named `fn` declarations directly inside those " ++
+        "containers; call expressions in top-level functions' bodies, where a " ++
+        "bare callee name resolves only to the unit's one top-level function of " ++
+        "that name and every other callee stays unresolved; member function " ++
+        "bodies, other container members, nested containers, builtin calls, and " ++
+        "every other declaration are unsupported",
 };
 
 /// Guards against unbounded recursion on pathological input. Exceeding it is
@@ -130,6 +136,14 @@ const TopLevelName = struct {
     function: ?u32,
 };
 
+/// A covered top-level container, whose direct members are read once every
+/// top-level declaration has been.
+const CoveredContainer = struct {
+    index: u32,
+    name: []const u8,
+    value: ts.Node,
+};
+
 /// A covered function whose body is walked for calls.
 const FunctionBody = struct {
     index: u32,
@@ -172,6 +186,8 @@ pub fn analyze(
     defer names.deinit(gpa);
     var bodies: std.ArrayList(FunctionBody) = .empty;
     defer bodies.deinit(gpa);
+    var containers: std.ArrayList(CoveredContainer) = .empty;
+    defer containers.deinit(gpa);
     var using_namespace = false;
 
     var members = root.namedChildren();
@@ -185,7 +201,7 @@ pub fn analyze(
                 continue;
             };
             const name = try builder.dupe(name_node.text(source));
-            const index = try addDefinition(builder, scope, member, name, "function", &.{
+            const index = try addDefinition(builder, scope, member, name, "function", &.{}, &.{
                 .{ .key = "zig.construct", .value = "function" },
             }, "named top-level `fn` declaration in the analyzed source unit");
             try addDefines(builder, member, name, index);
@@ -206,23 +222,53 @@ pub fn analyze(
                 continue;
             };
             const name = try builder.dupe(declaration.name.text(source));
-            const index = try addDefinition(builder, scope, member, name, "container", &.{
+            const index = try addDefinition(builder, scope, member, name, "container", &.{}, &.{
                 .{ .key = "zig.construct", .value = "container" },
                 .{ .key = "zig.container", .value = declaration.label },
             }, "top-level `const` bound directly to a container expression in the analyzed source unit");
             try addDefines(builder, member, name, index);
             definitions += 1;
-
-            var inner = declaration.value.namedChildren();
-            while (inner.next()) |inner_member| {
-                if (isComment(inner_member.kind())) continue;
-                uncovered.note(inner_member.kind(), .container_member);
-            }
+            try containers.append(gpa, .{ .index = index, .name = name, .value = declaration.value });
             continue;
         }
 
         if (std.mem.eql(u8, kind, "using_namespace_declaration")) using_namespace = true;
         uncovered.note(kind, .top_level);
+    }
+
+    // Members come after every top-level declaration, so a unit's top-level
+    // definitions keep the batch order they had before members were covered.
+    var unanalyzed_member_bodies: u32 = 0;
+    for (containers.items) |container| {
+        const path = try builder.dupeSlice(&.{container.name});
+        var inner = container.value.namedChildren();
+        while (inner.next()) |inner_member| {
+            const kind = inner_member.kind();
+            if (isComment(kind)) continue;
+            if (!std.mem.eql(u8, kind, "function_declaration")) {
+                uncovered.note(kind, .container_member);
+                continue;
+            }
+            const name_node = inner_member.childByFieldName("name") orelse {
+                uncovered.note(kind, .container_member);
+                continue;
+            };
+            const name = try builder.dupe(name_node.text(source));
+            const index = try addDefinition(builder, scope, inner_member, name, "function", path, &.{
+                .{ .key = "zig.construct", .value = "function" },
+                .{ .key = "zig.placement", .value = "container_member" },
+            }, "named `fn` declared directly inside a covered top-level container in the analyzed source unit");
+            try builder.addRelationship(.{
+                .kind = .defines,
+                .source = .{ .entity = container.index },
+                .target = .{ .local = index },
+                .evidence = evidenceOf(builder, inner_member, name),
+                .resolution = .{ .fact = .{
+                    .method = "declared directly inside this top-level container",
+                } },
+            });
+            if (inner_member.childByFieldName("body") != null) unanalyzed_member_bodies += 1;
+        }
     }
 
     const unit_scope: CallScope = .{
@@ -240,6 +286,12 @@ pub fn analyze(
     }
 
     try uncovered.report(builder);
+    if (unanalyzed_member_bodies > 0) {
+        try builder.addDiagnostic(.unsupported_construct, try builder.print(
+            "{d} member function bodies inside top-level containers were not analyzed for calls",
+            .{unanalyzed_member_bodies},
+        ));
+    }
     if (too_deep) {
         try builder.addDiagnostic(
             .unsupported_construct,
@@ -430,6 +482,7 @@ fn addDefinition(
     node: ts.Node,
     name: []const u8,
     role: []const u8,
+    container_path: []const []const u8,
     labels: []const model.ExtensionLabel,
     method: []const u8,
 ) !u32 {
@@ -443,7 +496,7 @@ fn addDefinition(
             // Zig has no overloading: a name is unique among the declarations
             // of one container, so a parameter edit is not a new definition.
             .signature = null,
-            .container_path = &.{},
+            .container_path = container_path,
         },
         .evidence = evidenceOf(builder, node, name),
         .extension = .{

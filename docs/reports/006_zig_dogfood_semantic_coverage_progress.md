@@ -16,14 +16,14 @@ implementing
 
 ## Current Status
 
-Stage 1 is complete. Stages 2 to 5 are pending.
+Stages 1 and 2 are complete. Stages 3 to 5 are pending.
 
 ## Stage Log
 
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 1: Coverage probes and fixture design | Completed | Fixtures for member functions, nested containers, local import aliases, exact and unresolved qualified calls, and provider edits; expected graph deltas and risk matrix recorded below. No behavior change. |
-| Stage 2: Container member function definitions | Pending | |
+| Stage 2: Container member function definitions | Completed | Named `fn` declarations directly inside covered top-level containers are `function` definitions with `container_path` and `container DEFINES member`; their bodies are reported as not analyzed. A renamed container reports its members' loss with replacements through a new generic reconciliation fallback. |
 | Stage 3: Local Zig import alias context | Pending | |
 | Stage 4: Exact qualified call facts | Pending | |
 | Stage 5: Dogfood and documentation | Pending | |
@@ -148,3 +148,50 @@ Verification:
 | `./scripts/check-zig-version.sh` | Zig 0.16.0 matches. |
 | `tree-sitter parse` over every new fixture | No `ERROR` or `MISSING` node. |
 | `zig build test --summary all` | 20/20 steps; 186/187 passed, 1 skipped. The skip is the pre-existing environment-dependent `src/mcp/root.zig` dogfood-root test. The fixture discovery test now also registers the new fixtures and stays green. |
+
+## Stage 2: Container Member Function Definitions
+
+Changed files: `src/frontends/zig.zig`, `src/core/model.zig`,
+`src/core/reconcile.zig`, `src/frontends/root.zig`,
+`tests/vertical_slice_test.zig`, `tests/mcp_smoke_test.zig`,
+`docs/spec/capability_matrix.md`, this log.
+
+Decisions taken inside the plan's boundary:
+
+- A named `function_declaration` directly inside a covered top-level container
+  is a `function` definition with `container_path = [container name]`, labels
+  `zig.construct = function` and `zig.placement = container_member`, and a
+  `DEFINES` fact from the container. No signature, as for top-level functions.
+  Every other member kind stays an unsupported construct per kind.
+- Member drafts are emitted after every top-level declaration, so a unit's
+  top-level definitions keep the batch order they had.
+- Member bodies are not walked yet (Stage 4). Until then the unit reports one
+  `unsupported_construct` count of member function bodies whose calls were not
+  analyzed, so their calls read as unanalyzed rather than absent.
+- **Shared-core change.** Reconciliation reported a renamed container's members
+  as `removed` plus `created`, because `IdentityEvidence.sameSlot` requires the
+  same `container_path`. Constitution section 4 forbids hiding identity loss as
+  an unrelated deletion and creation, and the plan's Stage 2 DoD requires
+  observable loss for containment changes. `IdentityEvidence.sameNameElsewhere`
+  (same scope, language, role, and name under a different container path) is
+  now a second replacement search in pass 3, used only when no same-slot
+  replacement exists. It records the existing unresolved
+  `identity_correspondence`, never a fact, and applies to every frontend: a
+  renamed Java class now reports its methods as lost with replacements too.
+- The producer version is now `plan-006+ts-abi15`.
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | 89/89 passed, including the new reconcile test for a renamed container. |
+| `zig fmt --check build.zig src tests` | Clean. |
+| `zig build test --summary all` | 20/20 steps; 190/191 passed, 1 skipped (the pre-existing environment-dependent MCP dogfood-root test). New: member definition shape test, member body edit, member rename, container rename. Updated: fixture counts (six definitions), the MCP smoke test (two `greet` definitions told apart by `container_path`). |
+
+Mutation checks, run and reverted:
+
+- Without the `sameNameElsewhere` fallback, the reconcile container-rename test
+  and the Zig container-rename fixture test fail (`lost` expected 2, found 1).
+- With member `container_path` left empty, the member-shape frontend test and
+  the MCP smoke test fail, and the four member fixture tests abort on a
+  missing member lookup.

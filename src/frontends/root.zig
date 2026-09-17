@@ -663,7 +663,7 @@ test "an empty zig container fails the unit's analysis rather than yielding a gu
     try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.{ .kind = .definition }));
 }
 
-test "declarations inside a zig container are not top-level definitions" {
+test "only direct member functions of a covered zig container become member definitions" {
     var analyzer = Analyzer.init(testing.allocator, null);
     defer analyzer.deinit();
     var graph = try core.Graph.init(testing.allocator, "fixtures");
@@ -672,21 +672,46 @@ test "declarations inside a zig container are not top-level definitions" {
     _ = try indexZig(&analyzer, &graph,
         \\const Outer = struct {
         \\    field: u8,
-        \\    pub const Inner = struct { a: u8 };
+        \\    pub const Inner = struct { a: u8, fn deep() void {} };
         \\    fn method() void {}
-        \\    fn other() void {}
+        \\    pub fn other() void {}
+        \\    extern fn declared() void;
+        \\    test "t" {}
         \\};
+        \\fn run() void {
+        \\    const Local = struct { a: u8, fn hidden() void {} };
+        \\    _ = Local;
+        \\}
         \\
     );
 
     var snapshot = try graph.publish();
     defer snapshot.deinit();
-    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .definition }));
-    for ([_][]const u8{ "Inner", "method", "other", "field" }) |name| {
+    const outer = snapshot.findDefinition("probe.zig", "Outer").?;
+    try testing.expectEqual(@as(usize, 0), outer.identity.container_path.len);
+    for ([_][]const u8{ "method", "other", "declared" }) |name| {
+        const member = snapshot.findDefinition("probe.zig", name).?;
+        try testing.expectEqualStrings("function", member.identity.role);
+        try testing.expect(member.identity.signature == null);
+        try testing.expectEqual(@as(usize, 1), member.identity.container_path.len);
+        try testing.expectEqualStrings("Outer", member.identity.container_path[0]);
+        try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+            .kind = .defines,
+            .source = outer.id,
+            .target = member.id,
+            .resolution = .fact,
+        }));
+    }
+    // The nested container, its member, a field, a test, and a container in a
+    // function body are not definitions.
+    for ([_][]const u8{ "Inner", "deep", "field", "Local", "hidden" }) |name| {
         try testing.expect(snapshot.findDefinition("probe.zig", name) == null);
     }
-    // Members are counted per kind: a field, a nested declaration, two functions.
-    try testing.expectEqual(@as(usize, 3), snapshot.countDiagnostics(.unsupported_construct));
+    try testing.expectEqual(@as(usize, 5), snapshot.countEntities(.{ .kind = .definition }));
+    // Members are reported per kind: a field, a nested declaration, a test;
+    // the two member bodies; and the container in `run`'s body.
+    try testing.expectEqual(@as(usize, 5), snapshot.countDiagnostics(.unsupported_construct));
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .kind = .calls }));
 }
 
 test "an empty zig unit reports confirmed absence" {

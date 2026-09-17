@@ -148,17 +148,26 @@ pub fn integrate(graph: *Graph, batch: contract.FrontendBatch) Error!Outcome {
 
         var replacement: ?model.EntityId = null;
         var replacement_evidence: ?model.SourceEvidence = null;
-        for (batch.entities, 0..) |draft, index| {
-            if (claimed_replacement[index]) continue;
-            // Only an entity created in this revision can be a replacement; a
-            // preserved one is already accounted for.
-            const created_here = graph.entity(local_ids[index].?).?.created_revision == revision;
-            if (!created_here) continue;
-            if (!existing.identity.sameSlot(draft.identity)) continue;
-            claimed_replacement[index] = true;
-            replacement = local_ids[index].?;
-            replacement_evidence = draft.evidence;
-            break;
+        // A new entity in the same slot is the replacement. Failing that, one
+        // with the same name under other containers is: a renamed container
+        // takes its members' containment with it.
+        for ([_]*const fn (model.IdentityEvidence, model.IdentityEvidence) bool{
+            model.IdentityEvidence.sameSlot,
+            model.IdentityEvidence.sameNameElsewhere,
+        }) |replaces| {
+            for (batch.entities, 0..) |draft, index| {
+                if (claimed_replacement[index]) continue;
+                // Only an entity created in this revision can be a replacement;
+                // a preserved one is already accounted for.
+                const created_here = graph.entity(local_ids[index].?).?.created_revision == revision;
+                if (!created_here) continue;
+                if (!replaces(existing.identity, draft.identity)) continue;
+                claimed_replacement[index] = true;
+                replacement = local_ids[index].?;
+                replacement_evidence = draft.evidence;
+                break;
+            }
+            if (replacement != null) break;
         }
 
         if (replacement) |new_id| {
@@ -518,6 +527,89 @@ test "a removed definition is removed, not reported as lost" {
     const event = after.identityEventFor(greeting_before.id, outcome.revision).?;
     try testing.expectEqual(model.IdentityEventKind.removed, event.kind);
     try testing.expect(event.replacement == null);
+}
+
+/// A batch declaring one member named `member` inside a container named
+/// `container`, which the unit introduces.
+fn integrateMember(graph: *Graph, unit: model.SourceUnitId, container: []const u8, member: []const u8) !Outcome {
+    var builder = contract.BatchBuilder.init(graph.gpa, unit, test_capabilities);
+    defer builder.deinit();
+    const evidence: model.SourceEvidence = .{ .unit = unit, .range = range(0, 10), .text = "decl" };
+    const outer = try builder.addEntity(.{
+        .kind = .definition,
+        .identity = .{
+            .scope = .{ .unit = unit },
+            .language = .java,
+            .role = "class",
+            .name = container,
+            .signature = null,
+            .container_path = &.{},
+        },
+        .evidence = evidence,
+        .extension = .{ .namespace = "java", .labels = &.{} },
+        .resolution = .{ .fact = .{ .method = "declaration in source" } },
+    });
+    const inner = try builder.addEntity(.{
+        .kind = .definition,
+        .identity = .{
+            .scope = .{ .unit = unit },
+            .language = .java,
+            .role = "method",
+            .name = member,
+            .signature = null,
+            .container_path = try builder.dupeSlice(&.{container}),
+        },
+        .evidence = evidence,
+        .extension = .{ .namespace = "java", .labels = &.{} },
+        .resolution = .{ .fact = .{ .method = "declaration in source" } },
+    });
+    try builder.addRelationship(.{
+        .kind = .defines,
+        .source = .unit_container,
+        .target = .{ .local = outer },
+        .evidence = evidence,
+        .resolution = .{ .fact = .{ .method = "declared in the unit" } },
+    });
+    try builder.addRelationship(.{
+        .kind = .defines,
+        .source = .{ .entity = outer },
+        .target = .{ .local = inner },
+        .evidence = evidence,
+        .resolution = .{ .fact = .{ .method = "declared in the container" } },
+    });
+    return integrate(graph, builder.batch());
+}
+
+test "a renamed container makes its members' identity loss observable too" {
+    var graph = try Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+    const unit = try graph.addSourceUnit("a/A.java", .java, "v1");
+    _ = try integrateMember(&graph, unit, "Greeter", "greet");
+
+    var before = try graph.publish();
+    defer before.deinit();
+    const member_before = before.findEntity(.{ .kind = .definition, .role = "method", .name = "greet" }).?;
+
+    const outcome = try integrateMember(&graph, unit, "Welcomer", "greet");
+    try testing.expectEqual(@as(usize, 2), outcome.lost);
+    try testing.expectEqual(@as(usize, 2), outcome.created);
+    try testing.expectEqual(@as(usize, 0), outcome.removed);
+    try testing.expectEqual(@as(usize, 0), outcome.preserved);
+
+    var after = try graph.publish();
+    defer after.deinit();
+    const member_after = after.findEntity(.{ .kind = .definition, .role = "method", .name = "greet" }).?;
+    try testing.expectEqualStrings("Welcomer", member_after.identity.container_path[0]);
+    const event = after.identityEventFor(member_before.id, outcome.revision).?;
+    try testing.expectEqual(model.IdentityEventKind.lost, event.kind);
+    try testing.expectEqual(member_after.id, event.replacement.?);
+
+    // A body-level rename of the member alone stays a same-slot loss, and an
+    // unchanged container keeps its identity.
+    const renamed = try integrateMember(&graph, unit, "Welcomer", "welcome");
+    try testing.expectEqual(@as(usize, 1), renamed.preserved);
+    try testing.expectEqual(@as(usize, 1), renamed.lost);
+    try testing.expectEqual(@as(usize, 0), renamed.removed);
 }
 
 test "a reference target moves between unresolved and resolved" {

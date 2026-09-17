@@ -1935,6 +1935,17 @@ fn hasDiagnosticContaining(snapshot: *const semidx.Snapshot, kind: model.Diagnos
     return false;
 }
 
+/// The one current definition named `name` inside `container` in the Zig
+/// fixture.
+fn zigMember(snapshot: *const semidx.Snapshot, container: []const u8, name: []const u8) ?model.Entity {
+    var found = snapshot.entitiesMatching(.{ .kind = .definition, .path = zig_path, .name = name });
+    while (found.next()) |entity| {
+        const path = entity.identity.container_path;
+        if (path.len == 1 and std.mem.eql(u8, path[0], container)) return entity;
+    }
+    return null;
+}
+
 test "the zig fixture yields its top-level functions and containers as definitions" {
     var fixture = try ZigFixture.init(testing.allocator);
     defer fixture.deinit();
@@ -1966,7 +1977,8 @@ test "the zig fixture yields its top-level functions and containers as definitio
         try testing.expectEqualStrings("zig", definition.extension.namespace);
         try testing.expectEqual(@as(usize, 0), definition.identity.container_path.len);
     }
-    try testing.expectEqual(@as(usize, 5), snapshot.countEntities(.{ .kind = .definition }));
+    // The direct member function of `Greeter` is a sixth definition.
+    try testing.expectEqual(@as(usize, 6), snapshot.countEntities(.{ .kind = .definition }));
 
     // Ingestion says the repository contains the file; the frontend says the
     // file introduces each covered declaration, as a fact of its own.
@@ -1979,16 +1991,34 @@ test "the zig fixture yields its top-level functions and containers as definitio
     }));
     try testing.expect(snapshot.countAssertions(.{ .producer = "frontend.zig", .resolution = .fact }) >= 10);
 
-    // The `greet` method inside `Greeter`, the `name` field, the import, the
-    // constant, and the test are not definitions, and they are reported
-    // instead of looking absent.
-    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .definition, .name = "greet" }));
+    // The `name` field, the import, the constant, and the test are not
+    // definitions, and they are reported instead of looking absent.
     for ([_][]const u8{ "name", "std", "limit" }) |name| {
         try testing.expect(snapshot.findDefinition(zig_path, name) == null);
     }
     try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, "2 top-level `variable_declaration`"));
     try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, "`test_declaration`"));
-    try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, "`function_declaration` declared inside a top-level container"));
+    try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, "`container_field` declared inside a top-level container"));
+    try testing.expect(!hasDiagnosticContaining(&snapshot, .unsupported_construct, "`function_declaration` declared inside a top-level container"));
+
+    // The `greet` member of `Greeter` is a definition of its own, introduced by
+    // the container rather than by the file, and distinct from top-level `greet`.
+    try testing.expectEqual(@as(usize, 2), snapshot.countEntities(.{ .kind = .definition, .name = "greet" }));
+    const member = zigMember(&snapshot, "Greeter", "greet").?;
+    try testing.expect(member.id != greet.id);
+    try testing.expectEqualStrings("function", member.identity.role);
+    try testing.expectEqualStrings("function", member.extension.get("zig.construct").?);
+    try testing.expectEqualStrings("container_member", member.extension.get("zig.placement").?);
+    try testing.expect(greet.extension.get("zig.placement") == null);
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .defines,
+        .source = greeter.id,
+        .target = member.id,
+        .resolution = .fact,
+    }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .kind = .defines, .source = file.id, .target = member.id }));
+    // Its body is not analyzed yet, and says so.
+    try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, "1 member function bodies inside top-level containers were not analyzed"));
     try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
     try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.confirmed_absence));
 }
@@ -2004,7 +2034,7 @@ test "a zig body edit preserves every definition id" {
 
     const outcome = try fixture.edit("zig/edits/01_body_edit.zig");
     try testing.expect(outcome.applied);
-    try testing.expectEqual(@as(usize, 5), outcome.preserved);
+    try testing.expectEqual(@as(usize, 6), outcome.preserved);
     try testing.expectEqual(@as(usize, 0), outcome.created);
     try testing.expectEqual(@as(usize, 0), outcome.removed);
     try testing.expectEqual(@as(usize, 0), outcome.lost);
@@ -2025,7 +2055,7 @@ test "an added zig definition leaves the others untouched" {
     const greet_before = before.findDefinition(zig_path, "greet").?;
 
     const outcome = try fixture.edit("zig/edits/02_added_definition.zig");
-    try testing.expectEqual(@as(usize, 5), outcome.preserved);
+    try testing.expectEqual(@as(usize, 6), outcome.preserved);
     try testing.expectEqual(@as(usize, 1), outcome.created);
     try testing.expectEqual(@as(usize, 0), outcome.lost);
 
@@ -2051,7 +2081,7 @@ test "a renamed zig definition is reported as identity loss with its replacement
     const outcome = try fixture.edit("zig/edits/03_renamed_definition.zig");
     try testing.expectEqual(@as(usize, 1), outcome.lost);
     try testing.expectEqual(@as(usize, 1), outcome.created);
-    try testing.expectEqual(@as(usize, 4), outcome.preserved);
+    try testing.expectEqual(@as(usize, 5), outcome.preserved);
     try testing.expectEqual(@as(usize, 0), outcome.removed);
 
     var after = try fixture.index.publish();
@@ -2094,13 +2124,87 @@ test "editing the zig fixture into unparsable source stops its facts being curre
     // Nothing was deleted, so repairing the source restores the same entities.
     const repaired = try fixture.edit("zig/edits/01_body_edit.zig");
     try testing.expect(repaired.applied);
-    try testing.expectEqual(@as(usize, 5), repaired.preserved);
+    try testing.expectEqual(@as(usize, 6), repaired.preserved);
     try testing.expectEqual(@as(usize, 0), repaired.created);
 
     var repaired_snapshot = try fixture.index.publish();
     defer repaired_snapshot.deinit();
     try testing.expectEqual(greet_before.id, repaired_snapshot.findDefinition(zig_path, "greet").?.id);
     try testing.expectEqual(@as(usize, 0), repaired_snapshot.countDiagnostics(.analysis_failed));
+}
+
+test "a zig member body edit preserves the member's identity" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const member_before = zigMember(&before, "Greeter", "greet").?;
+
+    const outcome = try fixture.edit("zig/edits/07_member_body_edit.zig");
+    try testing.expect(outcome.applied);
+    try testing.expectEqual(@as(usize, 6), outcome.preserved);
+    try testing.expectEqual(@as(usize, 0), outcome.created);
+    try testing.expectEqual(@as(usize, 0), outcome.lost);
+    try testing.expectEqual(@as(usize, 0), outcome.removed);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    const member_after = zigMember(&after, "Greeter", "greet").?;
+    try testing.expectEqual(member_before.id, member_after.id);
+    try testing.expectEqual(model.IdentityEventKind.preserved, after.identityEventFor(member_before.id, outcome.revision).?.kind);
+}
+
+test "a renamed zig member is reported as identity loss with its replacement" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const member_before = zigMember(&before, "Greeter", "greet").?;
+    const greet_before = before.findDefinition(zig_path, "greet").?;
+
+    const outcome = try fixture.edit("zig/edits/08_member_renamed.zig");
+    try testing.expectEqual(@as(usize, 5), outcome.preserved);
+    try testing.expectEqual(@as(usize, 1), outcome.lost);
+    try testing.expectEqual(@as(usize, 1), outcome.created);
+    try testing.expectEqual(@as(usize, 0), outcome.removed);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    const welcome = zigMember(&after, "Greeter", "welcome").?;
+    const event = after.identityEventFor(member_before.id, outcome.revision).?;
+    try testing.expectEqual(model.IdentityEventKind.lost, event.kind);
+    try testing.expectEqual(welcome.id, event.replacement.?);
+    // The top-level function of the member's old name is not its replacement.
+    try testing.expectEqual(greet_before.id, after.findDefinition(zig_path, "greet").?.id);
+    try testing.expect(zigMember(&after, "Greeter", "greet") == null);
+}
+
+test "renaming a zig container makes its member's identity loss observable" {
+    var fixture = try ZigFixture.init(testing.allocator);
+    defer fixture.deinit();
+
+    var before = try fixture.index.publish();
+    defer before.deinit();
+    const container_before = before.findDefinition(zig_path, "Greeter").?;
+    const member_before = zigMember(&before, "Greeter", "greet").?;
+
+    const outcome = try fixture.edit("zig/edits/09_container_renamed.zig");
+    try testing.expectEqual(@as(usize, 4), outcome.preserved);
+    try testing.expectEqual(@as(usize, 2), outcome.lost);
+    try testing.expectEqual(@as(usize, 2), outcome.created);
+    try testing.expectEqual(@as(usize, 0), outcome.removed);
+
+    var after = try fixture.index.publish();
+    defer after.deinit();
+    const welcomer = after.findDefinition(zig_path, "Welcomer").?;
+    const member_after = zigMember(&after, "Welcomer", "greet").?;
+    try testing.expectEqual(welcomer.id, after.identityEventFor(container_before.id, outcome.revision).?.replacement.?);
+    const event = after.identityEventFor(member_before.id, outcome.revision).?;
+    try testing.expectEqual(model.IdentityEventKind.lost, event.kind);
+    try testing.expectEqual(member_after.id, event.replacement.?);
+    try testing.expectEqual(@as(usize, 1), after.countRelationships(.{ .kind = .defines, .source = welcomer.id, .target = member_after.id }));
 }
 
 test "same-unit zig calls are current facts and every other callee stays unresolved" {
@@ -2238,7 +2342,7 @@ test "a zig call moves from unresolved to resolved when its target appears" {
     const announce_before = before.findDefinition(zig_path, "announce").?;
 
     const outcome = try fixture.edit("zig/edits/04_reference_resolved.zig");
-    try testing.expectEqual(@as(usize, 5), outcome.preserved);
+    try testing.expectEqual(@as(usize, 6), outcome.preserved);
     try testing.expectEqual(@as(usize, 1), outcome.created);
 
     var after = try fixture.index.publish();
@@ -2274,7 +2378,7 @@ test "adding a zig unit leaves java and clojure analysis unchanged" {
     defer after.deinit();
     try testing.expectEqual(java_assertions, after.countAssertions(.{ .producer = "frontend.java" }));
     try testing.expectEqual(clojure_assertions, after.countAssertions(.{ .producer = "frontend.clojure" }));
-    try testing.expectEqual(@as(usize, 8 + 5), after.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 8 + 6), after.countEntities(.{ .kind = .definition }));
     // A Java or Clojure call named `greet` did not become a Zig fact, or the
     // other way round: every call fact stays inside its own language's unit.
     var facts = after.relationships(.{ .kind = .calls, .resolution = .fact });

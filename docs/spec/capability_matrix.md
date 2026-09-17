@@ -4,7 +4,7 @@ doc_type: "specification"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-14"
+updated: "2026-09-17"
 ---
 
 # Preview Capability Matrix
@@ -87,13 +87,13 @@ claim.
 
 | Aspect | Current behavior |
 | --- | --- |
-| Definitions (facts) | Named top-level `fn` declarations, including `extern` and `inline` (role `function`), and top-level `const` declarations bound directly to a `struct`, `enum`, `union`, or `opaque` expression (role `container`). Labels `zig.construct`, `zig.container`. |
-| Relationships (facts) | `file DEFINES function|container`. A bare call `foo(...)` in a covered function body is a `CALLS` fact only when the unit's top level declares `foo` exactly once, as a covered function, and no parameter, local binding, capture, or `usingnamespace` could give it another meaning. No `REFERENCES` are emitted. |
+| Definitions (facts) | Named top-level `fn` declarations, including `extern` and `inline` (role `function`), top-level `const` declarations bound directly to a `struct`, `enum`, `union`, or `opaque` expression (role `container`), and named `fn` declarations directly inside such a container (role `function`, `container_path` naming the container, label `zig.placement = container_member`; [ADR 006](../adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md)). Labels `zig.construct`, `zig.container`, `zig.placement`. |
+| Relationships (facts) | `file DEFINES function|container`, `container DEFINES function` for its direct members. A bare call `foo(...)` in a covered function body is a `CALLS` fact only when the unit's top level declares `foo` exactly once, as a covered function, and no parameter, local binding, capture, or `usingnamespace` could give it another meaning. No `REFERENCES` are emitted. |
 | Unresolved | Calls through a namespace, value, or member (`std.debug.print`, `self.x()`, `protocol.writeString(...)`), including calls to functions in other files; shadowed, duplicated, aliased, or imported names; every bare call in a unit with `usingnamespace`; calls under logical negation such as `!helper()`, which the pinned grammar parses as a type-shaped callee ([follow-up 001](../followups/001_zig_logical_negation_calls.md)). |
-| Unsupported | Every other top-level declaration (`var`, aliases, `@import` bindings, error sets, `test`, `comptime`, `usingnamespace`), reported per kind per unit; declarations inside containers (methods and nested types are not definitions); container expressions inside function bodies; nesting deeper than 64 levels. |
+| Unsupported | Every other top-level declaration (`var`, aliases, `@import` bindings, error sets, `test`, `comptime`, `usingnamespace`), reported per kind per unit; container members other than named `fn` declarations (fields, nested containers and their members, constants, tests), reported per kind; the bodies of member functions, reported as one count per unit; container expressions inside function bodies; nesting deeper than 64 levels. |
 | Analysis failed | A unit containing an empty container body such as `struct {}`, which the pinned grammar parses as an error ([follow-up 002](../followups/002_zig_empty_container_grammar.md)). |
 | Not recorded | Builtin calls (`@as(...)`) themselves (their arguments are walked); calls inside `test` blocks, `comptime` blocks, and container members; `@import` graph semantics. |
-| Identity | No signature in identity: a parameter edit keeps the definition; a rename is identity loss. |
+| Identity | No signature in identity: a parameter edit keeps the definition; a rename is identity loss. A member's identity includes its container's name: renaming the container is identity loss for the container and for each member, reported with the renamed member as replacement. |
 | Known false negatives | **References and calls are same-unit only.** `semidx_references` never lists a caller from another unit, and callers inside methods are not recorded ([follow-up 006](../followups/006_zig_cross_unit_and_member_calls.md)). |
 
 ## MCP Output (`semidx-mcp`)

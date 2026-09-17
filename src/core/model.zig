@@ -273,6 +273,24 @@ pub const IdentityEvidence = struct {
         }
         return true;
     }
+
+    /// Same scope, language, role, and name under different containers: the
+    /// shape a declaration takes when its container is renamed or it moves to
+    /// another container. Like `sameSlot`, this is not correspondence. It only
+    /// lets such a break be reported as identity loss with its replacement.
+    pub fn sameNameElsewhere(a: IdentityEvidence, b: IdentityEvidence) bool {
+        if (a.language != b.language) return false;
+        if (!a.scope.eql(b.scope)) return false;
+        if (!std.mem.eql(u8, a.role, b.role)) return false;
+        const a_name = a.name orelse return false;
+        const b_name = b.name orelse return false;
+        if (!std.mem.eql(u8, a_name, b_name)) return false;
+        if (a.container_path.len != b.container_path.len) return true;
+        for (a.container_path, b.container_path) |x, y| {
+            if (!std.mem.eql(u8, x, y)) return true;
+        }
+        return false;
+    }
 };
 
 fn optionalStringEql(a: ?[]const u8, b: ?[]const u8) bool {
