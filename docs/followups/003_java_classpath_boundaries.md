@@ -4,7 +4,7 @@ doc_type: "follow_up"
 lifecycle: "active"
 status: "open"
 agent_action: "use_as_input_for_future_plan_only"
-updated: "2026-09-14"
+updated: "2026-09-17"
 ---
 
 # Java Classpath Boundaries
@@ -32,6 +32,15 @@ one module can resolve to a class from another module as a `REFERENCES` fact.
 Plan 003 intentionally admitted same-package resolution without adding `module`,
 `IMPORTS`, build graph modeling, or classpath entities to the shared core. Those
 questions need their own decision and evidence.
+
+## Decision Record Reminder
+
+When Java cross-unit work resumes, resolve this boundary before widening
+same-package facts. This is the next preferred Java ADR candidate because the
+current behavior can otherwise produce false facts across independent modules
+that happen to share a package name. Java single-type imports are useful, but
+they are lower priority than deciding how classpath or module visibility enters
+resolution evidence.
 
 ## Acceptance Direction
 

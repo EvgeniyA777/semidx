@@ -387,9 +387,12 @@ why. This is not a changelog of removed implementation; see `git log`.
   package was expressible as extension vocabulary plus an analyzer projection,
   with no shared-core kind.
 - Next cross-unit work should again be one narrow, language-correct producer
-  with its own requirement: Java single-type imports, or the multi-module
-  classpath boundary the same-package rule currently ignores, are the nearest
-  candidates. Each needs its own decision record; neither is implied by ADR 004.
+  with its own requirement. If the next area is Java, prefer a decision record
+  for the multi-module classpath boundary before widening Java facts: it is the
+  sharper exactness risk because two independent roots can share a package name.
+  Java single-type imports are still useful, but should follow or explicitly
+  account for the classpath/module boundary. Neither candidate is implied by
+  ADR 004.
 - Source identity needs a stronger evidence story for common refactors where a
   file moves and changes in the same rescan. The current exact-content rule is
   intentionally conservative; future work should prefer explicit VCS/IDE move
