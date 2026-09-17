@@ -185,6 +185,37 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
         }
     }
     try testing.expect(mapped_definition);
+    // The default whole-repository map either fits its response budget or says
+    // it did not and continues through cursor pages that together return every
+    // file exactly once over the same snapshot.
+    var paged_paths: std.StringHashMapUnmanaged(void) = .empty;
+    var page_cursor: ?[]const u8 = null;
+    var pages: usize = 0;
+    var largest_page: usize = 0;
+    while (true) {
+        const arguments = if (page_cursor) |c| try std.fmt.allocPrint(arena, "{{\"cursor\":\"{s}\"}}", .{c}) else "{}";
+        var page_bytes: usize = undefined;
+        const page = try gate.sizedCall(100 + @as(i64, @intCast(pages)), "semidx_repo_map", arguments, &page_bytes);
+        pages += 1;
+        largest_page = @max(largest_page, page_bytes);
+        try gate.require(pages <= copy.units, "response_budget", "the map walk did not end after {d} pages", .{pages});
+        try gate.require(revisionOf(page) == first_revision and page.get("files_total").?.integer == map.get("files_total").?.integer, "response_budget", "map page {d} reads another snapshot or total", .{pages});
+        const files = page.get("files").?.array.items;
+        try gate.require(files.len > 0, "response_budget", "map page {d} returned no file", .{pages});
+        for (files) |file| {
+            const path = file.object.get("unit").?.object.get("path").?.string;
+            try gate.require(!(try paged_paths.getOrPut(arena, path)).found_existing, "response_budget", "map pages returned {s} twice", .{path});
+        }
+        const next = page.get("next_cursor") orelse break;
+        try gate.require(page.get("truncated").?.bool, "response_budget", "map page {d} has a next_cursor but is not truncated", .{pages});
+        const cut_by_limit = page.get("offset").?.integer + page.get("budget").?.object.get("limit").?.integer < page.get("files_total").?.integer;
+        try gate.require(page.get("budget_exhausted").?.bool or cut_by_limit, "response_budget", "map page {d} continues without reporting budget_exhausted or a limit cut", .{pages});
+        page_cursor = next.string;
+    }
+    try gate.require(paged_paths.count() == copy.units, "response_budget", "map pages returned {d} of {d} files", .{ paged_paths.count(), copy.units });
+    try gate.pass("response_budget", "the default map returned {d} files over {d} pages", .{ paged_paths.count(), pages });
+    try gate.observe("response_budget: default map walk: {d} pages, largest page {d} bytes", .{ pages, largest_page });
+
     const bounded_map = try gate.call(26, "semidx_repo_map", "{\"limit\":2}");
     try gate.requireTruncated("semidx_repo_map limit 2", bounded_map, "files", "files_total", "truncated");
 

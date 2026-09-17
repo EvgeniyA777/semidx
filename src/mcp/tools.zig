@@ -102,6 +102,8 @@ const shared_params = struct {
         "full renders every recorded field.");
     const max_response_bytes = countParam("max_response_bytes", 32_000, 2_000_000, "Stop appending whole items once the structured " ++
         "result would exceed this many bytes; the first item is always returned, and the result reports budget_exhausted.");
+    const cursor: Param = .{ .name = "cursor", .type = .string, .description = "Opaque next_cursor from an earlier result of this tool; " ++
+        "repeat that call's other arguments. Only limit and max_response_bytes may change between pages." };
 };
 
 /// Renders a JSON string literal at compile time.
@@ -157,6 +159,7 @@ pub const definitions = [_]Definition{
         shared_params.language,
         countParam("limit", 100, 1000, "Maximum entries."),
         shared_params.max_response_bytes,
+        shared_params.cursor,
     }),
     define(.semidx_repo_map, "Repository map", "List indexed source units with their analysis state and the top-level definitions the graph " ++
         "records in each. Bounded; results report truncation.", &.{
@@ -166,6 +169,7 @@ pub const definitions = [_]Definition{
         countParam("definitions_per_file", 50, 500, null),
         shared_params.detail,
         shared_params.max_response_bytes,
+        shared_params.cursor,
     }),
     define(.semidx_find_definitions, "Find definitions", "Find definition entities by exact name, root-relative path, language, and role, with the " ++
         "producer, resolution, and freshness of each definition's existence claim.", &.{
@@ -177,6 +181,7 @@ pub const definitions = [_]Definition{
         shared_params.resolution,
         countParam("limit", 50, 500, null),
         shared_params.max_response_bytes,
+        shared_params.cursor,
     }),
     define(.semidx_references, "References and calls", "Return the REFERENCES and CALLS relationships recorded for a definition, identified by " ++
         "entity_id or by exact name. A call is one occurrence and is listed once. Incoming relationships target the " ++
@@ -191,6 +196,7 @@ pub const definitions = [_]Definition{
         countParam("limit", 100, 1000, null),
         shared_params.detail,
         shared_params.max_response_bytes,
+        shared_params.cursor,
     }),
     define(.semidx_context, "Graph context", "Return a bounded graph neighborhood around an entity (entity_id), a definition name, or a " ++
         "source unit (path): the entity, its unit's analysis state, incoming and outgoing relationships of every " ++
@@ -536,6 +542,125 @@ const Hints = struct {
         try s.endArray();
     }
 };
+
+// -- cursors ----------------------------------------------------------------
+
+/// A continuation of one tool call over one snapshot. It names the tool, the
+/// snapshot revision, a hash of the call's canonical arguments, and the
+/// position of the next item in the call's deterministic order. Clients treat
+/// the encoding as opaque; the server only ever honors a cursor whose tool,
+/// revision, and arguments match the call it arrives with.
+const Cursor = struct {
+    tool: Tool,
+    revision: u64,
+    arguments: u64,
+    position: usize,
+
+    const prefix = "sdx1.";
+    const Base64 = std.base64.url_safe_no_pad;
+
+    fn encode(self: Cursor, arena: Allocator) Allocator.Error![]const u8 {
+        const payload = try std.fmt.allocPrint(arena, "{d}.{d}.{x:0>16}.{d}", .{ @intFromEnum(self.tool), self.revision, self.arguments, self.position });
+        const out = try arena.alloc(u8, prefix.len + Base64.Encoder.calcSize(payload.len));
+        @memcpy(out[0..prefix.len], prefix);
+        _ = Base64.Encoder.encode(out[prefix.len..], payload);
+        return out;
+    }
+
+    /// Null for anything this server did not issue.
+    fn decode(arena: Allocator, text: []const u8) Allocator.Error!?Cursor {
+        if (!std.mem.startsWith(u8, text, prefix) or text.len > 256) return null;
+        const encoded = text[prefix.len..];
+        const size = Base64.Decoder.calcSizeForSlice(encoded) catch return null;
+        const payload = try arena.alloc(u8, size);
+        Base64.Decoder.decode(payload, encoded) catch return null;
+        var fields = std.mem.splitScalar(u8, payload, '.');
+        const tool = std.fmt.parseInt(u8, fields.next() orelse return null, 10) catch return null;
+        const revision = std.fmt.parseInt(u64, fields.next() orelse return null, 10) catch return null;
+        const arguments = std.fmt.parseInt(u64, fields.next() orelse return null, 16) catch return null;
+        const position = std.fmt.parseInt(usize, fields.next() orelse return null, 10) catch return null;
+        if (fields.next() != null or tool >= std.enums.values(Tool).len) return null;
+        return .{ .tool = @enumFromInt(tool), .revision = revision, .arguments = arguments, .position = position };
+    }
+};
+
+/// A hash of every argument a tool declares, with its default applied when the
+/// call omits it, except those a caller may change between pages.
+fn canonicalArguments(comptime tool: Tool, map: ?ObjectMap) u64 {
+    var hasher = std.hash.Wyhash.init(0);
+    inline for (definitions[@intFromEnum(tool)].params) |param| {
+        const paged = comptime std.mem.eql(u8, param.name, "cursor") or std.mem.eql(u8, param.name, "limit") or
+            std.mem.eql(u8, param.name, "max_response_bytes");
+        if (!paged) {
+            hasher.update(param.name);
+            hasher.update("=");
+            const given: ?std.json.Value = if (map) |object| object.get(param.name) else null;
+            if (given) |value| switch (value) {
+                .string => |text| {
+                    hasher.update("s");
+                    hasher.update(text);
+                },
+                .integer => |n| {
+                    hasher.update("i");
+                    hasher.update(std.mem.asBytes(&n));
+                },
+                // Validation refused every other JSON type before this.
+                else => hasher.update("?"),
+            } else switch (param.type) {
+                .count => |count| {
+                    const n: i64 = count.default;
+                    hasher.update("i");
+                    hasher.update(std.mem.asBytes(&n));
+                },
+                .choice => |choice| if (choice.default) |default| {
+                    hasher.update("s");
+                    hasher.update(default);
+                } else hasher.update("-"),
+                .string, .entity_id => hasher.update("-"),
+            }
+            hasher.update("\x00");
+        }
+    }
+    return hasher.final();
+}
+
+/// The position a paged call starts at: 0 without a cursor, otherwise the
+/// position of a cursor this tool issued over the published snapshot for the
+/// same canonical arguments. Every mismatch is a tool error naming it.
+fn cursorPosition(ctx: *Context, comptime tool: Tool, args: Args(tool)) Error!usize {
+    const text = try args.string("cursor") orelse return 0;
+    const cursor = try Cursor.decode(ctx.arena, text) orelse return ctx.fail("cursor is not one this server issued", .{});
+    if (cursor.tool != tool) {
+        return ctx.fail("cursor was issued by {t}, not {t}; pass it to {t}", .{ cursor.tool, tool, cursor.tool });
+    }
+    if (cursor.revision != ctx.snapshot.revision) {
+        return ctx.fail("cursor was issued at snapshot revision {d}, but revision {d} is published; repeat the call without cursor " ++
+            "to start over on the new snapshot", .{ cursor.revision, ctx.snapshot.revision });
+    }
+    if (cursor.arguments != canonicalArguments(tool, args.map)) {
+        return ctx.fail("cursor was issued for different arguments; repeat the call that returned it, changing only cursor, limit, " ++
+            "or max_response_bytes", .{});
+    }
+    return cursor.position;
+}
+
+/// Refuses a position past the end, which only an altered cursor can name.
+fn checkPosition(ctx: *Context, position: usize, total: usize) Error!void {
+    if (position > total) return ctx.fail("cursor position {d} is past the {d} items this call selects", .{ position, total });
+}
+
+/// `offset`, and `next_cursor` when items remain after this page, with a
+/// `continue` hint for `list`.
+fn writePage(ctx: *Context, s: *Stringify, comptime tool: Tool, args: Args(tool), hints: *Hints, list: []const u8, position: usize, returned: usize, total: usize) Error!void {
+    try s.objectField("offset");
+    try s.write(position);
+    const next = position + returned;
+    if (next >= total) return;
+    const cursor: Cursor = .{ .tool = tool, .revision = ctx.snapshot.revision, .arguments = canonicalArguments(tool, args.map), .position = next };
+    try s.objectField("next_cursor");
+    try s.write(try cursor.encode(ctx.arena));
+    try hints.add(ctx.arena, list, .@"continue", &.{"cursor"});
+}
 
 /// Writes JSON already rendered by `Context.item` as the next value at `s`.
 fn writeRaw(s: *Stringify, rendered: []const u8) Error!void {
@@ -1134,13 +1259,15 @@ pub fn outline(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
         }
     }
     std.mem.sort(OutlineEntry, entries.items, {}, OutlineEntry.less);
+    const position = try cursorPosition(ctx, .semidx_outline, args);
+    try checkPosition(ctx, position, entries.items.len);
 
     try beginStructured(ctx, s);
     try s.objectField("path_prefix");
     try protocol.writeString(s, directory);
     try s.objectField("entries");
     try s.beginArray();
-    const page = entries.items[0..@min(entries.items.len, limit)];
+    const page = entries.items[position..@min(entries.items.len, position + limit)];
     var returned: usize = 0;
     for (page) |entry| {
         if (!try ctx.append(s, writeOutlineEntry, .{ directory, entry })) break;
@@ -1155,8 +1282,9 @@ pub fn outline(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     try totals.write(s, true);
     try writeBudgetOutcome(ctx, s, .{ .entries = page.len - returned });
     var hints: Hints = .{};
+    try writePage(ctx, s, .semidx_outline, args, &hints, if (ctx.budget_exhausted) "response" else "entries", position, returned, entries.items.len);
     const narrow = try std.mem.concat(ctx.arena, []const u8, &.{ &.{"path_prefix"}, try args.unset(&.{"language"}) });
-    if (entries.items.len > limit) {
+    if (position + limit < entries.items.len) {
         try hints.add(ctx.arena, "entries", .narrow, narrow);
         try hints.add(ctx.arena, "entries", .raise, raisable(.semidx_outline, "limit", limit));
     }
@@ -1209,12 +1337,14 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
         try order.append(ctx.arena, i);
     }
     std.mem.sort(usize, order.items, snapshot, lessPath);
+    const position = try cursorPosition(ctx, .semidx_repo_map, args);
+    try checkPosition(ctx, position, order.items.len);
 
     var hints: Hints = .{};
     try beginStructured(ctx, s);
     try s.objectField("files");
     try s.beginArray();
-    const page = order.items[0..@min(order.items.len, limit)];
+    const page = order.items[position..@min(order.items.len, position + limit)];
     var returned: usize = 0;
     for (page) |i| {
         var definitions_truncated = false;
@@ -1230,8 +1360,9 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     try s.objectField("truncated");
     try s.write(returned < order.items.len);
     try writeBudgetOutcome(ctx, s, .{ .files = page.len - returned });
+    try writePage(ctx, s, .semidx_repo_map, args, &hints, if (ctx.budget_exhausted) "response" else "files", position, returned, order.items.len);
     const narrow = try args.unset(&.{ "path_prefix", "language" });
-    if (order.items.len > limit) {
+    if (position + limit < order.items.len) {
         try hints.add(ctx.arena, "files", .narrow, narrow);
         try hints.add(ctx.arena, "files", .raise, raisable(.semidx_repo_map, "limit", limit));
     }
@@ -1293,6 +1424,7 @@ pub fn findDefinitions(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Erro
     const limit = try args.count("limit");
     const max_bytes = try args.count("max_response_bytes");
     ctx.max_response_bytes = max_bytes;
+    const position = try cursorPosition(ctx, .semidx_find_definitions, args);
 
     try beginStructured(ctx, s);
     try s.objectField("definitions");
@@ -1307,19 +1439,21 @@ pub fn findDefinitions(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Erro
             if (!resolutionMatches(resolution, existence.resolution)) continue;
         }
         total += 1;
-        if (total > limit) continue;
+        if (total <= position or total > position + limit) continue;
         if (try ctx.append(s, writeEntity, .{ entity, EntityShape.full })) returned += 1 else omitted += 1;
     }
     try s.endArray();
+    try checkPosition(ctx, position, total);
     try s.objectField("total");
     try s.write(total);
     try s.objectField("truncated");
     try s.write(returned < total);
     try writeBudgetOutcome(ctx, s, .{ .definitions = omitted });
     var hints: Hints = .{};
+    try writePage(ctx, s, .semidx_find_definitions, args, &hints, if (ctx.budget_exhausted) "response" else "definitions", position, returned, total);
     const unset = try args.unset(&.{ "name", "path", "language", "role" });
     const narrow = if (resolution == .any) try std.mem.concat(ctx.arena, []const u8, &.{ unset, &.{"resolution"} }) else unset;
-    if (total > limit) {
+    if (position + limit < total) {
         try hints.add(ctx.arena, "definitions", .narrow, narrow);
         try hints.add(ctx.arena, "definitions", .raise, raisable(.semidx_find_definitions, "limit", limit));
     }
@@ -1386,25 +1520,24 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
     ctx.max_response_bytes = max_bytes;
     const targets = try selectTargets(ctx, args, freshness, false);
     const shown_targets = targets[0..@min(targets.len, max_targets)];
+    const position = try cursorPosition(ctx, .semidx_references, args);
 
     try beginStructured(ctx, s);
     try s.objectField("targets");
     try s.beginArray();
-    // Compact names a relationship end that is a returned target by id alone.
-    // A target the budget refused leaves the budget exhausted, so no
-    // relationship is rendered after it.
+    // Targets are bounded by `max_targets` alone and repeated on every page,
+    // so the budget and its first always-admitted item are the
+    // relationships'. Compact names a relationship end that is a target by id.
     var in_view: std.ArrayList(model.EntityId) = .empty;
     for (shown_targets) |target| {
-        if (!try ctx.append(s, writeEntity, .{ target, if (detail == .full) EntityShape.full else EntityShape.focus })) break;
-        try in_view.append(ctx.arena, target.id);
+        try writeEntity(ctx, s, target, if (detail == .full) .full else .focus);
+        if (detail == .compact) try in_view.append(ctx.arena, target.id);
     }
-    const returned_targets = in_view.items.len;
-    if (detail == .full) in_view.clearRetainingCapacity();
     try s.endArray();
     try s.objectField("targets_total");
     try s.write(targets.len);
     try s.objectField("targets_truncated");
-    try s.write(returned_targets < targets.len);
+    try s.write(targets.len > max_targets);
 
     var seen: std.AutoHashMapUnmanaged(model.AssertionId, void) = .empty;
     var total: usize = 0;
@@ -1426,18 +1559,20 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
                 // still one occurrence.
                 if ((try seen.getOrPut(ctx.arena, assertion.id)).found_existing) continue;
                 total += 1;
-                if (total > limit) continue;
+                if (total <= position or total > position + limit) continue;
                 if (try ctx.append(s, writeRelationship, .{ assertion, @as(?[]const u8, pass.name), detail, @as([]const model.EntityId, in_view.items) })) returned += 1 else omitted += 1;
             }
         }
     }
     try s.endArray();
+    try checkPosition(ctx, position, total);
     try s.objectField("relationships_total");
     try s.write(total);
     try s.objectField("truncated");
     try s.write(returned < total);
-    try writeBudgetOutcome(ctx, s, .{ .targets = shown_targets.len - returned_targets, .relationships = omitted });
+    try writeBudgetOutcome(ctx, s, .{ .relationships = omitted });
     var hints: Hints = .{};
+    try writePage(ctx, s, .semidx_references, args, &hints, if (ctx.budget_exhausted) "response" else "relationships", position, returned, total);
     // `path` and `language` qualify a name; with `entity_id` they are refused.
     const by_name = !args.given("entity_id");
     const narrow_targets = try std.mem.concat(ctx.arena, []const u8, &.{ &.{"entity_id"}, try args.unset(&.{ "path", "language" }) });
@@ -1448,12 +1583,12 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
     if (by_name) try narrow.appendSlice(ctx.arena, try args.unset(&.{ "path", "language" }));
     if (direction == .both) try narrow.append(ctx.arena, "direction");
     if (resolution == .any) try narrow.append(ctx.arena, "resolution");
-    if (total > limit) {
+    if (position + limit < total) {
         try hints.add(ctx.arena, "relationships", .narrow, narrow.items);
         try hints.add(ctx.arena, "relationships", .raise, raisable(.semidx_references, "limit", limit));
     }
     if (ctx.budget_exhausted) {
-        try hints.add(ctx.arena, "response", .narrow, if (returned_targets < shown_targets.len and by_name) narrow_targets else narrow.items);
+        try hints.add(ctx.arena, "response", .narrow, narrow.items);
         try hints.add(ctx.arena, "response", .raise, raisable(.semidx_references, "max_response_bytes", max_bytes));
     }
     try hints.write(s);

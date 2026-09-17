@@ -25,7 +25,8 @@ gates, and the shape decisions later stages follow are recorded below.
 | Stage 2: Compact `semidx_references` | Completed (`9f4f3c2`) | `semidx_references` takes `detail` (`compact` default, `full`). Compact renders each listed target once, with its existence claim, and names a relationship end that is a listed target by `{id}`; the other end, resolution, producer, and evidence are compact. `writeString` at `limit` 1000: 24,716 transcript bytes against 56,964 full (43%), now a `compact_budget` hard gate. |
 | Stage 3: Truncation guidance | Completed (`ce55c9f`) | Cut lists in `semidx_repo_map`, `semidx_find_definitions`, `semidx_references`, and `semidx_context` carry `narrowing_hints` naming declared arguments to narrow or raise; complete results carry none. |
 | Stage 4: Repository outline | Completed (`49304c3`) | New `semidx_outline` lists the directories and files directly under a directory with unit, language, analysis, diagnostic, and definition counts and no definition entities. The root outline of this repository is 4,610 transcript bytes against 157,047 for the compact whole-repository map (2%). It is step 2 of the gate's required call sequence. |
-| Stage 5: Whole-response budget | Completed | Every list tool takes `max_response_bytes` (32,000 default, 2,000,000 max), appends whole items only while the structured result stays within it, and reports `budget_exhausted`, `omitted_by_budget`, and `response` hints. The default whole-repository map now returns 31,355 structured bytes with 68 files selected and reports the rest omitted. |
+| Stage 5: Whole-response budget | Completed (`755f879`) | Every list tool takes `max_response_bytes` (32,000 default, 2,000,000 max), appends whole items only while the structured result stays within it, and reports `budget_exhausted`, `omitted_by_budget`, and `response` hints. The default whole-repository map now returns 31,355 structured bytes with 68 files selected and reports the rest omitted. |
+| Stage 6: Revision-bound cursors | Completed | `semidx_outline`, `semidx_repo_map`, `semidx_find_definitions`, and `semidx_references` take `cursor` and return `offset` and, while items remain, `next_cursor`. A cursor from another tool, snapshot revision, or argument set is a tool error naming the mismatch. The new `response_budget` hard gate walks the default whole-repository map: 68 files over 3 pages. |
 
 ## Plan Readiness Gate
 
@@ -328,3 +329,37 @@ Same method as Stage 1, this repository at revision 90 of the working tree
 | `zig fmt --check build.zig src tests` | Pass |
 | `zig build test-mcp --summary all` | Pass; 26 passed, 1 skipped. New tests: every budgeted tool at `max_response_bytes` 1 returns one item, valid JSON, `truncated`, and exact `omitted_by_budget`; defaults over a small root are not exhausted; a twelve-unit multi-focus context stays within 34,000 text bytes by default, reports exhaustion, and every returned list's `truncated` equals returned < total. |
 | `zig build preview-gate --summary all` | Pass; 14/14 steps, 6/6 tests; `compact_budget` 47% / 43% / 39% |
+
+## Stage 6: Revision-Bound Cursors
+
+Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig` (tests),
+`tests/mcp_dogfood_test.zig`, `docs/mcp/habit_loop_gate.md`
+(`response_budget` row), this log.
+
+- `Cursor` encodes the tool, snapshot revision, canonical-argument hash
+  (Wyhash over every declared argument with defaults applied, except
+  `cursor`, `limit`, and `max_response_bytes`), and next position, as
+  `sdx1.` plus URL-safe base64. Decoding refuses anything else.
+- `cursorPosition` checks, in order, that the cursor decodes, names this
+  tool, names the published revision, and matches the canonical arguments;
+  each failure is a tool error saying which and what to do. A position past
+  the selection is refused too (only an altered cursor can name one).
+- Paged results report `offset` and, while `offset + returned < total`,
+  `next_cursor` with a `continue` hint on the cut list (`response` when the
+  budget cut it). `truncated` stays "fewer returned than selected", so every
+  page but a complete single one is truncated. Limit hints now use
+  `offset + limit < total`.
+- `semidx_references` renders its targets (at most 50) on every page outside
+  the budget: otherwise targets could spend a small budget and a page would
+  return no relationship, so a cursor would never advance. The first
+  relationship of each page is always returned. `omitted_by_budget` for
+  references is `relationships` only.
+- `semidx_context` has no cursor (decided at readiness).
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-mcp --summary all` | Pass; 27 passed, 1 skipped. New test: for outline, map, definitions, and references, walking pages at `limit` 1 and at `max_response_bytes` 1 returns exactly the items of one unbounded call, in order, with a constant total, `offset` equal to the items already seen, and no `continue` hint on the last page; `limit` may change between pages; a cursor passed to another tool, with other arguments, invented, or after a refresh that published a new revision is a tool error naming the mismatch. |
+| `zig build preview-gate --summary all` | Pass; 14/14 steps, 6/6 tests; `response_budget`: 68 files over 3 pages, largest page 70,877 transcript bytes |

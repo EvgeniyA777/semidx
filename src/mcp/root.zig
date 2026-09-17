@@ -1186,11 +1186,11 @@ test "the response budget appends whole items, keeps valid JSON, and reports wha
     const refs = try Budgeted.call(&h, arena, "semidx_references", "{\"name\":\"shout\",\"direction\":\"both\",\"max_response_bytes\":1}");
     try testing.expectEqual(@as(usize, 1), refs.get("targets").?.array.items.len);
     try testing.expect(!refs.get("targets_truncated").?.bool);
-    try testing.expectEqual(@as(usize, 0), refs.get("relationships").?.array.items.len);
     try testing.expectEqual(@as(i64, 2), refs.get("relationships_total").?.integer);
     try testing.expect(refs.get("truncated").?.bool);
-    try Budgeted.exhausted(refs, "relationships", 2);
-    try testing.expectEqual(@as(i64, 0), refs.get("omitted_by_budget").?.object.get("targets").?.integer);
+    // The first relationship is always returned; targets do not spend it.
+    try testing.expectEqual(@as(usize, 1), refs.get("relationships").?.array.items.len);
+    try Budgeted.exhausted(refs, "relationships", 1);
 
     const context = try Budgeted.call(&h, arena, "semidx_context", "{\"name\":\"shout\",\"max_response_bytes\":1}");
     const focus = context.get("focus").?.array.items[0].object;
@@ -1201,6 +1201,105 @@ test "the response budget appends whole items, keeps valid JSON, and reports wha
     try testing.expect(!context.get("focus_truncated").?.bool);
     try Budgeted.exhausted(context, "relationships", 3);
     try expectHint(context, "response", "lower", &.{ "relationship_limit", "diagnostic_limit" });
+}
+
+/// The text of a tool execution error.
+fn toolError(result: std.json.Value) ![]const u8 {
+    try testing.expect(result.object.get("isError").?.bool);
+    return result.object.get("content").?.array.items[0].object.get("text").?.string;
+}
+
+test "cursors walk a result in pages over one snapshot and fail clearly across refresh, tools, and arguments" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.init(false, "const std = @import(\"std\");\n\npub fn shout() void {\n    std.debug.print(\"x\", .{});\n    loud();\n}\n\nfn loud() void {}\n");
+    defer h.deinit();
+
+    const Walk = struct {
+        /// Walks every page of `tool` with `arguments` (an object body without
+        /// braces) and returns the key of every item, in order.
+        fn keys(harness: *Harness, a: Allocator, tool: []const u8, arguments: []const u8, list: []const u8, key: []const u8, total_field: []const u8) ![]const []const u8 {
+            var out: std.ArrayList([]const u8) = .empty;
+            var cursor: ?[]const u8 = null;
+            var total: ?i64 = null;
+            var pages: usize = 0;
+            while (true) : (pages += 1) {
+                try testing.expect(pages < 64);
+                const body = if (cursor) |c| try std.fmt.allocPrint(a, "{{{s},\"cursor\":\"{s}\"}}", .{ arguments, c }) else try std.fmt.allocPrint(a, "{{{s}}}", .{arguments});
+                const result = try harness.callTool(a, tool, body);
+                try testing.expect(!result.object.get("isError").?.bool);
+                const page = result.object.get("structuredContent").?.object;
+                try testing.expectEqual(@as(i64, @intCast(out.items.len)), page.get("offset").?.integer);
+                // Every page keeps the whole call's total.
+                const page_total = page.get(total_field).?.integer;
+                if (total) |t| try testing.expectEqual(t, page_total) else total = page_total;
+                const items = page.get(list).?.array.items;
+                try testing.expect(items.len > 0);
+                for (items) |item| {
+                    const value = item.object.get(key).?;
+                    try out.append(a, switch (value) {
+                        .string => |text| text,
+                        .object => |object| object.get("path").?.string,
+                        else => try std.fmt.allocPrint(a, "{d}", .{value.integer}),
+                    });
+                }
+                const next = page.get("next_cursor") orelse {
+                    try testing.expect(hintArguments(page, list, "continue") == null and hintArguments(page, "response", "continue") == null);
+                    break;
+                };
+                try testing.expect(page.get("truncated").?.bool);
+                cursor = next.string;
+            }
+            try testing.expectEqual(total.?, @as(i64, @intCast(out.items.len)));
+            return out.items;
+        }
+
+        fn expectSame(expected: []const []const u8, actual: []const []const u8) !void {
+            try testing.expectEqual(expected.len, actual.len);
+            for (expected, actual) |e, x| try testing.expectEqualStrings(e, x);
+        }
+    };
+
+    // One page per item, by limit and by budget, equals one unbounded call.
+    const cases = [_]struct { tool: []const u8, base: []const u8, list: []const u8, key: []const u8, total: []const u8 }{
+        .{ .tool = "semidx_outline", .base = "", .list = "entries", .key = "path", .total = "entries_total" },
+        .{ .tool = "semidx_repo_map", .base = "", .list = "files", .key = "unit", .total = "files_total" },
+        .{ .tool = "semidx_find_definitions", .base = "", .list = "definitions", .key = "id", .total = "total" },
+        .{ .tool = "semidx_references", .base = "\"name\":\"shout\",\"direction\":\"both\"", .list = "relationships", .key = "assertion_id", .total = "relationships_total" },
+    };
+    for (cases) |case| {
+        const sep = if (case.base.len == 0) "" else ",";
+        const whole = try Walk.keys(&h, arena, case.tool, try std.fmt.allocPrint(arena, "{s}{s}\"max_response_bytes\":2000000", .{ case.base, sep }), case.list, case.key, case.total);
+        try testing.expect(whole.len >= 2);
+        try Walk.expectSame(whole, try Walk.keys(&h, arena, case.tool, try std.fmt.allocPrint(arena, "{s}{s}\"limit\":1", .{ case.base, sep }), case.list, case.key, case.total));
+        try Walk.expectSame(whole, try Walk.keys(&h, arena, case.tool, try std.fmt.allocPrint(arena, "{s}{s}\"max_response_bytes\":1", .{ case.base, sep }), case.list, case.key, case.total));
+    }
+
+    // A page names what continues it; limit may change between pages.
+    const first = (try h.callTool(arena, "semidx_find_definitions", "{\"limit\":1}")).object.get("structuredContent").?.object;
+    try expectHint(first, "definitions", "continue", &.{"cursor"});
+    const cursor = first.get("next_cursor").?.string;
+    const rest_body = try std.fmt.allocPrint(arena, "{{\"limit\":50,\"cursor\":\"{s}\"}}", .{cursor});
+    const rest = (try h.callTool(arena, "semidx_find_definitions", rest_body)).object.get("structuredContent").?.object;
+    try testing.expectEqual(@as(usize, 3), rest.get("definitions").?.array.items.len);
+    try testing.expect(rest.get("next_cursor") == null);
+
+    // Another tool, other arguments, and an invented cursor are refused.
+    const other_tool = try std.fmt.allocPrint(arena, "{{\"cursor\":\"{s}\"}}", .{cursor});
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_repo_map", other_tool)), "issued by semidx_find_definitions") != null);
+    const other_arguments = try std.fmt.allocPrint(arena, "{{\"limit\":1,\"language\":\"zig\",\"cursor\":\"{s}\"}}", .{cursor});
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", other_arguments)), "different arguments") != null);
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", "{\"cursor\":\"sdx1.bm9wZQ\"}")), "not one this server issued") != null);
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", "{\"cursor\":\"abc\"}")), "not one this server issued") != null);
+
+    // After a refresh publishes a new revision, the old cursor fails.
+    try h.tmp.dir.writeFile(test_io, .{ .sub_path = "added.zig", .data = "pub fn added() void {}\n" });
+    try testing.expect(!(try h.callTool(arena, "semidx_refresh", "{}")).object.get("isError").?.bool);
+    const stale = try toolError(try h.callTool(arena, "semidx_find_definitions", rest_body));
+    try testing.expect(std.mem.indexOf(u8, stale, "snapshot revision") != null);
+    try testing.expect(std.mem.indexOf(u8, stale, "without cursor") != null);
 }
 
 test "a worst-case multi-focus context cannot exceed the default response budget silently" {
