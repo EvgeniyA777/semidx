@@ -1,11 +1,10 @@
 ---
 title: "Release discipline for MCP preview"
 doc_type: "follow_up"
-lifecycle: "active"
 lifecycle: "completed"
 status: "completed"
 agent_action: "historical_reference_only"
-updated: "2026-09-16"
+updated: "2026-09-17"
 ---
 
 # Release Discipline For MCP Preview
