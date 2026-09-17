@@ -3,7 +3,7 @@ title: "MCP progressive discovery and response budgets"
 doc_type: "plan"
 lifecycle: "active"
 status: "planned"
-agent_action: "blocked_until_plan_008_completed"
+agent_action: "ready_for_execution"
 updated: "2026-09-17"
 ---
 

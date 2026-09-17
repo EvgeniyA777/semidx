@@ -1,9 +1,9 @@
 ---
 title: "Habit loop release gate progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-17"
 ---
 
@@ -14,10 +14,11 @@ Companion log for
 
 ## Current Status
 
-Stages 1 to 4 are complete: the gate is specified in
+Plan 008 is complete. The gate is specified in
 [docs/mcp/habit_loop_gate.md](../mcp/habit_loop_gate.md), and
 `zig build preview-gate` runs it over the repository-copy and fixture profiles.
-Stage 5 is pending.
+Release-candidate evidence, review outcome, residual risks, and the next
+recommended release action are recorded below.
 
 ## Stage Log
 
@@ -26,8 +27,8 @@ Stage 5 is pending.
 | Stage 1: Gate specification | Completed (`63129db`) | The required call sequence, fourteen named hard gates, the observations, two profiles, and extension rules are specified in the habit loop gate reference. No behavior change. |
 | Stage 2: Gate runner | Completed (`97a07e0`) | `zig build preview-gate` runs the gate. `tests/mcp_gate.zig` checks every tool result's shape, envelope, and budget, tracks the required call sequence, fails named gates with `gate: FAIL [<profile>] <gate>`, and prints the evidence summary. The dogfood habit loop is its `repository-copy` profile. |
 | Stage 3: Multi-profile coverage | Completed (`97a07e0`) | `tests/mcp_fixture_gate_test.zig` is the `fixture` profile: a temporary root of seven `fixtures/vertical-slice` files plus one unindexed file, proving facts, unresolved calls, unsupported constructs, a failing unit, and a unit made stale by the edit. |
-| Stage 4: Release-candidate evidence packaging | Completed | The release-candidate command set ran at `97a07e0`; hard results, observations, skipped and failed checks, and residual risks are recorded below. The preview reference, testing policy, and `RULES.md` point at the gate. |
-| Stage 5: Gate review and handoff | Pending | |
+| Stage 4: Release-candidate evidence packaging | Completed (`035d234`) | The release-candidate command set ran at `97a07e0`; hard results, observations, skipped and failed checks, and residual risks are recorded below. The preview reference, testing policy, and `RULES.md` point at the gate. |
+| Stage 5: Gate review and handoff | Completed | `preview-gate` is the one canonical gate and `dogfood` is its repository-copy profile; stale next-step bookkeeping in the roadmap, Plan 009, and `MEMORY.md` is aligned; review found no defect. |
 
 ## Plan Readiness Gate
 
@@ -246,3 +247,81 @@ budgets remain per list. Nothing here sets a threshold.
   machine and are not comparable across machines or build modes.
 - **Profile roots are narrow.** Two roots cannot show behavior on much larger
   or differently shaped repositories.
+
+## Stage 5: Gate Review And Handoff
+
+Changed files: `MEMORY.md`, `docs/design/001_project_roadmap.md`,
+`docs/plans/008_habit_loop_release_gate.md`,
+`docs/plans/009_mcp_progressive_discovery_and_budgets.md` (frontmatter only),
+this log.
+
+### Duplication With Plan 005
+
+The gate extends Plan 005's dogfood work rather than replacing or copying it.
+`zig build dogfood` (the Plan 005 habit loop, evidence-text, and recovery
+proofs, widened by Plans 006 and 007) is now the `repository-copy` profile, and
+`zig build preview-gate` depends on that step instead of re-running its tests
+under another name. The Plan 005 release-gate command set lives in historical
+release notes and plan documents; it does not conflict with the new gate, and
+`docs/agent-policy/testing.md` now says a release candidate records its own
+command set, with `preview-gate` as its habit-loop part.
+
+### Stale Instructions
+
+- `docs/agent-policy/testing.md` said "Release gates: No command"; updated in
+  Stage 4.
+- `docs/design/001_project_roadmap.md` still listed Plans 007 and 008 as next;
+  it now names Plan 009 and the gate.
+- `docs/plans/009_mcp_progressive_discovery_and_budgets.md` was marked
+  `blocked_until_plan_008_completed`; it is now `ready_for_execution`. Its own
+  readiness gate still applies before execution.
+- `MEMORY.md` named Plan 008 as next; it now names the gate command and Plan
+  009, with the observations Plan 009 asked for.
+- Historical documents (Plan 005, release notes, follow-up 004) were left
+  unchanged.
+
+### Extending The Gate
+
+[Extending The Gate](../mcp/habit_loop_gate.md#extending-the-gate) owns the
+rule: a new hard gate only for habit-loop behavior an agent relies on that holds
+on every machine meeting the prerequisites, a new profile only for a root that
+shows something the existing ones cannot, and never counts or broad benchmarks
+as gates. The mechanics are `Gate.require`/`Gate.pass` in `tests/mcp_gate.zig`
+and one run step added to `preview-gate` in `build.zig`.
+
+### Review
+
+Self-review of the diff `91ffbb0..035d234` against the plan, the testing
+policy, and the specification:
+
+| Item | Disposition |
+| --- | --- |
+| Every named gate in the specification has a `require` and a `pass` in the runner or a profile, with the same name. | Checked; no finding. |
+| `Gate.call` checks the envelope without optional unwraps, but `Gate.refresh` and `Gate.checkHealth` unwrap nested fields of an already shape-checked result, so a missing nested field panics instead of naming a gate. | Accepted as is: the test still fails with a stack trace, and the specification's `result_shape` gate covers only the envelope. |
+| `semantic_contract_null` is recorded as passed at health time, before later calls are checked. | Rejected as a defect: every call checks it, and the summary prints only after every call passed. |
+| The call-sequence check treats every call after the refresh as `after_refresh`, including a full-detail map. | Accepted: the specification requires a lookup or context call after the refresh, and both profiles make one. |
+| The fixture profile's no-source-text list uses short strings (`hello`, `text.len`). | Checked against the passing transcript and the fixture names and designators: none of them is a name, path, or designator. |
+| Concurrency: another change committed `README.md` as `e36d7ba` between Stages 3 and 4 on this branch. | No overlap with this plan's files; the new README names no proof command, so the conditional README update still does not apply. |
+
+### Closure Verification
+
+Code is unchanged since the Stage 4 run at `97a07e0` (Stages 4 and 5 touch
+documentation only), so the build lanes were not rerun. Run on the final tree:
+
+- `./scripts/check-agent-attribution.sh --all`: pass.
+- `./scripts/check-memory-freshness.sh --range 91ffbb0..HEAD`: pass (the range
+  updates `MEMORY.md`).
+- `git diff --check`: pass. `wc -l RULES.md`: 170, within the 200-line budget.
+
+Drift check at closure: `GLOSSARY.md` terms (`habit loop`, `release gate`,
+`release candidate`) are used as defined; the gate reference owns `hard gate`,
+`observation`, and `gate profile`. `SPEC.md`, `CORE.md`, `CONFORMANCE.md`, and
+the constitution are unaffected: no semantics, contract, core kind, persistence,
+or remote operation was added.
+
+### Next Recommended Release Action
+
+Do not cut a preview for this plan: it changed tests, the build graph, and
+documentation, not `semidx-mcp` behavior, so `0.1.0-preview.2` still describes
+the binary. Execute Plan 009 next, and make `zig build preview-gate` part of the
+release gate of the next preview that changes MCP behavior.

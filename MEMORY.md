@@ -60,7 +60,13 @@ documents that own history, rationale, and evidence.
   `fixtures/`.
 - Main commands: `zig build test-core`, `zig build test`, `zig fmt --check .`,
   `zig build run -- <files>`, `zig build mcp -- --root <dir>`,
-  `zig build test-mcp`, and `zig build dogfood`.
+  `zig build test-mcp`, `zig build dogfood`, and `zig build preview-gate`.
+- `zig build preview-gate` is the one canonical local habit-loop gate
+  ([specification](docs/mcp/habit_loop_gate.md)): the dogfood proofs as its
+  `repository-copy` profile plus a `fixture` profile over a temporary root that
+  proves honest degradation. Named hard gates fail it; latency and sizes are
+  printed observations only. It is not a release and not part of
+  `zig build test`.
 - Build prerequisites are local files: pinned tree-sitter grammar sources and a
   local tree-sitter runtime exposing `tree_sitter/api.h` and
   `libtree-sitter.a`. `build.zig.zon` declares no fetched dependencies.
@@ -194,13 +200,14 @@ documents that own history, rationale, and evidence.
 
 ## Near-Term Priorities
 
-- Plan 008 is the next implementation plan: it should make the agent habit loop a repeatable local release gate:
-  [docs/plans/008_habit_loop_release_gate.md](docs/plans/008_habit_loop_release_gate.md).
-  After Plan 008, Plan 009 should address MCP progressive discovery and response
-  budgets:
-  [docs/plans/009_mcp_progressive_discovery_and_budgets.md](docs/plans/009_mcp_progressive_discovery_and_budgets.md),
+- Plan 009 is the next implementation plan: MCP progressive discovery and
+  response budgets
+  ([docs/plans/009_mcp_progressive_discovery_and_budgets.md](docs/plans/009_mcp_progressive_discovery_and_budgets.md),
   with [Follow-up 009](docs/followups/009_mcp_progressive_discovery_and_response_budgets.md)
-  as its accepted input.
+  as its accepted input). Its size baseline is the Plan 008 gate run: the
+  compact whole-repository map is about 155 KB and `semidx_references` for
+  `writeString` about 57 KB. Run `zig build preview-gate` as part of any next
+  preview's release gate.
 - The next Java ADR candidate should be multi-module classpath boundaries before
   Java facts are widened. This is the sharper exactness risk because independent
   roots can share a package name. Java single-type imports are useful, but should
@@ -235,6 +242,8 @@ documents that own history, rationale, and evidence.
   [docs/reports/006_zig_dogfood_semantic_coverage_progress.md](docs/reports/006_zig_dogfood_semantic_coverage_progress.md).
 - Plan 007 MCP response budgets and schema ergonomics:
   [docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md](docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md).
+- Plan 008 habit loop gate and release-candidate evidence:
+  [docs/reports/008_habit_loop_release_gate_progress.md](docs/reports/008_habit_loop_release_gate_progress.md).
 - Active follow-ups:
   [docs/followups/README.md](docs/followups/README.md).
 - Product direction:
