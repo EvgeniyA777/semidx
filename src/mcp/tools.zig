@@ -185,7 +185,9 @@ pub const definitions = [_]Definition{
         shared_params.path,
         shared_params.language,
         shared_params.freshness,
-        countParam("relationship_limit", 50, 500, null),
+        countParam("relationship_limit", 50, 500, "Maximum incoming and, separately, outgoing relationships per focus entity."),
+        countParam("diagnostic_limit", 50, 500, "Maximum diagnostics per focus entity's unit."),
+        shared_params.detail,
     }),
     define(.semidx_refresh, "Refresh index", "Rescan the configured root, reconcile the changes into the graph, and publish the next " ++
         "snapshot. Later calls observe the new snapshot; a failed refresh keeps the previous one.", &.{}),
@@ -444,33 +446,43 @@ fn writeRange(s: *Stringify, range: model.SourceRange, detail: DetailArg) Error!
     try s.endObject();
 }
 
-fn writeProducer(s: *Stringify, producer: model.Producer) Error!void {
+fn writeProducer(s: *Stringify, producer: model.Producer, detail: DetailArg) Error!void {
     try s.beginObject();
     try s.objectField("name");
     try protocol.writeString(s, producer.name);
-    try s.objectField("version");
-    try protocol.writeString(s, producer.version);
+    if (detail == .full) {
+        try s.objectField("version");
+        try protocol.writeString(s, producer.version);
+    }
     try s.endObject();
 }
 
-fn writeResolution(s: *Stringify, resolution: model.Resolution) Error!void {
+/// The category always; compact keeps what is missing from an unresolved
+/// claim and an approximate claim's confidence, and drops the prose.
+fn writeResolution(s: *Stringify, resolution: model.Resolution, detail: DetailArg) Error!void {
     try s.beginObject();
     try s.objectField("category");
     try s.write(@tagName(resolution.category()));
     switch (resolution) {
         .fact => |fact| {
-            try s.objectField("method");
-            try protocol.writeString(s, fact.method);
+            if (detail == .full) {
+                try s.objectField("method");
+                try protocol.writeString(s, fact.method);
+            }
         },
         .unresolved => |unresolved| {
             try s.objectField("missing");
             try s.write(@tagName(unresolved.missing));
-            try s.objectField("explanation");
-            try protocol.writeString(s, unresolved.explanation);
+            if (detail == .full) {
+                try s.objectField("explanation");
+                try protocol.writeString(s, unresolved.explanation);
+            }
         },
         .approximate => |approximate| {
-            try s.objectField("basis");
-            try protocol.writeString(s, approximate.basis);
+            if (detail == .full) {
+                try s.objectField("basis");
+                try protocol.writeString(s, approximate.basis);
+            }
             try s.objectField("confidence");
             try s.write(approximate.confidence);
         },
@@ -478,10 +490,12 @@ fn writeResolution(s: *Stringify, resolution: model.Resolution) Error!void {
     try s.endObject();
 }
 
-fn writeUnitRef(ctx: *Context, s: *Stringify, id: model.SourceUnitId) Error!void {
+fn writeUnitRef(ctx: *Context, s: *Stringify, id: model.SourceUnitId, detail: DetailArg) Error!void {
     try s.beginObject();
-    try s.objectField("id");
-    try s.write(@intFromEnum(id));
+    if (detail == .full) {
+        try s.objectField("id");
+        try s.write(@intFromEnum(id));
+    }
     try s.objectField("path");
     if (ctx.snapshot.unit(id)) |view| try protocol.writeString(s, view.path) else try s.write(null);
     try s.endObject();
@@ -511,13 +525,13 @@ pub fn writeUnit(ctx: *Context, s: *Stringify, view: semidx.core.graph.SourceUni
 /// Where a claim was observed. The source text a producer recorded for the
 /// claim is included only under the opt-in, bounded, and cut at a UTF-8
 /// boundary.
-fn writeEvidence(ctx: *Context, s: *Stringify, evidence: ?model.SourceEvidence) Error!void {
+fn writeEvidence(ctx: *Context, s: *Stringify, evidence: ?model.SourceEvidence, detail: DetailArg) Error!void {
     const observed = evidence orelse return s.write(null);
     try s.beginObject();
     try s.objectField("unit");
-    try writeUnitRef(ctx, s, observed.unit);
+    try writeUnitRef(ctx, s, observed.unit, detail);
     try s.objectField("range");
-    try writeRange(s, observed.range, .full);
+    try writeRange(s, observed.range, detail);
     try writeSourceText(ctx, s, observed);
     try s.endObject();
 }
@@ -541,6 +555,14 @@ const EntityShape = enum {
     /// a definition listed under its unit, which gives its kind, language,
     /// and evidence unit. Recorded evidence text stays under the opt-in.
     listed,
+    /// The id alone: the entity is already in view, as the focus end of a
+    /// compact context relationship.
+    id,
+    /// Id, kind, role, name, freshness, and evidence path and lines.
+    compact,
+    /// `compact` plus container path and the existence claim's category,
+    /// producer name, and freshness: a compact context focus.
+    focus,
     brief,
     full,
 };
@@ -549,9 +571,12 @@ fn writeEntity(ctx: *Context, s: *Stringify, entity: model.Entity, shape: Entity
     try s.beginObject();
     try s.objectField("id");
     try s.write(@intFromEnum(entity.id));
+    if (shape == .id) return s.endObject();
     if (shape != .listed) {
         try s.objectField("kind");
         try s.write(@tagName(entity.kind));
+    }
+    if (shape == .focus or shape == .brief or shape == .full) {
         try s.objectField("language");
         if (entity.identity.language) |language| try s.write(@tagName(language)) else try s.write(null);
     }
@@ -569,13 +594,37 @@ fn writeEntity(ctx: *Context, s: *Stringify, entity: model.Entity, shape: Entity
         }
         return s.endObject();
     }
+    const detail: DetailArg = if (shape == .compact or shape == .focus) .compact else .full;
     try s.objectField("evidence");
-    try writeEvidence(ctx, s, entity.evidence);
-    if (shape == .full) {
+    try writeEvidence(ctx, s, entity.evidence, detail);
+    if (shape == .focus or shape == .full) {
         try s.objectField("container_path");
         try s.beginArray();
         for (entity.identity.container_path) |segment| try protocol.writeString(s, segment);
         try s.endArray();
+    }
+    if (shape == .focus or shape == .full) {
+        try s.objectField("existence");
+        if (try ctx.existenceOf(entity.id)) |assertion| {
+            try s.beginObject();
+            if (detail == .full) {
+                try s.objectField("assertion_id");
+                try s.write(@intFromEnum(assertion.id));
+            }
+            try s.objectField("resolution");
+            try writeResolution(s, assertion.resolution, detail);
+            try s.objectField("producer");
+            try writeProducer(s, assertion.producer, detail);
+            try s.objectField("freshness");
+            try s.write(@tagName(ctx.snapshot.assertionFreshness(assertion)));
+            if (detail == .full) {
+                try s.objectField("revision");
+                try s.write(assertion.revision);
+            }
+            try s.endObject();
+        } else try s.write(null);
+    }
+    if (shape == .full) {
         try s.objectField("extension");
         try s.beginObject();
         try s.objectField("namespace");
@@ -592,21 +641,6 @@ fn writeEntity(ctx: *Context, s: *Stringify, entity: model.Entity, shape: Entity
         }
         try s.endArray();
         try s.endObject();
-        try s.objectField("existence");
-        if (try ctx.existenceOf(entity.id)) |assertion| {
-            try s.beginObject();
-            try s.objectField("assertion_id");
-            try s.write(@intFromEnum(assertion.id));
-            try s.objectField("resolution");
-            try writeResolution(s, assertion.resolution);
-            try s.objectField("producer");
-            try writeProducer(s, assertion.producer);
-            try s.objectField("freshness");
-            try s.write(@tagName(ctx.snapshot.assertionFreshness(assertion)));
-            try s.objectField("revision");
-            try s.write(assertion.revision);
-            try s.endObject();
-        } else try s.write(null);
         try s.objectField("created_revision");
         try s.write(entity.created_revision);
         try s.objectField("observed_revision");
@@ -615,8 +649,8 @@ fn writeEntity(ctx: *Context, s: *Stringify, entity: model.Entity, shape: Entity
     try s.endObject();
 }
 
-fn writeEntityRef(ctx: *Context, s: *Stringify, id: model.EntityId) Error!void {
-    if (ctx.snapshot.entityById(id)) |entity| return writeEntity(ctx, s, entity, .brief);
+fn writeEntityRef(ctx: *Context, s: *Stringify, id: model.EntityId, shape: EntityShape) Error!void {
+    if (ctx.snapshot.entityById(id)) |entity| return writeEntity(ctx, s, entity, shape);
     // A stale relationship may name an entity that has since been withdrawn.
     try s.beginObject();
     try s.objectField("id");
@@ -626,8 +660,17 @@ fn writeEntityRef(ctx: *Context, s: *Stringify, id: model.EntityId) Error!void {
     try s.endObject();
 }
 
-fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, direction: ?[]const u8) Error!void {
+/// A compact relationship renders the focus end as its id alone and the other
+/// end as a compact entity. Every detail level keeps the claim's resolution
+/// category, producer name, and freshness.
+fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, direction: ?[]const u8, detail: DetailArg, focus: ?model.EntityId) Error!void {
     const relationship = assertion.relationship().?;
+    const end = struct {
+        fn shape(d: DetailArg, f: ?model.EntityId, id: model.EntityId) EntityShape {
+            if (d == .full) return .brief;
+            return if (f == id) .id else .compact;
+        }
+    };
     try s.beginObject();
     try s.objectField("assertion_id");
     try s.write(@intFromEnum(assertion.id));
@@ -638,13 +681,13 @@ fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, d
     try s.objectField("kind");
     try s.write(@tagName(relationship.kind));
     try s.objectField("source");
-    try writeEntityRef(ctx, s, relationship.source);
+    try writeEntityRef(ctx, s, relationship.source, end.shape(detail, focus, relationship.source));
     try s.objectField("target");
     try s.beginObject();
     switch (relationship.target) {
         .entity => |id| {
             try s.objectField("entity");
-            try writeEntityRef(ctx, s, id);
+            try writeEntityRef(ctx, s, id, end.shape(detail, focus, id));
         },
         .designator => |designator| {
             try s.objectField("designator");
@@ -653,30 +696,38 @@ fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, d
     }
     try s.endObject();
     try s.objectField("resolution");
-    try writeResolution(s, assertion.resolution);
+    try writeResolution(s, assertion.resolution, detail);
     try s.objectField("producer");
-    try writeProducer(s, assertion.producer);
+    try writeProducer(s, assertion.producer, detail);
     try s.objectField("freshness");
     try s.write(@tagName(ctx.snapshot.assertionFreshness(assertion)));
-    try s.objectField("revision");
-    try s.write(assertion.revision);
+    if (detail == .full) {
+        try s.objectField("revision");
+        try s.write(assertion.revision);
+    }
     try s.objectField("evidence");
-    try writeEvidence(ctx, s, assertion.evidence);
+    try writeEvidence(ctx, s, assertion.evidence, detail);
     try s.endObject();
 }
 
-fn writeDiagnostic(ctx: *Context, s: *Stringify, diagnostic: model.Diagnostic) Error!void {
+/// Compact drops the unit, which the context focus already names, and the
+/// revision.
+fn writeDiagnostic(ctx: *Context, s: *Stringify, diagnostic: model.Diagnostic, detail: DetailArg) Error!void {
     try s.beginObject();
     try s.objectField("kind");
     try s.write(@tagName(diagnostic.kind));
-    try s.objectField("unit");
-    if (diagnostic.unit) |unit| try writeUnitRef(ctx, s, unit) else try s.write(null);
+    if (detail == .full) {
+        try s.objectField("unit");
+        if (diagnostic.unit) |unit| try writeUnitRef(ctx, s, unit, .full) else try s.write(null);
+    }
     try s.objectField("producer");
-    try writeProducer(s, diagnostic.producer);
+    try writeProducer(s, diagnostic.producer, detail);
     try s.objectField("message");
     try protocol.writeString(s, diagnostic.message);
-    try s.objectField("revision");
-    try s.write(diagnostic.revision);
+    if (detail == .full) {
+        try s.objectField("revision");
+        try s.write(diagnostic.revision);
+    }
     try s.endObject();
 }
 
@@ -788,7 +839,7 @@ pub fn health(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, status: Statu
         }
         try s.endObject();
         try s.objectField("producer");
-        try writeProducer(s, capabilities.producer);
+        try writeProducer(s, capabilities.producer, .full);
         try s.objectField("entity_roles");
         try s.write(capabilities.entity_roles);
         try s.objectField("relationship_kinds");
@@ -909,6 +960,8 @@ pub fn findDefinitions(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Erro
     try s.write(total);
     try s.objectField("truncated");
     try s.write(total > limit);
+    try s.objectField("budget");
+    try s.write(.{ .limit = limit });
     try s.endObject();
 }
 
@@ -991,7 +1044,7 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
                 // still one occurrence.
                 if ((try seen.getOrPut(ctx.arena, assertion.id)).found_existing) continue;
                 total += 1;
-                if (total <= limit) try writeRelationship(ctx, s, assertion, pass.name);
+                if (total <= limit) try writeRelationship(ctx, s, assertion, pass.name, .full, null);
             }
         }
     }
@@ -1000,16 +1053,19 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
     try s.write(total);
     try s.objectField("truncated");
     try s.write(total > limit);
+    try s.objectField("budget");
+    try s.write(.{ .limit = limit, .target_limit = max_targets });
     try s.endObject();
 }
 
 const max_focus: usize = 10;
-const max_context_diagnostics: usize = 50;
 
 pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     const args = try Args(.semidx_context).init(ctx, arguments);
     const freshness = freshnessFilter(try args.choice(FreshnessArg, "freshness"));
     const limit = try args.count("relationship_limit");
+    const diagnostic_limit = try args.count("diagnostic_limit");
+    const detail = try args.choice(DetailArg, "detail");
     const targets = try selectTargets(ctx, args, freshness, true);
     const snapshot = ctx.snapshot;
 
@@ -1019,7 +1075,7 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     for (targets[0..@min(targets.len, max_focus)]) |entity| {
         try s.beginObject();
         try s.objectField("entity");
-        try writeEntity(ctx, s, entity, .full);
+        try writeEntity(ctx, s, entity, if (detail == .full) .full else .focus);
 
         const unit_id: ?model.SourceUnitId = switch (entity.identity.scope) {
             .unit => |id| id,
@@ -1027,7 +1083,7 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
         };
         try s.objectField("unit");
         if (unit_id) |id| {
-            if (snapshot.unit(id)) |view| try writeUnit(ctx, s, view, .full) else try s.write(null);
+            if (snapshot.unit(id)) |view| try writeUnit(ctx, s, view, detail) else try s.write(null);
         } else try s.write(null);
 
         const passes = [_]struct { name: []const u8, filter: Snapshot.RelationshipFilter }{
@@ -1041,7 +1097,7 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
             var found = snapshot.relationships(pass.filter);
             while (found.next()) |assertion| {
                 n += 1;
-                if (n <= limit) try writeRelationship(ctx, s, assertion, null);
+                if (n <= limit) try writeRelationship(ctx, s, assertion, null, detail, entity.id);
             }
             try s.endArray();
             try s.objectField(if (pass.name[0] == 'i') "incoming_total" else "outgoing_total");
@@ -1057,14 +1113,14 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
             for (snapshot.diagnostics) |diagnostic| {
                 if (diagnostic.unit != id) continue;
                 diagnostics += 1;
-                if (diagnostics <= max_context_diagnostics) try writeDiagnostic(ctx, s, diagnostic);
+                if (diagnostics <= diagnostic_limit) try writeDiagnostic(ctx, s, diagnostic, detail);
             }
         }
         try s.endArray();
         try s.objectField("diagnostics_total");
         try s.write(diagnostics);
         try s.objectField("diagnostics_truncated");
-        try s.write(diagnostics > max_context_diagnostics);
+        try s.write(diagnostics > diagnostic_limit);
 
         try s.objectField("last_identity_event");
         if (snapshot.lastIdentityEvent(entity.id)) |event| {
@@ -1086,6 +1142,8 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     try s.write(targets.len);
     try s.objectField("focus_truncated");
     try s.write(targets.len > max_focus);
+    try s.objectField("budget");
+    try s.write(.{ .detail = detail, .relationship_limit = limit, .diagnostic_limit = diagnostic_limit, .focus_limit = max_focus });
     try s.endObject();
 }
 

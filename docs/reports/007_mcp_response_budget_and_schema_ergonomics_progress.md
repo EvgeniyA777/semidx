@@ -14,10 +14,10 @@ Companion log for
 
 ## Current Status
 
-Stages 1 to 3 are complete: the baseline output inventory and budget gates
+Stages 1 to 4 are complete: the baseline output inventory and budget gates
 are recorded, tool schemas are generated from the same argument declarations
-the validator reads, and the repository map is compact by default. Stages 4
-and 5 are pending.
+the validator reads, and the repository map and graph context are compact by
+default with a full detail level. Stage 5 is pending.
 
 ## Stage Log
 
@@ -26,7 +26,7 @@ and 5 are pending.
 | Stage 1: Response inventory and budget targets | Completed | Baseline transcript and structured sizes per tool over this repository, the fields that dominate `repo_map` and `context`, and the hard gates versus observations below. No behavior change. |
 | Stage 2: Tool schema and argument validation cleanup | Completed | Each tool's arguments are declared once as `Param` values; the advertised JSON Schema is generated from them at compile time, and `Args(tool)` reads types, enum values, defaults, and maxima from the same declarations. The advertised `tools/list` is unchanged. |
 | Stage 3: Compact repository map | Completed | `semidx_repo_map` takes `detail` (`compact` default, `full`) and reports `budget`. Over this repository the default map with `limit` 1000 is 152,579 transcript bytes against 322,104 for `full` (47%, gate at most 50%). |
-| Stage 4: Focused context budgeting | Pending | |
+| Stage 4: Focused context budgeting | Completed | `semidx_context` takes `detail` and `diagnostic_limit` and reports `budget`; `semidx_find_definitions` and `semidx_references` report the limits they applied. The default context for `health` in `src/mcp/tools.zig` at limit 500 is 60,962 transcript bytes against 153,194 for `full` (39%, gate at most 50%). |
 | Stage 5: Documentation and habit loop update | Pending | |
 
 ## Plan Readiness Gate
@@ -208,6 +208,59 @@ Verification:
   recovery, run by `zig build dogfood`).
 - `zig build dogfood --summary all`: 5 of 5 passed; repository map budget
   gate at 47%.
+
+## Stage 4: Focused Context Budgeting
+
+Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig`,
+`tests/mcp_dogfood_test.zig`, `docs/mcp/local_preview.md`, this log.
+
+- `semidx_context` declares `diagnostic_limit` (default 50, max 500; it was a
+  fixed 50) and `detail`. `budget` reports `detail`, `relationship_limit`,
+  `diagnostic_limit`, and `focus_limit` (10).
+- Compact focus entity: `id`, `kind`, `language`, `role`, `name`,
+  `freshness`, `evidence` (unit `path`, `start_line`, `end_line`),
+  `container_path`, and `existence` with `resolution.category`,
+  `producer.name`, and `freshness`. The unit has `id`, `path`, `language`,
+  `analysis`.
+- Compact relationship: `assertion_id`, `kind`, the focus end as `{id}`, the
+  other end as `id`, `kind`, `role`, `name`, `freshness`, `evidence`; a
+  designator target unchanged; `resolution` with `category` plus `missing`
+  (unresolved) or `confidence` (approximate); `producer.name`; `freshness`;
+  compact `evidence`. Dropped: resolution `method`, `explanation`, `basis`,
+  producer `version`, the relationship `revision`, unit ids in evidence, and
+  columns and byte offsets.
+- Compact diagnostic: `kind`, `producer.name`, `message`; the unit is the
+  focus unit and is not repeated.
+- Full is the pre-plan context plus `budget`.
+- `semidx_find_definitions` reports `budget: {limit}` and `semidx_references`
+  `budget: {limit, target_limit}`. Their rendering is unchanged.
+
+Tests:
+
+- `root.zig` "compact context keeps every claim's resolution, producer, and
+  freshness; full context keeps the evidence for review": over a unit with an
+  unresolved `std.debug.print` call, compact text carries no `explanation`,
+  `method`, byte or column offsets, `extension`, `version`, or
+  `file_entity_id`; the focus end is `{id}`; every outgoing claim has a
+  producer name and freshness and no revision; the unresolved claim keeps its
+  category, `missing`, and designator and names no entity. Full context has
+  existence `assertion_id`, `method`, producer `version`, relationship
+  `revision`, six range fields, and `explanation` on the unresolved claim.
+  `relationship_limit: 1` and `diagnostic_limit: 1` truncate outgoing
+  relationships and diagnostics separately from incoming ones and from focus.
+- The source-text test also calls `semidx_context` with `detail: "full"`.
+- `mcp_dogfood_test.zig`: the compact `scan` context keeps the call fact and
+  an unresolved designator with `missing`; its full context has an
+  `explanation` for every unresolved claim; the context budget gate compares
+  compact and full `health` contexts at limit 500.
+
+Verification:
+
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build test-mcp --summary all`: 21 of 22 passed, 1 skipped.
+- `zig build dogfood --summary all`: 5 of 5 passed; gates at 47%
+  (repository map) and 39% (context).
+- `zig build test --summary all`: 206 of 207 passed, 1 skipped.
 
 ## Residual Risk
 

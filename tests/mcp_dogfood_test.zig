@@ -229,9 +229,9 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     for (focus.get("outgoing").?.array.items) |relationship| {
         const target = relationship.object.get("target").?.object;
         if (std.mem.eql(u8, "unresolved", category(relationship))) {
-            // An unresolved claim names no entity and says why.
+            // An unresolved claim names no entity and what is missing.
             try testing.expect(target.get("entity") == null);
-            try testing.expect(relationship.object.get("resolution").?.object.get("explanation") != null);
+            try testing.expect(relationship.object.get("resolution").?.object.get("missing") != null);
             unresolved_designator = target.get("designator").?.string;
         } else if (target.get("entity")) |entity| {
             if (entity.object.get("id").?.integer == definition_id) fact_to_definition = true;
@@ -240,6 +240,17 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     try testing.expect(fact_to_definition);
     try testing.expect(unresolved_designator != null);
     try testing.expect(focus.get("diagnostics_total").?.integer > 0);
+    // The full context says why each unresolved claim is unresolved.
+    const full_context = try timedCall(client, 24, "semidx_context", "{\"name\":\"" ++ caller_name ++ "\",\"path\":\"" ++ definition_path ++ "\",\"detail\":\"full\"}");
+    const full_focus = for (full_context.get("focus").?.array.items) |item| {
+        if (item.object.get("entity").?.object.get("container_path").?.array.items.len == 0) break item.object;
+    } else return error.TestExpectedTopLevelFocus;
+    try testing.expectEqual(focus.get("outgoing_total").?.integer, full_focus.get("outgoing_total").?.integer);
+    for (full_focus.get("outgoing").?.array.items) |relationship| {
+        if (std.mem.eql(u8, "unresolved", category(relationship))) {
+            try testing.expect(relationship.object.get("resolution").?.object.get("explanation") != null);
+        }
+    }
     std.debug.print("dogfood: {s} has an unresolved outgoing call to `{s}`; {d} diagnostics in its unit\n", .{
         caller_name,
         unresolved_designator.?,
@@ -312,7 +323,12 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     }
 
     // An import of a package stays unresolved: `std` is not a local file.
-    const importer_context = try timedCall(client, 23, "semidx_context", "{\"name\":\"" ++ importer_caller ++ "\",\"path\":\"" ++ importer_path ++ "\",\"relationship_limit\":500}");
+    var importer_context_bytes: usize = undefined;
+    const importer_context = try sizedCall(client, 23, "semidx_context", "{\"name\":\"" ++ importer_caller ++ "\",\"path\":\"" ++ importer_path ++ "\",\"relationship_limit\":500}", &importer_context_bytes);
+    var full_importer_context_bytes: usize = undefined;
+    const full_importer_context = try sizedCall(client, 25, "semidx_context", "{\"name\":\"" ++ importer_caller ++ "\",\"path\":\"" ++ importer_path ++ "\",\"relationship_limit\":500,\"detail\":\"full\"}", &full_importer_context_bytes);
+    try testing.expectEqual(importer_context.get("focus_total").?.integer, full_importer_context.get("focus_total").?.integer);
+    try expectAtMostHalf("semidx_context health relationship_limit 500", importer_context_bytes, full_importer_context_bytes);
     var package_call_unresolved = false;
     var imported_call_fact = false;
     const importer_focus = for (importer_context.get("focus").?.array.items) |item| {

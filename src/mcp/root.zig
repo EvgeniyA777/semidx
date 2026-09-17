@@ -797,6 +797,126 @@ test "the default repository map is compact, and a full map recovers every unit 
     try testing.expectEqual(@as(i64, 1), bounded.get("budget").?.object.get("definitions_per_file").?.integer);
 }
 
+test "compact context keeps every claim's resolution, producer, and freshness; full context keeps the evidence for review" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    // `shout` makes one call the frontend cannot resolve.
+    try h.init(false, "const std = @import(\"std\");\n\npub fn shout() void {\n    std.debug.print(\"x\", .{});\n}\n");
+    defer h.deinit();
+
+    const compact_result = try h.callTool(arena, "semidx_context", "{\"name\":\"shout\"}");
+    const compact = compact_result.object.get("structuredContent").?.object;
+    const compact_text = compact_result.object.get("content").?.array.items[0].object.get("text").?.string;
+    for ([_][]const u8{ "\"explanation\"", "\"method\"", "\"start_byte\"", "\"start_column\"", "\"extension\"", "\"version\"", "\"file_entity_id\"" }) |absent| {
+        try testing.expect(std.mem.indexOf(u8, compact_text, absent) == null);
+    }
+    const compact_budget = compact.get("budget").?.object;
+    try testing.expectEqualStrings("compact", compact_budget.get("detail").?.string);
+    try testing.expectEqual(@as(i64, 50), compact_budget.get("relationship_limit").?.integer);
+    try testing.expectEqual(@as(i64, 50), compact_budget.get("diagnostic_limit").?.integer);
+    try testing.expectEqual(@as(i64, 10), compact_budget.get("focus_limit").?.integer);
+
+    const compact_focus = compact.get("focus").?.array.items[0].object;
+    const focus_entity = compact_focus.get("entity").?.object;
+    const focus_id = focus_entity.get("id").?.integer;
+    try testing.expectEqual(@as(usize, 0), focus_entity.get("container_path").?.array.items.len);
+    try testing.expectEqualStrings("extra.zig", focus_entity.get("evidence").?.object.get("unit").?.object.get("path").?.string);
+    const existence = focus_entity.get("existence").?.object;
+    try testing.expectEqualStrings("fact", existence.get("resolution").?.object.get("category").?.string);
+    try testing.expectEqualStrings("frontend.zig", existence.get("producer").?.object.get("name").?.string);
+    try testing.expectEqualStrings("current", existence.get("freshness").?.string);
+
+    var compact_unresolved = false;
+    for (compact_focus.get("outgoing").?.array.items) |item| {
+        const relationship = item.object;
+        // The focus end is named by id alone.
+        const source = relationship.get("source").?.object;
+        try testing.expectEqual(focus_id, source.get("id").?.integer);
+        try testing.expectEqual(@as(usize, 1), source.count());
+        try testing.expectEqualStrings("frontend.zig", relationship.get("producer").?.object.get("name").?.string);
+        try testing.expectEqualStrings("current", relationship.get("freshness").?.string);
+        try testing.expect(relationship.get("revision") == null);
+        try testing.expectEqual(@as(usize, 2), relationship.get("evidence").?.object.get("range").?.object.count());
+        const resolution = relationship.get("resolution").?.object;
+        if (std.mem.eql(u8, "unresolved", resolution.get("category").?.string)) {
+            // An unresolved claim stays unresolved: it names what is missing
+            // and a designator, never an entity.
+            try testing.expect(resolution.get("missing") != null);
+            const target = relationship.get("target").?.object;
+            try testing.expectEqualStrings("std.debug.print", target.get("designator").?.string);
+            try testing.expect(target.get("entity") == null);
+            compact_unresolved = true;
+        }
+    }
+    try testing.expect(compact_unresolved);
+    for (compact_focus.get("incoming").?.array.items) |item| {
+        const target = item.object.get("target").?.object.get("entity").?.object;
+        try testing.expectEqual(@as(usize, 1), target.count());
+        try testing.expectEqualStrings("file", item.object.get("source").?.object.get("kind").?.string);
+    }
+    try testing.expect(compact_focus.get("diagnostics").?.array.items.len > 0);
+    for (compact_focus.get("diagnostics").?.array.items) |item| {
+        const diagnostic = item.object;
+        try testing.expect(diagnostic.get("kind") != null and diagnostic.get("message") != null);
+        try testing.expect(diagnostic.get("producer").?.object.get("name") != null);
+        try testing.expect(diagnostic.get("unit") == null and diagnostic.get("revision") == null);
+    }
+
+    // Full context exposes everything review and impact analysis read.
+    const full = (try h.callTool(arena, "semidx_context", "{\"name\":\"shout\",\"detail\":\"full\"}")).object.get("structuredContent").?.object;
+    try testing.expectEqualStrings("full", full.get("budget").?.object.get("detail").?.string);
+    const full_focus = full.get("focus").?.array.items[0].object;
+    const full_entity = full_focus.get("entity").?.object;
+    try testing.expect(full_entity.get("extension") != null and full_entity.get("created_revision") != null);
+    const full_existence = full_entity.get("existence").?.object;
+    try testing.expect(full_existence.get("assertion_id") != null and full_existence.get("revision") != null);
+    try testing.expect(full_existence.get("resolution").?.object.get("method") != null);
+    try testing.expect(full_existence.get("producer").?.object.get("version") != null);
+    try testing.expect(full_focus.get("unit").?.object.get("file_entity_id") != null);
+    var full_unresolved = false;
+    for (full_focus.get("outgoing").?.array.items) |item| {
+        const relationship = item.object;
+        try testing.expect(relationship.get("revision") != null);
+        try testing.expect(relationship.get("producer").?.object.get("version") != null);
+        try testing.expectEqual(@as(usize, 6), relationship.get("evidence").?.object.get("range").?.object.count());
+        try testing.expect(relationship.get("evidence").?.object.get("unit").?.object.get("id") != null);
+        try testing.expect(relationship.get("source").?.object.get("evidence") != null);
+        const resolution = relationship.get("resolution").?.object;
+        if (std.mem.eql(u8, "unresolved", resolution.get("category").?.string)) {
+            try testing.expect(resolution.get("explanation") != null);
+            full_unresolved = true;
+        }
+    }
+    try testing.expect(full_unresolved);
+    for (full_focus.get("diagnostics").?.array.items) |item| {
+        try testing.expect(item.object.get("unit") != null and item.object.get("revision") != null);
+    }
+
+    // Each list reports its own total and truncation.
+    const bounded = (try h.callTool(arena, "semidx_context", "{\"path\":\"greeter.zig\",\"relationship_limit\":1,\"diagnostic_limit\":1}")).object.get("structuredContent").?.object;
+    const bounded_focus = bounded.get("focus").?.array.items[0].object;
+    try testing.expectEqual(@as(usize, 1), bounded_focus.get("outgoing").?.array.items.len);
+    try testing.expectEqual(@as(i64, 2), bounded_focus.get("outgoing_total").?.integer);
+    try testing.expect(bounded_focus.get("outgoing_truncated").?.bool);
+    try testing.expectEqual(@as(i64, 1), bounded_focus.get("incoming_total").?.integer);
+    try testing.expect(!bounded_focus.get("incoming_truncated").?.bool);
+    const diagnostics_total = bounded_focus.get("diagnostics_total").?.integer;
+    try testing.expectEqual(@as(usize, @min(1, @as(usize, @intCast(diagnostics_total)))), bounded_focus.get("diagnostics").?.array.items.len);
+    try testing.expectEqual(diagnostics_total > 1, bounded_focus.get("diagnostics_truncated").?.bool);
+    try testing.expectEqual(@as(i64, 1), bounded.get("focus_total").?.integer);
+    try testing.expect(!bounded.get("focus_truncated").?.bool);
+    try testing.expectEqual(@as(i64, 1), bounded.get("budget").?.object.get("diagnostic_limit").?.integer);
+
+    // The other list tools name the limits they applied.
+    const found = (try h.callTool(arena, "semidx_find_definitions", "{\"limit\":3}")).object.get("structuredContent").?.object;
+    try testing.expectEqual(@as(i64, 3), found.get("budget").?.object.get("limit").?.integer);
+    const refs = (try h.callTool(arena, "semidx_references", "{\"name\":\"greeting\"}")).object.get("structuredContent").?.object;
+    try testing.expectEqual(@as(i64, 100), refs.get("budget").?.object.get("limit").?.integer);
+    try testing.expectEqual(@as(i64, 50), refs.get("budget").?.object.get("target_limit").?.integer);
+}
+
 test "no tool result carries source text unless evidence text was opted into, and then bounded" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
@@ -814,6 +934,7 @@ test "no tool result carries source text unless evidence text was opted into, an
         .{ "semidx_references", "{\"name\":\"greeting\",\"direction\":\"both\"}" },
         .{ "semidx_context", "{\"name\":\"greeting\"}" },
         .{ "semidx_context", "{\"path\":\"greeter.zig\"}" },
+        .{ "semidx_context", "{\"name\":\"greeting\",\"detail\":\"full\"}" },
     };
 
     var off: Harness = undefined;
