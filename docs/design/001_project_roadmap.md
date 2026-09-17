@@ -36,8 +36,9 @@ semantic truth.
 ## Current Position
 
 As of 2026-09-17, the Zig dogfood frontend, its Plan 006 widening, and the first
-local MCP preview are implemented and reviewed. The current local MCP preview
-release candidate is `v0.1.0-preview.2`, ready for an explicit tag request.
+local MCP preview are implemented and reviewed. The local MCP previews
+`v0.1.0-preview.1` and `v0.1.0-preview.2` are tagged in the local repository;
+the tags are not pushed.
 
 Implemented:
 
@@ -66,15 +67,13 @@ Implemented:
   `alias.foo(...)` through a local relative `@import` is an exact cross-unit
   `CALLS` fact with a provider dependency.
 
-Ready to tag:
+Tagged (local annotated tags, not pushed):
 
-- `v0.1.0-preview.2` ([release notes](../releases/v0.1.0-preview.2.md)) is the
-  current tree: the preview.1 surface plus the Plan 006 Zig coverage. The
-  product version was raised so the wider behavior is not reported under the
-  preview.1 version. No release tag has been created.
-- Plan 005 completed the `v0.1.0-preview.1` handoff; its
-  [release notes](../releases/v0.1.0-preview.1.md) describe the tree at
-  `e36693a`, before Plan 006. That tag, too, requires an explicit request.
+- `v0.1.0-preview.2` at `8818bb6` ([release notes](../releases/v0.1.0-preview.2.md)):
+  the preview.1 surface plus the Plan 006 Zig coverage. The product version was
+  raised so the wider behavior is not reported under the preview.1 version.
+- `v0.1.0-preview.1` at `e36693a` ([release notes](../releases/v0.1.0-preview.1.md)):
+  the Plan 005 handoff, before Plan 006.
 
 Not yet present:
 
@@ -96,7 +95,7 @@ Not yet present:
 | M2: Repository-scale local graph | Done | Move from hand-picked files to repository scans and incremental maintenance. | Scan/edit/remove paths preserve consistent graph state and bounded affected-region work. |
 | M3: First cross-unit semantic value | Done | Establish one language-correct cross-unit fact without admitting modules/imports prematurely. | Java same-package type references resolve under the narrow rule. |
 | M4: Dogfood language and local MCP preview | Done | Make semidx useful to its own development loop and to local agents. | Zig dogfood works; `semidx-mcp` answers graph-backed tools over stdio with source text off by default. |
-| M5: Preview release | Candidate ready | Make one source-built semidx usable against many local repository roots. | `v0.1.0-preview.2` (or `v0.1.0-preview.1` at its handoff commit) can be cut after an explicit tag request, without a stable semantic contract promise. |
+| M5: Preview release | Done | Make one source-built semidx usable against many local repository roots. | `v0.1.0-preview.1` and `v0.1.0-preview.2` are tagged locally, without a stable semantic contract promise. Pushing the tags needs an explicit request. |
 | M6: Stable local CLI/MCP product | Later | Stabilize the local user-facing product surface. | `v0.1.0` is cut with documented CLI/MCP behavior, install path, version reporting, and support boundaries. |
 | M7: Published semantic contract | Later | Version the semantic model exposed to consumers. | SPEC/CORE publish contract versioning, schema shape, capability matrix, and migration rules. |
 | M8: Deeper semantic coverage | Later | Expand exact graph value without collapsing unsupported or unresolved states. | New language or relationship coverage lands through focused plans, ADRs where needed, and conformance evidence. |
@@ -106,8 +105,7 @@ Not yet present:
 
 The next useful sequence is:
 
-1. Cut a preview tag only after an explicit release-tag request (see Ready to
-   tag).
+1. Push the preview tags only after an explicit push request.
 2. Execute [Plan 007](../plans/007_mcp_response_budget_and_schema_ergonomics.md)
    to make MCP responses cheaper for agents; Plan 006 made call-heavy Zig
    context responses larger.
