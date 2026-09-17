@@ -2388,3 +2388,173 @@ test "adding a zig unit leaves java and clojure analysis unchanged" {
         try testing.expectEqual(evidence.unit, target.evidence.?.unit);
     }
 }
+
+// -- Plan 006: Zig local imports ----------------------------------------------
+
+const imports_dir = "zig/imports/";
+
+/// Copies the local-import fixture units into a scannable tree, at the same
+/// root-relative paths they have under the fixtures directory.
+fn writeImportFixtures(tree: *Tree) !void {
+    const gpa = testing.allocator;
+    for ([_][]const u8{ "wire.zig", "session.zig", "support/util.zig" }) |name| {
+        const path = try std.mem.concat(gpa, u8, &.{ imports_dir, name });
+        defer gpa.free(path);
+        const source = try loadFixture(gpa, path);
+        defer gpa.free(source);
+        try tree.write(path, source);
+    }
+}
+
+/// Whether `dependent` currently declares a dependency on `provider`.
+fn dependsOn(index: *semidx.Index, dependent: []const u8, provider: []const u8) bool {
+    const from = index.graph.unitByPath(dependent) orelse return false;
+    const to = index.graph.unitByPath(provider) orelse return false;
+    for (index.graph.dependencies.declarations.items) |declaration| {
+        if (declaration.dependent == from and declaration.provider == to) return true;
+    }
+    return false;
+}
+
+fn declaredDependencies(index: *semidx.Index, dependent: []const u8) usize {
+    const from = index.graph.unitByPath(dependent) orelse return 0;
+    var count: usize = 0;
+    for (index.graph.dependencies.declarations.items) |declaration| {
+        if (declaration.dependent == from) count += 1;
+    }
+    return count;
+}
+
+test "the local-import fixtures depend on exactly the units their established aliases name" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try writeImportFixtures(&tree);
+    const outcome = try tree.rescan();
+    try testing.expectEqual(@as(usize, 3), outcome.added);
+
+    const session = imports_dir ++ "session.zig";
+    const util = imports_dir ++ "support/util.zig";
+    const wire = imports_dir ++ "wire.zig";
+    try testing.expect(dependsOn(&tree.index, session, wire));
+    try testing.expect(dependsOn(&tree.index, session, util));
+    try testing.expect(dependsOn(&tree.index, util, session));
+    try testing.expectEqual(@as(usize, 2), declaredDependencies(&tree.index, session));
+    try testing.expectEqual(@as(usize, 1), declaredDependencies(&tree.index, util));
+    try testing.expectEqual(@as(usize, 0), declaredDependencies(&tree.index, wire));
+
+    var snapshot = try tree.index.publish();
+    defer snapshot.deinit();
+    for ([_][]const u8{
+        "`const outside = @import(\"../../../outside.zig\")` establishes no local import alias: the path escapes the indexed root",
+        "`const upper = @import(\"Wire.zig\")` establishes no local import alias: no indexed Zig source unit has the path `zig/imports/Wire.zig`",
+        "`const absent = @import(\"absent.zig\")` establishes no local import alias: no indexed Zig source unit has the path `zig/imports/absent.zig`",
+        "`const twin = @import(\"wire.zig\")` establishes no local import alias: the unit's top level declares this name more than once",
+        "`const twin = @import(\"support/util.zig\")` establishes no local import alias: the unit's top level declares this name more than once",
+    }) |message| {
+        try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, message));
+    }
+    try testing.expect(!hasDiagnosticContaining(&snapshot, .unsupported_construct, "`const std = @import"));
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+    // No import is a graph relationship: only containment, definition, and
+    // calls come out of these units.
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .kind = .references }));
+}
+
+const importer_zig =
+    \\const provider = @import("../b/provider.zig");
+    \\pub fn run() void {
+    \\    provider.go();
+    \\}
+    \\
+;
+const provider_zig = "pub fn go() void {}\n";
+
+test "a zig importer scanned before its provider depends on it after the same scan" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    // Units are analyzed in path order, so the importer is read while its
+    // provider is registered but not yet analyzed, and read again once it is.
+    try tree.write("a/importer.zig", importer_zig);
+    try tree.write("b/provider.zig", provider_zig);
+    try tree.write("c/unrelated.zig", "pub fn idle() void {}\n");
+    const first = try tree.rescan();
+    try testing.expectEqual(@as(usize, 3), first.added);
+    try testing.expectEqual(@as(usize, 1), first.invalidated);
+    try testing.expect(dependsOn(&tree.index, "a/importer.zig", "b/provider.zig"));
+
+    // A provider edit reaches the importer and nothing else.
+    try tree.write("b/provider.zig", "pub fn go() void {\n    return;\n}\n");
+    const edited = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), edited.changed);
+    try testing.expectEqual(@as(usize, 1), edited.invalidated);
+    try testing.expectEqual(@as(usize, 2), edited.analyzed);
+}
+
+test "a zig provider scanned before its importer costs no second read" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("a/provider.zig", provider_zig);
+    try tree.write("b/importer.zig",
+        \\const provider = @import("../a/provider.zig");
+        \\pub fn run() void {}
+        \\
+    );
+    const first = try tree.rescan();
+    try testing.expectEqual(@as(usize, 0), first.invalidated);
+    try testing.expect(dependsOn(&tree.index, "b/importer.zig", "a/provider.zig"));
+}
+
+test "moving or removing a zig provider reanalyzes its importer" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("a/importer.zig", importer_zig);
+    try tree.write("b/provider.zig", provider_zig);
+    _ = try tree.rescan();
+
+    // The provider's contents are unchanged, so it is not reanalyzed; the
+    // importer found it by the path it no longer has.
+    try tree.move("b/provider.zig", "b/moved.zig");
+    const moved = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), moved.renamed);
+    try testing.expectEqual(@as(usize, 1), moved.invalidated);
+    try testing.expectEqual(@as(usize, 1), moved.analyzed);
+    try testing.expectEqual(@as(usize, 0), declaredDependencies(&tree.index, "a/importer.zig"));
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        try testing.expect(hasDiagnosticContaining(&snapshot, .unsupported_construct, "no indexed Zig source unit has the path `b/provider.zig`"));
+    }
+
+    // Moved back, a later edit of the importer finds it again; removal then
+    // withdraws the dependency by reanalyzing the importer.
+    try tree.move("b/moved.zig", "b/provider.zig");
+    try tree.write("a/importer.zig", importer_zig ++ "\n");
+    _ = try tree.rescan();
+    try testing.expect(dependsOn(&tree.index, "a/importer.zig", "b/provider.zig"));
+    try tree.remove("b/provider.zig");
+    const removed = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), removed.removed);
+    try testing.expectEqual(@as(usize, 1), removed.invalidated);
+    try testing.expectEqual(@as(usize, 0), declaredDependencies(&tree.index, "a/importer.zig"));
+}
+
+test "a zig provider added after its importer is not noticed until the importer is reanalyzed" {
+    // The named residual risk of Plan 006: a missing import path is read as
+    // no unit, which declares nothing, so adding the unit later reaches no one.
+    // The importer's calls stay unresolved; nothing false is claimed.
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("a/importer.zig", importer_zig);
+    _ = try tree.rescan();
+    try testing.expectEqual(@as(usize, 0), declaredDependencies(&tree.index, "a/importer.zig"));
+
+    try tree.write("b/provider.zig", provider_zig);
+    const added = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), added.added);
+    try testing.expectEqual(@as(usize, 0), added.invalidated);
+    try testing.expectEqual(@as(usize, 0), declaredDependencies(&tree.index, "a/importer.zig"));
+
+    try tree.write("a/importer.zig", importer_zig ++ "\n");
+    _ = try tree.rescan();
+    try testing.expect(dependsOn(&tree.index, "a/importer.zig", "b/provider.zig"));
+}

@@ -72,10 +72,15 @@ pub const Index = struct {
         upkeep: *Upkeep,
     ) !model.SourceUnitId {
         const unit = try self.graph.addSourceUnit(path, language, bytes);
+        try self.analyzeAdded(unit, upkeep);
+        return unit;
+    }
+
+    /// Analyzes a unit that was registered in this batch and never analyzed.
+    fn analyzeAdded(self: *Index, unit: model.SourceUnitId, upkeep: *Upkeep) !void {
         upkeep.before.clearRetainingCapacity();
         _ = try self.analyzer.indexUnit(&self.graph, unit);
         try upkeep.recordAnalysis(unit);
-        return unit;
     }
 
     /// Applies an edit to one unit and reconciles only that unit's semantic
@@ -165,10 +170,11 @@ pub const Index = struct {
         defer seeds.deinit(gpa);
         for (correspondence.decisions) |decision| {
             switch (decision) {
-                // A move changes no contents, and an addition has nothing
-                // pointing at it yet: a declaration names a unit, and no unit
-                // can have named one that did not exist.
-                .changed => |match| try seeds.append(gpa, match.id),
+                // An addition has nothing pointing at it yet: a declaration
+                // names a unit, and no unit can have named one that did not
+                // exist. A move changes no contents, but a unit that found it
+                // by path read where it was.
+                .changed, .renamed => |match| try seeds.append(gpa, match.id),
                 .removed => |id| try seeds.append(gpa, id),
                 else => {},
             }
@@ -196,6 +202,21 @@ pub const Index = struct {
                 else => {},
             }
         }
+        // Every addition is registered before anything is analyzed, so a unit
+        // that names another by path finds it whatever order the scan lists
+        // them in. Analysis order still matters; `Upkeep` accounts for it.
+        var added: std.ArrayList(model.SourceUnitId) = .empty;
+        defer added.deinit(gpa);
+        for (correspondence.decisions) |decision| {
+            switch (decision) {
+                .added => |scan_index| {
+                    const unit = found.units[scan_index];
+                    try added.append(gpa, try self.graph.addSourceUnit(unit.path, unit.language, unit.bytes));
+                },
+                else => {},
+            }
+        }
+        var next_added: usize = 0;
         for (correspondence.decisions) |decision| {
             switch (decision) {
                 .unchanged => outcome.unchanged += 1,
@@ -205,9 +226,9 @@ pub const Index = struct {
                     outcome.changed += 1;
                     outcome.analyzed += 1;
                 },
-                .added => |scan_index| {
-                    const unit = found.units[scan_index];
-                    _ = try self.registerUnit(unit.path, unit.language, unit.bytes, &upkeep);
+                .added => {
+                    try self.analyzeAdded(added.items[next_added], &upkeep);
+                    next_added += 1;
                     outcome.added += 1;
                     outcome.analyzed += 1;
                 },
@@ -257,14 +278,18 @@ pub const Index = struct {
         }
     }
 
-    /// Moves a unit to a new path. Its contents did not change, so nothing is
-    /// reanalyzed and nothing inside it loses its identity.
+    /// Moves a unit to a new path. Its contents did not change, so it is not
+    /// reanalyzed and nothing inside it loses its identity. A unit that found
+    /// it by its old path is reanalyzed.
     pub fn renameUnit(
         self: *Index,
         unit: model.SourceUnitId,
         path: []const u8,
     ) !void {
+        var upkeep = try Upkeep.begin(self, &.{unit});
+        defer upkeep.deinit();
         _ = try self.graph.setSourceUnitPath(unit, path);
+        try upkeep.finish(null);
     }
 
     /// Takes a unit out of the index, removing what it introduced, then
@@ -289,8 +314,10 @@ pub const Index = struct {
 /// Two things can make a unit's analysis out of date without its own contents
 /// changing, and each has its own mechanism:
 ///
-/// - A unit it read changed. Its dependency declarations say so, and they are
-///   read once, before the batch touches anything.
+/// - A unit it read changed or moved. Its dependency declarations say so, and
+///   they are read once, before the batch touches anything. A declaration
+///   made during the batch counts too: a unit analyzed before a unit it read
+///   was analyzed in the same batch read the provider's earlier state.
 /// - The set of top-level classes its Java package exports changed. No
 ///   declaration can say so, because a name that was unresolved read no
 ///   provider — the provider did not exist yet. So each step that removes or
@@ -401,6 +428,15 @@ const Upkeep = struct {
         for (self.dependents) |unit| {
             if (self.analyzed_at.contains(unit)) continue;
             try appendOwed(self.gpa, &owed, graph, unit);
+        }
+        // A unit analyzed in this batch is covered above only by what it
+        // declared before the batch, so its fresh declarations are checked
+        // against every provider analyzed after it.
+        for (graph.dependencies.declarations.items) |declaration| {
+            const read_at = self.analyzed_at.get(declaration.dependent) orelse continue;
+            const provided_at = self.analyzed_at.get(declaration.provider) orelse continue;
+            if (provided_at <= read_at) continue;
+            try appendOwed(self.gpa, &owed, graph, declaration.dependent);
         }
 
         var exports: std.ArrayList(frontends.java_packages.Export) = .empty;

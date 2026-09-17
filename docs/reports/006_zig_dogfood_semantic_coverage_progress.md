@@ -16,7 +16,7 @@ implementing
 
 ## Current Status
 
-Stages 1 and 2 are complete. Stages 3 to 5 are pending.
+Stages 1 to 3 are complete. Stages 4 and 5 are pending.
 
 ## Stage Log
 
@@ -24,7 +24,7 @@ Stages 1 and 2 are complete. Stages 3 to 5 are pending.
 | --- | --- | --- |
 | Stage 1: Coverage probes and fixture design | Completed | Fixtures for member functions, nested containers, local import aliases, exact and unresolved qualified calls, and provider edits; expected graph deltas and risk matrix recorded below. No behavior change. |
 | Stage 2: Container member function definitions | Completed | Named `fn` declarations directly inside covered top-level containers are `function` definitions with `container_path` and `container DEFINES member`; their bodies are reported as not analyzed. A renamed container reports its members' loss with replacements through a new generic reconciliation fallback. |
-| Stage 3: Local Zig import alias context | Pending | |
+| Stage 3: Local Zig import alias context | Completed | Exact top-level `const alias = @import("relative.zig")` declarations naming one indexed Zig unit establish an alias and declare a provider dependency; every other file import is reported with its reason. `Index` now registers a scan's additions before analyzing any, reanalyzes a unit read before a provider analyzed later in the same batch, and treats a moved unit as a dependency seed. |
 | Stage 4: Exact qualified call facts | Pending | |
 | Stage 5: Dogfood and documentation | Pending | |
 
@@ -195,3 +195,56 @@ Mutation checks, run and reverted:
 - With member `container_path` left empty, the member-shape frontend test and
   the MCP smoke test fail, and the four member fixture tests abort on a
   missing member lookup.
+
+## Stage 3: Local Zig Import Alias Context
+
+Changed files: `src/frontends/zig.zig`, `src/frontends/root.zig`,
+`src/root.zig`, `tests/vertical_slice_test.zig`, this log.
+
+Decisions taken inside the plan's boundary:
+
+- `zig.resolveImportPath` is pure and lexical. A literal not ending in `.zig`
+  is a package or builtin import (`std`, `builtin`, `root`) and is not
+  resolved or reported beyond its uncovered declaration. A `.zig` literal is
+  resolved against the importer's directory with `.` and `..`; an absolute
+  path, a backslash, an empty segment, or a `..` above the root rejects it.
+  The result is compared with indexed unit paths byte for byte through
+  `Graph.unitByPath`, so a case-mismatched path names no unit.
+- An import declaration is read token by token: optional `pub`, `const`, one
+  identifier, `=`, and `@import` with exactly one plain string literal. `var`,
+  a type annotation, `extern` or `export`, escape sequences, a second argument,
+  and an import used in a larger expression (`@import("x.zig").Frame`) are not
+  import declarations.
+- The analyzer builds `zig.Context` from the graph before analysis: one
+  provider per requested path that names a live Zig unit, with whether its
+  analysis is current. A pending provider still establishes the alias.
+- The frontend establishes an alias only when its provider exists, is not the
+  analyzed unit, the alias name is declared once at the top level, and the unit
+  has no `usingnamespace`. An established alias always declares a dependency on
+  its provider. A declined `.zig` import is an `unsupported_construct`
+  diagnostic naming the alias, the literal, and the reason, capped at 16 per
+  unit with an overflow count. Analysis without a graph declines every file
+  import. No entity, relationship, `module`, or `IMPORTS` is recorded.
+- **`Index` ordering (the readiness-gate risk).** `applyScan` registers every
+  added unit before analyzing any, so a path lookup does not depend on scan
+  order. `Upkeep.finish` additionally reanalyzes any unit whose declarations,
+  as they stand after the batch, name a provider analyzed at a later step of
+  the same batch. A scan rename, and `Index.renameUnit`, now seed dependency
+  propagation, because an alias found its provider by path. Java units are
+  covered by the same rules; no Java or Clojure expectation changed.
+
+Verification:
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Clean. |
+| `zig build test --summary all` | 20/20 steps; 199/200 passed, 1 skipped (pre-existing environment-dependent test). New: import path normalization, import declaration shapes and dependencies, duplicate and `usingnamespace` aliases, analysis without a graph, fixture dependencies and declined-alias diagnostics, importer scanned before its provider, provider scanned first, provider moved and removed, provider added later. |
+
+Mutation checks, run and reverted:
+
+- Without the same-batch step rule in `Upkeep.finish`, the importer-before-
+  provider test fails.
+- Without renames as seeds, the provider move test fails.
+- Without `addDependency` for an established alias, six import tests fail.
+- Not run: analyzing additions as they are registered. The importer-before-
+  provider test asserts the dependency that such ordering would lose.

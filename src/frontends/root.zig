@@ -133,8 +133,42 @@ pub const Analyzer = struct {
                 try java.analyze(builder, input, tree, context);
             },
             .clojure => try clojure.analyze(builder, input, tree),
-            .zig => try zig.analyze(builder, input, tree),
+            .zig => {
+                var scratch = std.heap.ArenaAllocator.init(self.gpa);
+                defer scratch.deinit();
+                const context = if (graph) |repository|
+                    try zigContext(repository, input.unit, tree.root(), scratch.allocator())
+                else
+                    zig.Context.empty;
+                try zig.analyze(builder, input, tree, context);
+            },
         }
+    }
+
+    /// The indexed Zig units the unit's top-level imports name, read from the
+    /// graph by exact root-relative path. A path no live Zig unit has is left
+    /// out, and the frontend reports it.
+    fn zigContext(
+        graph: *core.Graph,
+        unit: contract.SourceUnit,
+        root: ts.Node,
+        allocator: Allocator,
+    ) !zig.Context {
+        // A unit that does not parse yields no assertions, so it needs no
+        // providers either.
+        if (root.hasError()) return .{ .repository = true, .providers = &.{} };
+        var providers: std.ArrayList(zig.Provider) = .empty;
+        for (try zig.localImportPaths(allocator, root, unit.bytes, unit.path)) |path| {
+            const id = graph.unitByPath(path) orelse continue;
+            const record = graph.unit(id) orelse continue;
+            if (!record.isLive() or record.language != .zig) continue;
+            try providers.append(allocator, .{
+                .path = path,
+                .unit = id,
+                .current = record.analysis() == .current,
+            });
+        }
+        return .{ .repository = true, .providers = providers.items };
     }
 
     fn javaContext(
@@ -758,4 +792,159 @@ test "source that does not parse is reported as failed analysis" {
     defer snapshot.deinit();
     try testing.expectEqual(@as(usize, 1), snapshot.countDiagnostics(.analysis_failed));
     try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.{ .kind = .definition }));
+}
+
+test "a zig import path resolves lexically against the importer and never leaves the root" {
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    const allocator = scratch.allocator();
+
+    const files = [_]struct { importer: []const u8, literal: []const u8, path: []const u8 }{
+        .{ .importer = "src/mcp/tools.zig", .literal = "protocol.zig", .path = "src/mcp/protocol.zig" },
+        .{ .importer = "src/mcp/tools.zig", .literal = "../root.zig", .path = "src/root.zig" },
+        .{ .importer = "probe.zig", .literal = "./a/../b.zig", .path = "b.zig" },
+        .{ .importer = "zig/imports/session.zig", .literal = "./support/../support/util.zig", .path = "zig/imports/support/util.zig" },
+        // Case is kept byte for byte, so only an exact path can ever match.
+        .{ .importer = "zig/imports/session.zig", .literal = "Wire.zig", .path = "zig/imports/Wire.zig" },
+    };
+    for (files) |case| {
+        const resolved = try zig.resolveImportPath(allocator, case.importer, case.literal);
+        try testing.expectEqualStrings(case.path, resolved.file);
+    }
+
+    const rejected = [_]struct { importer: []const u8, literal: []const u8, reason: []const u8 }{
+        .{ .importer = "zig/imports/session.zig", .literal = "../../../outside.zig", .reason = "escapes" },
+        .{ .importer = "probe.zig", .literal = "../probe.zig", .reason = "escapes" },
+        .{ .importer = "a/b.zig", .literal = "/abs.zig", .reason = "absolute" },
+        .{ .importer = "a/b.zig", .literal = "x//y.zig", .reason = "empty segment" },
+        .{ .importer = "a/b.zig", .literal = "x\\y.zig", .reason = "backslash" },
+    };
+    for (rejected) |case| {
+        const resolved = try zig.resolveImportPath(allocator, case.importer, case.literal);
+        try testing.expect(std.mem.indexOf(u8, resolved.rejected, case.reason) != null);
+    }
+
+    for ([_][]const u8{ "std", "builtin", "root", "", "wire.zig.bak" }) |literal| {
+        try testing.expectEqual(zig.ImportPath.package, try zig.resolveImportPath(allocator, "a/b.zig", literal));
+    }
+}
+
+fn dependenciesOf(graph: *const core.Graph, dependent: model.SourceUnitId, out: []model.SourceUnitId) usize {
+    var count: usize = 0;
+    for (graph.dependencies.declarations.items) |declaration| {
+        if (declaration.dependent != dependent) continue;
+        if (count < out.len) out[count] = declaration.provider;
+        count += 1;
+    }
+    return count;
+}
+
+fn hasZigDiagnostic(snapshot: *const core.Snapshot, fragment: []const u8) bool {
+    for (snapshot.diagnostics) |diagnostic| {
+        if (std.mem.indexOf(u8, diagnostic.message, fragment) != null) return true;
+    }
+    return false;
+}
+
+test "only an exact top-level zig import declaration naming an indexed unit declares a dependency" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const wire = try graph.addSourceUnit("lib/wire.zig", .zig, "pub fn writeString() void {}\n");
+    _ = try analyzer.indexUnit(&graph, wire);
+    // Registered but never analyzed: the alias is still established.
+    const other = try graph.addSourceUnit("lib/other.zig", .zig, "pub fn go() void {}\n");
+    const main = try graph.addSourceUnit("app/main.zig", .zig,
+        \\const std = @import("std");
+        \\const wire = @import("../lib/wire.zig");
+        \\pub const other = @import("../lib/other.zig");
+        \\var mutable = @import("../lib/wire.zig");
+        \\const typed: type = @import("../lib/wire.zig");
+        \\const member = @import("../lib/wire.zig").Frame;
+        \\const escaped = @import("..\x2flib/wire.zig");
+        \\const missing = @import("../lib/missing.zig");
+        \\const upper = @import("../lib/Wire.zig");
+        \\const itself = @import("main.zig");
+        \\const outside = @import("../../outside.zig");
+        \\fn run() void {}
+        \\
+    );
+    const outcome = try analyzer.indexUnit(&graph, main);
+    try testing.expect(outcome.applied);
+
+    var providers: [4]model.SourceUnitId = undefined;
+    try testing.expectEqual(@as(usize, 2), dependenciesOf(&graph, main, &providers));
+    try testing.expectEqual(wire, providers[0]);
+    try testing.expectEqual(other, providers[1]);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expect(hasZigDiagnostic(&snapshot, "`const missing = @import(\"../lib/missing.zig\")` establishes no local import alias: no indexed Zig source unit has the path `lib/missing.zig`"));
+    try testing.expect(hasZigDiagnostic(&snapshot, "no indexed Zig source unit has the path `lib/Wire.zig`"));
+    try testing.expect(hasZigDiagnostic(&snapshot, "`const itself = @import(\"main.zig\")` establishes no local import alias: the path names the analyzed unit itself"));
+    try testing.expect(hasZigDiagnostic(&snapshot, "`const outside = @import(\"../../outside.zig\")` establishes no local import alias: the path escapes the indexed root"));
+    // `std` is a package import, and the `var`, typed, member, and escaped
+    // shapes are not import declarations: none of them is reported as one.
+    for ([_][]const u8{ "const std =", "mutable", "typed", "member", "escaped" }) |fragment| {
+        try testing.expect(!hasZigDiagnostic(&snapshot, fragment));
+    }
+    // An alias is analysis context, not graph content.
+    try testing.expectEqual(@as(usize, 1), snapshot.countEntities(.{ .kind = .definition, .path = "app/main.zig" }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .kind = .references }));
+}
+
+test "a duplicated or usingnamespace-shadowed zig import alias declares no dependency" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const wire = try graph.addSourceUnit("wire.zig", .zig, "pub fn go() void {}\n");
+    _ = try analyzer.indexUnit(&graph, wire);
+    const twin = try graph.addSourceUnit("twin.zig", .zig,
+        \\const wire = @import("wire.zig");
+        \\fn wire() void {}
+        \\
+    );
+    _ = try analyzer.indexUnit(&graph, twin);
+    const using = try graph.addSourceUnit("using.zig", .zig,
+        \\usingnamespace @import("other.zig");
+        \\const wire = @import("wire.zig");
+        \\
+    );
+    _ = try analyzer.indexUnit(&graph, using);
+
+    var providers: [2]model.SourceUnitId = undefined;
+    try testing.expectEqual(@as(usize, 0), dependenciesOf(&graph, twin, &providers));
+    try testing.expectEqual(@as(usize, 0), dependenciesOf(&graph, using, &providers));
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expect(hasZigDiagnostic(&snapshot, "declares this name more than once"));
+    try testing.expect(hasZigDiagnostic(&snapshot, "`usingnamespace` declaration"));
+}
+
+test "a zig unit analyzed without a graph establishes no import alias" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+
+    const input: contract.FrontendInput = .{ .unit = .{
+        .id = @enumFromInt(0),
+        .path = "main.zig",
+        .language = .zig,
+        .bytes = "const wire = @import(\"wire.zig\");\nfn run() void {}\n",
+    } };
+    var builder = contract.BatchBuilder.init(testing.allocator, input.unit.id, zig.capabilities);
+    defer builder.deinit();
+    try analyzer.analyze(null, input, &builder);
+
+    const batch = builder.batch();
+    try testing.expectEqual(@as(usize, 0), batch.dependencies.len);
+    var reported = false;
+    for (batch.diagnostics) |diagnostic| {
+        if (std.mem.indexOf(u8, diagnostic.message, "without repository context") != null) reported = true;
+    }
+    try testing.expect(reported);
 }
