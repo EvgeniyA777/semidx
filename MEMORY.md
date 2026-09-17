@@ -85,7 +85,9 @@ why. This is not a changelog of removed implementation; see `git log`.
   stdout/stderr streams and check the exit status, not just an early summary.
   Tooling policy carries a Zig addendum naming which probe belongs to which
   edit. Documentation policy owns ownership, filenames, frontmatter, lifecycle,
-  the ADR procedure, progress logs, and the Plan Readiness Gate; git policy owns
+  the ADR procedure, progress logs, the Plan Readiness Gate, glossary update
+  discipline for durable vocabulary, and drift control for plan readiness,
+  closure, ADRs, release handoffs, and source-of-truth edits; git policy owns
   hooks, command ordering, commit and push rules, and both the attribution and
   constitution-freeze enforcement; testing policy owns risk-based verification
   and local services; tooling policy owns MCP-first retrieval, code reading, and
