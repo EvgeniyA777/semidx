@@ -965,6 +965,20 @@ test "no tool result carries source text unless evidence text was opted into, an
         .get("evidence").?.object.get("source_text").?.object;
     try testing.expectEqual(tools.max_evidence_text_bytes, long_text.get("text").?.string.len);
     try testing.expect(long_text.get("truncated").?.bool);
+
+    // A compact repository map definition has no `evidence`; its bounded text
+    // sits next to its `range`.
+    const map = try on.callTool(arena, "semidx_repo_map", "{\"path_prefix\":\"extra.zig\"}");
+    const listed = map.object.get("structuredContent").?.object.get("files").?.array.items[0].object
+        .get("definitions").?.array.items[0].object;
+    try testing.expect(listed.get("evidence") == null and listed.get("range") != null);
+    const listed_text = listed.get("source_text").?.object;
+    try testing.expectEqual(tools.max_evidence_text_bytes, listed_text.get("text").?.string.len);
+    try testing.expect(listed_text.get("truncated").?.bool);
+    const off_map = try off.callTool(arena, "semidx_repo_map", "{\"path_prefix\":\"extra.zig\"}");
+    const off_listed = off_map.object.get("structuredContent").?.object.get("files").?.array.items[0].object
+        .get("definitions").?.array.items[0].object;
+    try testing.expect(off_listed.get("source_text") == null);
 }
 
 test "refresh publishes a new snapshot that observes edited and added units" {

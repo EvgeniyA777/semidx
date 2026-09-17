@@ -283,18 +283,26 @@ and field here, detail levels are experimental preview ergonomics, not a
 published semantic contract: `semantic_contract_version` stays `null`, and the
 graph values behind both levels are the same.
 
-- **`full`** renders every field described in [Result Fields](#result-fields).
+- **`full`** renders what the tool rendered before detail levels existed, plus
+  `budget`. For `semidx_context` that is every field described in
+  [Result Fields](#result-fields), including full focus entities with their
+  `existence` claims. For `semidx_repo_map` it is the richer unit and each
+  definition as a brief entity (`id`, `kind`, `language`, `role`, `name`,
+  `freshness`, `evidence`): it carries no `existence`, `extension`, or entity
+  revisions. For a definition's existence claim, producer, and resolution, use
+  `semidx_find_definitions` or `semidx_context`.
 - **`compact`** (the default) renders a subset of the same fields under the
   same names and JSON types, with one exception: a definition listed by
   `semidx_repo_map` carries `range` directly instead of `evidence`, because
-  its unit is the file it is listed under.
+  its unit is the file it is listed under. Under `--allow-evidence-text` its
+  `source_text` is likewise a sibling of that `range`.
 
 What compact keeps and drops:
 
 | Value | Compact keeps | Compact drops |
 | --- | --- | --- |
 | Unit (`semidx_repo_map` file, `semidx_context` focus unit) | `id`, `path`, `language`, `analysis` | `file_entity_id`, `content_revision`, `analysis_revision` |
-| Repository map definition | `id`, `role`, `name`, `freshness`, `range` (`start_line`, `end_line`) | `kind`, `language`, `evidence` |
+| Repository map definition | `id`, `role`, `name`, `freshness`, `range` (`start_line`, `end_line`), and `source_text` under `--allow-evidence-text` | `kind`, `language`, `evidence` |
 | Context focus entity | `id`, `kind`, `language`, `role`, `name`, `freshness`, `evidence`, `container_path`, `existence` (`resolution`, `producer`, `freshness`) | `extension`, `created_revision`, `observed_revision`, existence `assertion_id` and `revision` |
 | Relationship in context | `assertion_id`, `kind`, `source`, `target`, `resolution`, `producer`, `freshness`, `evidence`. The focus end is `{"id": …}` alone; the other end has `id`, `kind`, `role`, `name`, `freshness`, `evidence`; a designator target is unchanged. | `revision`; `language` of the other end |
 | Resolution | `category`; `missing` when unresolved; `confidence` when approximate | `method`, `explanation`, `basis` |
@@ -302,9 +310,12 @@ What compact keeps and drops:
 | Evidence | `unit.path`, `range.start_line`, `range.end_line`, and `source_text` under `--allow-evidence-text` | `unit.id`, columns, byte offsets |
 | Diagnostic in context | `kind`, `producer`, `message` | `unit` (the focus unit), `revision` |
 
-Compact never changes a claim: an unresolved claim still has category
-`unresolved` and a designator target, and every relationship still carries its
-producer and freshness. The evidence-text opt-in applies at both levels.
+Compact never changes a claim: in `semidx_context` an unresolved claim still
+has category `unresolved` and a designator target, and every relationship and
+focus existence claim still carries its resolution category, producer name,
+and freshness. `semidx_repo_map` is orientation at both levels: its
+definitions carry freshness and location, never their existence claim's
+resolution or producer. The evidence-text opt-in applies at both levels.
 
 `budget` names what bounded the result:
 
@@ -325,7 +336,9 @@ middle; the list that lost items says so through its `…_total` and
   result. Paths, ranges, entity names, designators, and diagnostic messages are
   graph values and are returned.
 - **`--allow-evidence-text`:** each `evidence` object gains
-  `source_text: {text, truncated}`, the text a producer recorded for that claim,
+  `source_text: {text, truncated}` (a compact `semidx_repo_map` definition,
+  which has no `evidence`, carries it next to its `range`), the text a
+  producer recorded for that claim,
   cut at 400 bytes on a UTF-8 boundary. Current frontends record a name or a
   callee as written, not a declaration body.
 - Results go only to the client process that started the server. What that

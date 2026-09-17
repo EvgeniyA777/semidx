@@ -118,9 +118,11 @@ documents that own history, rationale, and evidence.
   `semantic_contract_version` is still `null`.
 - Tool arguments are declared once in `src/mcp/tools.zig`; the advertised
   schema and the validator both derive from them. `semidx_repo_map` and
-  `semidx_context` default to `detail: "compact"` (a subset of fields that
-  keeps each claim's resolution category, producer name, freshness, and
-  location) and take `detail: "full"`; list tools report `budget`. Responses
+  `semidx_context` default to `detail: "compact"` and take `detail: "full"`.
+  Compact context keeps each claim's resolution category, producer name,
+  freshness, and location; the repository map carries freshness and location
+  but no existence provenance at either level (use `semidx_find_definitions`
+  or context for that). List tools report `budget`. Responses
   are bounded per list, not per response
   ([detail levels](docs/mcp/local_preview.md#detail-levels-and-budgets)).
 - `semidx_refresh` keeps the previous snapshot on failure. If a refresh fails

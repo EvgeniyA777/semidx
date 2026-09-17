@@ -324,7 +324,50 @@ Self-review of the diff from `efbc8b3` with `semidx-code-review`:
   listed definitions and compact evidence call the same `writeSourceText`,
   which checks the opt-in; the source-text test covers both detail levels.
 
-No open finding.
+No open finding from the self-review.
+
+### Independent Review (Post-Closure)
+
+An independent review of `efbc8b3..HEAD` found the mechanics sound: MCP stays a
+projection, compact never turns an unresolved relationship into a fact, full
+context returns the evidence-heavy form, and the 50% gates were not tuned after
+measurement. Its verification: `./scripts/check-zig-version.sh`,
+`git diff --check efbc8b3..HEAD`, `zig fmt --check build.zig src tests`,
+`zig build test` (206 of 207, 1 skipped), `zig build dogfood` (5 of 5; 47% and
+39%). Both findings are about wording overstating the implementation.
+
+1. **Medium, confirmed, fixed: documentation overpromised `semidx_repo_map`
+   detail.** `detail: "full"` renders definitions as brief entities
+   (`tools.zig`, `repoMap`), so it has no `existence`, `extension`, or entity
+   revisions, and compact listed definitions carry no existence resolution or
+   producer. `docs/mcp/local_preview.md` said `full` renders every field, and
+   `docs/spec/capability_matrix.md` and `MEMORY.md` said compact keeps each
+   claim's resolution and producer. Impact: an agent could treat a full
+   repository map as provenance-complete.
+   Fix: `local_preview.md` now says `full` is each tool's pre-detail rendering
+   plus `budget`, spells out what a full map lacks, and points to
+   `semidx_find_definitions` or `semidx_context` for existence provenance; the
+   "compact never changes a claim" paragraph is scoped to context, and the map
+   is described as orientation at both levels. The capability matrix Bounds
+   row and `MEMORY.md` say the same. The Post-Closure Assessment below was
+   corrected where it repeated the overstatement.
+2. **Low, confirmed, fixed: compact map evidence-text shape was
+   undocumented.** Under `--allow-evidence-text` a compact listed definition
+   writes `source_text` next to `range`, while the Source Text section said
+   each `evidence` object gains it; no test covered that path.
+   Fix: documented as part of the repository map exception (Detail Levels
+   paragraph and table, Source Text section). The code keeps the sibling shape:
+   adding an `evidence` wrapper only under the opt-in would make the shape
+   depend on a server flag. The source-text test now asserts that a compact map
+   definition over 600 bytes of recorded text has no `evidence`, has `range`,
+   and carries a 400-byte truncated `source_text`, and that the field is absent
+   without the opt-in. Mutation check: removing the `writeSourceText` call from
+   the listed shape fails that test; reverted.
+
+Verification after the fixes:
+
+- `zig fmt --check build.zig src tests`: clean; `git diff --check`: clean.
+- `zig build test --summary all`: 206 of 207 passed, 1 skipped.
 
 ## Post-Closure Assessment
 
@@ -373,8 +416,11 @@ token, so the whole-repository compact map is on the order of 20,000 tokens.
   full evidence inside every relationship, and the same `explanation` sentence
   repeated dozens of times. Compact output keeps what an agent acts on: who
   calls, at which line, what is called, and whether each claim is a fact.
-- **Authority unchanged.** Unresolved claims stay unresolved with a designator,
-  and every claim keeps producer and freshness, proven by tests.
+- **Authority unchanged in context.** Unresolved claims stay unresolved with a
+  designator, and every relationship and focus existence claim keeps its
+  resolution category, producer, and freshness, proven by tests. The
+  repository map never carried existence provenance and still does not; it is
+  orientation (corrected after the independent review above).
 - **Schema drift removed.** Advertised schemas and validation derive from one
   declaration; a mismatch fails compilation or the schema test.
 - **Visible budgets.** `budget` states which limits shaped a result.
