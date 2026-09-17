@@ -173,6 +173,8 @@ Ready criteria:
 - Contract changes are explicit and tied to source-of-truth documents.
 - Scope and non-scope are explicit.
 - Key decisions and rationale are recorded.
+- Drift control has checked the relevant source-of-truth documents for plan
+  readiness and has an explicit closure check for keeping them aligned.
 - Blockers and decision branches have precise stop and resume behavior.
 - Each stage has a clear purpose, ordered dependencies, and concrete outputs.
 - Verification commands and acceptance checks are named.
@@ -181,6 +183,26 @@ Ready criteria:
 - Runtime and environment traps have been considered.
 - The document is internally consistent and not overloaded with irrelevant
   implementation detail.
+
+## Drift Control
+
+Use drift control when preparing, executing, or closing a staged plan; writing an
+ADR; preparing a release handoff; or changing a source-of-truth document named by
+`RULES.md`. Compare the proposed or completed work against the current owners:
+the constitution, ADRs, `SPEC.md`, `CORE.md`, `CONFORMANCE.md`, `MEMORY.md`,
+capability matrices, follow-ups, `GLOSSARY.md`, and the implementation where it
+is the runtime authority.
+
+The check is directional: no consumer or tool shape defines graph semantics; no
+unresolved, approximate, stale, unsupported, or unavailable claim is presented as
+a fact; no core kind, semantic contract, persistence, remote operation, language
+coverage, release claim, or durable vocabulary appears without its owner being
+updated or explicitly named.
+
+For plan readiness and plan closure, record either that the relevant owners are
+already aligned or the exact documents updated, deferred, or left as residual
+risk. If this becomes a frequent standalone audit, promote the workflow into a
+repo-local skill instead of growing this policy section.
 
 ## Language And Links
 
