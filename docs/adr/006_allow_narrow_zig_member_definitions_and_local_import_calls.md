@@ -53,9 +53,17 @@ then add call facts in a later stage.
 The Zig frontend may use a top-level declaration of the form
 `const alias = @import("relative/path.zig");` as frontend-local analysis context
 when the string names exactly one indexed Zig source unit under the same root.
-The alias is not an entity and does not create a graph relationship. No
-`module`, `IMPORTS`, package import, build graph, or public import model is
-admitted by this decision.
+The relative string is resolved lexically from the importing source unit's
+directory, may use `.` or `..`, must stay under the indexed root, and must match
+the indexed root-relative Zig path exactly, including case. Filesystem
+case-folding, symlink resolution, or package search must not turn a non-exact
+path into a match. The alias is not an entity and does not create a graph
+relationship. No `module`, `IMPORTS`, package import, build graph, or public
+import model is admitted by this decision.
+
+Establishing such an alias means the dependent analysis read the provider source
+unit. The analysis result must declare a dependency on that provider even when no
+call through the alias resolves to a fact.
 
 A qualified call `alias.foo(...)` may be recorded as a cross-unit `CALLS` fact
 only when all of the following are true:
@@ -65,7 +73,8 @@ only when all of the following are true:
 - the provider declares exactly one current covered exported callable named
   `foo` in the provider file namespace;
 - the target is a graph-established current `definition` fact; and
-- the analysis result declares a dependency on the provider source unit.
+- the analysis result declared the provider dependency required by the alias
+  rule.
 
 For the first implementation, "exported callable" means a covered file-level
 `pub fn` target. Extending that visibility rule to other Zig callable forms is
@@ -95,9 +104,10 @@ controls when each behavior lands.
 
 For cross-unit calls, a relative `@import` alias is different from a
 repository-wide name match. The provider unit is named by source syntax, the
-target is selected from current provider facts, and the dependent records that
-it read the provider. The graph records the resulting `CALLS` fact only when
-that evidence yields one exact target.
+path is resolved by a bounded exact rule, the target is selected from current
+provider facts, and the dependent records that it read the provider even if the
+specific call is still unresolved. The graph records the resulting `CALLS` fact
+only when that evidence yields one exact target.
 
 Keeping the alias outside the graph prevents this narrow Zig mechanism from
 becoming a hidden `module` or `IMPORTS` admission. The graph stores the
@@ -124,9 +134,11 @@ coverage or admission questions, not implied by this decision.
    never on tree-sitter node ids or byte ranges. Body edits preserve identity
    where correspondence is established; renames or containment changes make
    identity loss observable.
-5. **Incrementality and consistent observation.** Preserved. Cross-unit call
-   facts require provider dependency declarations so provider changes can
-   invalidate dependents. Consumers continue to query published snapshots.
+5. **Incrementality and consistent observation.** Preserved. Established local
+   import aliases and cross-unit call facts require provider dependency
+   declarations so provider changes can invalidate dependents, including when a
+   previously unresolved call becomes resolvable after an exported function is
+   added. Consumers continue to query published snapshots.
 6. **Language frontends preserve meaning.** Preserved. Zig containment,
    visibility, import-alias evidence, and unsupported cases stay in Zig
    frontend behavior and extension vocabulary. No new core kind is admitted.
@@ -147,9 +159,10 @@ coverage or admission questions, not implied by this decision.
 - Plan 006 may change a covered `alias.foo(...)` call through a relative local
   `@import` from an unresolved designator into a current cross-unit `CALLS` fact
   when the provider and target are uniquely established.
-- Every cross-unit `CALLS` fact produced under this decision must declare its
-  provider dependency, and provider edits must not leave stale facts answering
-  as current.
+- Every established local import alias must declare its provider dependency,
+  even when a call through that alias stays unresolved. Every cross-unit `CALLS`
+  fact produced under this decision must use such a dependency, and provider
+  edits must not leave stale facts answering as current.
 - This decision does not admit `module`, `IMPORTS`, package imports, arbitrary
   namespace/member lookup, receiver resolution, dispatch, nested-container
   semantics, generic/comptime resolution, persistence, stable schemas, or a
@@ -169,12 +182,15 @@ Plan 006 must add tests proving:
   or unresolved rather than confirmed absent;
 - member bodies, when analyzed, use the same exact narrow call rules as covered
   top-level functions and leave receiver or arbitrary member calls unresolved;
-- a relative local `@import` alias can support an exact `alias.foo(...)`
-  cross-unit `CALLS` fact to one current exported provider callable;
+- a relative local `@import` alias resolves only by exact lexical path
+  normalization from the importing unit directory, rejects root escapes and
+  case-mismatched paths, declares a provider dependency, and can support an exact
+  `alias.foo(...)` cross-unit `CALLS` fact to one current exported provider
+  callable;
 - missing units, package imports, non-exported targets, duplicate targets,
   shadowed aliases, dynamic imports, and unsupported visibility stay unresolved
   with explanations;
-- provider removals, renames, and relevant export changes reanalyze dependents
-  and exclude stale facts from default current queries; and
+- provider removals, renames, additions, and relevant export changes reanalyze
+  dependents and exclude stale facts from default current queries; and
 - no result introduces `module`, `IMPORTS`, approximate assertions, source text
   by default, or a non-null semantic contract version.

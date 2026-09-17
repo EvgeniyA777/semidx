@@ -16,8 +16,9 @@ preserving the product promise: exact when it knows, honest when it does not.
 
 The plan extends the Zig frontend only where the current source tree and
 fixtures provide exact evidence. It is not a general Zig language-support push.
-The intended user value is that a local agent can ask semidx about `src/root.zig`
-and `src/mcp/` and get useful definition, caller, and context answers before
+The intended user value is that a local agent can ask semidx about member-heavy
+units such as `src/root.zig` and local-relative-import-heavy units under
+`src/mcp/`, then get useful definition, caller, and context answers before
 falling back to direct file reads.
 
 ## Start Rule
@@ -112,10 +113,11 @@ unit is indexed, and `foo` resolves to exactly one covered exported callable
 definition in that provider's file namespace under the implemented visibility
 rule. All other qualified calls stay unresolved designators.
 
-**Dependencies are mandatory for external targets.** Every resolved cross-unit
-call declares the provider unit dependency, and integration must continue to
-reject external targets that are not current graph-established definition
-facts.
+**Dependencies are mandatory for imported providers.** Every established local
+import alias declares a dependency on its provider unit, even when a call through
+that alias stays unresolved. Every resolved cross-unit call then uses that
+provider dependency, and integration must continue to reject external targets
+that are not current graph-established definition facts.
 
 **No new core kinds.** Zig import aliases, container names, visibility, and
 construct kinds remain extension labels, diagnostics, dependencies, or
@@ -168,17 +170,25 @@ Required behavior:
   remain unsupported, top-level `@import` aliases, qualified calls through a
   resolvable import, qualified calls through unresolved values, and ambiguous
   targets.
-- Record expected facts and unresolved assertions in tests before or with the
-  first implementation slice.
+- Include negative fixtures for root-escaping imports, case-mismatched import
+  paths, shadowed aliases, and a provider that gains the exported callable after
+  the dependent first analyzed the alias.
+- Record expected facts and unresolved assertions before or with the first
+  implementation slice. If a red baseline is useful, record it in the progress
+  log or a temporary local run; do not commit a required verification lane in a
+  failing state.
 - Capture at least one representative semidx source pattern from `src/mcp/` or
   `src/root.zig` in dogfood expectations.
+- Start
+  [docs/reports/006_zig_dogfood_semantic_coverage_progress.md](../reports/006_zig_dogfood_semantic_coverage_progress.md)
+  with the compact risk matrix required by testing policy.
 
 Done when:
 
 - The fixtures distinguish exact facts from unresolved designators and
   unsupported constructs.
-- The baseline test expectations describe the intended new coverage and fail on
-  the current implementation for the behavior this plan will add.
+- The committed baseline evidence describes the intended new coverage without
+  requiring `zig build test` to be red at commit time.
 
 ### Stage 2: Container Member Function Definitions
 
@@ -222,6 +232,8 @@ Likely files:
 
 - `src/frontends/zig.zig`
 - `src/frontends/root.zig`
+- `src/root.zig` only if existing dependency propagation cannot prove
+  provider-add invalidation from declared alias dependencies
 - `src/core/contract.zig` only if the existing external-target contract needs a
   narrow reusable helper
 - `tests/vertical_slice_test.zig`
@@ -230,8 +242,13 @@ Required behavior:
 
 - Detect top-level `const alias = @import("relative/path.zig");` declarations
   when the string names one indexed Zig source unit under the same root.
+- Resolve the relative string lexically against the importing unit's directory,
+  normalize `.` and `..`, reject paths that escape the indexed root, and match
+  the indexed Zig unit by exact root-relative path bytes, including case.
 - Make that alias available only as frontend analysis context for the current
   unit.
+- Declare a provider-unit dependency for every established alias, even when no
+  call through that alias resolves.
 - Record no `IMPORTS` or `module` core relationship.
 - Keep missing, non-relative, package, builtin, dynamic, duplicate, or otherwise
   ambiguous imports unresolved or unsupported with actionable diagnostics.
@@ -240,6 +257,10 @@ Done when:
 
 - A fixture can distinguish a resolvable local import alias from import shapes
   this plan declines to resolve.
+- Root escapes, case mismatches, package imports, and duplicate or missing units
+  do not establish aliases.
+- An established alias records a provider dependency before any cross-unit call
+  fact is emitted.
 - No public result claims an import relationship as a fact.
 
 ### Stage 4: Exact Qualified Call Facts
@@ -257,16 +278,18 @@ Likely files:
 Required behavior:
 
 - Resolve `alias.foo(...)` as a `CALLS` fact only when Stage 3 established
-  `alias`, the provider unit has exactly one current covered callable
-  definition named `foo`, and every required visibility/coverage condition is
-  satisfied.
+  `alias`, the provider unit has exactly one current covered file-level `pub fn`
+  definition named `foo` in its file namespace, and every required
+  visibility/coverage condition is satisfied.
 - Analyze calls inside covered top-level functions and covered direct member
   functions under the same exact narrow call rules.
-- Declare the provider dependency for each external target.
+- Use the provider dependency declared for the established alias for each
+  external target.
 - Reanalyze dependents when the provider adds, removes, renames, or changes the
   relevant exported callable.
 - Keep arbitrary member lookup, value receiver calls, package imports, duplicate
-  names, unsupported visibility, and uncertain call shapes unresolved.
+  names, shadowed aliases, unsupported visibility, and uncertain call shapes
+  unresolved.
 
 Done when:
 
@@ -274,7 +297,8 @@ Done when:
   resolution, freshness, evidence, and provider dependency.
 - Covered member-body calls are either exact facts under the same narrow rules
   or unresolved/unsupported for a named reason.
-- A provider rename or removal updates the dependent without editing it.
+- A provider addition, rename, or removal updates the dependent without editing
+  it.
 - A provider body edit preserves identities and does not force unrelated units
   to reanalyze.
 
@@ -292,13 +316,20 @@ Likely files:
 
 Required behavior:
 
-- Add dogfood checks showing at least one useful semidx-internal Zig definition
-  or call now appears where it was previously unsupported or unresolved.
-- Record output-size and latency observations, but do not turn them into
-  product benchmarks.
+- Add dogfood checks showing at least two concrete graph deltas: one useful
+  semidx-internal Zig member definition, and one exact qualified call through a
+  local relative import, now appear where they were previously unsupported or
+  unresolved.
+- Record MCP output-size and latency observations, but do not turn them into
+  product benchmarks. If the new member definitions or calls conflict with Plan
+  007's response-budget assumptions, update Plan 007 or record the residual risk
+  before closure.
 - Update capability and local preview docs to state the exact new Zig subset and
   the remaining false negatives.
-- Update follow-up statuses only for the portions actually resolved.
+- Keep follow-up reports open when only part of their scope is resolved; add a
+  dated note for the resolved portion rather than inventing a partial status.
+- Update `MEMORY.md` by replacing the compact Plan 006 entry with implemented
+  reality, not by appending historical detail.
 
 Done when:
 
@@ -313,6 +344,7 @@ Done when:
 Run focused checks first, then the full lane required by the stage:
 
 - `./scripts/check-zig-version.sh`
+- `zig fmt --check build.zig src tests`
 - `zig build test-core`
 - `zig build test`
 - `zig build test-mcp`

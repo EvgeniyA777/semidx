@@ -64,25 +64,29 @@ Prioritize implementation by dogfood pain after the preview release.
   subset; the implementation and verification work remains open.
 - ADR 003 forbids repository-wide name matching as graph assertions: a call
   may become a fact only through language-correct resolution, such as an
-  `@import` of a relative path to a known unit followed by a public top-level
-  declaration of that unit, never by matching the callee's last name segment.
+  `@import` of a relative path resolved exactly from the importing unit's
+  directory to a known unit followed by a public top-level declaration of that
+  unit, never by matching the callee's last name segment.
 - Container members as definitions and method-call resolution are separate
   steps from cross-unit function calls; each should be scoped explicitly.
 - Follow Plan 003's precedent where possible: language vocabulary in extension
   payloads and analyzer projections, without admitting `module` or `IMPORTS`
   unless `CORE.md` admission is completed first.
-- Record analysis dependencies on provider units so edits invalidate
-  dependents.
+- Record analysis dependencies on provider units as soon as a local import alias
+  is established, even if the specific call remains unresolved, so provider
+  additions, removals, and renames invalidate dependents.
 
 ## Required Tests
 
 - `const p = @import("protocol.zig"); p.writeString()` resolves to the one
   public top-level function in that unit, with a dependency on it.
+- `@import("../outside.zig")` escaping the root, a case-mismatched path, a
+  missing unit, and duplicate provider candidates do not establish an alias.
 - A non-`pub` target, a missing unit, a package import such as
   `@import("std")`, a shadowed binding, and a computed callee stay unresolved
   with explanations.
-- An edit that removes or renames the provider's declaration invalidates the
-  dependent and leaves the call unresolved rather than stale-as-current.
+- An edit that adds, removes, or renames the provider's declaration invalidates
+  the dependent and updates the call rather than leaving stale current results.
 - If container members become definitions: identity evidence carries the
   container path, a body edit preserves identity, and calls inside members are
   recorded under the same narrow rules.

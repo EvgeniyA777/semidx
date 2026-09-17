@@ -48,9 +48,10 @@ documents that own history, rationale, and evidence.
 - [ADR 006](docs/adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md)
   admits the Plan 006 Zig dogfood extension: direct member functions inside
   covered top-level containers may become definitions, their bodies may later be
-  analyzed under the same exact narrow call rules, and relative local `@import`
-  aliases may support exact `alias.foo(...)` `CALLS` facts without admitting
-  `module`, `IMPORTS`, dispatch, arbitrary member lookup, or package imports.
+  analyzed under the same exact narrow call rules, and exact-case relative local
+  `@import` aliases may declare provider dependencies and support exact
+  `alias.foo(...)` `CALLS` facts without admitting `module`, `IMPORTS`,
+  dispatch, arbitrary member lookup, or package imports.
 
 ## Implementation Reality
 
@@ -164,8 +165,8 @@ documents that own history, rationale, and evidence.
 - Plan 006 is the next implementation plan:
   [docs/plans/006_zig_dogfood_semantic_coverage.md](docs/plans/006_zig_dogfood_semantic_coverage.md).
   It should implement ADR 006 through fixtures first, then member definitions,
-  local import alias collection, exact cross-unit `alias.foo(...)` calls, dogfood
-  proof, and closure docs.
+  local import alias collection with provider dependencies, exact cross-unit
+  `alias.foo(...)` calls, dogfood proof, and closure docs.
 - Plan 007 should improve MCP response budgeting and schema ergonomics without
   treating MCP convenience as graph authority:
   [docs/plans/007_mcp_response_budget_and_schema_ergonomics.md](docs/plans/007_mcp_response_budget_and_schema_ergonomics.md).
