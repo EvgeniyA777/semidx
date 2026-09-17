@@ -355,6 +355,28 @@ fn Args(comptime tool: Tool) type {
             return (self.map orelse return null).get(name);
         }
 
+        /// Whether the call gave the argument at all.
+        fn given(self: Self, comptime name: []const u8) bool {
+            _ = comptime for (params) |param| {
+                if (std.mem.eql(u8, param.name, name)) break param;
+            } else @compileError(@tagName(tool) ++ " does not declare an argument \"" ++ name ++ "\"");
+            return self.value(name) != null;
+        }
+
+        /// The named arguments the call did not give, for a hint.
+        fn unset(self: Self, comptime names: []const []const u8) Allocator.Error![]const []const u8 {
+            var out: std.ArrayList([]const u8) = .empty;
+            inline for (names) |name| {
+                if (!self.given(name)) try out.append(self.ctx.arena, name);
+            }
+            return out.items;
+        }
+
+        /// The maximum a count argument declares.
+        fn maximum(comptime name: []const u8) u32 {
+            return comptime declared(name, .count).type.count.maximum;
+        }
+
         fn string(self: Self, comptime name: []const u8) Error!?[]const u8 {
             _ = comptime declared(name, .string);
             return switch (self.value(name) orelse return null) {
@@ -407,6 +429,64 @@ fn Args(comptime tool: Tool) type {
 /// Refuses any argument, for tools that take none.
 pub fn expectNoArguments(ctx: *Context, arguments: ?ObjectMap) Error!void {
     _ = try Args(.semidx_refresh).init(ctx, arguments);
+}
+
+// -- narrowing hints --------------------------------------------------------
+
+const HintAction = enum {
+    /// Give one of these arguments to select fewer items.
+    narrow,
+    /// Give a larger value for one of these arguments.
+    raise,
+    /// Give a smaller value for one of these arguments.
+    lower,
+    /// Repeat the call with the returned cursor.
+    @"continue",
+};
+
+/// Usage guidance for a bounded result: which declared arguments of the same
+/// tool narrow, enlarge, or continue a list that was cut. A hint is derived
+/// only from which list was cut and which arguments the call gave. It is not
+/// a graph claim: it says nothing about the omitted items, and it never
+/// changes what a query selects.
+const Hints = struct {
+    items: std.ArrayList(Hint) = .empty,
+
+    const Hint = struct { list: []const u8, action: HintAction, arguments: []const []const u8 };
+
+    /// Adds a hint once per list and action; a hint naming no argument is
+    /// dropped.
+    fn add(self: *Hints, arena: Allocator, list: []const u8, action: HintAction, arguments: []const []const u8) Allocator.Error!void {
+        if (arguments.len == 0) return;
+        for (self.items.items) |hint| {
+            if (hint.action == action and std.mem.eql(u8, hint.list, list)) return;
+        }
+        try self.items.append(arena, .{ .list = list, .action = action, .arguments = arguments });
+    }
+
+    /// Writes `narrowing_hints` only when a list was cut, so a complete result
+    /// carries none.
+    fn write(self: Hints, s: *Stringify) Error!void {
+        if (self.items.items.len == 0) return;
+        try s.objectField("narrowing_hints");
+        try s.beginArray();
+        for (self.items.items) |hint| {
+            try s.beginObject();
+            try s.objectField("list");
+            try s.write(hint.list);
+            try s.objectField("action");
+            try s.write(@tagName(hint.action));
+            try s.objectField("arguments");
+            try s.write(hint.arguments);
+            try s.endObject();
+        }
+        try s.endArray();
+    }
+};
+
+/// `name` alone when the call's value for it is below its declared maximum.
+fn raisable(comptime tool: Tool, comptime name: []const u8, current: u32) []const []const u8 {
+    return if (current < Args(tool).maximum(name)) &.{name} else &.{};
 }
 
 // -- rendering --------------------------------------------------------------
@@ -886,6 +966,7 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     }
     std.mem.sort(usize, order.items, snapshot, lessPath);
 
+    var hints: Hints = .{};
     try beginStructured(ctx, s);
     try s.objectField("files");
     try s.beginArray();
@@ -918,12 +999,20 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
         try s.objectField("nested_definitions_total");
         try s.write(nested);
         try s.endObject();
+        if (top_level > per_file) {
+            try hints.add(ctx.arena, "definitions", .raise, raisable(.semidx_repo_map, "definitions_per_file", per_file));
+        }
     }
     try s.endArray();
     try s.objectField("files_total");
     try s.write(order.items.len);
     try s.objectField("truncated");
     try s.write(order.items.len > limit);
+    if (order.items.len > limit) {
+        try hints.add(ctx.arena, "files", .narrow, try args.unset(&.{ "path_prefix", "language" }));
+        try hints.add(ctx.arena, "files", .raise, raisable(.semidx_repo_map, "limit", limit));
+    }
+    try hints.write(s);
     try s.objectField("budget");
     try s.write(.{ .detail = detail, .limit = limit, .definitions_per_file = per_file });
     try s.endObject();
@@ -960,6 +1049,14 @@ pub fn findDefinitions(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Erro
     try s.write(total);
     try s.objectField("truncated");
     try s.write(total > limit);
+    var hints: Hints = .{};
+    if (total > limit) {
+        const unset = try args.unset(&.{ "name", "path", "language", "role" });
+        const narrow = if (resolution == .any) try std.mem.concat(ctx.arena, []const u8, &.{ unset, &.{"resolution"} }) else unset;
+        try hints.add(ctx.arena, "definitions", .narrow, narrow);
+        try hints.add(ctx.arena, "definitions", .raise, raisable(.semidx_find_definitions, "limit", limit));
+    }
+    try hints.write(s);
     try s.objectField("budget");
     try s.write(.{ .limit = limit });
     try s.endObject();
@@ -1057,6 +1154,21 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
     try s.write(total);
     try s.objectField("truncated");
     try s.write(total > limit);
+    var hints: Hints = .{};
+    // `path` and `language` qualify a name; with `entity_id` they are refused.
+    const by_name = !args.given("entity_id");
+    if (targets.len > max_targets and by_name) {
+        try hints.add(ctx.arena, "targets", .narrow, try std.mem.concat(ctx.arena, []const u8, &.{ &.{"entity_id"}, try args.unset(&.{ "path", "language" }) }));
+    }
+    if (total > limit) {
+        var narrow: std.ArrayList([]const u8) = .empty;
+        if (by_name) try narrow.appendSlice(ctx.arena, try args.unset(&.{ "path", "language" }));
+        if (direction == .both) try narrow.append(ctx.arena, "direction");
+        if (resolution == .any) try narrow.append(ctx.arena, "resolution");
+        try hints.add(ctx.arena, "relationships", .narrow, narrow.items);
+        try hints.add(ctx.arena, "relationships", .raise, raisable(.semidx_references, "limit", limit));
+    }
+    try hints.write(s);
     try s.objectField("budget");
     try s.write(.{ .detail = detail, .limit = limit, .target_limit = max_targets });
     try s.endObject();
@@ -1073,6 +1185,7 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     const targets = try selectTargets(ctx, args, freshness, true);
     const snapshot = ctx.snapshot;
 
+    var hints: Hints = .{};
     try beginStructured(ctx, s);
     try s.objectField("focus");
     try s.beginArray();
@@ -1108,6 +1221,7 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
             try s.write(n);
             try s.objectField(if (pass.name[0] == 'i') "incoming_truncated" else "outgoing_truncated");
             try s.write(n > limit);
+            if (n > limit) try hints.add(ctx.arena, pass.name, .raise, raisable(.semidx_context, "relationship_limit", limit));
         }
 
         var diagnostics: usize = 0;
@@ -1125,6 +1239,7 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
         try s.write(diagnostics);
         try s.objectField("diagnostics_truncated");
         try s.write(diagnostics > diagnostic_limit);
+        if (diagnostics > diagnostic_limit) try hints.add(ctx.arena, "diagnostics", .raise, raisable(.semidx_context, "diagnostic_limit", diagnostic_limit));
 
         try s.objectField("last_identity_event");
         if (snapshot.lastIdentityEvent(entity.id)) |event| {
@@ -1146,6 +1261,10 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     try s.write(targets.len);
     try s.objectField("focus_truncated");
     try s.write(targets.len > max_focus);
+    if (targets.len > max_focus) {
+        try hints.add(ctx.arena, "focus", .narrow, try std.mem.concat(ctx.arena, []const u8, &.{ &.{"entity_id"}, try args.unset(&.{ "path", "language" }) }));
+    }
+    try hints.write(s);
     try s.objectField("budget");
     try s.write(.{ .detail = detail, .relationship_limit = limit, .diagnostic_limit = diagnostic_limit, .focus_limit = max_focus });
     try s.endObject();

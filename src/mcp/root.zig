@@ -1015,6 +1015,93 @@ test "compact references render each target once and keep every claim's resoluti
     try testing.expect(full_explanation and full_method);
 }
 
+/// The `arguments` of the hint for `list` and `action`, or null for none.
+fn hintArguments(structured: std.json.ObjectMap, list: []const u8, action: []const u8) ?[]const std.json.Value {
+    const hints = structured.get("narrowing_hints") orelse return null;
+    for (hints.array.items) |hint| {
+        if (std.mem.eql(u8, list, hint.object.get("list").?.string) and std.mem.eql(u8, action, hint.object.get("action").?.string)) {
+            return hint.object.get("arguments").?.array.items;
+        }
+    }
+    return null;
+}
+
+fn expectHint(structured: std.json.ObjectMap, list: []const u8, action: []const u8, expected: []const []const u8) !void {
+    const arguments = hintArguments(structured, list, action) orelse return error.TestExpectedHint;
+    try testing.expectEqual(expected.len, arguments.len);
+    for (expected, arguments) |name, argument| try testing.expectEqualStrings(name, argument.string);
+}
+
+test "narrowing hints name declared arguments of a cut list and are absent from complete results" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.init(false, "const std = @import(\"std\");\n\npub fn shout() void {\n    std.debug.print(\"x\", .{});\n    loud();\n}\n\nfn loud() void {}\n");
+    defer h.deinit();
+
+    const Call = struct {
+        fn structured(harness: *Harness, a: Allocator, tool: []const u8, arguments: []const u8) !std.json.ObjectMap {
+            const result = try harness.callTool(a, tool, arguments);
+            try testing.expect(!result.object.get("isError").?.bool);
+            const object = result.object.get("structuredContent").?.object;
+            // Every argument a hint names is one the tool declares.
+            const definition = tools.definitions[@intFromEnum(tools.byName(tool).?)];
+            if (object.get("narrowing_hints")) |hints| {
+                try testing.expect(hints.array.items.len > 0);
+                for (hints.array.items) |hint| {
+                    for (hint.object.get("arguments").?.array.items) |argument| {
+                        for (definition.params) |param| {
+                            if (std.mem.eql(u8, param.name, argument.string)) break;
+                        } else return error.TestHintNamesUndeclaredArgument;
+                    }
+                }
+            }
+            return object;
+        }
+    };
+
+    // Complete results carry no hint.
+    for ([_][2][]const u8{
+        .{ "semidx_repo_map", "{}" },
+        .{ "semidx_find_definitions", "{}" },
+        .{ "semidx_references", "{\"name\":\"shout\",\"direction\":\"both\"}" },
+        .{ "semidx_context", "{\"name\":\"shout\"}" },
+    }) |call| {
+        const complete = try Call.structured(&h, arena, call[0], call[1]);
+        try testing.expect(complete.get("narrowing_hints") == null);
+    }
+
+    const files = try Call.structured(&h, arena, "semidx_repo_map", "{\"limit\":1}");
+    try testing.expect(files.get("truncated").?.bool);
+    try expectHint(files, "files", "narrow", &.{ "path_prefix", "language" });
+    try expectHint(files, "files", "raise", &.{"limit"});
+    // An argument the call already gave is not suggested again.
+    const zig_files = try Call.structured(&h, arena, "semidx_repo_map", "{\"limit\":1,\"language\":\"zig\"}");
+    try expectHint(zig_files, "files", "narrow", &.{"path_prefix"});
+    // A limit already at its maximum is not suggested for raising.
+    const per_file = try Call.structured(&h, arena, "semidx_repo_map", "{\"definitions_per_file\":1}");
+    try expectHint(per_file, "definitions", "raise", &.{"definitions_per_file"});
+    try testing.expect(hintArguments(per_file, "files", "narrow") == null);
+
+    const definitions = try Call.structured(&h, arena, "semidx_find_definitions", "{\"limit\":1}");
+    try expectHint(definitions, "definitions", "narrow", &.{ "name", "path", "language", "role", "resolution" });
+    try expectHint(definitions, "definitions", "raise", &.{"limit"});
+
+    const by_name = try Call.structured(&h, arena, "semidx_references", "{\"name\":\"shout\",\"direction\":\"both\",\"limit\":1}");
+    try expectHint(by_name, "relationships", "narrow", &.{ "path", "language", "direction", "resolution" });
+    try expectHint(by_name, "relationships", "raise", &.{"limit"});
+    const shout_id = by_name.get("targets").?.array.items[0].object.get("id").?.integer;
+    const by_id = try Call.structured(&h, arena, "semidx_references", try std.fmt.allocPrint(arena, "{{\"entity_id\":{d},\"direction\":\"outgoing\",\"resolution\":\"any\",\"limit\":1}}", .{shout_id}));
+    try expectHint(by_id, "relationships", "narrow", &.{"resolution"});
+    const at_maximum = try Call.structured(&h, arena, "semidx_references", "{\"name\":\"shout\",\"direction\":\"outgoing\",\"resolution\":\"fact\",\"path\":\"extra.zig\",\"language\":\"zig\",\"limit\":1000}");
+    try testing.expect(at_maximum.get("narrowing_hints") == null);
+
+    const context = try Call.structured(&h, arena, "semidx_context", "{\"name\":\"shout\",\"relationship_limit\":1}");
+    try expectHint(context, "outgoing", "raise", &.{"relationship_limit"});
+    try testing.expect(hintArguments(context, "incoming", "raise") == null);
+}
+
 test "no tool result carries source text unless evidence text was opted into, and then bounded" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();

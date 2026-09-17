@@ -22,7 +22,8 @@ gates, and the shape decisions later stages follow are recorded below.
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 1: Evidence refresh and budget targets | Completed (`1f95838`) | Baseline structured and transcript sizes over this repository at `2353145`, one real-client observation, hard gates, soft observations, and the default response budget target. No behavior change. |
-| Stage 2: Compact `semidx_references` | Completed | `semidx_references` takes `detail` (`compact` default, `full`). Compact renders each listed target once, with its existence claim, and names a relationship end that is a listed target by `{id}`; the other end, resolution, producer, and evidence are compact. `writeString` at `limit` 1000: 24,716 transcript bytes against 56,964 full (43%), now a `compact_budget` hard gate. |
+| Stage 2: Compact `semidx_references` | Completed (`9f4f3c2`) | `semidx_references` takes `detail` (`compact` default, `full`). Compact renders each listed target once, with its existence claim, and names a relationship end that is a listed target by `{id}`; the other end, resolution, producer, and evidence are compact. `writeString` at `limit` 1000: 24,716 transcript bytes against 56,964 full (43%), now a `compact_budget` hard gate. |
+| Stage 3: Truncation guidance | Completed | Cut lists in `semidx_repo_map`, `semidx_find_definitions`, `semidx_references`, and `semidx_context` carry `narrowing_hints` naming declared arguments to narrow or raise; complete results carry none. |
 
 ## Plan Readiness Gate
 
@@ -207,3 +208,37 @@ row), this log.
 | `zig fmt --check build.zig src tests` | Pass |
 | `zig build test-mcp --summary all` | Pass; 22 passed, 1 skipped (the dogfood recovery test) |
 | `zig build dogfood --summary all` | Pass; 10/10 steps, 5/5 tests; `compact_budget` 47% map, 43% references, 39% context |
+
+## Stage 3: Truncation Guidance
+
+Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig` (test), this log.
+
+- `narrowing_hints` is written by `Hints.write` only when a list was cut. Each
+  hint is added once per list and action, and one that would name no argument
+  is dropped, so a limit already at its maximum is never suggested for raising
+  and an argument the call already gave is never suggested again (except
+  `path_prefix`, which a longer prefix narrows, and `resolution`/`direction`
+  when they still select everything).
+- Lists and hints: `semidx_repo_map` `files` (narrow `path_prefix`,
+  `language`; raise `limit`) and `definitions` (raise `definitions_per_file`);
+  `semidx_find_definitions` `definitions` (narrow `name`, `path`, `language`,
+  `role`, `resolution`; raise `limit`); `semidx_references` `targets` (narrow
+  `entity_id`, `path`, `language`) and `relationships` (narrow `path` and
+  `language` when targets are named, `direction` when `both`, `resolution`
+  when `any`; raise `limit`); `semidx_context` `focus` (narrow `entity_id`,
+  `path`, `language`), `incoming`/`outgoing` (raise `relationship_limit`), and
+  `diagnostics` (raise `diagnostic_limit`).
+- `Args(tool).given`, `unset`, and `maximum` check every name against the
+  tool's declarations at compile time, so a hint cannot name an undeclared
+  argument; the test also checks that at run time for every hint it sees.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-mcp --summary all` | Pass; 23 passed, 1 skipped |
+
+Not rerun: `zig build dogfood`. Hints only add a field to cut lists, and no
+gate reads or forbids it; the gate runs again at Stage 5, which changes
+defaults.
