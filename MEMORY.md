@@ -112,8 +112,13 @@ why. This is not a changelog of removed implementation; see `git log`.
   [ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md) fixes how
   parsing enters the build: local tree-sitter C sources behind one adapter, with
   grammar sources pinned by `scripts/setup-tree-sitter-grammars.sh` and the
-  runtime linked from a local install prefix. Reasoning about the architecture
-  documents themselves stays in
+  runtime linked from a local install prefix. ADR 006 admits the narrow Zig
+  dogfood extension that Plan 006 will implement: direct member functions inside
+  covered top-level containers may become definitions, their bodies may later be
+  analyzed under the same exact narrow call rules, and relative local `@import`
+  aliases may support exact `alias.foo(...)` `CALLS` facts without admitting
+  `module`, `IMPORTS`, dispatch, arbitrary member lookup, or package imports.
+  Reasoning about the architecture documents themselves stays in
   [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md), and drafting history
   stays in `git log`.
 - `README.md` is a minimal human entry point. Its status line says "first
@@ -415,12 +420,12 @@ why. This is not a changelog of removed implementation; see `git log`.
 - **Plans 006–008 are the planned post-preview adoption sequence.** Plan 006
   deepens Zig dogfood semantic coverage for semidx's own code, starting with
   container member functions and the smallest exact same-repository qualified
-  call subset that can be proven from graph-established evidence. Plan 007 then
-  budgets MCP responses and schema ergonomics so agents can use compact default
-  orientation before focused calls. Plan 008 turns the agent habit loop into a
-  repeatable local release gate with clear pass/fail evidence, while still
-  reporting `semantic_contract_version: null` and excluding persistence, HTTP,
-  package distribution, and remote services.
+  call subset that can be proven from graph-established evidence under ADR 006.
+  Plan 007 then budgets MCP responses and schema ergonomics so agents can use
+  compact default orientation before focused calls. Plan 008 turns the agent
+  habit loop into a repeatable local release gate with clear pass/fail evidence,
+  while still reporting `semantic_contract_version: null` and excluding
+  persistence, HTTP, package distribution, and remote services.
 - `scripts/semidx-mcp.sh` is the stable local launcher for agents. It execs the
   built `zig-out/bin/semidx-mcp`, passes through explicit `--root`, `--help`,
   and `--version`, and otherwise indexes `SEMIDX_ROOT`, the current Git root, or

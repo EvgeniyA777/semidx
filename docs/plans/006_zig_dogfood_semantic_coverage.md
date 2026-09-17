@@ -4,7 +4,7 @@ doc_type: "plan"
 lifecycle: "active"
 status: "planned"
 agent_action: "ready_for_execution"
-updated: "2026-09-16"
+updated: "2026-09-17"
 ---
 
 # 006: Zig Dogfood Semantic Coverage
@@ -68,6 +68,9 @@ remain follow-up inputs unless a stage explicitly adopts them with tests.
   especially dogfood proofs and the agent habit loop.
 - [ADR 005](../adr/005_add_zig_frontend_and_local_mcp_preview.md), which admits
   the current Zig frontend and local MCP preview.
+- [ADR 006](../adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md),
+  which admits narrow Zig member definitions, member body call analysis, and
+  local-import qualified calls without admitting `module` or `IMPORTS`.
 - [Preview capability matrix](../spec/capability_matrix.md), for current
   producer behavior and limitation language.
 - [Follow-up 001](../followups/001_zig_logical_negation_calls.md).
@@ -94,18 +97,20 @@ inside containers or behind qualified names.
 **Dogfood coverage leads breadth.** Add Zig rules only when they improve
 semidx-on-semidx workflows and can be tested on representative fixtures.
 
-**Container member functions may become definitions.** A function declared
+**Container member functions are admitted by ADR 006.** A function declared
 inside a covered top-level container may be a `definition` with Zig extension
 vocabulary and a `container_path`, provided identity evidence is based on
 allocated unit scope, language, role, name/signature if present, and containment
-names, never on byte ranges.
+names, never on byte ranges. Its body may be analyzed under the same exact
+narrow call rules as a covered top-level function, but Stage 2 lands member
+identity before Stage 4 lands the call facts.
 
-**Qualified cross-unit calls start with local file imports only.** A call like
-`alias.foo(...)` may become a fact only when `alias` is a top-level `const`
-directly bound to `@import("relative/path.zig")`, the imported unit is indexed,
-and `foo` resolves to exactly one covered callable definition exported by that
-unit under the implemented visibility rule. All other qualified calls stay
-unresolved designators.
+**Qualified cross-unit calls start with local file imports only.** Under ADR
+006, a call like `alias.foo(...)` may become a fact only when `alias` is a
+top-level `const` directly bound to `@import("relative/path.zig")`, the imported
+unit is indexed, and `foo` resolves to exactly one covered exported callable
+definition in that provider's file namespace under the implemented visibility
+rule. All other qualified calls stay unresolved designators.
 
 **Dependencies are mandatory for external targets.** Every resolved cross-unit
 call declares the provider unit dependency, and integration must continue to
@@ -198,6 +203,9 @@ Required behavior:
   for renames or containment changes.
 - Continue reporting unsupported nested declarations rather than silently
   dropping them as confirmed absence.
+- Do not add member-body call facts in this stage unless a fixture proves they
+  are required for member identity; ADR 006 admits that behavior, but Stage 4
+  owns the call-fact rollout.
 
 Done when:
 
@@ -252,16 +260,20 @@ Required behavior:
   `alias`, the provider unit has exactly one current covered callable
   definition named `foo`, and every required visibility/coverage condition is
   satisfied.
+- Analyze calls inside covered top-level functions and covered direct member
+  functions under the same exact narrow call rules.
 - Declare the provider dependency for each external target.
 - Reanalyze dependents when the provider adds, removes, renames, or changes the
   relevant exported callable.
-- Keep member calls, value receiver calls, package imports, duplicate names,
-  unsupported visibility, and uncertain call shapes unresolved.
+- Keep arbitrary member lookup, value receiver calls, package imports, duplicate
+  names, unsupported visibility, and uncertain call shapes unresolved.
 
 Done when:
 
 - A cross-unit Zig call fixture produces a current fact with producer,
   resolution, freshness, evidence, and provider dependency.
+- Covered member-body calls are either exact facts under the same narrow rules
+  or unresolved/unsupported for a named reason.
 - A provider rename or removal updates the dependent without editing it.
 - A provider body edit preserves identities and does not force unrelated units
   to reanalyze.

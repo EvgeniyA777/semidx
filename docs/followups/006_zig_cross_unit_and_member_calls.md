@@ -4,7 +4,7 @@ doc_type: "follow_up"
 lifecycle: "active"
 status: "open"
 agent_action: "use_as_input_for_future_plan_only"
-updated: "2026-09-14"
+updated: "2026-09-17"
 ---
 
 # Zig Cross-Unit And Member Call Resolution
@@ -21,6 +21,9 @@ residual risk.
 See
 [Plan 004 Stage 4 residual risk](../reports/004_zig_frontend_and_mcp_preview_progress.md#residual-risk)
 and [ADR 005](../adr/005_add_zig_frontend_and_local_mcp_preview.md).
+[ADR 006](../adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md)
+now admits the narrow member-definition and local-import call rules that a future
+implementation plan may apply.
 
 ## Current Behavior
 
@@ -57,7 +60,8 @@ Prioritize implementation by dogfood pain after the preview release.
 ## Acceptance Direction
 
 - Cross-unit Zig resolution is outside ADR 005, which admits only same-unit
-  calls. A plan that adds it needs its own decision record.
+  calls. ADR 006 now supplies the decision record for the narrow local-import
+  subset; the implementation and verification work remains open.
 - ADR 003 forbids repository-wide name matching as graph assertions: a call
   may become a fact only through language-correct resolution, such as an
   `@import` of a relative path to a known unit followed by a public top-level

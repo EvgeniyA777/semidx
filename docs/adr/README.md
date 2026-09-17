@@ -20,3 +20,4 @@ ratified constitution.
 - [003: Reject Repository-Wide Name Matching As Graph Assertions](003_reject_name_match_assertions.md)
 - [004: Allow Java Same-Package Type Resolution](004_allow_java_same_package_type_resolution.md)
 - [005: Add Zig Frontend And Local MCP Preview](005_add_zig_frontend_and_local_mcp_preview.md)
+- [006: Allow Narrow Zig Member Definitions And Local-Import Calls](006_allow_narrow_zig_member_definitions_and_local_import_calls.md)
