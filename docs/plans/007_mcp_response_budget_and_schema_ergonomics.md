@@ -2,9 +2,9 @@
 title: "MCP response budget and schema ergonomics"
 doc_type: "plan"
 lifecycle: "active"
-status: "planned"
+status: "in_progress"
 agent_action: "ready_for_execution"
-updated: "2026-09-16"
+updated: "2026-09-17"
 ---
 
 # 007: MCP Response Budget And Schema Ergonomics
