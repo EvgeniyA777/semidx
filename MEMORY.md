@@ -196,6 +196,11 @@ documents that own history, rationale, and evidence.
 
 - Plan 008 is the next implementation plan: it should make the agent habit loop a repeatable local release gate:
   [docs/plans/008_habit_loop_release_gate.md](docs/plans/008_habit_loop_release_gate.md).
+  After Plan 008, Plan 009 should address MCP progressive discovery and response
+  budgets:
+  [docs/plans/009_mcp_progressive_discovery_and_budgets.md](docs/plans/009_mcp_progressive_discovery_and_budgets.md),
+  with [Follow-up 009](docs/followups/009_mcp_progressive_discovery_and_response_budgets.md)
+  as its accepted input.
 - The next Java ADR candidate should be multi-module classpath boundaries before
   Java facts are widened. This is the sharper exactness risk because independent
   roots can share a package name. Java single-type imports are useful, but should

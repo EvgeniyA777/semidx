@@ -30,6 +30,7 @@ evidence would make it ready to implement or close.
 | [003](003_java_classpath_boundaries.md) | open | `semantic_limitation` | [Plan 003 report](../reports/003_java_package_type_resolution_progress.md#residual-risk) | Java same-package resolution treats the repository as one classpath. |
 | [006](006_zig_cross_unit_and_member_calls.md) | open | `coverage_gap` | [Plan 004 report](../reports/004_zig_frontend_and_mcp_preview_progress.md#residual-risk) | Zig calls through receivers, values, nested namespaces, container members, and package imports stay unresolved; local-import calls were resolved by Plan 006. |
 | [008](008_clojure_lexical_scope_coverage.md) | open | `coverage_gap` | [Plan 005 report](../reports/005_mcp_preview_release_readiness_progress.md#stage-25-same-unit-name-resolution-facts-java-and-clojure) | Clojure symbols under forms that may bind names stay unresolved until lexical scope is modeled. |
+| [009](009_mcp_progressive_discovery_and_response_budgets.md) | open | `release_readiness` | [Plan 007 report](../reports/007_mcp_response_budget_and_schema_ergonomics_progress.md#residual-risk) | MCP cold start still needs progressive discovery, compact references, whole-response budgets, and safe continuation. |
 
 ## Completed Follow-ups
 
