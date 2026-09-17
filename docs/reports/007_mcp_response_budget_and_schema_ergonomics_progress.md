@@ -477,8 +477,10 @@ the pagination non-scope.
 - `docs/agent-policy/tooling.md`: names the tools and flow, not arguments;
   aligned without change.
 - Plan 008: already expects a compact `semidx_repo_map`; aligned.
-- `GLOSSARY.md`: "detail level" and "budget" are MCP preview argument and field
-  names owned by `docs/mcp/local_preview.md`, not durable project vocabulary.
+- `GLOSSARY.md`: "detail level", "response budget", and "tool schema" already
+  cover the durable concepts. Concrete preview argument and field names such as
+  `detail`, `budget`, `compact`, and `full` are owned by
+  `docs/mcp/local_preview.md`.
 
 ## Residual Risk
 
