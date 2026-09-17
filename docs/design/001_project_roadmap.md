@@ -37,8 +37,7 @@ semantic truth.
 
 As of 2026-09-17, the Zig dogfood frontend, its Plan 006 widening, and the first
 local MCP preview are implemented and reviewed. The current local MCP preview
-release candidate is `v0.1.0-preview.2`, ready for an explicit tag request once
-its release gate evidence is recorded.
+release candidate is `v0.1.0-preview.2`, ready for an explicit tag request.
 
 Implemented:
 
