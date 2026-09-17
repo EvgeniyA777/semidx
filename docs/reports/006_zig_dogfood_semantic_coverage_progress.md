@@ -26,7 +26,7 @@ Plan 006 is complete. Stages 1 to 5 are implemented and verified; the closure la
 | Stage 2: Container member function definitions | Completed | Named `fn` declarations directly inside covered top-level containers are `function` definitions with `container_path` and `container DEFINES member`; their bodies are reported as not analyzed. A renamed container reports its members' loss with replacements through a new generic reconciliation fallback. |
 | Stage 3: Local Zig import alias context | Completed | Exact top-level `const alias = @import("relative.zig")` declarations naming one indexed Zig unit establish an alias and declare a provider dependency; every other file import is reported with its reason. `Index` now registers a scan's additions before analyzing any, reanalyzes a unit read before a provider analyzed later in the same batch, and treats a moved unit as a dependency seed. |
 | Stage 4: Exact qualified call facts | Completed | `alias.foo(...)` through an established local import alias is a cross-unit `CALLS` fact to the one exported `pub fn` of that name in a current provider; member bodies are analyzed under the same rules with the container's names in scope. Provider body edits, added exports, renames, visibility changes, broken analysis, and removal all update the importer without editing it. |
-| Stage 5: Dogfood and documentation | Completed | `zig build dogfood` proves both deltas on a copy of this repository: `Server.handleLine` is a member definition, and `protocol.writeString` has 19 cross-unit call facts from `src/mcp/tools.zig`. Capability matrix, local preview reference, `SPEC.md`, follow-up 006, and `MEMORY.md` state the implemented subset and its false negatives. |
+| Stage 5: Dogfood and documentation | Completed | `zig build dogfood` proves both deltas on a copy of this repository: `Server.handleLine` is a member definition, and `protocol.writeString` has 23 current call facts: 19 from `src/mcp/tools.zig`, 1 from `src/mcp/root.zig`, and 3 from its own unit. Capability matrix, local preview reference, `SPEC.md`, follow-up 006, and `MEMORY.md` state the implemented subset and its false negatives. |
 
 ## Plan Readiness Gate
 
@@ -321,9 +321,12 @@ Dogfood checks added to the habit-loop test:
   unsupported container member.
 - **Exact qualified call.** `semidx_references` for `writeString` in
   `src/mcp/protocol.zig` returns only current `calls` facts from
-  `frontend.zig`: 19 from `src/mcp/tools.zig` (through
-  `const protocol = @import("protocol.zig")`) and 3 from its own unit. Before
-  Plan 006 the follow-up recorded only the 3 same-unit callers.
+  `frontend.zig`, 23 in all: 19 from `src/mcp/tools.zig` and 1 from
+  `src/mcp/root.zig` (each through its own
+  `const protocol = @import("protocol.zig")`), and 3 from its own unit. The
+  test classifies every caller path and checks that the buckets add up to the
+  reported total. Before Plan 006 the follow-up recorded only the 3 same-unit
+  callers.
 - `semidx_context` for `health` in `src/mcp/tools.zig` shows an outgoing fact
   into `src/mcp/protocol.zig` beside unresolved `std.…` calls.
 - The existing context check for `scan` in `src/source/discovery.zig` now
@@ -384,7 +387,8 @@ behavior is mutation-checked in Stages 2 to 4.
 
 ## Review Findings
 
-Findings-first self-review of the final diff (no separate reviewer):
+Findings-first self-review of the final diff, then an external review after
+closure:
 
 | Finding | Disposition |
 | --- | --- |
@@ -392,6 +396,7 @@ Findings-first self-review of the final diff (no separate reviewer):
 | The existing dogfood `scan` context check assumed one match; member coverage made it two. | Fixed in Stage 5 (see above). |
 | `sameNameElsewhere` can pair a removed declaration with an unrelated new one of the same name and role under a different container. | Accepted: the pairing is recorded as the existing unresolved identity correspondence, never a fact, and only when no same-slot replacement exists. |
 | Scan renames now seed propagation for every language, so a moved Java provider reanalyzes its Java dependents. | Accepted: redundant but correct; Java bindings do not read paths. |
+| External review, low, confirmed: the dogfood proof and this log reported `writeString` callers as 19 from `tools.zig` and 3 same-unit, silently leaving out a current fact from `src/mcp/root.zig` (23 in all). Behavior was correct; the evidence was incomplete. | Fixed: the dogfood test classifies every caller path, asserts the buckets add up to `relationships_total`, and prints each other caller unit; the Stage Log and Stage 5 evidence now state 19 + 1 + 3 = 23. Verified with `zig build dogfood` (5/5). |
 | `Index.addUnit` one unit at a time does not revisit a Zig importer added before its provider. The developer command does this for individual file arguments (1,401 facts over `src` files versus 1,645 for the `src` directory). | Accepted as residual risk: same class as the named missing-provider risk, unresolved rather than false. Scans, which the MCP preview uses, are order-independent. |
 
 ## Residual Risk

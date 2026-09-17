@@ -251,9 +251,15 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     // designator, so references listed only same-unit callers.
     const imported = try timedCall(client, 22, "semidx_references", "{\"name\":\"" ++ imported_name ++ "\",\"path\":\"" ++ imported_path ++ "\",\"limit\":1000}");
     try testing.expect(!imported.get("truncated").?.bool);
+    // Every caller is classified: the named importer, the unit itself, and any
+    // other unit calling through its own local import alias.
+    const Bucket = struct { path: []const u8, facts: usize };
+    var other_callers: std.ArrayList(Bucket) = .empty;
     var cross_unit_facts: usize = 0;
     var same_unit_facts: usize = 0;
-    for (imported.get("relationships").?.array.items) |relationship| {
+    const imported_relationships = imported.get("relationships").?.array.items;
+    try testing.expectEqual(@as(i64, @intCast(imported_relationships.len)), imported.get("relationships_total").?.integer);
+    for (imported_relationships) |relationship| {
         try testing.expectEqualStrings("calls", relationship.object.get("kind").?.string);
         try testing.expectEqualStrings("fact", category(relationship));
         try testing.expectEqualStrings("current", relationship.object.get("freshness").?.string);
@@ -263,11 +269,25 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
             cross_unit_facts += 1;
         } else if (std.mem.eql(u8, caller_path, imported_path)) {
             same_unit_facts += 1;
+        } else {
+            try testing.expect(std.mem.endsWith(u8, caller_path, ".zig"));
+            for (other_callers.items) |*bucket| {
+                if (std.mem.eql(u8, bucket.path, caller_path)) {
+                    bucket.facts += 1;
+                    break;
+                }
+            } else try other_callers.append(arena, .{ .path = caller_path, .facts = 1 });
         }
     }
     try testing.expect(cross_unit_facts > 0);
     try testing.expect(same_unit_facts > 0);
-    std.debug.print("dogfood: {s} in {s} has {d} call facts from {s} and {d} from its own unit\n", .{ imported_name, imported_path, cross_unit_facts, importer_path, same_unit_facts });
+    var other_facts: usize = 0;
+    for (other_callers.items) |bucket| other_facts += bucket.facts;
+    try testing.expectEqual(imported_relationships.len, cross_unit_facts + same_unit_facts + other_facts);
+    std.debug.print("dogfood: {s} in {s} has {d} call facts: {d} from {s}, {d} from its own unit, {d} from other units\n", .{ imported_name, imported_path, imported_relationships.len, cross_unit_facts, importer_path, same_unit_facts, other_facts });
+    for (other_callers.items) |bucket| {
+        std.debug.print("dogfood:   {d} from {s}\n", .{ bucket.facts, bucket.path });
+    }
 
     // An import of a package stays unresolved: `std` is not a local file.
     const importer_context = try timedCall(client, 23, "semidx_context", "{\"name\":\"" ++ importer_caller ++ "\",\"path\":\"" ++ importer_path ++ "\",\"relationship_limit\":500}");
