@@ -122,9 +122,9 @@ documents that own history, rationale, and evidence.
 - The product version is `0.1.0-preview.2` (`build.zig.zon`): the preview.1
   surface plus Plan 006 Zig coverage
   ([release notes](docs/releases/v0.1.0-preview.2.md)). Plan 005's
-  `v0.1.0-preview.1` handoff describes the tree at `e36693a`. Both are local
-  annotated tags (`v0.1.0-preview.1` at `e36693a`, `v0.1.0-preview.2` at
-  `8818bb6`), not pushed.
+  `v0.1.0-preview.1` handoff describes the tree at `e36693a`. Both are annotated
+  tags pushed to `origin` (`v0.1.0-preview.1` at `e36693a`,
+  `v0.1.0-preview.2` at `8818bb6`); no GitHub release was created.
 
 ## What Does Not Exist
 
