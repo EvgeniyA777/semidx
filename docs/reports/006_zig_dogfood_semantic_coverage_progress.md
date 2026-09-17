@@ -442,3 +442,24 @@ closure:
 - `MEMORY.md`: the Plan 006 priority entry is replaced by implemented reality.
 - Follow-up 006: open, with a dated note for the resolved portion.
 - Plan 007: not edited; see Residual Risk.
+
+## Documentation Cleanup
+
+After the external review, a closing sweep of every document naming Plan 006 or
+describing Zig coverage (2026-09-17):
+
+- `docs/design/001_project_roadmap.md`: updated. Plan 006 moved from the
+  near-term sequence to implemented work, and the "not yet present" line now
+  excludes the local-import subset.
+- `MEMORY.md` and the roadmap: record that the `v0.1.0-preview.1` handoff and
+  [release notes](../releases/v0.1.0-preview.1.md) describe the tree before
+  Plan 006 while `build.zig.zon` still reports `0.1.0-preview.1`. The release
+  notes are not edited here: which tree a tag describes is a release decision,
+  left open for an explicit tag request.
+- Left as written, because they record their own moment: plans and reports 004
+  and 005, the Plan 006 plan body, and ADR 006 (accepted; its "Plan 006 may"
+  consequences are the decision, and this log is the implementation evidence).
+- Aligned with no change: `docs/adr/README.md`, `docs/followups/README.md`,
+  follow-up 006, `SPEC.md`, `CONFORMANCE.md`, `GLOSSARY.md`, the capability
+  matrix, the local preview reference, and Plans 007 and 008 (Plan 007's start
+  rule is now satisfied).

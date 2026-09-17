@@ -120,6 +120,8 @@ documents that own history, rationale, and evidence.
   `scripts/start-mcp-server.sh` and `scripts/mcp-stdio.sh` remain compatibility
   aliases.
 - Plan 005 made `v0.1.0-preview.1` release-candidate ready, but it is not tagged.
+  Its handoff and release notes predate Plan 006, while `build.zig.zon` still
+  says `0.1.0-preview.1`; a tag request must choose the tree it describes.
 
 ## What Does Not Exist
 

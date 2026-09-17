@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-16"
+updated: "2026-09-17"
 ---
 
 # Project Roadmap
@@ -35,9 +35,9 @@ semantic truth.
 
 ## Current Position
 
-As of 2026-09-16, the Zig dogfood frontend and the first local MCP preview are
-implemented and reviewed. The first local MCP preview release candidate,
-`v0.1.0-preview.1`, is ready for an explicit tag request.
+As of 2026-09-17, the Zig dogfood frontend, its Plan 006 widening, and the first
+local MCP preview are implemented and reviewed. The first local MCP preview
+release candidate, `v0.1.0-preview.1`, is ready for an explicit tag request.
 
 Implemented:
 
@@ -59,11 +59,21 @@ Implemented:
 - Plan 004 Stages 4-5 are implemented and reviewed: `semidx-mcp` serves graph-backed tools
   over stdio to `2026-07-28` and `2025-06-18` clients with source text off by
   default, documented in [the local preview reference](../mcp/local_preview.md).
+- [Plan 006](../plans/006_zig_dogfood_semantic_coverage.md) is implemented and
+  reviewed ([ADR 006](../adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md),
+  [evidence](../reports/006_zig_dogfood_semantic_coverage_progress.md)): direct
+  member functions of top-level Zig containers are definitions, and
+  `alias.foo(...)` through a local relative `@import` is an exact cross-unit
+  `CALLS` fact with a provider dependency.
 
 Ready to tag:
 
 - Plan 005 completed the MCP preview release-candidate handoff for
   `v0.1.0-preview.1`. No release tag has been created.
+- That handoff and its [release notes](../releases/v0.1.0-preview.1.md) describe
+  the tree before Plan 006, whose Zig coverage is wider while `build.zig.zon`
+  still reports `0.1.0-preview.1`. Tagging needs an explicit choice between the
+  handoff commit and a refreshed release note for the current tree.
 
 Not yet present:
 
@@ -73,8 +83,8 @@ Not yet present:
 - File watching or daemon lifecycle.
 - HTTP transport.
 - Source-text MCP output by default.
-- General module, import, classpath, namespace, method, field, or cross-unit Zig
-  resolution.
+- General module, import, classpath, namespace, method, or field resolution;
+  Zig cross-unit calls beyond local relative `@import` aliases.
 
 ## Milestone Ladder
 
@@ -95,14 +105,14 @@ Not yet present:
 
 The next useful sequence is:
 
-1. Cut `v0.1.0-preview.1` only after an explicit release-tag request.
-2. Execute [Plan 006](../plans/006_zig_dogfood_semantic_coverage.md) to deepen
-   Zig dogfood semantic coverage.
-3. Execute [Plan 007](../plans/007_mcp_response_budget_and_schema_ergonomics.md)
-   to make MCP responses cheaper for agents.
-4. Execute [Plan 008](../plans/008_habit_loop_release_gate.md) to turn the
+1. Cut `v0.1.0-preview.1` only after an explicit release-tag request, choosing
+   which tree it describes (see Ready to tag).
+2. Execute [Plan 007](../plans/007_mcp_response_budget_and_schema_ergonomics.md)
+   to make MCP responses cheaper for agents; Plan 006 made call-heavy Zig
+   context responses larger.
+3. Execute [Plan 008](../plans/008_habit_loop_release_gate.md) to turn the
    agent habit loop into the next repeatable local release gate.
-5. Use the MCP preview while developing semidx itself and collect evidence for
+4. Use the MCP preview while developing semidx itself and collect evidence for
    the next semantic expansion.
 
 After the preview is usable, prioritize work that increases exact graph value
