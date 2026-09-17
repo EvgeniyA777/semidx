@@ -37,81 +37,151 @@ pub const Definition = struct {
     tool: Tool,
     title: []const u8,
     description: []const u8,
-    /// A complete JSON Schema object on one line: it is copied into a stdio
-    /// message verbatim.
+    /// Every argument the tool accepts. The advertised schema and the argument
+    /// validator are both derived from this list.
+    params: []const Param,
+    /// A complete JSON Schema object on one line, generated from `params`: it
+    /// is copied into a stdio message verbatim.
     input_schema: []const u8,
 };
 
-const limit_schema = "{\"type\":\"integer\",\"minimum\":1";
-const freshness_schema = "\"freshness\":{\"type\":\"string\",\"enum\":[\"current\",\"stale\",\"any\"],\"default\":\"current\"," ++
-    "\"description\":\"Which claims to include: those about current unit contents (default), stale ones, or both.\"}";
-const resolution_schema = "\"resolution\":{\"type\":\"string\",\"enum\":[\"any\",\"fact\",\"unresolved\",\"approximate\"],\"default\":\"any\"}";
-const language_schema = "\"language\":{\"type\":\"string\",\"enum\":[\"java\",\"clojure\",\"zig\"]}";
+/// One tool argument, declared once. `inputSchema` renders it into the
+/// advertised schema and `Args` validates against it, so the two cannot name
+/// different types, enum values, defaults, or maxima.
+pub const Param = struct {
+    name: []const u8,
+    type: ParamType,
+    description: ?[]const u8 = null,
+};
+
+pub const ParamType = union(enum) {
+    string,
+    /// A non-negative integer naming a graph entity.
+    entity_id,
+    /// A positive integer bounded by `maximum`.
+    count: struct { default: u32, maximum: u32 },
+    /// One of an enum's tag names.
+    choice: struct { values: []const []const u8, default: ?[]const u8 },
+};
+
+fn countParam(comptime name: []const u8, comptime default: u32, comptime maximum: u32, comptime description: ?[]const u8) Param {
+    return .{ .name = name, .type = .{ .count = .{ .default = default, .maximum = maximum } }, .description = description };
+}
+
+fn choiceParam(comptime E: type, comptime name: []const u8, comptime default: ?E, comptime description: ?[]const u8) Param {
+    const values = comptime values: {
+        var list: [std.meta.fields(E).len][]const u8 = undefined;
+        for (std.meta.fields(E), &list) |field, *value| value.* = field.name;
+        break :values list;
+    };
+    return .{
+        .name = name,
+        .type = .{ .choice = .{ .values = &values, .default = if (default) |value| @tagName(value) else null } },
+        .description = description,
+    };
+}
+
+const FreshnessArg = enum { current, stale, any };
+const ResolutionArg = enum { any, fact, unresolved, approximate };
+const DirectionArg = enum { incoming, outgoing, both };
+
+/// Arguments shared by several tools.
+const shared_params = struct {
+    const freshness = choiceParam(FreshnessArg, "freshness", .current, "Which claims to include: those about current unit contents (default), stale ones, or both.");
+    const resolution = choiceParam(ResolutionArg, "resolution", .any, null);
+    const language = choiceParam(model.Language, "language", null, null);
+    const entity_id: Param = .{ .name = "entity_id", .type = .entity_id };
+    const name: Param = .{ .name = "name", .type = .string };
+    const path: Param = .{ .name = "path", .type = .string };
+};
+
+/// Renders a JSON string literal at compile time.
+fn jsonString(comptime text: []const u8) []const u8 {
+    comptime var out: []const u8 = "\"";
+    inline for (text) |c| {
+        out = out ++ switch (c) {
+            '"' => "\\\"",
+            '\\' => "\\\\",
+            0...0x1f => @compileError("control character in a tool schema string"),
+            else => &[_]u8{c},
+        };
+    }
+    return out ++ "\"";
+}
+
+fn inputSchema(comptime params: []const Param) []const u8 {
+    comptime var out: []const u8 = "{\"type\":\"object\",\"additionalProperties\":false";
+    if (params.len != 0) {
+        out = out ++ ",\"properties\":{";
+        inline for (params, 0..) |param, i| {
+            if (i != 0) out = out ++ ",";
+            const body: []const u8 = switch (param.type) {
+                .string => "\"type\":\"string\"",
+                .entity_id => "\"type\":\"integer\",\"minimum\":0",
+                .count => |count| std.fmt.comptimePrint("\"type\":\"integer\",\"minimum\":1,\"maximum\":{d},\"default\":{d}", .{ count.maximum, count.default }),
+                .choice => |choice| choice: {
+                    comptime var values: []const u8 = "";
+                    inline for (choice.values, 0..) |value, j| values = values ++ (if (j == 0) "" else ",") ++ jsonString(value);
+                    break :choice "\"type\":\"string\",\"enum\":[" ++ values ++ "]" ++
+                        (if (choice.default) |default| ",\"default\":" ++ jsonString(default) else "");
+                },
+            };
+            out = out ++ jsonString(param.name) ++ ":{" ++ body ++
+                (if (param.description) |description| ",\"description\":" ++ jsonString(description) else "") ++ "}";
+        }
+        out = out ++ "}";
+    }
+    return out ++ "}";
+}
+
+fn define(comptime tool: Tool, comptime title: []const u8, comptime description: []const u8, comptime params: []const Param) Definition {
+    return .{ .tool = tool, .title = title, .description = description, .params = params, .input_schema = inputSchema(params) };
+}
 
 pub const definitions = [_]Definition{
-    .{
-        .tool = .semidx_health,
-        .title = "Index health",
-        .description = "Report the configured root, the published snapshot revision, source-unit and graph counts, " ++
-            "per-language frontend coverage and parser availability, diagnostic counts, and the last scan outcome.",
-        .input_schema = "{\"type\":\"object\",\"additionalProperties\":false}",
-    },
-    .{
-        .tool = .semidx_repo_map,
-        .title = "Repository map",
-        .description = "List indexed source units with their analysis state and the top-level definitions the graph " ++
-            "records in each. Bounded; results report truncation.",
-        .input_schema = "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{" ++
-            "\"path_prefix\":{\"type\":\"string\",\"description\":\"Root-relative, '/'-separated path prefix.\"}," ++
-            language_schema ++ "," ++
-            "\"limit\":" ++ limit_schema ++ ",\"maximum\":1000,\"default\":100,\"description\":\"Maximum files.\"}," ++
-            "\"definitions_per_file\":" ++ limit_schema ++ ",\"maximum\":500,\"default\":50}}}",
-    },
-    .{
-        .tool = .semidx_find_definitions,
-        .title = "Find definitions",
-        .description = "Find definition entities by exact name, root-relative path, language, and role, with the " ++
-            "producer, resolution, and freshness of each definition's existence claim.",
-        .input_schema = "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{" ++
-            "\"name\":{\"type\":\"string\",\"description\":\"Exact definition name.\"}," ++
-            "\"path\":{\"type\":\"string\",\"description\":\"Exact root-relative path of the source unit.\"}," ++
-            language_schema ++ "," ++
-            "\"role\":{\"type\":\"string\",\"description\":\"Frontend role, such as function, container, class, method, or defn.\"}," ++
-            freshness_schema ++ "," ++ resolution_schema ++ "," ++
-            "\"limit\":" ++ limit_schema ++ ",\"maximum\":500,\"default\":50}}}",
-    },
-    .{
-        .tool = .semidx_references,
-        .title = "References and calls",
-        .description = "Return the REFERENCES and CALLS relationships recorded for a definition, identified by " ++
-            "entity_id or by exact name. A call is one occurrence and is listed once. Incoming relationships target the " ++
-            "definition; outgoing ones start from it and may be unresolved designators.",
-        .input_schema = "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{" ++
-            "\"entity_id\":{\"type\":\"integer\",\"minimum\":0}," ++
-            "\"name\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"}," ++ language_schema ++ "," ++
-            "\"direction\":{\"type\":\"string\",\"enum\":[\"incoming\",\"outgoing\",\"both\"],\"default\":\"incoming\"}," ++
-            freshness_schema ++ "," ++ resolution_schema ++ "," ++
-            "\"limit\":" ++ limit_schema ++ ",\"maximum\":1000,\"default\":100}}}",
-    },
-    .{
-        .tool = .semidx_context,
-        .title = "Graph context",
-        .description = "Return a bounded graph neighborhood around an entity (entity_id), a definition name, or a " ++
-            "source unit (path): the entity, its unit's analysis state, incoming and outgoing relationships of every " ++
-            "kind, the unit's diagnostics, and the entity's last identity event.",
-        .input_schema = "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{" ++
-            "\"entity_id\":{\"type\":\"integer\",\"minimum\":0}," ++
-            "\"name\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"}," ++ language_schema ++ "," ++
-            freshness_schema ++ "," ++
-            "\"relationship_limit\":" ++ limit_schema ++ ",\"maximum\":500,\"default\":50}}}",
-    },
-    .{
-        .tool = .semidx_refresh,
-        .title = "Refresh index",
-        .description = "Rescan the configured root, reconcile the changes into the graph, and publish the next " ++
-            "snapshot. Later calls observe the new snapshot; a failed refresh keeps the previous one.",
-        .input_schema = "{\"type\":\"object\",\"additionalProperties\":false}",
-    },
+    define(.semidx_health, "Index health", "Report the configured root, the published snapshot revision, source-unit and graph counts, " ++
+        "per-language frontend coverage and parser availability, diagnostic counts, and the last scan outcome.", &.{}),
+    define(.semidx_repo_map, "Repository map", "List indexed source units with their analysis state and the top-level definitions the graph " ++
+        "records in each. Bounded; results report truncation.", &.{
+        .{ .name = "path_prefix", .type = .string, .description = "Root-relative, '/'-separated path prefix." },
+        shared_params.language,
+        countParam("limit", 100, 1000, "Maximum files."),
+        countParam("definitions_per_file", 50, 500, null),
+    }),
+    define(.semidx_find_definitions, "Find definitions", "Find definition entities by exact name, root-relative path, language, and role, with the " ++
+        "producer, resolution, and freshness of each definition's existence claim.", &.{
+        .{ .name = "name", .type = .string, .description = "Exact definition name." },
+        .{ .name = "path", .type = .string, .description = "Exact root-relative path of the source unit." },
+        shared_params.language,
+        .{ .name = "role", .type = .string, .description = "Frontend role, such as function, container, class, method, or defn." },
+        shared_params.freshness,
+        shared_params.resolution,
+        countParam("limit", 50, 500, null),
+    }),
+    define(.semidx_references, "References and calls", "Return the REFERENCES and CALLS relationships recorded for a definition, identified by " ++
+        "entity_id or by exact name. A call is one occurrence and is listed once. Incoming relationships target the " ++
+        "definition; outgoing ones start from it and may be unresolved designators.", &.{
+        shared_params.entity_id,
+        shared_params.name,
+        shared_params.path,
+        shared_params.language,
+        choiceParam(DirectionArg, "direction", .incoming, null),
+        shared_params.freshness,
+        shared_params.resolution,
+        countParam("limit", 100, 1000, null),
+    }),
+    define(.semidx_context, "Graph context", "Return a bounded graph neighborhood around an entity (entity_id), a definition name, or a " ++
+        "source unit (path): the entity, its unit's analysis state, incoming and outgoing relationships of every " ++
+        "kind, the unit's diagnostics, and the entity's last identity event.", &.{
+        shared_params.entity_id,
+        shared_params.name,
+        shared_params.path,
+        shared_params.language,
+        shared_params.freshness,
+        countParam("relationship_limit", 50, 500, null),
+    }),
+    define(.semidx_refresh, "Refresh index", "Rescan the configured root, reconcile the changes into the graph, and publish the next " ++
+        "snapshot. Later calls observe the new snapshot; a failed refresh keeps the previous one.", &.{}),
 };
 
 pub fn byName(name: []const u8) ?Tool {
@@ -219,10 +289,6 @@ pub const Context = struct {
     }
 };
 
-const FreshnessArg = enum { current, stale, any };
-const ResolutionArg = enum { any, fact, unresolved, approximate };
-const DirectionArg = enum { incoming, outgoing, both };
-
 fn freshnessFilter(arg: FreshnessArg) ?model.Freshness {
     return switch (arg) {
         .current => .current,
@@ -240,63 +306,97 @@ fn resolutionMatches(arg: ResolutionArg, resolution: model.Resolution) bool {
     };
 }
 
-const Args = struct {
-    ctx: *Context,
-    map: ?ObjectMap,
+/// The validated arguments of one tool. Every accessor names a parameter the
+/// tool's definition declares and takes its type, default, and maximum from
+/// that declaration; naming an undeclared parameter, or reading one as the
+/// wrong type, is a compile error.
+fn Args(comptime tool: Tool) type {
+    return struct {
+        const Self = @This();
+        const params = definitions[@intFromEnum(tool)].params;
 
-    fn allowOnly(self: Args, names: []const []const u8) Error!void {
-        const map = self.map orelse return;
-        var keys = map.iterator();
-        outer: while (keys.next()) |entry| {
-            for (names) |name| {
-                if (std.mem.eql(u8, entry.key_ptr.*, name)) continue :outer;
+        ctx: *Context,
+        map: ?ObjectMap,
+
+        /// Refuses any argument the definition does not declare.
+        fn init(ctx: *Context, map: ?ObjectMap) Error!Self {
+            if (map) |object| {
+                var keys = object.iterator();
+                outer: while (keys.next()) |entry| {
+                    for (params) |param| {
+                        if (std.mem.eql(u8, entry.key_ptr.*, param.name)) continue :outer;
+                    }
+                    return ctx.fail("unknown argument \"{s}\"", .{entry.key_ptr.*});
+                }
             }
-            return self.ctx.fail("unknown argument \"{s}\"", .{entry.key_ptr.*});
+            return .{ .ctx = ctx, .map = map };
         }
-    }
 
-    fn string(self: Args, name: []const u8) Error!?[]const u8 {
-        const value = (self.map orelse return null).get(name) orelse return null;
-        return switch (value) {
-            .string => |s| s,
-            else => self.ctx.fail("argument \"{s}\" must be a string", .{name}),
-        };
-    }
+        fn declared(comptime name: []const u8, comptime tag: std.meta.Tag(ParamType)) Param {
+            for (params) |param| {
+                if (!std.mem.eql(u8, param.name, name)) continue;
+                if (param.type != tag) @compileError(@tagName(tool) ++ " declares \"" ++ name ++ "\" as " ++ @tagName(param.type));
+                return param;
+            }
+            @compileError(@tagName(tool) ++ " does not declare an argument \"" ++ name ++ "\"");
+        }
 
-    fn count(self: Args, name: []const u8, default: u32, maximum: u32) Error!u32 {
-        const value = (self.map orelse return default).get(name) orelse return default;
-        const n = switch (value) {
-            .integer => |n| n,
-            else => return self.ctx.fail("argument \"{s}\" must be an integer", .{name}),
-        };
-        if (n < 1 or n > maximum) return self.ctx.fail("argument \"{s}\" must be between 1 and {d}", .{ name, maximum });
-        return @intCast(n);
-    }
+        fn value(self: Self, name: []const u8) ?std.json.Value {
+            return (self.map orelse return null).get(name);
+        }
 
-    fn entityId(self: Args, name: []const u8) Error!?model.EntityId {
-        const value = (self.map orelse return null).get(name) orelse return null;
-        const n = switch (value) {
-            .integer => |n| n,
-            else => return self.ctx.fail("argument \"{s}\" must be an integer", .{name}),
-        };
-        if (n < 0 or n > std.math.maxInt(u32)) return self.ctx.fail("argument \"{s}\" is not an entity id", .{name});
-        return @enumFromInt(@as(u32, @intCast(n)));
-    }
+        fn string(self: Self, comptime name: []const u8) Error!?[]const u8 {
+            _ = comptime declared(name, .string);
+            return switch (self.value(name) orelse return null) {
+                .string => |s| s,
+                else => self.ctx.fail("argument \"{s}\" must be a string", .{name}),
+            };
+        }
 
-    fn choice(self: Args, comptime E: type, name: []const u8, default: E) Error!E {
-        const text = try self.string(name) orelse return default;
-        return std.meta.stringToEnum(E, text) orelse self.ctx.fail("argument \"{s}\" has unsupported value \"{s}\"", .{ name, text });
-    }
+        fn count(self: Self, comptime name: []const u8) Error!u32 {
+            const bounds = comptime declared(name, .count).type.count;
+            const n = switch (self.value(name) orelse return bounds.default) {
+                .integer => |n| n,
+                else => return self.ctx.fail("argument \"{s}\" must be an integer", .{name}),
+            };
+            if (n < 1 or n > bounds.maximum) return self.ctx.fail("argument \"{s}\" must be between 1 and {d}", .{ name, bounds.maximum });
+            return @intCast(n);
+        }
 
-    fn language(self: Args) Error!?model.Language {
-        const text = try self.string("language") orelse return null;
-        return std.meta.stringToEnum(model.Language, text) orelse self.ctx.fail("argument \"language\" has unsupported value \"{s}\"", .{text});
-    }
-};
+        fn entityId(self: Self, comptime name: []const u8) Error!?model.EntityId {
+            _ = comptime declared(name, .entity_id);
+            const n = switch (self.value(name) orelse return null) {
+                .integer => |n| n,
+                else => return self.ctx.fail("argument \"{s}\" must be an integer", .{name}),
+            };
+            if (n < 0 or n > std.math.maxInt(u32)) return self.ctx.fail("argument \"{s}\" is not an entity id", .{name});
+            return @enumFromInt(@as(u32, @intCast(n)));
+        }
+
+        /// A choice read as `E`, whose tag names must be the declared values.
+        /// Null only when the parameter declares no default and is absent.
+        fn choice(self: Self, comptime E: type, comptime name: []const u8) Error!(if (declared(name, .choice).type.choice.default == null) ?E else E) {
+            const declaration = comptime declared(name, .choice).type.choice;
+            comptime {
+                const tags = std.meta.fieldNames(E);
+                if (tags.len != declaration.values.len) @compileError("\"" ++ name ++ "\" is not declared with the values of " ++ @typeName(E));
+                for (tags, declaration.values) |tag, declared_value| {
+                    if (!std.mem.eql(u8, tag, declared_value)) @compileError("\"" ++ name ++ "\" is not declared with the values of " ++ @typeName(E));
+                }
+            }
+            const default: ?E = comptime if (declaration.default) |text| std.meta.stringToEnum(E, text).? else null;
+            const text = switch (self.value(name) orelse return if (default) |d| d else null) {
+                .string => |s| s,
+                else => return self.ctx.fail("argument \"{s}\" must be a string", .{name}),
+            };
+            return std.meta.stringToEnum(E, text) orelse self.ctx.fail("argument \"{s}\" has unsupported value \"{s}\"", .{ name, text });
+        }
+    };
+}
 
 /// Refuses any argument, for tools that take none.
 pub fn expectNoArguments(ctx: *Context, arguments: ?ObjectMap) Error!void {
-    try (Args{ .ctx = ctx, .map = arguments }).allowOnly(&.{});
+    _ = try Args(.semidx_refresh).init(ctx, arguments);
 }
 
 // -- rendering --------------------------------------------------------------
@@ -588,7 +688,7 @@ pub fn writeUnitCounts(ctx: *Context, s: *Stringify) Error!void {
 // -- tools ------------------------------------------------------------------
 
 pub fn health(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, status: Status) Error!void {
-    try expectNoArguments(ctx, arguments);
+    _ = try Args(.semidx_health).init(ctx, arguments);
     const snapshot = ctx.snapshot;
 
     try beginStructured(ctx, s);
@@ -681,12 +781,11 @@ fn lessPath(snapshot: *const Snapshot, a: usize, b: usize) bool {
 }
 
 pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
-    const args: Args = .{ .ctx = ctx, .map = arguments };
-    try args.allowOnly(&.{ "path_prefix", "language", "limit", "definitions_per_file" });
+    const args = try Args(.semidx_repo_map).init(ctx, arguments);
     const prefix = try args.string("path_prefix");
-    const language = try args.language();
-    const limit = try args.count("limit", 100, 1000);
-    const per_file = try args.count("definitions_per_file", 50, 500);
+    const language = try args.choice(model.Language, "language");
+    const limit = try args.count("limit");
+    const per_file = try args.count("definitions_per_file");
     const snapshot = ctx.snapshot;
 
     var order: std.ArrayList(usize) = .empty;
@@ -743,18 +842,17 @@ pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
 }
 
 pub fn findDefinitions(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
-    const args: Args = .{ .ctx = ctx, .map = arguments };
-    try args.allowOnly(&.{ "name", "path", "language", "role", "freshness", "resolution", "limit" });
+    const args = try Args(.semidx_find_definitions).init(ctx, arguments);
     const filter: Snapshot.EntityFilter = .{
         .kind = .definition,
         .name = try args.string("name"),
         .path = try args.string("path"),
         .role = try args.string("role"),
-        .language = try args.language(),
-        .freshness = freshnessFilter(try args.choice(FreshnessArg, "freshness", .current)),
+        .language = try args.choice(model.Language, "language"),
+        .freshness = freshnessFilter(try args.choice(FreshnessArg, "freshness")),
     };
-    const resolution = try args.choice(ResolutionArg, "resolution", .any);
-    const limit = try args.count("limit", 50, 500);
+    const resolution = try args.choice(ResolutionArg, "resolution");
+    const limit = try args.count("limit");
 
     try beginStructured(ctx, s);
     try s.objectField("definitions");
@@ -780,11 +878,11 @@ pub fn findDefinitions(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Erro
 const max_targets: usize = 50;
 
 /// The entities a references or context call is about.
-fn selectTargets(ctx: *Context, args: Args, freshness: ?model.Freshness, allow_path_only: bool) Error![]model.Entity {
+fn selectTargets(ctx: *Context, args: anytype, freshness: ?model.Freshness, allow_path_only: bool) Error![]model.Entity {
     const id = try args.entityId("entity_id");
     const name = try args.string("name");
     const path = try args.string("path");
-    const language = try args.language();
+    const language = try args.choice(model.Language, "language");
 
     var targets: std.ArrayList(model.Entity) = .empty;
     if (id) |entity_id| {
@@ -820,12 +918,11 @@ fn selectTargets(ctx: *Context, args: Args, freshness: ?model.Freshness, allow_p
 }
 
 pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
-    const args: Args = .{ .ctx = ctx, .map = arguments };
-    try args.allowOnly(&.{ "entity_id", "name", "path", "language", "direction", "freshness", "resolution", "limit" });
-    const direction = try args.choice(DirectionArg, "direction", .incoming);
-    const freshness = freshnessFilter(try args.choice(FreshnessArg, "freshness", .current));
-    const resolution = try args.choice(ResolutionArg, "resolution", .any);
-    const limit = try args.count("limit", 100, 1000);
+    const args = try Args(.semidx_references).init(ctx, arguments);
+    const direction = try args.choice(DirectionArg, "direction");
+    const freshness = freshnessFilter(try args.choice(FreshnessArg, "freshness"));
+    const resolution = try args.choice(ResolutionArg, "resolution");
+    const limit = try args.count("limit");
     const targets = try selectTargets(ctx, args, freshness, false);
     const shown_targets = targets[0..@min(targets.len, max_targets)];
 
@@ -873,10 +970,9 @@ const max_focus: usize = 10;
 const max_context_diagnostics: usize = 50;
 
 pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
-    const args: Args = .{ .ctx = ctx, .map = arguments };
-    try args.allowOnly(&.{ "entity_id", "name", "path", "language", "freshness", "relationship_limit" });
-    const freshness = freshnessFilter(try args.choice(FreshnessArg, "freshness", .current));
-    const limit = try args.count("relationship_limit", 50, 500);
+    const args = try Args(.semidx_context).init(ctx, arguments);
+    const freshness = freshnessFilter(try args.choice(FreshnessArg, "freshness"));
+    const limit = try args.count("relationship_limit");
     const targets = try selectTargets(ctx, args, freshness, true);
     const snapshot = ctx.snapshot;
 
@@ -956,12 +1052,41 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
     try s.endObject();
 }
 
-test "every tool schema is one line of valid JSON naming an object" {
+test "every tool schema is one line of valid JSON naming exactly the declared arguments" {
     for (definitions) |definition| {
         try std.testing.expect(std.mem.indexOfScalar(u8, definition.input_schema, '\n') == null);
         var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, definition.input_schema, .{});
         defer parsed.deinit();
-        try std.testing.expectEqualStrings("object", parsed.value.object.get("type").?.string);
+        const schema = parsed.value.object;
+        try std.testing.expectEqualStrings("object", schema.get("type").?.string);
+        try std.testing.expect(!schema.get("additionalProperties").?.bool);
+        const properties = if (schema.get("properties")) |value| value.object.count() else 0;
+        try std.testing.expectEqual(definition.params.len, properties);
+        for (definition.params) |param| {
+            const property = schema.get("properties").?.object.get(param.name).?.object;
+            switch (param.type) {
+                .string => try std.testing.expectEqualStrings("string", property.get("type").?.string),
+                .entity_id => {
+                    try std.testing.expectEqualStrings("integer", property.get("type").?.string);
+                    try std.testing.expectEqual(@as(i64, 0), property.get("minimum").?.integer);
+                },
+                .count => |count| {
+                    try std.testing.expectEqualStrings("integer", property.get("type").?.string);
+                    try std.testing.expectEqual(@as(i64, 1), property.get("minimum").?.integer);
+                    try std.testing.expectEqual(@as(i64, count.maximum), property.get("maximum").?.integer);
+                    try std.testing.expectEqual(@as(i64, count.default), property.get("default").?.integer);
+                },
+                .choice => |choice| {
+                    try std.testing.expectEqualStrings("string", property.get("type").?.string);
+                    const values = property.get("enum").?.array.items;
+                    try std.testing.expectEqual(choice.values.len, values.len);
+                    for (choice.values, values) |expected, actual| try std.testing.expectEqualStrings(expected, actual.string);
+                    if (choice.default) |default| {
+                        try std.testing.expectEqualStrings(default, property.get("default").?.string);
+                    } else try std.testing.expect(property.get("default") == null);
+                },
+            }
+        }
     }
     try std.testing.expectEqual(std.enums.values(Tool).len, definitions.len);
     for (definitions, std.enums.values(Tool)) |definition, tool| try std.testing.expectEqual(tool, definition.tool);

@@ -14,15 +14,16 @@ Companion log for
 
 ## Current Status
 
-Stage 1 is complete: the baseline output inventory and the budget gates are
-recorded below. Stages 2 to 5 are pending.
+Stages 1 and 2 are complete: the baseline output inventory and budget gates
+are recorded, and tool schemas are generated from the same argument
+declarations the validator reads. Stages 3 to 5 are pending.
 
 ## Stage Log
 
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 1: Response inventory and budget targets | Completed | Baseline transcript and structured sizes per tool over this repository, the fields that dominate `repo_map` and `context`, and the hard gates versus observations below. No behavior change. |
-| Stage 2: Tool schema and argument validation cleanup | Pending | |
+| Stage 2: Tool schema and argument validation cleanup | Completed | Each tool's arguments are declared once as `Param` values; the advertised JSON Schema is generated from them at compile time, and `Args(tool)` reads types, enum values, defaults, and maxima from the same declarations. The advertised `tools/list` is unchanged. |
 | Stage 3: Compact repository map | Pending | |
 | Stage 4: Focused context budgeting | Pending | |
 | Stage 5: Documentation and habit loop update | Pending | |
@@ -125,6 +126,43 @@ instead of absolute sizes of a repository that keeps growing:
 Observations, printed by `zig build dogfood` and recorded here, not enforced:
 absolute byte counts per call, latency, and the transcript to structured
 multiplier.
+
+## Stage 2: Tool Schema And Argument Validation Cleanup
+
+Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig`, this log.
+
+- `Definition.params` declares every argument: `string`, `entity_id`,
+  `count` (default, maximum), or `choice` (enum values from a Zig enum, optional
+  default). `freshness`, `resolution`, `language`, `entity_id`, `name`, and
+  `path` are shared declarations. `inputSchema` renders the one-line schema at
+  compile time.
+- `Args(tool)` refuses undeclared arguments at run time. Its accessors take
+  only a parameter name and look the declaration up at compile time: reading an
+  undeclared parameter, reading one as the wrong type, or reading a choice
+  through an enum whose tags differ from the declared values does not compile.
+- Behavior is unchanged: the parsed `tools/list` from the new binary equals the
+  one from `efbc8b3` for every tool.
+
+Tests:
+
+- `tools.zig`: every schema is one line, `additionalProperties: false`, and
+  names exactly the declared arguments with matching types, enum values,
+  defaults, and maxima.
+- `root.zig`: for every tool, an unknown argument is refused; for every
+  declared argument, a wrong JSON type is refused with a message naming the
+  expected type; counts refuse 0 and maximum + 1 and accept the maximum;
+  choices refuse an unknown value and accept every declared value; entity ids
+  refuse -1. Annotations: only `semidx_refresh` is not read-only, it is not
+  destructive, and no tool is open-world.
+- Mutation check: rendering `maximum + 1` into the schema fails the schema
+  test (`expected 1000, found 1001`); reverted.
+
+Verification:
+
+- `./scripts/check-zig-version.sh`: 0.16.0 matches.
+- `zig fmt src/mcp`: clean.
+- `zig build test-mcp --summary all`: 19 of 20 passed, 1 skipped (the dogfood
+  recovery test, which runs only under `zig build dogfood`).
 
 ## Residual Risk
 

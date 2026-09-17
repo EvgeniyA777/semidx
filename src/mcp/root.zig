@@ -593,6 +593,75 @@ test "one dispatcher serves modern requests statelessly and legacy requests afte
     try testing.expect(std.mem.indexOf(u8, h.log.written(), "indexed 1 source units") != null);
 }
 
+test "every declared argument is validated as its advertised schema says, and annotations stay accurate" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.init(false, "");
+    defer h.deinit();
+
+    const Check = struct {
+        fn call(harness: *Harness, a: Allocator, tool: tools.Tool, base: []const u8, argument: []const u8, value: []const u8) !std.json.Value {
+            const arguments = try std.fmt.allocPrint(a, "{{{s}\"{s}\":{s}}}", .{ base, argument, value });
+            return harness.callTool(a, @tagName(tool), arguments);
+        }
+        fn refused(result: std.json.Value, needle: []const u8) !void {
+            try testing.expect(result.object.get("isError").?.bool);
+            const text = result.object.get("content").?.array.items[0].object.get("text").?.string;
+            try testing.expect(std.mem.indexOf(u8, text, needle) != null);
+        }
+        fn accepted(result: std.json.Value) !void {
+            try testing.expect(!result.object.get("isError").?.bool);
+        }
+    };
+
+    for (tools.definitions) |definition| {
+        // References and context need a target; the others need nothing.
+        const base: []const u8 = switch (definition.tool) {
+            .semidx_references, .semidx_context => "\"name\":\"greet\",",
+            else => "",
+        };
+        try Check.refused(try Check.call(&h, arena, definition.tool, base, "bogus_argument", "1"), "unknown argument \"bogus_argument\"");
+        for (definition.params) |param| {
+            const own_base = if (std.mem.eql(u8, param.name, "name") or std.mem.eql(u8, param.name, "entity_id")) "" else base;
+            switch (param.type) {
+                .string => try Check.refused(try Check.call(&h, arena, definition.tool, own_base, param.name, "1"), "must be a string"),
+                .entity_id => {
+                    try Check.refused(try Check.call(&h, arena, definition.tool, own_base, param.name, "\"1\""), "must be an integer");
+                    try Check.refused(try Check.call(&h, arena, definition.tool, own_base, param.name, "-1"), "is not an entity id");
+                },
+                .count => |count| {
+                    try Check.refused(try Check.call(&h, arena, definition.tool, own_base, param.name, "\"1\""), "must be an integer");
+                    try Check.refused(try Check.call(&h, arena, definition.tool, own_base, param.name, "0"), "must be between 1 and");
+                    const above = try std.fmt.allocPrint(arena, "{d}", .{count.maximum + 1});
+                    try Check.refused(try Check.call(&h, arena, definition.tool, own_base, param.name, above), "must be between 1 and");
+                    const maximum = try std.fmt.allocPrint(arena, "{d}", .{count.maximum});
+                    try Check.accepted(try Check.call(&h, arena, definition.tool, own_base, param.name, maximum));
+                },
+                .choice => |choice| {
+                    try Check.refused(try Check.call(&h, arena, definition.tool, own_base, param.name, "1"), "must be a string");
+                    try Check.refused(try Check.call(&h, arena, definition.tool, own_base, param.name, "\"not-a-value\""), "unsupported value");
+                    for (choice.values) |value| {
+                        const quoted = try std.fmt.allocPrint(arena, "\"{s}\"", .{value});
+                        try Check.accepted(try Check.call(&h, arena, definition.tool, own_base, param.name, quoted));
+                    }
+                },
+            }
+        }
+    }
+
+    const list = (try h.send(arena, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{" ++ modern_meta ++ "}}")).?;
+    for (list.object.get("result").?.object.get("tools").?.array.items) |tool| {
+        const annotations = tool.object.get("annotations").?.object;
+        const is_refresh = std.mem.eql(u8, "semidx_refresh", tool.object.get("name").?.string);
+        try testing.expectEqual(!is_refresh, annotations.get("readOnlyHint").?.bool);
+        try testing.expect(!annotations.get("openWorldHint").?.bool);
+        // Refresh rebuilds the server's own index and touches no file.
+        if (is_refresh) try testing.expect(!annotations.get("destructiveHint").?.bool);
+    }
+}
+
 test "the product version is reported in server identity and health, apart from the contract version" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
