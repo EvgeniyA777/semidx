@@ -1,13 +1,25 @@
 ---
 title: "MCP progressive discovery and response budgets"
 doc_type: "follow_up"
-lifecycle: "active"
-status: "open"
-agent_action: "use_as_input_for_future_plan_only"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-17"
 ---
 
 # MCP Progressive Discovery And Response Budgets
+
+## Resolution
+
+Completed by [Plan 009](../plans/009_mcp_progressive_discovery_and_budgets.md)
+([progress log](../reports/009_mcp_progressive_discovery_and_budgets_progress.md)).
+Acceptance directions 1 to 6 are delivered: compact `semidx_references`,
+`semidx_outline`, `narrowing_hints`, `max_response_bytes` with
+`budget_exhausted`, snapshot-bound cursors, and `semidx_context` traversal with
+`direction` and `depth`. Direction 7, text fallback measurement across real
+clients, is split into
+[Follow-up 010](010_mcp_text_fallback_client_measurement.md). The text below is
+the finding as recorded before the plan.
 
 ## Classification
 

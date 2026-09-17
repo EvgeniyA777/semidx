@@ -2,8 +2,10 @@
 //!
 //! It copies the source units a scan of this repository finds into a temporary
 //! root, byte for byte, and drives the built `semidx-mcp` over stdio through the
-//! agent habit loop: health, repository map, definition lookup, references and
-//! context, an edit of the copy, and a refresh that publishes a new revision.
+//! agent habit loop: health, outline, repository map (including its cursor
+//! pages under the response budget), definition lookup, references and
+//! context (including a depth-2 traversal), an edit of the copy, and a refresh
+//! that publishes a new revision.
 //! The repository itself is never edited.
 //!
 //! The habit loop test is the `repository-copy` profile of the habit loop

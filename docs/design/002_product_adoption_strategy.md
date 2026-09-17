@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-14"
+updated: "2026-09-17"
 ---
 
 # Product Adoption Strategy
@@ -68,7 +68,8 @@ file exploration.
 The intended habit loop:
 
 1. Start with `semidx_health` to learn whether the graph is current enough.
-2. Use `semidx_repo_map` for repository orientation instead of broad file reads.
+2. Use `semidx_outline`, then a scoped `semidx_repo_map`, for repository
+   orientation instead of broad file reads.
 3. Use `semidx_find_definitions` before opening likely definition files.
 4. Use `semidx_references` for impact checks before editing.
 5. Use `semidx_context` as the default focused-context tool around a symbol,

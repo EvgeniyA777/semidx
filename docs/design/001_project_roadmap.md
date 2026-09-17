@@ -104,16 +104,15 @@ Not yet present:
 
 The next useful sequence is:
 
-1. Execute [Plan 009](../plans/009_mcp_progressive_discovery_and_budgets.md)
-   to make cold-start discovery and references cheaper for agents.
-   [Plan 007](../plans/007_mcp_response_budget_and_schema_ergonomics.md) made
-   the repository map and context compact by default, and
-   [Plan 008](../plans/008_habit_loop_release_gate.md) turned the agent habit
-   loop into the `zig build preview-gate` gate
-   ([specification](../mcp/habit_loop_gate.md)); its observations are Plan 009's
-   baseline.
+1. Cut the next preview so installed users get
+   [Plan 009](../plans/009_mcp_progressive_discovery_and_budgets.md)'s
+   progressive discovery (`semidx_outline`, compact references, response
+   budgets, cursors, bounded traversal), with `zig build preview-gate` as the
+   habit-loop part of its release gate
+   ([specification](../mcp/habit_loop_gate.md)).
 2. Use the MCP preview while developing semidx itself and collect evidence for
-   the next semantic expansion.
+   the next semantic expansion, including how real clients show tool results
+   to models ([follow-up 010](../followups/010_mcp_text_fallback_client_measurement.md)).
 
 After the preview is usable, prioritize work that increases exact graph value
 for real local development:

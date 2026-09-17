@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-14"
+updated: "2026-09-17"
 ---
 
 # Tooling Policy
@@ -32,12 +32,16 @@ which is an open requirement owned by [SPEC.md](../../SPEC.md).
   code before edits, use semidx retrieval first.
 - First-pass flow is strict:
   1. `semidx_health`
-  2. `semidx_repo_map`
-  3. `semidx_find_definitions`
-  4. `semidx_references` or `semidx_context`
-  5. `semidx_refresh` after edits
+  2. `semidx_outline` (repeat with a directory `path_prefix` to descend)
+  3. `semidx_repo_map` with the `path_prefix` of one directory or file
+  4. `semidx_find_definitions`
+  5. `semidx_references` or `semidx_context`
+  6. `semidx_refresh` after edits
 - A successful `semidx_health` is not a reason to switch to filesystem browsing.
-  Continue with `semidx_repo_map` and graph-backed lookup.
+  Continue with `semidx_outline`, a scoped `semidx_repo_map`, and graph-backed
+  lookup.
+- When a result is cut, follow its `narrowing_hints` before raising limits or
+  walking `next_cursor` pages.
 - Use `semidx_context` to read the focused graph neighborhood before patching
   source files.
 - Use manual file reads only as a fallback when semidx MCP fails, when the target
@@ -49,8 +53,9 @@ which is an open requirement owned by [SPEC.md](../../SPEC.md).
 ## MCP Query And Wire Shape
 
 - The configured server is `semidx` and exposes:
-  `semidx_health`, `semidx_repo_map`, `semidx_find_definitions`,
-  `semidx_references`, `semidx_context`, and `semidx_refresh`.
+  `semidx_health`, `semidx_outline`, `semidx_repo_map`,
+  `semidx_find_definitions`, `semidx_references`, `semidx_context`, and
+  `semidx_refresh`.
 - The server indexes one root at startup. In this repository `.mcp.json` passes
   the repository root explicitly. For other repositories, register
   `/Users/ae/workspaces/semidx/scripts/semidx-mcp.sh` with that repository's

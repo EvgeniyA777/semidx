@@ -117,20 +117,29 @@ documents that own history, rationale, and evidence.
 - `semidx-mcp` is the experimental local stdio preview. It scans one local root,
   publishes one snapshot, serves both the current `2026-07-28` stateless MCP
   shape and the legacy initialized `2025-06-18` shape, and exposes
-  `semidx_health`, `semidx_repo_map`, `semidx_find_definitions`,
-  `semidx_references`, `semidx_context`, and `semidx_refresh`.
+  `semidx_health`, `semidx_outline`, `semidx_repo_map`,
+  `semidx_find_definitions`, `semidx_references`, `semidx_context`, and
+  `semidx_refresh`.
 - MCP results return graph values only by default: ids, paths, ranges, kinds,
   relationships, and per-claim resolution, freshness, and producer.
   `semantic_contract_version` is still `null`.
 - Tool arguments are declared once in `src/mcp/tools.zig`; the advertised
-  schema and the validator both derive from them. `semidx_repo_map` and
-  `semidx_context` default to `detail: "compact"` and take `detail: "full"`.
-  Compact context keeps each claim's resolution category, producer name,
-  freshness, and location; the repository map carries freshness and location
-  but no existence provenance at either level (use `semidx_find_definitions`
-  or context for that). List tools report `budget`. Responses
-  are bounded per list, not per response
+  schema and the validator both derive from them. `semidx_repo_map`,
+  `semidx_references`, and `semidx_context` default to `detail: "compact"` and
+  take `detail: "full"`. Compact context and references keep each claim's
+  resolution category, producer name, freshness, and location; the repository
+  map carries freshness and location but no existence provenance at either
+  level. List tools report `budget`
   ([detail levels](docs/mcp/local_preview.md#detail-levels-and-budgets)).
+- Plan 009 made discovery progressive: `semidx_outline` gives per-directory
+  counts without definitions as the first orientation call; every list tool
+  stops at `max_response_bytes` (32000 structured bytes by default, whole
+  items only) and reports `budget_exhausted`; cut lists carry
+  `narrowing_hints`; outline, map, definitions, and references return
+  `next_cursor`, valid only for the same server process, tool, arguments,
+  and snapshot revision; `semidx_context` takes `direction` and `depth` (max 3) for a
+  traversal that renders each entity once. All are projection mechanics, not
+  graph semantics.
 - `semidx_refresh` keeps the previous snapshot on failure. If a refresh fails
   after reconciliation starts, the server discards that index and rebuilds from
   the same scan to avoid publishing partial state.
@@ -147,7 +156,7 @@ documents that own history, rationale, and evidence.
 ## What Does Not Exist
 
 - No persistence, HTTP, gRPC, stable CLI contract, `contracts/` schemas,
-  resources, prompts, pagination, subscriptions, file watching, package-manager
+  resources, prompts, subscriptions, file watching, package-manager
   distribution, binary release, remote service dependency, vectors, embeddings,
   RAG, or retrieval pipeline.
 - No published semantic contract version. Current core admissions are
@@ -203,14 +212,12 @@ documents that own history, rationale, and evidence.
 
 ## Near-Term Priorities
 
-- Plan 009 is the next implementation plan: MCP progressive discovery and
-  response budgets
-  ([docs/plans/009_mcp_progressive_discovery_and_budgets.md](docs/plans/009_mcp_progressive_discovery_and_budgets.md),
-  with [Follow-up 009](docs/followups/009_mcp_progressive_discovery_and_response_budgets.md)
-  as its accepted input). Its size baseline is the Plan 008 gate run: the
-  compact whole-repository map is about 155 KB and `semidx_references` for
-  `writeString` about 57 KB. Run `zig build preview-gate` as part of any next
-  preview's release gate.
+- Plan 009 is complete, and `semidx-mcp` behavior changed after
+  `0.1.0-preview.2`: cut the next preview with `zig build preview-gate` in its
+  release gate before telling installed users about outline, budgets, cursors,
+  or traversal. Text fallback duplication stays unchanged until
+  [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
+  measures real clients.
 - The next Java ADR candidate should be multi-module classpath boundaries before
   Java facts are widened. This is the sharper exactness risk because independent
   roots can share a package name. Java single-type imports are useful, but should
@@ -247,6 +254,8 @@ documents that own history, rationale, and evidence.
   [docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md](docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md).
 - Plan 008 habit loop gate and release-candidate evidence:
   [docs/reports/008_habit_loop_release_gate_progress.md](docs/reports/008_habit_loop_release_gate_progress.md).
+- Plan 009 progressive discovery and response budgets:
+  [docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md](docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md).
 - Active follow-ups:
   [docs/followups/README.md](docs/followups/README.md).
 - Product direction:

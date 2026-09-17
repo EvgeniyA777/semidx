@@ -14,13 +14,15 @@ This repository skill adds semidx-specific evidence requirements.
 2. Run the semantic flow:
 
    ```text
-   semidx_health -> semidx_repo_map -> semidx_find_definitions
-   -> semidx_references or semidx_context
+   semidx_health -> semidx_outline -> semidx_repo_map(path_prefix)
+   -> semidx_find_definitions -> semidx_references or semidx_context
    ```
 
    Keep the default compact `detail`; ask for `detail: "full"` only on the one
    target whose resolution explanations, producer versions, or byte offsets
    the task needs ([detail levels](../../../docs/mcp/local_preview.md#detail-levels-and-budgets)).
+   When a result is cut, follow its `narrowing_hints`; for impact beyond one
+   step, use `semidx_context` with `direction` and `depth: 2`.
 3. Verify reported root path, snapshot revision, language counts, parser
    availability, analysis state, and diagnostics.
 4. Refine broad results with concrete `path`, `path_prefix`, `language`, `role`,
@@ -43,7 +45,7 @@ This repository skill adds semidx-specific evidence requirements.
 - resolution, freshness, limitations, snapshot revision, and exact files needing direct
   inspection.
 
-Do not stop after only `semidx_health` or `semidx_repo_map`. The preview is
+Do not stop after only `semidx_health`, `semidx_outline`, or `semidx_repo_map`. The preview is
 exact when it knows and honest when it does not; unresolved, unsupported,
 stale, approximate, and unavailable results are useful signals, not permission
 to present guesses as facts.

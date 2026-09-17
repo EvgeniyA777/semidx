@@ -32,8 +32,9 @@ It does not:
 - resolve names, search text, rank, or guess: a tool shows what the graph
   recorded, selected by exact name, path, language, or role;
 - return source code: results carry paths and ranges, not file contents;
-- watch files, persist the graph, serve HTTP, or offer resources, prompts,
-  pagination, or subscriptions;
+- watch files, persist the graph, serve HTTP, or offer resources, prompts, or
+  subscriptions; its only continuation mechanism is a [cursor](#cursors) bound
+  to one snapshot revision;
 - contact any network service.
 
 You may infer:
@@ -50,6 +51,9 @@ You must not infer:
   are reported through diagnostics and resolution, not as absence;
 - that an unresolved designator such as `std.debug.print` refers to a definition
   with that name. It is text the producer could not resolve;
+- that a list is complete when its `…_truncated` flag or `budget_exhausted` is
+  true, or that items a limit or budget left out matter less than the ones
+  returned. A narrowing hint is usage guidance, not a claim about the graph;
 - that result fields are a stable interface.
 
 ## Build
@@ -162,23 +166,34 @@ Read this before registering semidx with a client that uses a hosted model.
 
 ### First Calls
 
-A useful order for an agent starting on a repository. Every step uses the
-default compact [detail level](#detail-levels-and-budgets):
+Discover progressively: learn where to look, then open a small map, then ask
+focused questions. Every step uses the default compact
+[detail level](#detail-levels-and-budgets) and response budget:
 
 1. `semidx_health`: is every unit `current`, and which languages have parsers?
-2. `semidx_repo_map` with a `path_prefix`: which files and top-level
-   definitions exist, and at which lines?
-3. `semidx_find_definitions` with a `name`: where is a definition introduced?
-4. `semidx_references` or `semidx_context` on it: what calls it, what does it
-   call, and which of those claims are facts?
-5. `semidx_refresh` after editing files, before trusting later answers.
+2. `semidx_outline`: which directories and files exist under the root, and how
+   many units, definitions, and diagnostics each holds? Repeat with a
+   directory's `path_prefix` to descend. It lists no definitions.
+3. `semidx_repo_map` with the `path_prefix` of one directory (or file): which
+   top-level definitions exist there, and at which lines?
+4. `semidx_find_definitions` with a `name`: where is a definition introduced?
+5. `semidx_references` or `semidx_context` on it: what calls it, what does it
+   call, and which of those claims are facts? For impact beyond one step, give
+   `semidx_context` a `direction` and `depth: 2`.
+6. `semidx_refresh` after editing files, before trusting later answers.
 
-Ask for `detail: "full"` only for the one entity whose resolution methods,
-unresolved explanations, producer versions, or byte offsets you need, for
-example to review a claim or plan an impact analysis. Avoid a whole-repository
-`semidx_repo_map` with `detail: "full"` and a large `limit` as a first call:
-over this repository it is about 320 KB on the wire, against about 150 KB
-compact and 10 to 30 KB for one source directory as `path_prefix`.
+When a result is cut, read its `narrowing_hints` and narrow the next call
+rather than raising every limit; follow `next_cursor` only when you need the
+rest of that exact list.
+
+Use `semidx_outline`, not `semidx_repo_map`, for the first look at a
+repository: over this repository the root outline is about 5 KB on the wire,
+while a whole-repository map lists every top-level definition (about 157 KB
+compact with no budget, so by default it stops at the response budget and
+continues over three cursor pages). Use `semidx_repo_map` once you know which
+directory or file matters. Ask for `detail: "full"` only for the one entity
+whose resolution methods, unresolved explanations, producer versions, or byte
+offsets you need, for example to review a claim or plan an impact analysis.
 
 ### Protocol Versions
 
@@ -206,7 +221,10 @@ JSON, and `isError: false`.
 ## Tools
 
 Every list is bounded and reports its total and whether it was truncated, and
-every tool that returns lists reports the limits it applied in `budget`.
+every tool that returns lists reports the limits it applied in `budget`. List
+tools also stop at a [response budget](#response-budget), may add
+[narrowing hints](#narrowing-hints), and some continue through
+[cursors](#cursors).
 Invalid argument values, wrong argument types, and unknown arguments are
 returned as a tool result with `isError: true` and an explanation. Each tool's
 `inputSchema` in `tools/list` names exactly the arguments, types, enum values,
@@ -215,15 +233,17 @@ defaults, and maxima the server validates.
 | Tool | Arguments (defaults) | Returns |
 | --- | --- | --- |
 | `semidx_health` | none | Product version, root, snapshot revision, refresh recovery state (`recovery`: rebuild count, a rebuilt index awaiting publication, a rebuild still needed), unit counts by analysis state and language, entity and assertion counts, per-language parser availability and declared coverage, diagnostic counts, the last scan outcome, and whether evidence text is enabled. |
-| `semidx_repo_map` | `path_prefix`, `language`, `limit` (100, max 1000 files), `definitions_per_file` (50, max 500), `detail` (`compact`) | Units sorted by path, each with its analysis state, diagnostic counts, and top-level definitions (definitions with an empty container path), plus the number of nested definitions. `compact` gives each unit's `id`, `path`, `language`, and `analysis`, and each definition's `id`, `role`, `name`, `freshness`, and `range` lines; `full` gives the unit's revisions and entity id and each definition as an entity with its `evidence`. |
-| `semidx_find_definitions` | `name`, `path`, `language`, `role`, `freshness` (`current`), `resolution` (`any`), `limit` (50, max 500) | Definitions matching every given filter, each with its existence claim's resolution, producer, and freshness. |
-| `semidx_references` | `entity_id`, or `name` with optional `path`/`language`; `direction` (`incoming`), `freshness` (`current`), `resolution` (`any`), `limit` (100, max 1000) | The target definitions (at most 50) and the `REFERENCES`/`CALLS` relationships into them (`incoming`) or out of them (`outgoing`). A call is one occurrence and is listed once. |
-| `semidx_context` | `entity_id`, `name` (with optional `path`/`language`), or `path` alone for a source unit; `freshness` (`current`), `relationship_limit` (50, max 500, per direction), `diagnostic_limit` (50, max 500), `detail` (`compact`) | Up to 10 focus entities, each with its unit's analysis state, incoming and outgoing relationships of every kind, the unit's diagnostics, and the entity's last identity event. `compact` names the focus end of each relationship by `id` alone and renders the other end, resolutions, producers, evidence, and diagnostics without their full fields; `full` renders them all. |
+| `semidx_outline` | `path_prefix` (a directory; omitted for the root), `language`, `limit` (100, max 1000 entries), `max_response_bytes`, `cursor` | The directories and files directly under `path_prefix`, sorted by name, with counts and no definitions. See [Outline](#outline). |
+| `semidx_repo_map` | `path_prefix`, `language`, `limit` (100, max 1000 files), `definitions_per_file` (50, max 500), `detail` (`compact`), `max_response_bytes`, `cursor` | Units sorted by path, each with its analysis state, diagnostic counts, and top-level definitions (definitions with an empty container path), plus the number of nested definitions. `path_prefix` is a plain string prefix of unit paths. `compact` gives each unit's `id`, `path`, `language`, and `analysis`, and each definition's `id`, `role`, `name`, `freshness`, and `range` lines; `full` gives the unit's revisions and entity id and each definition as an entity with its `evidence`. |
+| `semidx_find_definitions` | `name`, `path`, `language`, `role`, `freshness` (`current`), `resolution` (`any`), `limit` (50, max 500), `max_response_bytes`, `cursor` | Definitions matching every given filter, each with its existence claim's resolution, producer, and freshness. |
+| `semidx_references` | `entity_id`, or `name` with optional `path`/`language`; `direction` (`incoming`), `freshness` (`current`), `resolution` (`any`), `limit` (100, max 1000), `detail` (`compact`), `max_response_bytes`, `cursor` | The target definitions (at most 50, on every page) and the `REFERENCES`/`CALLS` relationships into them (`incoming`) or out of them (`outgoing`). A call is one occurrence and is listed once. `compact` renders each target once, with its existence claim, and names a relationship end that is a target by `id` alone; `full` renders both ends of every relationship. |
+| `semidx_context` | `entity_id`, `name` (with optional `path`/`language`), or `path` alone for a source unit; `freshness` (`current`), `direction` (`both`), `depth` (1, max 3), `relationship_limit` (50, max 500, per direction), `diagnostic_limit` (50, max 500), `detail` (`compact`), `max_response_bytes` | Up to 10 focus entities, each with its unit's analysis state, incoming and outgoing relationships of every kind (only those `direction` includes), the unit's diagnostics, and the entity's last identity event. `compact` names the focus end of each relationship by `id` alone and renders the other end, resolutions, producers, evidence, and diagnostics without their full fields; `full` renders them all. `depth` 2 or 3 adds a [traversal](#traversal). |
 | `semidx_refresh` | none | The new and previous snapshot revisions, `entity_ids_preserved` (false when this refresh published an index rebuilt after a failure), the scan outcome (unchanged, changed, renamed, added, removed, analyzed, ambiguous renames, invalidated), unit counts, and diagnostic counts. |
 
 `freshness` is `current`, `stale`, or `any`. `resolution` is `any`, `fact`,
 `unresolved`, or `approximate`. `language` is `java`, `clojure`, or `zig`.
-`detail` is `compact` or `full`.
+`detail` is `compact` or `full`. `direction` is `incoming`, `outgoing`, or
+`both`. `max_response_bytes` defaults to 32000 (max 2000000).
 `role` is the frontend's role for a definition: for Zig `function` or
 `container`. A Zig member function has role `function` and a one-element
 `container_path`; `semidx_repo_map` counts it as nested.
@@ -259,8 +279,10 @@ A **relationship** carries `assertion_id`, `kind` (`contains`, `defines`,
 `references`, `calls`), `source` (an entity), `target`, `resolution`,
 `producer`, `freshness`, `revision`, and `evidence`. `target` is either
 `{"entity": …}` or `{"designator": "…"}`; a designator is never an entity. In
-`semidx_references`, `direction` says whether the relationship enters or leaves
-the target.
+`semidx_references` and traversal edges, `direction` says whether the
+relationship enters or leaves the entity it was found from; a traversal edge
+also carries `distance` and `from`. An entity rendered as `{"id": …}` alone is
+rendered with its fields elsewhere in the same result.
 
 A **resolution** carries `category` and, by category: `method` (`fact`),
 `missing` and `explanation` (`unresolved`), or `basis` and `confidence`
@@ -279,7 +301,7 @@ invalid byte replaced by U+FFFD.
 
 ## Detail Levels And Budgets
 
-`semidx_repo_map` and `semidx_context` take `detail`. Like every other argument
+`semidx_repo_map`, `semidx_references`, and `semidx_context` take `detail`. Like every other argument
 and field here, detail levels are experimental preview ergonomics, not a
 published semantic contract: `semantic_contract_version` stays `null`, and the
 graph values behind both levels are the same.
@@ -306,15 +328,17 @@ What compact keeps and drops:
 | Repository map definition | `id`, `role`, `name`, `freshness`, `range` (`start_line`, `end_line`), and `source_text` under `--allow-evidence-text` | `kind`, `language`, `evidence` |
 | Context focus entity | `id`, `kind`, `language`, `role`, `name`, `freshness`, `evidence`, `container_path`, `existence` (`resolution`, `producer`, `freshness`) | `extension`, `created_revision`, `observed_revision`, existence `assertion_id` and `revision` |
 | Relationship in context | `assertion_id`, `kind`, `source`, `target`, `resolution`, `producer`, `freshness`, `evidence`. The focus end is `{"id": …}` alone; the other end has `id`, `kind`, `role`, `name`, `freshness`, `evidence`; a designator target is unchanged. | `revision`; `language` of the other end |
+| References target | `id`, `kind`, `language`, `role`, `name`, `freshness`, `evidence`, `container_path`, `existence` (`resolution`, `producer`, `freshness`) | `extension`, `created_revision`, `observed_revision`, existence `assertion_id` and `revision` |
+| Relationship in references | As in context, plus `direction`; an end that is a listed target is `{"id": …}` alone. | `revision`; `language` of the other end |
 | Resolution | `category`; `missing` when unresolved; `confidence` when approximate | `method`, `explanation`, `basis` |
 | Producer | `name` | `version` |
 | Evidence | `unit.path`, `range.start_line`, `range.end_line`, and `source_text` under `--allow-evidence-text` | `unit.id`, columns, byte offsets |
 | Diagnostic in context | `kind`, `producer`, `message` | `unit` (the focus unit), `revision` |
 
-Compact never changes a claim: in `semidx_context` an unresolved claim still
-has category `unresolved` and a designator target, and every relationship and
-focus existence claim still carries its resolution category, producer name,
-and freshness. `semidx_repo_map` is orientation at both levels: its
+Compact never changes a claim: in `semidx_context` and `semidx_references` an
+unresolved claim still has category `unresolved` and a designator target, and
+every relationship, focus or target existence claim still carries its
+resolution category, producer name, and freshness. `semidx_repo_map` is orientation at both levels: its
 definitions carry freshness and location, never their existence claim's
 resolution or producer. The evidence-text opt-in applies at both levels.
 
@@ -322,14 +346,135 @@ resolution or producer. The evidence-text opt-in applies at both levels.
 
 | Tool | `budget` |
 | --- | --- |
-| `semidx_repo_map` | `detail`, `limit`, `definitions_per_file` |
-| `semidx_find_definitions` | `limit` |
-| `semidx_references` | `limit`, `target_limit` (50) |
-| `semidx_context` | `detail`, `relationship_limit`, `diagnostic_limit`, `focus_limit` (10) |
+| `semidx_outline` | `limit`, `max_response_bytes` |
+| `semidx_repo_map` | `detail`, `limit`, `definitions_per_file`, `max_response_bytes` |
+| `semidx_find_definitions` | `limit`, `max_response_bytes` |
+| `semidx_references` | `detail`, `limit`, `target_limit` (50), `max_response_bytes` |
+| `semidx_context` | `detail`, `direction`, `depth`, `relationship_limit`, `diagnostic_limit`, `focus_limit` (10), `max_response_bytes` |
 
 Budgets select whole items before rendering. A result is never cut in the
-middle; the list that lost items says so through its `…_total` and
-`…_truncated` fields.
+middle; a list that returns fewer items than it selected says so through its
+`…_total` and `…_truncated` fields (`truncated` is true exactly when fewer
+items were returned than the total).
+
+This section and the five below own the preview terms *outline*, *response
+budget*, *narrowing hint*, *cursor*, and *traversal*. They are MCP output
+mechanics: none of them changes what the graph records or what a query
+selects.
+
+### Outline
+
+`semidx_outline` answers "where should I look?" without listing definitions.
+`path_prefix` names a directory, root-relative and `/`-separated; a trailing
+`/` is optional, and omitting it means the root. The result echoes the
+normalized `path_prefix` (`""` or ending in `/`) and lists `entries`, the
+immediate children that contain at least one unit (after the `language`
+filter):
+
+- a **directory** entry: `name`, `path` (ending in `/`), `type: "directory"`,
+  and `counts` summed over every unit below it: `units`, `languages` (units
+  per language), `analysis` (units per analysis state), `diagnostics` (per
+  kind), `top_level_definitions`, and `nested_definitions`;
+- a **file** entry: `name`, `path`, `type: "file"`, its compact `unit`, and
+  `counts` with `diagnostics`, `top_level_definitions`, and
+  `nested_definitions`.
+
+`totals` has the directory counts over every matched unit, and
+`entries_total` and `truncated` bound the list. Definition counts are current
+definitions split as `semidx_repo_map` splits them. A counted definition is a
+count, not a listed entity: open `semidx_repo_map` for its name and lines. A
+`path_prefix` under which no unit exists returns no entries and zero totals.
+
+### Response Budget
+
+Every list tool takes `max_response_bytes` (default 32000, max 2000000). Items
+are selected whole: an outline entry, a map file with its definitions, a
+definition, a relationship, a context focus entity, a diagnostic, or a
+traversal edge is rendered on its own first and appended only when the
+structured result stays within the budget. The first item of a result is
+always returned, so a small budget still makes progress. Once one item does
+not fit, no later item is appended, so each list returns a prefix of what it
+selected. The totals, hints, and `budget` that close a result follow the last
+item and are not counted; they add a few hundred bytes. `semidx_references`
+targets (at most 50) are outside the budget, so its first relationship is the
+item always returned. The text block repeats the structured result, so the
+response on the wire is about twice the budget.
+
+Every budgeted result reports `budget_exhausted`. When it is true it also
+reports `omitted_by_budget`: for each list, how many items were selected within
+that list's own limit but not returned (`entries`; `files`; `definitions`;
+`relationships`; or `focus`, `relationships`, `diagnostics`, and `edges`).
+Omitted items are not less relevant or less certain than returned ones; they
+come later in the list's order.
+
+### Narrowing Hints
+
+A result whose list was cut, by a limit or by the budget, carries
+`narrowing_hints`; a complete result carries none. Each hint is
+`{"list": …, "action": …, "arguments": […]}`:
+
+| `action` | Meaning |
+| --- | --- |
+| `narrow` | Give one of these arguments to select fewer items. |
+| `raise` | Give a larger value for one of these arguments. |
+| `lower` | Give a smaller value for one of these arguments. |
+| `continue` | Repeat the call with `cursor` set to `next_cursor`. |
+
+`list` names the cut list, or `response` when the budget cut it. A hint names
+only arguments the same tool declares; it omits arguments the call already
+gave (except `path_prefix`, which a longer prefix narrows, and a `direction`
+or `resolution` that still selects everything) and limits already at their
+maximum. Hints are derived from which list was cut and which arguments were
+given, never from entity names, paths, or counts, and they are not graph
+claims: a hint says nothing about the items it did not return.
+
+### Cursors
+
+`semidx_outline`, `semidx_repo_map`, `semidx_find_definitions`, and
+`semidx_references` return `offset` (the position of their first returned
+item) and, while items remain after this page, `next_cursor`. Repeat the call
+with `cursor` set to it and the same other arguments; `limit` and
+`max_response_bytes` may change between pages. Pages over one snapshot
+revision return every item exactly once, in order, and keep the whole call's
+totals. `semidx_context` has no cursor: narrow it with `entity_id`,
+`direction`, or its limits.
+
+A cursor is opaque. It is valid only for the server process and tool that
+issued it, the snapshot revision it was issued at, and the same arguments;
+anything else is a tool error (`isError: true`) that says which of those
+differs. A restarted server refuses every earlier cursor, because its revision
+numbers start again. After
+`semidx_refresh` publishes a new revision, every earlier cursor fails, so a
+walk never mixes two graph states; repeat the call without `cursor`. A refresh
+that finds no change keeps the revision, and cursors stay valid because the
+graph is the same. `tools/list` is not paginated and refuses any `cursor`.
+
+### Traversal
+
+`semidx_context` takes `direction` (`both`, `incoming`, `outgoing`) and `depth`
+(1 to 3). A `direction` that excludes a list omits that list and its
+`…_total` and `…_truncated` fields. At `depth` 1 (the default) the result is
+the one-step context described above.
+
+At `depth` 2 or 3 the result adds `traversal`: `depth`, `direction`, `edges`,
+`edges_total`, `edges_truncated`, and `reached_total`. Starting from the
+entities the focus lists reached, each step lists the relationships of the
+entities reached at the step before (in `direction`), up to `depth` steps from
+the focus. Each edge is a relationship with `direction`, `distance` (2 or 3),
+and `from`, the entity it was found from. In a traversal result:
+
+- every entity is rendered with its fields at its first occurrence and as
+  `{"id": …}` afterwards (a focus entity keeps its own focus rendering);
+- a relationship already listed, in a focus list or at an earlier step, is not
+  listed again;
+- an entity is expanded at most once and focus entities never, so cycles end;
+- a designator is never followed, and every edge keeps its resolution,
+  producer, freshness, and evidence, so a fact and an unresolved call stay
+  apart at every distance;
+- `relationship_limit` applies per expanded entity and direction;
+  `edges_total` counts the relationships of the entities that were expanded,
+  and `edges_truncated` says whether fewer edges were listed. An entity reached
+  only through an edge that was not listed is not expanded.
 
 ## Source Text
 
@@ -358,6 +503,7 @@ middle; the list that lost items says so through its `…_total` and
 | Non-object `params` or `_meta`; non-string `io.modelcontextprotocol/protocolVersion`; `2026-07-28` request without `clientCapabilities`; `tools/call` without a string `name` or with non-object `arguments`; unknown tool; any `cursor`; `tools/list` or `tools/call` in `2025-06-18` form before `initialize`; `initialize` without a string `protocolVersion` | `-32602` |
 | `io.modelcontextprotocol/protocolVersion` other than `2026-07-28` | `-32022` with `data.supported` and `data.requested` |
 | Invalid argument value or unknown argument | Tool result with `isError: true` |
+| `cursor` not issued by this server, issued by another server process or another tool, at another snapshot revision, or for other arguments | Tool result with `isError: true` saying which, and to repeat the call without `cursor` after a refresh |
 | Refresh cannot scan the root | Tool result with `isError: true`; the index is unchanged and the previous snapshot stays published |
 | Refresh fails while reconciling or publishing | Tool result with `isError: true` saying whether the index was rebuilt; the previous snapshot stays published, and the next refresh publishes the rebuilt index or retries the rebuild |
 
@@ -387,14 +533,15 @@ Notifications, including malformed ones, are never answered.
 - The graph lives in memory and is rebuilt on every start. Edits are observed
   only after `semidx_refresh`. A refresh with no source changes publishes the
   same revision.
-- Output is bounded per list, not per response. Compact defaults keep common
-  calls small, but a `semidx_context` with a high `relationship_limit` on a
-  call-heavy function, a `semidx_references` for a widely called function, or
-  a whole-repository map can still return a large message: over this
-  repository the compact context of `health` in `src/mcp/tools.zig` at limit
-  500 is about 60 KB. Every tool result also repeats its structured object as JSON text for
-  clients without structured-content support, which roughly doubles its size
-  on the wire.
+- List results stop at the response budget, 32000 structured bytes by
+  default, plus the few hundred bytes of fields that close a result. Every
+  tool result also repeats its structured object as JSON text for clients
+  without structured-content support, so a default response can reach about
+  65 KB on the wire. Whether a client shows the model one copy or both, and
+  where it starts warning or spilling to a file, depends on the client. An
+  explicit `max_response_bytes` up to 2000000 returns larger results, and
+  `semidx_health` and `semidx_refresh` are not budgeted (their size does not
+  grow with the number of definitions).
 - A refresh that fails after reconciliation started (for example, out of
   memory) never publishes a partly updated graph. The server discards that index
   and rebuilds a fresh one from the same scan; the published snapshot stays the

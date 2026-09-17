@@ -30,7 +30,7 @@ evidence would make it ready to implement or close.
 | [003](003_java_classpath_boundaries.md) | open | `semantic_limitation` | [Plan 003 report](../reports/003_java_package_type_resolution_progress.md#residual-risk) | Java same-package resolution treats the repository as one classpath. |
 | [006](006_zig_cross_unit_and_member_calls.md) | open | `coverage_gap` | [Plan 004 report](../reports/004_zig_frontend_and_mcp_preview_progress.md#residual-risk) | Zig calls through receivers, values, nested namespaces, container members, and package imports stay unresolved; local-import calls were resolved by Plan 006. |
 | [008](008_clojure_lexical_scope_coverage.md) | open | `coverage_gap` | [Plan 005 report](../reports/005_mcp_preview_release_readiness_progress.md#stage-25-same-unit-name-resolution-facts-java-and-clojure) | Clojure symbols under forms that may bind names stay unresolved until lexical scope is modeled. |
-| [009](009_mcp_progressive_discovery_and_response_budgets.md) | open | `release_readiness` | [Plan 007 report](../reports/007_mcp_response_budget_and_schema_ergonomics_progress.md#residual-risk) | MCP cold start still needs progressive discovery, compact references, whole-response budgets, and safe continuation. |
+| [010](010_mcp_text_fallback_client_measurement.md) | open | `release_readiness` | [Plan 009 report](../reports/009_mcp_progressive_discovery_and_budgets_progress.md#payload-copies) | Measure how real MCP clients expose the duplicated text fallback before changing it. |
 
 ## Completed Follow-ups
 
@@ -38,4 +38,5 @@ evidence would make it ready to implement or close.
 | --- | --- | --- | --- | --- |
 | [004](004_release_discipline_for_mcp_preview.md) | completed | `release_readiness` | [Plan 005](../plans/005_mcp_preview_release_readiness.md) | Preview release discipline, source-built release notes, and release gate were completed for `v0.1.0-preview.1`. |
 | [005](005_mcp_source_derived_consent_boundary.md) | completed | `release_readiness` | [Plan 005](../plans/005_mcp_preview_release_readiness.md) | Hosted-client consent wording and default no-source-text evidence were completed for the preview release. |
+| [009](009_mcp_progressive_discovery_and_response_budgets.md) | completed | `release_readiness` | [Plan 009](../plans/009_mcp_progressive_discovery_and_budgets.md) | Outline, compact references, truncation hints, whole-response budgets, snapshot-bound cursors, and bounded traversal were delivered; text fallback measurement split into 010. |
 | [007](007_grammar_setup_fetches_unused_unpinned_sources.md) | fixed | `release_readiness` | [Follow-up 007 resolution](007_grammar_setup_fetches_unused_unpinned_sources.md#resolution) | The grammar setup script fetches only the pinned grammars `build.zig` compiles and checks its list against `build.zig`. |

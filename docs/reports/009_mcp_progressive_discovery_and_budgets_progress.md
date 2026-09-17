@@ -1,9 +1,9 @@
 ---
 title: "MCP progressive discovery and response budgets progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-17"
 ---
 
@@ -14,8 +14,15 @@ Companion log for
 
 ## Current Status
 
-Stage 1 is complete: the baseline sizes, the client observation, the hard
-gates, and the shape decisions later stages follow are recorded below.
+Plan 009 is complete. `semidx_outline` is the first orientation call,
+`semidx_references` is compact by default, cut lists carry narrowing hints,
+every list tool stops at a whole-item response budget, four list tools continue
+through cursors bound to one server process and snapshot revision, and
+`semidx_context` traverses up to three steps. The preview reference, gate
+specification, capability matrix, tooling policy, and `MEMORY.md` teach the
+progressive habit loop. Follow-up 009 is closed; text fallback measurement is
+split into Follow-up 010. Final evidence, review, residual risks, and the next
+step are in [Stage 8](#stage-8-documentation-gate-integration-and-handoff).
 
 ## Stage Log
 
@@ -27,7 +34,8 @@ gates, and the shape decisions later stages follow are recorded below.
 | Stage 4: Repository outline | Completed (`49304c3`) | New `semidx_outline` lists the directories and files directly under a directory with unit, language, analysis, diagnostic, and definition counts and no definition entities. The root outline of this repository is 4,610 transcript bytes against 157,047 for the compact whole-repository map (2%). It is step 2 of the gate's required call sequence. |
 | Stage 5: Whole-response budget | Completed (`755f879`) | Every list tool takes `max_response_bytes` (32,000 default, 2,000,000 max), appends whole items only while the structured result stays within it, and reports `budget_exhausted`, `omitted_by_budget`, and `response` hints. The default whole-repository map now returns 31,355 structured bytes with 68 files selected and reports the rest omitted. |
 | Stage 6: Revision-bound cursors | Completed (`d57d886`) | `semidx_outline`, `semidx_repo_map`, `semidx_find_definitions`, and `semidx_references` take `cursor` and return `offset` and, while items remain, `next_cursor`. A cursor from another tool, snapshot revision, or argument set is a tool error naming the mismatch. The new `response_budget` hard gate walks the default whole-repository map: 68 files over 3 pages. |
-| Stage 7: Bounded graph traversal | Completed | `semidx_context` takes `direction` (`both` default) and `depth` (1 default, max 3). Depth 1 output is unchanged; depth 2 and 3 add `traversal.edges` with `distance` and `from`, render every entity once and name it by id afterwards, list each relationship once, and never expand an entity twice. Over this repository `writeString` incoming at depth 2 lists 52 second-step call facts reaching 31 entities. |
+| Stage 7: Bounded graph traversal | Completed (`1eeb0cb`) | `semidx_context` takes `direction` (`both` default) and `depth` (1 default, max 3). Depth 1 output is unchanged; depth 2 and 3 add `traversal.edges` with `distance` and `from`, render every entity once and name it by id afterwards, list each relationship once, and never expand an entity twice. Over this repository `writeString` incoming at depth 2 lists 52 second-step call facts reaching 31 entities. |
+| Stage 8: Documentation, gate integration, and handoff | Completed | The preview reference documents outline, response budget, narrowing hints, cursors, and traversal, and recommends `health -> outline -> repo_map(path_prefix) -> find -> references/context`; review found and fixed one cursor defect (cursors now name the server process); final gate and size evidence below. |
 
 ## Plan Readiness Gate
 
@@ -74,7 +82,9 @@ stages do not guess:
   page size between pages. A cursor from another tool, revision, or argument set
   is a tool error (`isError: true`) naming which of those differs. A rebuilt
   index publishes revisions above the old ones (`Graph.idFloor`), so a revision
-  number never names two graph states within one process.
+  number never names two graph states within one process. (Stage 8 review
+  added the server process to the cursor: numbering restarts in a new
+  process.)
 - **Traversal** extends `semidx_context` with `direction` (`both` default,
   `incoming`, `outgoing`) and `depth` (1 default, maximum 3). At depth 1 the
   result is unchanged except that `direction` can omit one list. At depth 2 or
@@ -401,3 +411,145 @@ Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig` (test),
 | `zig fmt --check build.zig src tests` | Pass |
 | `zig build test-mcp --summary all` | Pass; 28 passed, 1 skipped. New test over a cycle (`a`->`b`->`a`), a repeated neighbor (`c` from `a` and `b`), and an unresolved call: depth 1 unchanged; `direction` omits a list; depth 2 and 3 list the same four second-step edges and end; every end in them is `{id}`; each of the three entities is rendered with fields exactly once; the unresolved edge keeps its designator and `missing`; with both directions each relationship is listed once and the traversal reaches distance 3; `relationship_limit` 1 cuts edges with `edges` hints; under a 1,200-byte budget no `{id}` names an unrendered entity. |
 | `zig build preview-gate --summary all` | Pass; 14/14 steps, 6/6 tests; `writeString` incoming depth 2: 52 of 52 edges, all facts, 31 entities reached, 66,972 transcript bytes, budget not exhausted |
+
+## Stage 8: Documentation, Gate Integration, And Handoff
+
+Changed files: `docs/mcp/local_preview.md`, `docs/spec/capability_matrix.md`,
+`docs/agent-policy/tooling.md`, `docs/agent-policy/testing.md` (dogfood lane
+description), `.agents/skills/semidx-code-exploration/SKILL.md`, `README.md`,
+`docs/design/001_project_roadmap.md`,
+`docs/design/002_product_adoption_strategy.md`, `MEMORY.md`,
+`docs/followups/009_mcp_progressive_discovery_and_response_budgets.md`,
+`docs/followups/010_mcp_text_fallback_client_measurement.md` (new),
+`docs/followups/README.md`,
+`docs/plans/009_mcp_progressive_discovery_and_budgets.md` (frontmatter),
+`src/mcp/root.zig` and `src/mcp/tools.zig` (server instructions, cursor process
+binding), `tests/mcp_dogfood_test.zig` (comment), this log.
+
+- **Preview reference.** The first-call sequence now starts with
+  `semidx_outline` and says when to use it versus `semidx_repo_map`. New
+  sections, owning the preview terms, describe the outline, the response
+  budget, narrowing hints, cursors, and traversal; the tools table, budget
+  table, compact table, relationship fields, errors, "must not infer" list, and
+  limits are updated. The server's `instructions` recommend the same start.
+- **README.** Plane: AI-agent onboarding. Its tool list and first-session loop
+  named the old sequence and "pagination" as absent; both now match the
+  preview. No proof command or evidence was added to it.
+- **ADR.** No new record. Outline, budgets, hints, cursors, and traversal are
+  projection mechanics of the local MCP consumer ADR 005 admitted; its §11
+  answers still hold: no graph semantics, no relationship created from output
+  shape, one snapshot revision per result and per cursor walk, local only, no
+  source text by default. ADR 005's consequence that pagination beyond small
+  bounded lists was future work is historical and left unchanged.
+
+### Final Sizes
+
+Same method as Stage 1, final tree, this repository (68 units, revision 90 of
+the working tree; `src/mcp/` grew, so the whole map is larger than the
+baseline).
+
+| Call | Baseline transcript | Final transcript | Final structured | Outcome |
+| --- | ---: | ---: | ---: | --- |
+| `semidx_outline` `{}` | none | 4,741 | 2,095 | complete, 5 entries |
+| `semidx_repo_map` `{}` | 155,339 | 67,857 | 31,506 | `budget_exhausted`, `next_cursor` |
+| `semidx_repo_map` `limit` 1000, budget 2,000,000 | 155,341 | 157,449 | 72,936 | complete |
+| `semidx_repo_map` `path_prefix` `src/mcp/` | 25,641 | 27,745 | 12,685 | complete |
+| `semidx_references` `writeString`, `limit` 1000 | 56,927 | 27,941 | 12,754 | compact default, 26 calls |
+| same, `detail: "full"` | | 64,337 | 29,913 | complete |
+| `semidx_references` `scanDir` | 6,786 | 3,639 | 1,563 | complete |
+| `semidx_context` `scan` | 11,794 | 11,966 | 5,459 | complete |
+| `semidx_context` `health`, `relationship_limit` 500 | 60,962 | 61,468 | 28,343 | complete |
+| `semidx_context` `init` (multi-focus) | 59,524 | 61,248 | 28,480 | complete |
+| `semidx_context` `writeString`, incoming, `depth` 2 | none | 66,856 | 30,711 | complete, 52 second-step edges |
+
+The documented cold start (`health`, root `outline`, one scoped `repo_map`)
+is about 39 KB on the wire here, against 162 KB for `health` plus the flat
+whole-repository map before this plan.
+
+### Gate Result
+
+`zig build preview-gate --summary all` on the final tree: pass, 14/14 steps,
+6/6 tests, 28 `hard pass` lines, 53 observations.
+
+| Gate | `repository-copy` | `fixture` |
+| --- | --- | --- |
+| `call_sequence` | Pass, with `outline` | Pass, with `outline` |
+| `compact_budget` | Pass; map 47%, references 43%, context 39% | Not applicable |
+| `response_budget` | Pass; 68 files over 3 pages, largest page 70,875 bytes | Not applicable |
+| `honest_degradation` | Not applicable | Pass; the outline counts the failing unit pending with its analysis failure |
+| Every other gate | Pass | Pass |
+
+Observations: root outline 4,742 bytes against 157,449 for the unbudgeted
+compact map (3%) in `repository-copy`, 4,590 bytes in `fixture`;
+`writeString` incoming depth 2: 52 of 52 edges, all facts, 31 entities
+reached, 66,972 bytes.
+
+### Closure Verification
+
+Zig 0.16.0, Debug, macOS arm64, 2026-09-17, no network used.
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Pass |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-core -Dgrammars-dir=/nonexistent --summary all` | Pass; 89/89 |
+| `zig build test --summary all` | Pass; 213 passed, 1 skipped (the dogfood recovery test, run by `dogfood`) |
+| `zig build test-mcp --summary all` | Pass; 28 passed, 1 skipped |
+| `zig build preview-gate --summary all` (includes `zig build dogfood`) | Pass; 14/14 steps, 6/6 tests |
+| `./scripts/check-agent-attribution.sh --all` | Pass |
+| `git diff --check` | Pass |
+| `wc -l RULES.md` | 171, unchanged |
+
+### Review
+
+Self-review of `1f95838..HEAD` against the plan, the constitution's §3, §5,
+and §7, the testing policy, and the preview reference.
+
+| Item | Disposition |
+| --- | --- |
+| A server restart numbers revisions from the start again, so a cursor kept by a client across a restart could match a new process's revision and arguments and page over a different graph. | **Fixed** in this stage: a cursor also carries a random per-process instance, and any other process refuses it ("issued by another server process"). Test added; full lane and gate rerun. |
+| With a small budget, `semidx_references` targets could spend the budget so a page returns no relationship and its cursor never advances. | **Fixed** in Stage 6 before commit: targets (at most 50) are outside the budget and the first relationship of a page is always returned; the cursor walk test at `max_response_bytes` 1 proves progress. |
+| The budget does not count the fixed fields after the last item. | Accepted and documented: they are a few hundred bytes; the multi-focus test bounds the whole text at budget plus 2,000. |
+| At depth 2 or 3 a focus entity can appear rendered in another focus's list and again in its own focus block. | Accepted and documented: a focus keeps its focus rendering; every other entity is rendered once, and no `{id}` names an unrendered entity (tested under a tight budget). |
+| `edges_total` counts relationships of expanded entities only; entities reached through unlisted edges are not expanded. | Accepted and documented; `edges_truncated` and hints say the traversal was cut. |
+| Hints could be read as relevance claims. | Rejected as a defect: they are derived only from the cut list and the given arguments (checked at compile time against declarations) and documented as usage guidance, never graph claims. |
+| Compact references could hide an unresolved claim. | Rejected: tests show category, `missing`, designator, producer, and freshness on every compact relationship; full mode keeps methods, explanations, versions, byte offsets, and revisions. |
+
+### Residual Risks
+
+- **Text fallback duplication.** Every result still carries structured content
+  and the same object as text, about twice the budget on the wire. Only the
+  stdio client and one real-client call were observed
+  ([Follow-up 010](../followups/010_mcp_text_fallback_client_measurement.md)).
+- **Ranking not implemented.** Lists are in graph or path order; nothing ranks
+  candidates, by design of this plan's non-scope.
+- **No stable semantic contract.** `semantic_contract_version` is `null`; tool
+  names, arguments, and fields (including the new ones) may change.
+- **Remaining large outputs.** An explicit `max_response_bytes` up to
+  2,000,000 can still return a very large result; `semidx_health` and
+  `semidx_refresh` are unbudgeted (bounded by languages and fixed fields); a
+  references page carries up to 50 targets outside the budget.
+- **Budget is bytes, not tokens.** Client token limits vary with content; the
+  32,000-byte default is tuned to ordinary calls over this repository and one
+  client observation.
+- **Unreleased behavior.** The binary still reports `0.1.0-preview.2`, whose
+  release notes predate these tools.
+
+### Drift Check At Closure
+
+- The constitution, `SPEC.md`, `CORE.md`, and `CONFORMANCE.md` are unaffected:
+  no graph semantics, core kind, contract, persistence, or remote operation was
+  added, and output shape still selects and renders only recorded values.
+- `docs/mcp/local_preview.md` owns *outline*, *response budget*, *narrowing
+  hint*, *cursor*, and *traversal* as preview terms; `GLOSSARY.md` needs no
+  entry. The gate reference owns the new `response_budget` gate.
+- Aligned: preview reference, gate specification, capability matrix, tooling
+  and testing policies, exploration skill, README, roadmap, adoption strategy,
+  `MEMORY.md`, Follow-ups 009 and 010 and their index, Plan 009 frontmatter.
+
+### Next Step
+
+Cut the next preview (`0.1.0-preview.3`) so installed users get these tools,
+with `zig build preview-gate` as the habit-loop part of its release gate and
+release notes that name the new arguments and fields. Then measure real
+clients for Follow-up 010 before touching the text fallback.

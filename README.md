@@ -51,14 +51,13 @@ Implemented today:
 - Java same-package top-level type facts under a deliberately narrow rule;
 - Zig top-level functions and containers, direct member functions, same-unit
   bare calls, and exact local relative `@import` alias calls;
-- local MCP tools: `semidx_health`, `semidx_repo_map`,
+- local MCP tools: `semidx_health`, `semidx_outline`, `semidx_repo_map`,
   `semidx_find_definitions`, `semidx_references`, `semidx_context`, and
-  `semidx_refresh`.
+  `semidx_refresh`, with response budgets and snapshot-bound continuation.
 
 Not present yet:
 
-- persistence, file watching, daemon lifecycle, HTTP/gRPC, pagination,
-  subscriptions, package-manager distribution, or binary releases;
+- persistence, file watching, daemon lifecycle, HTTP/gRPC, subscriptions, package-manager distribution, or binary releases;
 - a published semantic contract version or stable public schema set;
 - complete Java, Clojure, or Zig language support;
 - vectors, embeddings, a retrieval pipeline, or source-text output by default.
@@ -124,11 +123,13 @@ For a first agent session, use this habit loop:
 
 1. `semidx_health` to check the root, snapshot revision, languages, parsers,
    diagnostics, and whether the graph is current enough.
-2. `semidx_repo_map` with a `path_prefix` to orient by files and top-level
-   definitions.
-3. `semidx_find_definitions` before opening likely definition files.
-4. `semidx_references` or `semidx_context` before editing a target.
-5. `semidx_refresh` after edits, before trusting later graph answers.
+2. `semidx_outline` to see which directories and files hold units,
+   definitions, and diagnostics, without listing every definition.
+3. `semidx_repo_map` with a `path_prefix` to orient by files and top-level
+   definitions in the part that matters.
+4. `semidx_find_definitions` before opening likely definition files.
+5. `semidx_references` or `semidx_context` before editing a target.
+6. `semidx_refresh` after edits, before trusting later graph answers.
 
 By default MCP results contain graph values only: paths, ranges, entity names,
 ids, relationships, resolution, freshness, producers, and diagnostics. semidx
