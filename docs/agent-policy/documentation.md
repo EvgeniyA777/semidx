@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-14"
+updated: "2026-09-17"
 ---
 
 # Documentation Policy
@@ -27,6 +27,10 @@ updated: "2026-09-14"
   but its check mechanics are not immutable constitutional text.
 - `GLOSSARY.md` owns the rest of the project vocabulary. It is descriptive, not
   normative, and must not restate the constitution's Defined Terms.
+- When a plan, ADR, report, specification, or policy introduces durable project
+  vocabulary outside the constitution's Defined Terms and outside CORE/SPEC-owned
+  kind, schema, or contract definitions, update `GLOSSARY.md` in the same change
+  or explicitly record which document owns the term.
 - `SPEC.md` is the companion requirements document named by role in the
   constitution. It owns changing requirements, the language-extension catalogue,
   schema vocabulary, and semantic-contract publication and migration procedures.
