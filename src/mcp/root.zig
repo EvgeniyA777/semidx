@@ -277,6 +277,7 @@ pub const Server = struct {
         };
         const outcome = switch (tool) {
             .semidx_health => tools.health(&ctx, &body_stringify, arguments, try self.status(arena)),
+            .semidx_outline => tools.outline(&ctx, &body_stringify, arguments),
             .semidx_repo_map => tools.repoMap(&ctx, &body_stringify, arguments),
             .semidx_find_definitions => tools.findDefinitions(&ctx, &body_stringify, arguments),
             .semidx_references => tools.references(&ctx, &body_stringify, arguments),
@@ -1015,6 +1016,112 @@ test "compact references render each target once and keep every claim's resoluti
     try testing.expect(full_explanation and full_method);
 }
 
+test "the outline lists a directory's children with exact counts and no definitions" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.init(false, "pub fn shout() void {\n    loud();\n}\n\nfn loud() void {}\n");
+    defer h.deinit();
+    try h.tmp.dir.createDirPath(test_io, "lib/deep");
+    try h.tmp.dir.writeFile(test_io, .{ .sub_path = "lib/a.zig", .data = "pub fn alpha() void {}\n" });
+    try h.tmp.dir.writeFile(test_io, .{ .sub_path = "lib/deep/b.zig", .data = "pub fn beta() void {}\n\nconst Box = struct {\n    fn open() void {}\n};\n" });
+    // An empty container body fails analysis (follow-up 002).
+    try h.tmp.dir.writeFile(test_io, .{ .sub_path = "lib/broken.zig", .data = "const Empty = struct {};\n" });
+    try h.tmp.dir.writeFile(test_io, .{ .sub_path = "lib/notes.txt", .data = "not a unit\n" });
+    try testing.expect(!(try h.callTool(arena, "semidx_refresh", "{}")).object.get("isError").?.bool);
+
+    const Entries = struct {
+        fn of(harness: *Harness, a: Allocator, arguments: []const u8) !std.json.ObjectMap {
+            const result = try harness.callTool(a, "semidx_outline", arguments);
+            try testing.expect(!result.object.get("isError").?.bool);
+            // The outline counts definitions; it never lists one.
+            try testing.expect(std.mem.indexOf(u8, harness.out.written(), "\"definitions\"") == null);
+            try testing.expect(std.mem.indexOf(u8, harness.out.written(), "alpha") == null);
+            return result.object.get("structuredContent").?.object;
+        }
+        fn named(structured: std.json.ObjectMap, name: []const u8) !std.json.ObjectMap {
+            for (structured.get("entries").?.array.items) |entry| {
+                if (std.mem.eql(u8, name, entry.object.get("name").?.string)) return entry.object;
+            }
+            return error.TestExpectedEntry;
+        }
+    };
+
+    const root = try Entries.of(&h, arena, "{}");
+    try testing.expectEqualStrings("", root.get("path_prefix").?.string);
+    const names = [_][]const u8{ "extra.zig", "greeter.zig", "lib" };
+    const entries = root.get("entries").?.array.items;
+    try testing.expectEqual(names.len, entries.len);
+    for (names, entries) |name, entry| try testing.expectEqualStrings(name, entry.object.get("name").?.string);
+    try testing.expectEqual(@as(i64, 3), root.get("entries_total").?.integer);
+    try testing.expect(!root.get("truncated").?.bool);
+    try testing.expect(root.get("narrowing_hints") == null);
+    try testing.expectEqual(@as(i64, 100), root.get("budget").?.object.get("limit").?.integer);
+
+    const greeter = try Entries.named(root, "greeter.zig");
+    try testing.expectEqualStrings("file", greeter.get("type").?.string);
+    try testing.expectEqualStrings("greeter.zig", greeter.get("path").?.string);
+    try testing.expectEqualStrings("current", greeter.get("unit").?.object.get("analysis").?.string);
+    try testing.expectEqual(@as(i64, 2), greeter.get("counts").?.object.get("top_level_definitions").?.integer);
+    try testing.expect(greeter.get("counts").?.object.get("units") == null);
+
+    // A directory's counts are cumulative over every unit under it.
+    const lib = try Entries.named(root, "lib");
+    try testing.expectEqualStrings("directory", lib.get("type").?.string);
+    try testing.expectEqualStrings("lib/", lib.get("path").?.string);
+    try testing.expect(lib.get("unit") == null);
+    const lib_counts = lib.get("counts").?.object;
+    try testing.expectEqual(@as(i64, 3), lib_counts.get("units").?.integer);
+    try testing.expectEqual(@as(i64, 3), lib_counts.get("languages").?.object.get("zig").?.integer);
+    try testing.expectEqual(@as(i64, 0), lib_counts.get("languages").?.object.get("java").?.integer);
+    try testing.expectEqual(@as(i64, 2), lib_counts.get("analysis").?.object.get("current").?.integer);
+    try testing.expectEqual(@as(i64, 1), lib_counts.get("analysis").?.object.get("pending").?.integer);
+    try testing.expectEqual(@as(i64, 1), lib_counts.get("diagnostics").?.object.get("analysis_failed").?.integer);
+    try testing.expectEqual(@as(i64, 3), lib_counts.get("top_level_definitions").?.integer);
+    try testing.expectEqual(@as(i64, 1), lib_counts.get("nested_definitions").?.integer);
+
+    // Totals agree with health.
+    const health = (try h.callTool(arena, "semidx_health", "{}")).object.get("structuredContent").?.object;
+    const totals = root.get("totals").?.object;
+    try testing.expectEqual(health.get("units").?.object.get("total").?.integer, totals.get("units").?.integer);
+    try testing.expectEqual(health.get("diagnostics").?.object.get("unsupported_construct").?.integer, totals.get("diagnostics").?.object.get("unsupported_construct").?.integer);
+
+    // A trailing slash is optional; children are one level deep.
+    for ([_][]const u8{ "{\"path_prefix\":\"lib\"}", "{\"path_prefix\":\"lib/\"}" }) |arguments| {
+        const in_lib = try Entries.of(&h, arena, arguments);
+        try testing.expectEqualStrings("lib/", in_lib.get("path_prefix").?.string);
+        const lib_names = [_][]const u8{ "a.zig", "broken.zig", "deep" };
+        const lib_entries = in_lib.get("entries").?.array.items;
+        try testing.expectEqual(lib_names.len, lib_entries.len);
+        for (lib_names, lib_entries) |name, entry| try testing.expectEqualStrings(name, entry.object.get("name").?.string);
+        try testing.expectEqual(lib_counts.get("units").?.integer, in_lib.get("totals").?.object.get("units").?.integer);
+    }
+
+    // File counts agree with the repository map of the same file.
+    const deep = try Entries.of(&h, arena, "{\"path_prefix\":\"lib/deep\"}");
+    const b = try Entries.named(deep, "b.zig");
+    try testing.expectEqualStrings("lib/deep/b.zig", b.get("path").?.string);
+    const map = (try h.callTool(arena, "semidx_repo_map", "{\"path_prefix\":\"lib/deep/\"}")).object.get("structuredContent").?.object;
+    const mapped = map.get("files").?.array.items[0].object;
+    try testing.expectEqual(mapped.get("top_level_definitions_total").?.integer, b.get("counts").?.object.get("top_level_definitions").?.integer);
+    try testing.expectEqual(mapped.get("nested_definitions_total").?.integer, b.get("counts").?.object.get("nested_definitions").?.integer);
+
+    const bounded = try Entries.of(&h, arena, "{\"limit\":1}");
+    try testing.expectEqual(@as(usize, 1), bounded.get("entries").?.array.items.len);
+    try testing.expectEqual(@as(i64, 3), bounded.get("entries_total").?.integer);
+    try testing.expect(bounded.get("truncated").?.bool);
+    try expectHint(bounded, "entries", "narrow", &.{ "path_prefix", "language" });
+    try expectHint(bounded, "entries", "raise", &.{"limit"});
+
+    for ([_][]const u8{ "{\"language\":\"java\"}", "{\"path_prefix\":\"missing\"}" }) |arguments| {
+        const empty = try Entries.of(&h, arena, arguments);
+        try testing.expectEqual(@as(i64, 0), empty.get("entries_total").?.integer);
+        try testing.expectEqual(@as(i64, 0), empty.get("totals").?.object.get("units").?.integer);
+        try testing.expect(!empty.get("truncated").?.bool);
+    }
+}
+
 /// The `arguments` of the hint for `list` and `action`, or null for none.
 fn hintArguments(structured: std.json.ObjectMap, list: []const u8, action: []const u8) ?[]const std.json.Value {
     const hints = structured.get("narrowing_hints") orelse return null;
@@ -1113,6 +1220,7 @@ test "no tool result carries source text unless evidence text was opted into, an
     const extra = "pub fn " ++ long_name ++ "() void {}\n";
     const calls = [_][2][]const u8{
         .{ "semidx_health", "{}" },
+        .{ "semidx_outline", "{}" },
         .{ "semidx_repo_map", "{}" },
         .{ "semidx_repo_map", "{\"detail\":\"full\"}" },
         .{ "semidx_find_definitions", "{}" },

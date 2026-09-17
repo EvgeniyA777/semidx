@@ -26,6 +26,7 @@ const Snapshot = semidx.Snapshot;
 
 pub const Tool = enum {
     semidx_health,
+    semidx_outline,
     semidx_repo_map,
     semidx_find_definitions,
     semidx_references,
@@ -147,6 +148,13 @@ fn define(comptime tool: Tool, comptime title: []const u8, comptime description:
 pub const definitions = [_]Definition{
     define(.semidx_health, "Index health", "Report the configured root, the published snapshot revision, source-unit and graph counts, " ++
         "per-language frontend coverage and parser availability, diagnostic counts, and the last scan outcome.", &.{}),
+    define(.semidx_outline, "Repository outline", "List the directories and files directly under one directory, each with counts of " ++
+        "source units by language and analysis state, diagnostics by kind, and top-level and nested definitions, without " ++
+        "listing any definition. Start orientation here, then call semidx_repo_map with a path_prefix. Bounded; results report truncation.", &.{
+        .{ .name = "path_prefix", .type = .string, .description = "Root-relative, '/'-separated directory; omit for the root." },
+        shared_params.language,
+        countParam("limit", 100, 1000, "Maximum entries."),
+    }),
     define(.semidx_repo_map, "Repository map", "List indexed source units with their analysis state and the top-level definitions the graph " ++
         "records in each. Bounded; results report truncation.", &.{
         .{ .name = "path_prefix", .type = .string, .description = "Root-relative, '/'-separated path prefix." },
@@ -943,6 +951,162 @@ pub fn health(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, status: Statu
 
 fn lessPath(snapshot: *const Snapshot, a: usize, b: usize) bool {
     return std.mem.lessThan(u8, snapshot.units[a].path, snapshot.units[b].path);
+}
+
+/// Counts of source units and what the graph records in them, summed over the
+/// units under one outline entry. Definitions are current definitions, split
+/// as the repository map splits them.
+const OutlineCounts = struct {
+    units: usize = 0,
+    languages: std.enums.EnumArray(model.Language, usize) = .initFill(0),
+    analysis: std.enums.EnumArray(semidx.core.graph.UnitAnalysis, usize) = .initFill(0),
+    diagnostics: std.enums.EnumArray(model.DiagnosticKind, usize) = .initFill(0),
+    top_level_definitions: usize = 0,
+    nested_definitions: usize = 0,
+
+    fn add(self: *OutlineCounts, view: semidx.core.graph.SourceUnitView, unit: OutlineCounts) void {
+        self.units += 1;
+        self.languages.getPtr(view.language).* += 1;
+        self.analysis.getPtr(view.analysis()).* += 1;
+        for (std.enums.values(model.DiagnosticKind)) |kind| self.diagnostics.getPtr(kind).* += unit.diagnostics.get(kind);
+        self.top_level_definitions += unit.top_level_definitions;
+        self.nested_definitions += unit.nested_definitions;
+    }
+
+    /// A file entry leaves out what its unit already says.
+    fn write(self: OutlineCounts, s: *Stringify, per_unit: bool) Error!void {
+        try s.beginObject();
+        if (per_unit) {
+            try s.objectField("units");
+            try s.write(self.units);
+            inline for (.{ .{ "languages", &self.languages }, .{ "analysis", &self.analysis } }) |field| {
+                try s.objectField(field[0]);
+                try s.beginObject();
+                for (std.enums.values(@TypeOf(field[1].*).Key)) |key| {
+                    try s.objectField(@tagName(key));
+                    try s.write(field[1].get(key));
+                }
+                try s.endObject();
+            }
+        }
+        try s.objectField("diagnostics");
+        try s.beginObject();
+        for (std.enums.values(model.DiagnosticKind)) |kind| {
+            try s.objectField(@tagName(kind));
+            try s.write(self.diagnostics.get(kind));
+        }
+        try s.endObject();
+        try s.objectField("top_level_definitions");
+        try s.write(self.top_level_definitions);
+        try s.objectField("nested_definitions");
+        try s.write(self.nested_definitions);
+        try s.endObject();
+    }
+};
+
+/// Diagnostic and current definition counts of every unit, in one pass over
+/// the snapshot each.
+fn unitCounts(ctx: *Context) Allocator.Error!std.AutoHashMapUnmanaged(model.SourceUnitId, OutlineCounts) {
+    var counts: std.AutoHashMapUnmanaged(model.SourceUnitId, OutlineCounts) = .empty;
+    for (ctx.snapshot.units) |view| try counts.put(ctx.arena, view.id, .{});
+    for (ctx.snapshot.diagnostics) |diagnostic| {
+        const unit = counts.getPtr(diagnostic.unit orelse continue) orelse continue;
+        unit.diagnostics.getPtr(diagnostic.kind).* += 1;
+    }
+    var found = ctx.snapshot.entitiesMatching(.{ .kind = .definition });
+    while (found.next()) |entity| {
+        const id = switch (entity.identity.scope) {
+            .unit => |id| id,
+            .repository => continue,
+        };
+        const unit = counts.getPtr(id) orelse continue;
+        if (entity.identity.container_path.len == 0) unit.top_level_definitions += 1 else unit.nested_definitions += 1;
+    }
+    return counts;
+}
+
+const OutlineEntry = struct {
+    name: []const u8,
+    /// The file's unit; null for a directory.
+    unit: ?semidx.core.graph.SourceUnitView,
+    counts: OutlineCounts = .{},
+
+    fn less(_: void, a: OutlineEntry, b: OutlineEntry) bool {
+        return std.mem.lessThan(u8, a.name, b.name);
+    }
+};
+
+pub fn outline(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
+    const args = try Args(.semidx_outline).init(ctx, arguments);
+    const prefix = std.mem.trimEnd(u8, try args.string("path_prefix") orelse "", "/");
+    const language = try args.choice(model.Language, "language");
+    const limit = try args.count("limit");
+    const directory = if (prefix.len == 0) "" else try std.mem.concat(ctx.arena, u8, &.{ prefix, "/" });
+
+    const counts = try unitCounts(ctx);
+    var totals: OutlineCounts = .{};
+    var entries: std.ArrayList(OutlineEntry) = .empty;
+    var by_name: std.StringHashMapUnmanaged(usize) = .empty;
+    for (ctx.snapshot.units) |view| {
+        if (!std.mem.startsWith(u8, view.path, directory)) continue;
+        if (language) |l| {
+            if (view.language != l) continue;
+        }
+        const unit = counts.get(view.id).?;
+        totals.add(view, unit);
+        const rest = view.path[directory.len..];
+        if (std.mem.indexOfScalar(u8, rest, '/')) |slash| {
+            const slot = try by_name.getOrPut(ctx.arena, rest[0..slash]);
+            if (!slot.found_existing) {
+                slot.value_ptr.* = entries.items.len;
+                try entries.append(ctx.arena, .{ .name = rest[0..slash], .unit = null });
+            }
+            entries.items[slot.value_ptr.*].counts.add(view, unit);
+        } else {
+            var entry: OutlineEntry = .{ .name = rest, .unit = view };
+            entry.counts.add(view, unit);
+            try entries.append(ctx.arena, entry);
+        }
+    }
+    std.mem.sort(OutlineEntry, entries.items, {}, OutlineEntry.less);
+
+    try beginStructured(ctx, s);
+    try s.objectField("path_prefix");
+    try protocol.writeString(s, directory);
+    try s.objectField("entries");
+    try s.beginArray();
+    for (entries.items[0..@min(entries.items.len, limit)]) |entry| {
+        try s.beginObject();
+        try s.objectField("name");
+        try protocol.writeString(s, entry.name);
+        try s.objectField("path");
+        try protocol.writeString(s, try std.mem.concat(ctx.arena, u8, &.{ directory, entry.name, if (entry.unit == null) "/" else "" }));
+        try s.objectField("type");
+        try s.write(if (entry.unit == null) "directory" else "file");
+        if (entry.unit) |view| {
+            try s.objectField("unit");
+            try writeUnit(ctx, s, view, .compact);
+        }
+        try s.objectField("counts");
+        try entry.counts.write(s, entry.unit == null);
+        try s.endObject();
+    }
+    try s.endArray();
+    try s.objectField("entries_total");
+    try s.write(entries.items.len);
+    try s.objectField("truncated");
+    try s.write(entries.items.len > limit);
+    try s.objectField("totals");
+    try totals.write(s, true);
+    var hints: Hints = .{};
+    if (entries.items.len > limit) {
+        try hints.add(ctx.arena, "entries", .narrow, try std.mem.concat(ctx.arena, []const u8, &.{ &.{"path_prefix"}, try args.unset(&.{"language"}) }));
+        try hints.add(ctx.arena, "entries", .raise, raisable(.semidx_outline, "limit", limit));
+    }
+    try hints.write(s);
+    try s.objectField("budget");
+    try s.write(.{ .limit = limit });
+    try s.endObject();
 }
 
 pub fn repoMap(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {

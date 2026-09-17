@@ -145,6 +145,25 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     try testing.expectEqual(@as(i64, @intCast(copy.units)), units.get("total").?.integer);
     try testing.expect(units.get("current").?.integer > 0);
 
+    // -- outline: the cold-start orientation call ------------------------------
+    var outline_bytes: usize = undefined;
+    const root_outline = try gate.sizedCall(28, "semidx_outline", "{}", &outline_bytes);
+    try testing.expectEqual(first_revision, revisionOf(root_outline));
+    try testing.expect(!root_outline.get("truncated").?.bool);
+    const outline_totals = root_outline.get("totals").?.object;
+    try testing.expectEqual(units.get("total").?.integer, outline_totals.get("units").?.integer);
+    var outlined_units: i64 = 0;
+    var src_directory = false;
+    for (root_outline.get("entries").?.array.items) |entry| {
+        const entry_counts = entry.object.get("counts").?.object;
+        if (std.mem.eql(u8, "directory", entry.object.get("type").?.string)) {
+            outlined_units += entry_counts.get("units").?.integer;
+            if (std.mem.eql(u8, "src/", entry.object.get("path").?.string)) src_directory = true;
+        } else outlined_units += 1;
+    }
+    try testing.expectEqual(outline_totals.get("units").?.integer, outlined_units);
+    try testing.expect(src_directory);
+
     // -- repository map --------------------------------------------------------
     var map_bytes: usize = undefined;
     const map = try gate.sizedCall(2, "semidx_repo_map", "{\"limit\":1000}", &map_bytes);
@@ -154,6 +173,7 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     try testing.expectEqual(first_revision, revisionOf(full_map));
     try testing.expectEqual(map.get("files_total").?.integer, full_map.get("files_total").?.integer);
     try expectAtMostHalf(&gate, "semidx_repo_map limit 1000", map_bytes, full_map_bytes);
+    try gate.observe("outline: root outline {d} bytes against the compact whole-repository map {d} bytes ({d}%)", .{ outline_bytes, map_bytes, outline_bytes * 100 / map_bytes });
     try testing.expectEqual(first_revision, revisionOf(map));
     try testing.expectEqual(@as(i64, @intCast(copy.units)), map.get("files_total").?.integer);
     try testing.expect(!map.get("truncated").?.bool);

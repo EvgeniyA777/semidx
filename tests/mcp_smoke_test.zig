@@ -73,7 +73,7 @@ test "semidx-mcp serves both protocol eras over stdio with nothing but protocol 
 
     const list = try client.request(2, "tools/list", "{" ++ modern_meta ++ "}");
     const listed = list.object.get("result").?.object.get("tools").?.array.items;
-    const expected_tools = [_][]const u8{ "semidx_health", "semidx_repo_map", "semidx_find_definitions", "semidx_references", "semidx_context", "semidx_refresh" };
+    const expected_tools = [_][]const u8{ "semidx_health", "semidx_outline", "semidx_repo_map", "semidx_find_definitions", "semidx_references", "semidx_context", "semidx_refresh" };
     try testing.expectEqual(expected_tools.len, listed.len);
     for (expected_tools, listed) |name, tool| try testing.expectEqualStrings(name, tool.object.get("name").?.string);
 

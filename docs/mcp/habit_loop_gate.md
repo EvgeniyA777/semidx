@@ -56,13 +56,14 @@ runs both profiles and is the canonical gate.
 Each profile makes these calls, in this order, over one server process:
 
 1. `semidx_health`
-2. `semidx_repo_map` at the default compact detail
-3. `semidx_find_definitions`
-4. `semidx_references`
-5. `semidx_context`
-6. an edit of a file in the temporary root
-7. `semidx_refresh`
-8. a lookup or context call after the refresh
+2. `semidx_outline`
+3. `semidx_repo_map` at the default compact detail
+4. `semidx_find_definitions`
+5. `semidx_references`
+6. `semidx_context`
+7. an edit of a file in the temporary root
+8. `semidx_refresh`
+9. a lookup or context call after the refresh
 
 A profile may make further calls between these (full-detail comparisons,
 bounded list probes). A profile that skips a required call fails the
@@ -80,14 +81,14 @@ Every hard gate fails the profile. Names are the ones printed on failure.
 | `semantic_contract_null` | Every result carries `semantic_contract_version: null`. |
 | `parsers_available` | `semidx_health` lists every language with `parser.available: true`. |
 | `diagnostics_visible` | `semidx_health` reports diagnostic counts, and the profile's known diagnostics are non-zero: `unsupported_construct` for both profiles, and `analysis_failed` for `fixture`. |
-| `bounded_lists` | Every list tool result (`semidx_repo_map`, `semidx_find_definitions`, `semidx_references`, `semidx_context`) carries `budget`, and at least one call per profile hits its limit and reports `truncated: true` with a total larger than the returned list. |
+| `bounded_lists` | Every list tool result (`semidx_outline`, `semidx_repo_map`, `semidx_find_definitions`, `semidx_references`, `semidx_context`) carries `budget`, and at least one call per profile hits its limit and reports `truncated: true` with a total larger than the returned list. |
 | `resolution_visible` | A known exact call is a `fact`; a known unresolvable call is `unresolved` with a designator target, no entity, and `missing`. |
 | `refresh_revision` | `semidx_refresh` returns a revision greater than the one before the edit, and `previous_revision` equals that earlier revision. |
 | `new_snapshot_observed` | Every call after the refresh reads the refreshed revision, and sees the edit. |
 | `no_source_text` | Without `--allow-evidence-text`: health reports evidence text disabled, no result contains `source_text`, and no body text of the indexed source (including text added by the edit) appears in the stdout transcript. |
 | `stream_discipline` | After stdin closes, stdout carries nothing but the responses already read, the process exits with status 0, stderr is read to its end and contains the exit line, and stdout is valid UTF-8. |
 | `compact_budget` | `repository-copy` only: the default compact `semidx_repo_map`, `semidx_references`, and `semidx_context` transcripts are at most half the same calls with `detail: "full"` over the same snapshot (the Plan 007 budget, extended to references by Plan 009). |
-| `honest_degradation` | `fixture` only: the failing unit is reported with analysis `pending` and no definitions; after an edit makes a unit unparsable, its definitions are absent from default `current` lookups, present as `stale` (same entity id) under `freshness: "any"`, and its unit reports analysis `stale`; the file outside every frontend's coverage is not a unit. |
+| `honest_degradation` | `fixture` only: the failing unit is reported with analysis `pending` and no definitions, and the outline counts it pending with its analysis failure; after an edit makes a unit unparsable, its definitions are absent from default `current` lookups, present as `stale` (same entity id) under `freshness: "any"`, and its unit reports analysis `stale`; the file outside every frontend's coverage is not a unit. |
 
 The profile tests also carry assertions about specific graph content (for
 example Plan 006's member definition and cross-unit call facts). They fail the

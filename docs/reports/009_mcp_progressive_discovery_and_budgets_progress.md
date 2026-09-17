@@ -23,7 +23,8 @@ gates, and the shape decisions later stages follow are recorded below.
 | --- | --- | --- |
 | Stage 1: Evidence refresh and budget targets | Completed (`1f95838`) | Baseline structured and transcript sizes over this repository at `2353145`, one real-client observation, hard gates, soft observations, and the default response budget target. No behavior change. |
 | Stage 2: Compact `semidx_references` | Completed (`9f4f3c2`) | `semidx_references` takes `detail` (`compact` default, `full`). Compact renders each listed target once, with its existence claim, and names a relationship end that is a listed target by `{id}`; the other end, resolution, producer, and evidence are compact. `writeString` at `limit` 1000: 24,716 transcript bytes against 56,964 full (43%), now a `compact_budget` hard gate. |
-| Stage 3: Truncation guidance | Completed | Cut lists in `semidx_repo_map`, `semidx_find_definitions`, `semidx_references`, and `semidx_context` carry `narrowing_hints` naming declared arguments to narrow or raise; complete results carry none. |
+| Stage 3: Truncation guidance | Completed (`ce55c9f`) | Cut lists in `semidx_repo_map`, `semidx_find_definitions`, `semidx_references`, and `semidx_context` carry `narrowing_hints` naming declared arguments to narrow or raise; complete results carry none. |
+| Stage 4: Repository outline | Completed | New `semidx_outline` lists the directories and files directly under a directory with unit, language, analysis, diagnostic, and definition counts and no definition entities. The root outline of this repository is 4,610 transcript bytes against 157,047 for the compact whole-repository map (2%). It is step 2 of the gate's required call sequence. |
 
 ## Plan Readiness Gate
 
@@ -242,3 +243,39 @@ Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig` (test), this log.
 Not rerun: `zig build dogfood`. Hints only add a field to cut lists, and no
 gate reads or forbids it; the gate runs again at Stage 5, which changes
 defaults.
+
+## Stage 4: Repository Outline
+
+Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig` (dispatch and tests),
+`tests/mcp_gate.zig`, `tests/mcp_dogfood_test.zig`,
+`tests/mcp_fixture_gate_test.zig`, `tests/mcp_smoke_test.zig`,
+`docs/mcp/habit_loop_gate.md` (call sequence, `bounded_lists`,
+`honest_degradation`), this log.
+
+- `semidx_outline` takes `path_prefix` (a directory; trailing `/` optional;
+  omitted for the root), `language`, and `limit` (100, max 1000 entries).
+  Entries are sorted by name. A directory entry has `name`, `path` ending in
+  `/`, `type: "directory"`, and cumulative `counts` (`units`, `languages`,
+  `analysis`, `diagnostics`, `top_level_definitions`,
+  `nested_definitions`); a file entry has `type: "file"`, its compact `unit`,
+  and `counts` without the unit-level fields its unit already states. The
+  result carries `path_prefix` as normalized, `entries_total`, `truncated`,
+  `totals` over every matched unit, hints, and `budget`.
+- Definition counts use the same selection as `semidx_repo_map` (current
+  definitions; empty container path is top-level), computed in one pass over
+  entities and one over diagnostics per call. No source text is read; paths
+  are the unit paths.
+- The gate requires `semidx_outline` after `semidx_health`. The
+  `repository-copy` profile checks that outline totals equal health's unit
+  count and that entry counts add up to it, and observes the outline's size
+  against the whole map; the `fixture` profile checks the outline counts the
+  failing unit pending with its analysis failure and does not list the
+  unindexed file.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-mcp --summary all` | Pass; 24 passed, 1 skipped |
+| `zig build preview-gate --summary all` | Pass; 14/14 steps, 6/6 tests; outline 4,610 bytes (repository copy) and 4,458 bytes (fixture) |

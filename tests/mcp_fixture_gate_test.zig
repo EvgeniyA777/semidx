@@ -88,6 +88,16 @@ test "habit loop gate: fixture profile degrades honestly over a controlled root"
     try gate.require(units.get("total").?.integer == copied.len, "honest_degradation", "health counts {d} units for {d} indexable files", .{ units.get("total").?.integer, copied.len });
     try gate.require(units.get("pending").?.integer == 1, "honest_degradation", "health counts {d} pending units, not the one that failed analysis", .{units.get("pending").?.integer});
 
+    // -- outline: the failing unit is counted pending, the unindexed file is absent
+    const root_outline = try gate.call(12, "semidx_outline", "{}");
+    const outline_totals = root_outline.get("totals").?.object;
+    try gate.require(outline_totals.get("units").?.integer == copied.len and
+        outline_totals.get("analysis").?.object.get("pending").?.integer == 1 and
+        outline_totals.get("diagnostics").?.object.get("analysis_failed").?.integer == 1, "honest_degradation", "the outline does not count {d} units with one pending and one analysis failure", .{copied.len});
+    for (root_outline.get("entries").?.array.items) |entry| {
+        try gate.require(!std.mem.eql(u8, unindexed_path, entry.object.get("name").?.string), "honest_degradation", "{s} is listed in the outline", .{unindexed_path});
+    }
+
     // -- repository map --------------------------------------------------------
     const map = try gate.call(2, "semidx_repo_map", "{}");
     try testing.expectEqual(@as(i64, copied.len), map.get("files_total").?.integer);

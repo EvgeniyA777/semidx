@@ -18,12 +18,12 @@ const Value = std.json.Value;
 pub const ObjectMap = std.json.ObjectMap;
 
 /// A step of the habit loop, in the order a profile must make them.
-pub const Step = enum { health, repo_map, find_definitions, references, context, edit, refresh, after_refresh };
+pub const Step = enum { health, outline, repo_map, find_definitions, references, context, edit, refresh, after_refresh };
 
-const required_sequence = [_]Step{ .health, .repo_map, .find_definitions, .references, .context, .edit, .refresh, .after_refresh };
+const required_sequence = [_]Step{ .health, .outline, .repo_map, .find_definitions, .references, .context, .edit, .refresh, .after_refresh };
 
 /// Tools whose results are lists and must report the budget they applied.
-const list_tools = [_][]const u8{ "semidx_repo_map", "semidx_find_definitions", "semidx_references", "semidx_context" };
+const list_tools = [_][]const u8{ "semidx_outline", "semidx_repo_map", "semidx_find_definitions", "semidx_references", "semidx_context" };
 
 pub const Gate = struct {
     arena: std.mem.Allocator,
@@ -101,6 +101,8 @@ pub const Gate = struct {
             .refresh
         else if (self.refreshed_revision != null)
             .after_refresh
+        else if (std.mem.eql(u8, name, "semidx_outline"))
+            .outline
         else if (std.mem.eql(u8, name, "semidx_repo_map"))
             (if (isCompact(result)) .repo_map else null)
         else if (std.mem.eql(u8, name, "semidx_find_definitions"))
@@ -238,7 +240,7 @@ pub const Gate = struct {
             if (next < required_sequence.len and step == required_sequence[next]) next += 1;
         }
         try self.require(next == required_sequence.len, "call_sequence", "the habit loop never reached `{t}`", .{if (next < required_sequence.len) required_sequence[next] else Step.after_refresh});
-        try self.pass("call_sequence", "health, repo_map, find_definitions, references, context, edit, refresh, after_refresh", .{});
+        try self.pass("call_sequence", "health, outline, repo_map, find_definitions, references, context, edit, refresh, after_refresh", .{});
 
         const ended = try self.client.shutdown();
         try self.require(ended.trailing.len == 0, "stream_discipline", "stdout carried {d} bytes after the last response: {s}", .{ ended.trailing.len, ended.trailing });
