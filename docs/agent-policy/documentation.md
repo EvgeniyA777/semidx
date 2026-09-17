@@ -17,6 +17,10 @@ updated: "2026-09-17"
   detailed for the always-loaded rule kernel.
 - `MEMORY.md` owns current implementation reality, active assumptions, known
   gaps, and near-term priorities.
+- `MEMORY.md` is a bounded operational index, not an append-only history. Prefer
+  200-300 lines and keep it below 350 lines unless an active transition needs a
+  temporary exception. Update it by replacing or compressing stale detail into
+  links to ADRs, plans, reports, follow-ups, specs, or implementation files.
 - `ARCHITECTURE_CONSTITUTION.md` owns architectural constraints that must not
   change, including the five terms whose distinctions are themselves
   constraints (entity, node, relationship, assertion, fact).
