@@ -176,6 +176,7 @@ pub const definitions = [_]Definition{
         shared_params.freshness,
         shared_params.resolution,
         countParam("limit", 100, 1000, null),
+        shared_params.detail,
     }),
     define(.semidx_context, "Graph context", "Return a bounded graph neighborhood around an entity (entity_id), a definition name, or a " ++
         "source unit (path): the entity, its unit's analysis state, incoming and outgoing relationships of every " ++
@@ -658,15 +659,16 @@ fn writeEntityRef(ctx: *Context, s: *Stringify, id: model.EntityId, shape: Entit
     try s.endObject();
 }
 
-/// A compact relationship renders the focus end as its id alone and the other
-/// end as a compact entity. Every detail level keeps the claim's resolution
-/// category, producer name, and freshness.
-fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, direction: ?[]const u8, detail: DetailArg, focus: ?model.EntityId) Error!void {
+/// A compact relationship renders an end already in view (a context focus or
+/// a references target) as its id alone and the other end as a compact
+/// entity. Every detail level keeps the claim's resolution category, producer
+/// name, and freshness.
+fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, direction: ?[]const u8, detail: DetailArg, in_view: []const model.EntityId) Error!void {
     const relationship = assertion.relationship().?;
     const end = struct {
-        fn shape(d: DetailArg, f: ?model.EntityId, id: model.EntityId) EntityShape {
+        fn shape(d: DetailArg, view: []const model.EntityId, id: model.EntityId) EntityShape {
             if (d == .full) return .brief;
-            return if (f == id) .id else .compact;
+            return if (std.mem.indexOfScalar(model.EntityId, view, id) != null) .id else .compact;
         }
     };
     try s.beginObject();
@@ -679,13 +681,13 @@ fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, d
     try s.objectField("kind");
     try s.write(@tagName(relationship.kind));
     try s.objectField("source");
-    try writeEntityRef(ctx, s, relationship.source, end.shape(detail, focus, relationship.source));
+    try writeEntityRef(ctx, s, relationship.source, end.shape(detail, in_view, relationship.source));
     try s.objectField("target");
     try s.beginObject();
     switch (relationship.target) {
         .entity => |id| {
             try s.objectField("entity");
-            try writeEntityRef(ctx, s, id, end.shape(detail, focus, id));
+            try writeEntityRef(ctx, s, id, end.shape(detail, in_view, id));
         },
         .designator => |designator| {
             try s.objectField("designator");
@@ -1011,13 +1013,17 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
     const freshness = freshnessFilter(try args.choice(FreshnessArg, "freshness"));
     const resolution = try args.choice(ResolutionArg, "resolution");
     const limit = try args.count("limit");
+    const detail = try args.choice(DetailArg, "detail");
     const targets = try selectTargets(ctx, args, freshness, false);
     const shown_targets = targets[0..@min(targets.len, max_targets)];
+    // Compact names a relationship end that is a listed target by id alone.
+    const in_view = try ctx.arena.alloc(model.EntityId, if (detail == .compact) shown_targets.len else 0);
+    for (in_view, shown_targets[0..in_view.len]) |*id, target| id.* = target.id;
 
     try beginStructured(ctx, s);
     try s.objectField("targets");
     try s.beginArray();
-    for (shown_targets) |target| try writeEntity(ctx, s, target, .full);
+    for (shown_targets) |target| try writeEntity(ctx, s, target, if (detail == .full) .full else .focus);
     try s.endArray();
     try s.objectField("targets_total");
     try s.write(targets.len);
@@ -1042,7 +1048,7 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
                 // still one occurrence.
                 if ((try seen.getOrPut(ctx.arena, assertion.id)).found_existing) continue;
                 total += 1;
-                if (total <= limit) try writeRelationship(ctx, s, assertion, pass.name, .full, null);
+                if (total <= limit) try writeRelationship(ctx, s, assertion, pass.name, detail, in_view);
             }
         }
     }
@@ -1052,7 +1058,7 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
     try s.objectField("truncated");
     try s.write(total > limit);
     try s.objectField("budget");
-    try s.write(.{ .limit = limit, .target_limit = max_targets });
+    try s.write(.{ .detail = detail, .limit = limit, .target_limit = max_targets });
     try s.endObject();
 }
 
@@ -1095,7 +1101,7 @@ pub fn context(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!void {
             var found = snapshot.relationships(pass.filter);
             while (found.next()) |assertion| {
                 n += 1;
-                if (n <= limit) try writeRelationship(ctx, s, assertion, null, detail, entity.id);
+                if (n <= limit) try writeRelationship(ctx, s, assertion, null, detail, &.{entity.id});
             }
             try s.endArray();
             try s.objectField(if (pass.name[0] == 'i') "incoming_total" else "outgoing_total");

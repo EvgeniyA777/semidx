@@ -10,8 +10,8 @@
 //! gate (`docs/mcp/habit_loop_gate.md`): named hard gates fail through
 //! `mcp_gate.zig`, and timing and size are observations in its evidence
 //! summary, except the Plan 007 `compact_budget` gate: the default repository
-//! map and context transcripts are at most half of the same calls with
-//! `detail: "full"` over the same snapshot.
+//! map, references, and context transcripts are at most half of the same
+//! calls with `detail: "full"` over the same snapshot.
 
 const std = @import("std");
 const build_options = @import("build_options");
@@ -257,8 +257,14 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     // -- Plan 006: a call through a local relative import is a cross-unit fact ---
     // Before Plan 006 every `protocol.writeString(...)` was an unresolved
     // designator, so references listed only same-unit callers.
-    const imported = try gate.call(22, "semidx_references", "{\"name\":\"" ++ imported_name ++ "\",\"path\":\"" ++ imported_path ++ "\",\"limit\":1000}");
+    var imported_bytes: usize = undefined;
+    const imported = try gate.sizedCall(22, "semidx_references", "{\"name\":\"" ++ imported_name ++ "\",\"path\":\"" ++ imported_path ++ "\",\"limit\":1000}", &imported_bytes);
     try testing.expect(!imported.get("truncated").?.bool);
+    try testing.expectEqualStrings("compact", imported.get("budget").?.object.get("detail").?.string);
+    var full_imported_bytes: usize = undefined;
+    const full_imported = try gate.sizedCall(27, "semidx_references", "{\"name\":\"" ++ imported_name ++ "\",\"path\":\"" ++ imported_path ++ "\",\"limit\":1000,\"detail\":\"full\"}", &full_imported_bytes);
+    try testing.expectEqual(imported.get("relationships_total").?.integer, full_imported.get("relationships_total").?.integer);
+    try expectAtMostHalf(&gate, "semidx_references writeString limit 1000", imported_bytes, full_imported_bytes);
     // Every caller is classified: the named importer, the unit itself, and any
     // other unit calling through its own local import alias.
     const Bucket = struct { path: []const u8, facts: usize };

@@ -86,7 +86,7 @@ Every hard gate fails the profile. Names are the ones printed on failure.
 | `new_snapshot_observed` | Every call after the refresh reads the refreshed revision, and sees the edit. |
 | `no_source_text` | Without `--allow-evidence-text`: health reports evidence text disabled, no result contains `source_text`, and no body text of the indexed source (including text added by the edit) appears in the stdout transcript. |
 | `stream_discipline` | After stdin closes, stdout carries nothing but the responses already read, the process exits with status 0, stderr is read to its end and contains the exit line, and stdout is valid UTF-8. |
-| `compact_budget` | `repository-copy` only: the default compact `semidx_repo_map` and `semidx_context` transcripts are at most half the same calls with `detail: "full"` over the same snapshot (the Plan 007 budget). |
+| `compact_budget` | `repository-copy` only: the default compact `semidx_repo_map`, `semidx_references`, and `semidx_context` transcripts are at most half the same calls with `detail: "full"` over the same snapshot (the Plan 007 budget, extended to references by Plan 009). |
 | `honest_degradation` | `fixture` only: the failing unit is reported with analysis `pending` and no definitions; after an edit makes a unit unparsable, its definitions are absent from default `current` lookups, present as `stale` (same entity id) under `freshness: "any"`, and its unit reports analysis `stale`; the file outside every frontend's coverage is not a unit. |
 
 The profile tests also carry assertions about specific graph content (for

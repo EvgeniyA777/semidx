@@ -21,7 +21,8 @@ gates, and the shape decisions later stages follow are recorded below.
 
 | Stage | Status | Outcome |
 | --- | --- | --- |
-| Stage 1: Evidence refresh and budget targets | Completed | Baseline structured and transcript sizes over this repository at `2353145`, one real-client observation, hard gates, soft observations, and the default response budget target. No behavior change. |
+| Stage 1: Evidence refresh and budget targets | Completed (`1f95838`) | Baseline structured and transcript sizes over this repository at `2353145`, one real-client observation, hard gates, soft observations, and the default response budget target. No behavior change. |
+| Stage 2: Compact `semidx_references` | Completed | `semidx_references` takes `detail` (`compact` default, `full`). Compact renders each listed target once, with its existence claim, and names a relationship end that is a listed target by `{id}`; the other end, resolution, producer, and evidence are compact. `writeString` at `limit` 1000: 24,716 transcript bytes against 56,964 full (43%), now a `compact_budget` hard gate. |
 
 ## Plan Readiness Gate
 
@@ -181,3 +182,28 @@ passing through a real client without warning (28,095), so ordinary habit-loop
 calls are not cut, while the flat whole-repository map (71,961) is. Explicit
 `max_response_bytes` up to 2,000,000 recovers every current result in one call,
 including the full map (151,989).
+
+## Stage 2: Compact `semidx_references`
+
+Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig` (test),
+`tests/mcp_dogfood_test.zig`, `docs/mcp/habit_loop_gate.md` (`compact_budget`
+row), this log.
+
+- `writeRelationship` takes the ids already in view instead of one focus id,
+  so context passes its focus and references pass every listed target: a
+  recursive call or a call between two targets names both ends by id.
+- Full mode renders exactly what the tool rendered before, plus
+  `budget.detail`.
+- The new test covers a compact call with one fact and one unresolved outgoing
+  call (designator, `missing`, no entity; resolution, producer, freshness, and
+  evidence path and lines on both), an incoming call, and full mode's
+  resolution method and explanation, producer versions, byte offsets, entity
+  extension and revisions, and existence assertion id and revision.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-mcp --summary all` | Pass; 22 passed, 1 skipped (the dogfood recovery test) |
+| `zig build dogfood --summary all` | Pass; 10/10 steps, 5/5 tests; `compact_budget` 47% map, 43% references, 39% context |

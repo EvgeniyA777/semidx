@@ -917,6 +917,104 @@ test "compact context keeps every claim's resolution, producer, and freshness; f
     try testing.expectEqual(@as(i64, 50), refs.get("budget").?.object.get("target_limit").?.integer);
 }
 
+test "compact references render each target once and keep every claim's resolution; full references keep every field" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    // `shout` makes one call the frontend resolves and one it cannot.
+    try h.init(false, "const std = @import(\"std\");\n\npub fn shout() void {\n    std.debug.print(\"x\", .{});\n    loud();\n}\n\nfn loud() void {}\n");
+    defer h.deinit();
+
+    const compact_result = try h.callTool(arena, "semidx_references", "{\"name\":\"shout\",\"direction\":\"both\"}");
+    const compact_bytes = h.out.written().len;
+    const compact = compact_result.object.get("structuredContent").?.object;
+    const compact_text = compact_result.object.get("content").?.array.items[0].object.get("text").?.string;
+    for ([_][]const u8{ "\"explanation\"", "\"method\"", "\"start_byte\"", "\"extension\"", "\"version\"", "\"created_revision\"" }) |absent| {
+        try testing.expect(std.mem.indexOf(u8, compact_text, absent) == null);
+    }
+    const compact_budget = compact.get("budget").?.object;
+    try testing.expectEqualStrings("compact", compact_budget.get("detail").?.string);
+    try testing.expectEqual(@as(i64, 100), compact_budget.get("limit").?.integer);
+    try testing.expectEqual(@as(i64, 50), compact_budget.get("target_limit").?.integer);
+    try testing.expectEqual(@as(i64, 1), compact.get("targets_total").?.integer);
+    try testing.expect(!compact.get("targets_truncated").?.bool);
+
+    // The target is rendered once, with its existence claim.
+    const target = compact.get("targets").?.array.items[0].object;
+    const target_id = target.get("id").?.integer;
+    try testing.expectEqualStrings("shout", target.get("name").?.string);
+    const existence = target.get("existence").?.object;
+    try testing.expectEqualStrings("fact", existence.get("resolution").?.object.get("category").?.string);
+    try testing.expectEqualStrings("frontend.zig", existence.get("producer").?.object.get("name").?.string);
+    try testing.expectEqualStrings("current", existence.get("freshness").?.string);
+
+    const relationships = compact.get("relationships").?.array.items;
+    try testing.expectEqual(@as(i64, 2), compact.get("relationships_total").?.integer);
+    try testing.expectEqual(@as(usize, 2), relationships.len);
+    var fact_to_loud = false;
+    var unresolved_print = false;
+    for (relationships) |item| {
+        const relationship = item.object;
+        try testing.expectEqualStrings("outgoing", relationship.get("direction").?.string);
+        try testing.expectEqualStrings("calls", relationship.get("kind").?.string);
+        try testing.expectEqualStrings("frontend.zig", relationship.get("producer").?.object.get("name").?.string);
+        try testing.expectEqualStrings("current", relationship.get("freshness").?.string);
+        const evidence = relationship.get("evidence").?.object;
+        try testing.expectEqualStrings("extra.zig", evidence.get("unit").?.object.get("path").?.string);
+        try testing.expectEqual(@as(usize, 2), evidence.get("range").?.object.count());
+        // The target end is the listed target, named by id alone.
+        const source = relationship.get("source").?.object;
+        try testing.expectEqual(target_id, source.get("id").?.integer);
+        try testing.expectEqual(@as(usize, 1), source.count());
+        const resolution = relationship.get("resolution").?.object;
+        const end = relationship.get("target").?.object;
+        if (std.mem.eql(u8, "unresolved", resolution.get("category").?.string)) {
+            try testing.expect(resolution.get("missing") != null);
+            try testing.expectEqualStrings("std.debug.print", end.get("designator").?.string);
+            try testing.expect(end.get("entity") == null);
+            unresolved_print = true;
+        } else {
+            try testing.expectEqualStrings("fact", resolution.get("category").?.string);
+            const callee = end.get("entity").?.object;
+            try testing.expectEqualStrings("loud", callee.get("name").?.string);
+            try testing.expect(callee.get("evidence") != null and callee.get("existence") == null);
+            fact_to_loud = true;
+        }
+    }
+    try testing.expect(fact_to_loud and unresolved_print);
+
+    // Incoming: the caller is rendered, the listed target is its id.
+    const incoming = (try h.callTool(arena, "semidx_references", "{\"name\":\"loud\"}")).object.get("structuredContent").?.object;
+    const call = incoming.get("relationships").?.array.items[0].object;
+    try testing.expectEqualStrings("shout", call.get("source").?.object.get("name").?.string);
+    try testing.expectEqual(@as(usize, 1), call.get("target").?.object.get("entity").?.object.count());
+
+    const full_result = try h.callTool(arena, "semidx_references", "{\"name\":\"shout\",\"direction\":\"both\",\"detail\":\"full\"}");
+    try testing.expect(h.out.written().len > compact_bytes);
+    const full = full_result.object.get("structuredContent").?.object;
+    try testing.expectEqualStrings("full", full.get("budget").?.object.get("detail").?.string);
+    const full_target = full.get("targets").?.array.items[0].object;
+    try testing.expect(full_target.get("extension") != null and full_target.get("created_revision") != null and full_target.get("observed_revision") != null);
+    const full_existence = full_target.get("existence").?.object;
+    try testing.expect(full_existence.get("assertion_id") != null and full_existence.get("revision") != null);
+    try testing.expect(full_existence.get("producer").?.object.get("version") != null);
+    var full_explanation = false;
+    var full_method = false;
+    for (full.get("relationships").?.array.items) |item| {
+        const relationship = item.object;
+        try testing.expect(relationship.get("revision") != null);
+        try testing.expect(relationship.get("producer").?.object.get("version") != null);
+        try testing.expectEqual(@as(usize, 6), relationship.get("evidence").?.object.get("range").?.object.count());
+        try testing.expect(relationship.get("evidence").?.object.get("unit").?.object.get("id") != null);
+        try testing.expect(relationship.get("source").?.object.get("evidence") != null);
+        const resolution = relationship.get("resolution").?.object;
+        if (resolution.get("explanation") != null) full_explanation = true;
+        if (resolution.get("method") != null) full_method = true;
+    }
+    try testing.expect(full_explanation and full_method);
+}
+
 test "no tool result carries source text unless evidence text was opted into, and then bounded" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
