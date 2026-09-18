@@ -219,6 +219,11 @@ documents that own history, rationale, and evidence.
   or traversal. Text fallback duplication stays unchanged until
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
   measures real clients.
+- The roadmap now schedules active follow-ups by natural execution window:
+  010 with MCP fallback/release-readiness measurement; 006 as the next Zig
+  dogfood coverage lane; 001 when Zig call-shape work is open; 002 during parser
+  maintenance; 003 before broader Java resolution; and 008 when Clojure becomes
+  an active coverage target.
 - The next Java ADR candidate should be multi-module classpath boundaries before
   Java facts are widened. This is the sharper exactness risk because independent
   roots can share a package name. Java single-type imports are useful, but should

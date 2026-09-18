@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-17"
+updated: "2026-09-18"
 ---
 
 # Project Roadmap
@@ -35,9 +35,11 @@ semantic truth.
 
 ## Current Position
 
-As of 2026-09-17, the Zig dogfood frontend, its Plan 006 widening, and the first
+As of 2026-09-18, the Zig dogfood frontend, its Plan 006 widening, and the first
 local MCP preview are implemented and reviewed. The local MCP previews
 `v0.1.0-preview.1` and `v0.1.0-preview.2` are tagged and pushed to `origin`.
+Plan 009's progressive MCP discovery work is implemented on `dev` but not yet
+published as a preview tag.
 
 Implemented:
 
@@ -65,6 +67,12 @@ Implemented:
   member functions of top-level Zig containers are definitions, and
   `alias.foo(...)` through a local relative `@import` is an exact cross-unit
   `CALLS` fact with a provider dependency.
+- [Plan 009](../plans/009_mcp_progressive_discovery_and_budgets.md) is
+  implemented and reviewed on `dev`
+  ([evidence](../reports/009_mcp_progressive_discovery_and_budgets_progress.md)):
+  MCP discovery now starts with `semidx_outline`, references are compact by
+  default, list tools have whole-response budgets, truncation hints, and
+  authenticated cursors, and `semidx_context` supports bounded traversal.
 
 Tagged (annotated tags, pushed to `origin`):
 
@@ -113,6 +121,17 @@ The next useful sequence is:
 2. Use the MCP preview while developing semidx itself and collect evidence for
    the next semantic expansion, including how real clients show tool results
    to models ([follow-up 010](../followups/010_mcp_text_fallback_client_measurement.md)).
+
+Current follow-ups should be picked up where they naturally fit:
+
+| Timing | Follow-up | Why then |
+| --- | --- | --- |
+| Before changing MCP fallback output; useful during or right after the next preview release pass | [010: MCP text fallback client measurement](../followups/010_mcp_text_fallback_client_measurement.md) | The Plan 009 response budget controls structured output, but every result still carries the JSON text fallback. Measure real clients before shortening or configuring it. This does not block publishing the Plan 009 preview unless the release notes need fresh client observations. |
+| Next Zig dogfood semantic-coverage plan | [006: Zig cross-unit and member call resolution](../followups/006_zig_cross_unit_and_member_calls.md) | This is the highest-value open semantic gap for semidx's own development: receiver/value calls, nested namespaces, member targets, package imports, and missing-provider invalidation shape day-to-day impact analysis. |
+| When the next Zig frontend plan touches callee parsing or call-shape normalization | [001: Zig logical negation calls](../followups/001_zig_logical_negation_calls.md) | Keep it small and parser-evidenced. It is a correctness improvement, but not worth a standalone plan unless the Zig call walker is already open. |
+| Parser maintenance or grammar upgrade pass | [002: Zig empty container grammar](../followups/002_zig_empty_container_grammar.md) | First check whether a newer pinned grammar fixes the tree. Until then, the current analysis failure is honest and safer than guessing declarations from an erroneous parse tree. |
+| Before any broader Java type, import, module, or call resolution | [003: Java classpath boundaries](../followups/003_java_classpath_boundaries.md) | This should be the first Java resolution decision after the current slice, because widening same-package facts without classpath visibility can create false facts across independent modules. |
+| When Clojure becomes an active coverage target | [008: Clojure lexical scope coverage](../followups/008_clojure_lexical_scope_coverage.md) | The current conservative unresolved behavior is correct. Exact lexical scope and known `clojure.core` binding forms are valuable, but only when Clojure coverage is being deliberately expanded. |
 
 After the preview is usable, prioritize work that increases exact graph value
 for real local development:
