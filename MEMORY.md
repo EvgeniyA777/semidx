@@ -52,6 +52,10 @@ documents that own history, rationale, and evidence.
   declare provider dependencies and support exact `alias.foo(...)` `CALLS`
   facts, without admitting `module`, `IMPORTS`, dispatch, arbitrary member
   lookup, or package imports.
+- [ADR 008](docs/adr/008_java_visibility_boundaries.md) bounds Java resolution
+  to a derived source root, with a test source root reading its module's main
+  source root and nothing else crossing. It reads no build descriptor and admits
+  no core kind.
 
 ## Implementation Reality
 
@@ -94,9 +98,20 @@ documents that own history, rationale, and evidence.
 - `Graph` is mutable; `Snapshot` is the immutable published state observed by
   consumers. `publish` still walks the graph and is acceptable for edit batches,
   not for per-query publication.
-- Java same-package external references are graph facts only when ADR 004's
-  exact rule holds and the provider unit dependency is declared. Provider
-  removal, rename, or relevant export change reanalyzes dependents.
+- Java cross-unit references are graph facts only when ADR 004's exact rule
+  holds, the provider unit dependency is declared, and ADR 008's visibility
+  boundary permits it. A unit's scope is its **Java source root**: what remains
+  of its path once the directories its declared package spells and the file name
+  are removed from the end. Two units see each other when their source roots are
+  equal, or when the referring root is `<base>/src/test/<lang>` and the provider
+  is `<base>/src/main/<lang>` — that direction only. A unit whose path does not
+  spell its declared package has no source root, resolves nothing beyond itself,
+  and is a candidate for nothing. Single-type imports (`import a.b.C;`) resolve
+  inside that same boundary and are asked before the unit's own package;
+  on-demand and static imports never resolve. A name declared out of the unit's
+  scope is unresolved for its own stated reason, distinct from a name nothing
+  declares. Provider removal, rename, or relevant export change reanalyzes
+  dependents, and a package's importers are reanalyzed with its declarers.
 - Zig covers top-level `fn` definitions, top-level container declarations bound
   directly to struct/enum/union/opaque expressions, and named `fn` members
   directly inside them (`container_path` = container name). In every covered
@@ -165,8 +180,11 @@ documents that own history, rationale, and evidence.
 - No admitted shared-core `module` or `IMPORTS`.
 - No complete language support. Java, Clojure, and Zig fixtures prove current
   slice behavior; they are not a supported-language roster.
-- No Java imports, qualified names, nested classes, inheritance, classpath
-  symbols, interface/enum/record targets, or multi-module visibility model.
+- No Java on-demand or static import resolution, qualified names, nested
+  classes, inheritance, classpath symbols, interface/enum/record targets, or
+  reading of any build descriptor: cross-module visibility a build tool would
+  permit stays unresolved
+  ([Follow-up 011](docs/followups/011_java_cross_module_visibility.md)).
 - No Clojure namespace or lexical-scope model beyond the current conservative
   same-unit rules.
 - No Zig package imports, namespace/container/member lookup beyond ADR 006's
@@ -204,7 +222,9 @@ documents that own history, rationale, and evidence.
   pre-push hook for high-signal documentation and policy changes.
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
-  Java same-package currently treats the indexed repository as one classpath;
+  Java coverage, not its boundary, is what limits it — the supertype guard and
+  unresolved receivers dominate what stays unresolved; `semidx_context` at
+  `depth` 2 or more costs about 90 s on a 4,050-unit repository;
   definition renames are identity loss; a file moved and changed in one rescan
   loses identity; dependency invalidation is intentionally coarse and
   transitive; a Zig importer of a relative file that did not exist when it was
@@ -223,12 +243,22 @@ documents that own history, rationale, and evidence.
   because it improves semidx's view of itself. Dogfood-only coverage work,
   including [Follow-up 006](docs/followups/006_zig_cross_unit_and_member_calls.md),
   is deprioritized behind that.
-- [Plan 010](docs/plans/010_java_resolution_boundaries.md) is drafted and owns
-  the first step: prove semidx on a Java repository it does not own, then remove
-  the multi-module false-fact risk from
-  [Follow-up 003](docs/followups/003_java_classpath_boundaries.md) before any
-  Java widening. Its Stage 1 is a real go/no-go probe; a thin result re-opens the
-  language choice. No shared-core `module` or `IMPORTS` admission is in scope.
+- [Plan 010](docs/plans/010_java_resolution_boundaries.md) is executed. semidx
+  now has its first evidence from a repository it does not own (apache/dubbo at
+  `df9c5e1`, 119 Maven modules, 4,050 units), Java resolution is bounded by
+  ADR 008's source root, single-type imports resolve inside it, and Follow-up 003
+  is closed with its cross-module part split into
+  [Follow-up 011](docs/followups/011_java_cross_module_visibility.md). Read
+  [its report](docs/reports/010_java_resolution_boundaries_progress.md) before
+  choosing the next Java work: the false fact the plan removed occurred zero
+  times on real source, and what actually limits Java is the supertype guard
+  (62% of in-working-copy unresolved references) and unresolved receivers
+  (4,624 of 5,662 unresolved calls in the sample). No shared-core `module` or
+  `IMPORTS` was admitted.
+- Per-call latency is a known product problem, not a suspicion: on that
+  repository `semidx_context` at `depth=2` cost 90 s and `semidx_references`
+  about 1.3 s, against 0.02 s for `semidx_find_definitions`. The adoption
+  strategy names `semidx_context` the default focused-context tool.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`). Ecosystem
   evidence reversed the initial intent to shorten it: most MCP clients ignore
@@ -277,6 +307,9 @@ documents that own history, rationale, and evidence.
   [docs/reports/008_habit_loop_release_gate_progress.md](docs/reports/008_habit_loop_release_gate_progress.md).
 - Plan 009 progressive discovery and response budgets:
   [docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md](docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md).
+- Plan 010 Java resolution boundaries, and the first external-repository
+  evidence:
+  [docs/reports/010_java_resolution_boundaries_progress.md](docs/reports/010_java_resolution_boundaries_progress.md).
 - Active follow-ups:
   [docs/followups/README.md](docs/followups/README.md).
 - Product direction:

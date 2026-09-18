@@ -1,9 +1,9 @@
 ---
 title: "Java resolution boundaries progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-18"
 ---
 
@@ -14,7 +14,18 @@ Companion log for
 
 ## Current Status
 
-Stages 1 through 4 are complete; Stage 5 is closure. Stage 1's verdict is **go**, with one correction to the plan's
+Plan 010 is complete. semidx has its first recorded evidence from a Java
+repository it does not own, Java resolution is bounded by a derived source root,
+single-type imports resolve inside that boundary, and cross-unit reference facts
+on the probed repository rose from 336 to 496 with the cross-boundary false-fact
+count at zero — now structurally, not accidentally.
+
+One correction to the plan's premise is carried forward, because it should shape
+what happens next: the false fact Stage 3 removed occurred **zero** times on real
+source before the fix. It was a latent trap, not a measured harm. What actually
+limits Java is coverage — the supertype guard and unresolved receivers — and the
+90-second cost of `semidx_context` at depth 2. Both are in
+[Residual Risk](#residual-risk) and in the roadmap's near-term direction. Stage 1's verdict is **go**, with one correction to the plan's
 premise that later stages must carry: the false fact Stage 3 exists to remove is
 latent, not active. It is reproducible in two directories but occurs zero times
 in a 119-module, 4,050-unit external Java repository. Stage 4's execution
@@ -29,7 +40,7 @@ condition is met. Details and evidence are in
 | Stage 2: Boundary representation decision | Completed (`691f9ac`) | [ADR 008](../adr/008_java_visibility_boundaries.md): visibility is the derived Java source root, plus standard-layout test → main in that direction only. No build descriptor is read and no core kind is admitted. |
 | Stage 3: Boundary-aware same-package resolution | Completed | Same-package resolution establishes facts only inside a shared visibility scope. A name the package declares out of reach is unresolved for its own stated reason, not folded into "nothing declares this". The minimal reproduction is unresolved with its designator intact. |
 | Stage 4: Java single-type imports | Completed | `import a.b.C;` resolves inside the boundary and is asked before the unit's own package, as Java orders them. On-demand, static, and unindexed imports each stay unresolved with their own reason. A package's importers are reanalyzed when its exports change, so a class appearing later reaches the unit that imported it. |
-| Stage 5: Documentation, capability matrix, and closure | Not started | |
+| Stage 5: Documentation, capability matrix, and closure | Completed | Capability matrix, preview reference, roadmap, and `MEMORY.md` state the boundary and the dependency edge. Follow-up 003 closed against ADR 008; its cross-module part split into Follow-up 011. |
 
 ## Plan Readiness Gate
 
@@ -491,3 +502,122 @@ files, 26,509 definitions), so the additional assertions are identity
 correspondences — the assertion kind a reanalysis records when it re-establishes
 that an entity it is seeing again is the same entity. More reanalysis passes
 record more of them.
+
+### The Census, Re-Run
+
+The Stage 1 census repeated against the same repository and commit, by the same
+method: the incoming relationships of every one of the 3,337 top-level class
+definitions.
+
+| Cross-unit `REFERENCES` fact | Before | After |
+| --- | ---: | ---: |
+| Both units in the same Java source root | 170 | 273 |
+| Same module, a test source reads a main source | 161 | 223 |
+| Different modules, permitted by a declared dependency | 5 | 0 |
+| Different modules, not permitted | 0 | 0 |
+| Same module, a main source reads a test source | 0 | 0 |
+| **Total** | **336** | **496** |
+
+By how each fact was established:
+
+| Resolution method | Before | After |
+| --- | ---: | ---: |
+| The only top-level class of this simple name in the same package | 336 | 331 |
+| The single-type import of this name | 0 | 165 |
+
+This is exactly what [ADR 008](../adr/008_java_visibility_boundaries.md)
+predicted it would cost and buy. Stage 3 refused precisely the five cross-module
+facts and nothing else: 336 same-package facts became 331. Stage 4 added 165.
+Cross-unit reference facts rose 48%, and the graph-wide current unresolved count
+fell by exactly 160, which is 496 − 336 — the same conversions counted from the
+other side, and the answer to the balance question above.
+
+The false-fact count is still zero. The difference from Stage 1 is what that zero
+now rests on: before, it was zero because ADR 004's other preconditions happened
+not to reach across a module; now it is zero because a cross-boundary resolution
+cannot be established at all.
+
+## Stage 5: Documentation, Capability Matrix, And Closure
+
+| Document | Change |
+| --- | --- |
+| [capability matrix](../spec/capability_matrix.md) | The Java entry gains a **Visibility scope** row stating the source-root rule and the one directional exception, a **Dependency edge** row naming what will never resolve and why, per-import-form unresolved reasons, and an **Evidence** row recording the external repository, its commit, and its ingestion cost. The "known overbroad case" row is gone: it described the defect this plan removed. |
+| [local preview reference](../mcp/local_preview.md) | Two new limits: what a Java answer's boundary is in terms a user can act on, and that a reference to a type with no source under `--root` is unresolved by design and no configuration changes it. |
+| [Follow-up 003](../followups/003_java_classpath_boundaries.md) | Closed against ADR 008 and this plan, with each of its four required tests named against the test that implements it, and with the part that is deliberately not closed split out. |
+| [Follow-up 011](../followups/011_java_cross_module_visibility.md) | New. Cross-module visibility a build descriptor would establish, with the measurement that bounds its value (5 of 336 facts) and the risk that deferred it. |
+| [roadmap](../design/001_project_roadmap.md) | Records that the adoption track was entered and what the probe showed, including the two findings that outrank further boundary work. |
+| [MEMORY.md](../../MEMORY.md) | Java resolution reality, the boundary, what does not exist, the latency finding, and the next-step reading order. |
+
+### Verification
+
+All six commands from the plan's verification strategy, on the final tree:
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Zig 0.16.0 matches the target |
+| `zig fmt --check build.zig src tests` | clean |
+| `zig build test-core` | pass |
+| `zig build test` | 20/20 steps, 224/225 tests passed, 1 skipped |
+| `zig build dogfood` | 10/10 steps, 5/5 tests, `dogfood success` |
+| `zig build preview-gate --summary all` | 14/14 steps, 6/6 tests, `preview-gate success` |
+
+The test lane grew by eleven tests: three unit tests for the source-root and
+scope rules, four boundary integration tests, and four import tests including the
+invalidation case.
+
+### Definition Of Done
+
+| Requirement | Status |
+| --- | --- |
+| Same-package facts only within an explicit visibility boundary; false-fact count on the probed repository zero | Met. 496 cross-unit facts, none crossing a boundary it may not cross. |
+| Absent or ambiguous boundary evidence yields unresolved, never a name-selected fact | Met, and tested for a path that does not spell its package, for a cross-root pair, and for ambiguity inside one scope. |
+| Dependency references unresolved with designators intact, distinguishable from confirmed absence and unsupported constructs | Met; `expectHonestlyUnresolved` checks resolution, designator, producer, freshness, missing part, and the absence of a confirmed-absence diagnostic. |
+| No shared-core kind admitted; `module` and `IMPORTS` remain CORE.md's | Met. The source root is Java extension vocabulary in the analyzer's projection. |
+| No build tool executed, no network at index or query time | Met. Only the unit path and the package declaration are read. |
+| Recorded evidence of semidx against a Java repository it does not own, including what it could not answer | Met, in Stage 1 above, thin answers included. |
+| Follow-up 003 closed or narrowed; capability matrix states the boundary in actionable terms | Met; closed, with the cross-module part split into Follow-up 011. |
+
+### Residual Risk
+
+- **The evidence is one repository.** apache/dubbo is a Maven repository that
+  follows the standard directory layout in all 4,050 of its units. A repository
+  with a different layout, or one whose paths disagree with its package
+  declarations, gets less resolution, not wrong resolution — but nothing here
+  measures how much less.
+- **Cross-module references a build tool would permit stay unresolved**, by
+  decision ([Follow-up 011](../followups/011_java_cross_module_visibility.md)).
+- **Framework and dependency-injection relationships are invisible.** A
+  source-only graph cannot see what Spring, SPI, or reflection wires together,
+  and Dubbo is built on exactly that. Nothing in `semidx_references` will show
+  those edges, and no diagnostic says they exist.
+- **The importer hint is a superset that only grows.** A unit that stops
+  importing from a package is still reanalyzed when that package changes. It
+  costs a pass and changes no claim, and nothing prunes it while the graph lives.
+- **Java coverage, not its boundary, is the limit.** The supertype guard declined
+  62% of the unresolved references whose target does have source in the working
+  copy, and receivers accounted for 4,624 of 5,662 unresolved calls. Neither is
+  in this plan's scope and neither is improved by it.
+- **`semidx_context` at `depth` 2 or more cost about 90 s** on this repository,
+  against 0.02 s for `semidx_find_definitions`. The adoption strategy names it
+  the default focused-context tool.
+
+### Drift Check At Closure
+
+Owners checked and aligned: `CORE.md` unchanged and correct — no kind was
+admitted, and `module` and `IMPORTS` remain its open questions. `SPEC.md`
+unchanged; the capability matrix it owns is updated. The constitution is
+untouched and its seal verifies. `CONFORMANCE.md` unchanged: no scenario family
+changed shape. `GLOSSARY.md` needs no entry — "Java source root" is defined by
+ADR 008 and stated in the capability matrix, which the documentation policy
+accepts as naming the owning document. `MEMORY.md`, the roadmap, the capability
+matrix, the preview reference, and the follow-up register are updated in this
+plan's commits.
+
+### Next Step
+
+Do not start another Java boundary plan. The probe says the next Java work worth
+doing is coverage where it measurably stops — the supertype guard first, then
+receiver-qualified calls — and that per-call latency is a product problem that no
+amount of coverage compensates for. Both are recorded in the roadmap's near-term
+direction. Whether either is worth more than a second external probe in a
+different language is a product decision this plan does not make.

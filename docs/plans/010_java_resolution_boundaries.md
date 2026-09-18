@@ -1,13 +1,18 @@
 ---
 title: "Java resolution boundaries"
 doc_type: "plan"
-lifecycle: "active"
-status: "draft"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-18"
 ---
 
 # 010: Java Resolution Boundaries
+
+**Executed.** See
+[the progress log](../reports/010_java_resolution_boundaries_progress.md) for the
+evidence, the decisions, and one correction to this plan's premise: the false
+fact Stage 3 removed occurred zero times on the repository Stage 1 probed.
 
 ## Goal
 

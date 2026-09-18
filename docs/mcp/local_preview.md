@@ -536,6 +536,25 @@ Notifications, including malformed ones, are never answered.
   ([follow-up 001](../followups/001_zig_logical_negation_calls.md)), and a unit
   with an empty container body fails analysis
   ([follow-up 002](../followups/002_zig_empty_container_grammar.md)).
+- Java answers stop at a **visibility boundary**. A Java unit's scope is its
+  source root: what remains of its path once the directories its declared
+  package spells and the file name are removed from the end, so
+  `a/b/src/main/java/demo/X.java` declaring `package demo` has source root
+  `a/b/src/main/java`. Same-package names and single-type imports
+  (`import a.b.C;`) resolve only to units in that same root, or from a
+  `<base>/src/test/<lang>` root into `<base>/src/main/<lang>` — that direction
+  only. Two modules that share a package resolve nothing into each other, even
+  where a build tool would permit it, and a unit whose path does not spell its
+  declared package resolves nothing beyond itself
+  ([ADR 008](../adr/008_java_visibility_boundaries.md)). Each case says which it
+  is: a name declared out of reach reads differently from a name nothing
+  declares. On-demand imports (`import a.b.*;`) and static imports never
+  resolve.
+- A reference to a type with no source under `--root` — every JDK type, and
+  anything from a dependency not checked out here — is an unresolved designator.
+  semidx reads no `.jar`, no class file, and no build descriptor, so no
+  configuration changes that. Expect it to be most of what Java leaves
+  unresolved.
 - The graph lives in memory and is rebuilt on every start. Edits are observed
   only after `semidx_refresh`. A refresh with no source changes publishes the
   same revision.

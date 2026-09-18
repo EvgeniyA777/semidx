@@ -1,10 +1,10 @@
 ---
 title: "Java classpath boundaries"
 doc_type: "follow_up"
-lifecycle: "active"
-status: "open"
-agent_action: "use_as_input_for_future_plan_only"
-updated: "2026-09-17"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
+updated: "2026-09-18"
 ---
 
 # Java Classpath Boundaries
@@ -58,3 +58,38 @@ extension vocabulary if no shared-core kind is justified; adding a shared-core
 - Ambiguous or unavailable classpath data leaves references unresolved rather
   than selecting by repository-wide name.
 - Existing one-package fixtures from Plan 003 still resolve.
+
+## Resolution
+
+Closed by [ADR 008](../adr/008_java_visibility_boundaries.md) and
+[Plan 010](../plans/010_java_resolution_boundaries.md) Stages 3 and 4. A Java
+unit's visibility scope is its derived source root, so the indexed repository is
+no longer treated as one classpath, and a name declared outside the scope is an
+unresolved assertion that says so.
+
+All four required tests are implemented in `tests/vertical_slice_test.zig` and
+`src/frontends/java.zig`:
+
+- two independent roots sharing a package and class name do not become one
+  visible package — `two source roots sharing a package do not become one
+  visible package`;
+- a declared dependency permits resolution in the allowed direction only — `a
+  test source root reads its module's main source root, and not the other way
+  round`, where the declared dependency semidx recognizes is the standard
+  directory layout's test-to-main relationship;
+- ambiguous or unavailable boundary data leaves references unresolved — `a path
+  that does not spell its declared package resolves nothing and offers nothing`
+  and `ambiguity inside one shared scope stays unresolved and still says it is
+  ambiguous`;
+- Plan 003 one-package fixtures still resolve — unchanged and passing.
+
+One part is deliberately not closed. Cross-module visibility that a build
+descriptor would establish stays unresolved, because ADR 008 declined to read
+build descriptors. It is split into
+[Follow-up 011](011_java_cross_module_visibility.md) with its own evidence and
+required tests.
+
+Measured on apache/dubbo at `df9c5e1`, the behavior this entry warned about
+occurred zero times before the fix: the rule's other preconditions decline far
+more often than they fire, so the defect was latent rather than active. It was
+real nonetheless, and reproducible in two directories with no build file at all.
