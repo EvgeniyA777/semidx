@@ -149,9 +149,10 @@ documents that own history, rationale, and evidence.
   aliases.
 - The product version is `0.1.0-preview.3` (`build.zig.zon`): the preview.2
   surface plus Plan 009 progressive MCP discovery and response-budget behavior
-  ([release notes](docs/releases/v0.1.0-preview.3.md)). Previous annotated tags
-  pushed to `origin`: `v0.1.0-preview.1` at `e36693a` and
-  `v0.1.0-preview.2` at `8818bb6`; no GitHub release was created.
+  ([release notes](docs/releases/v0.1.0-preview.3.md)). Annotated tags pushed
+  to `origin`: `v0.1.0-preview.1` at `e36693a`, `v0.1.0-preview.2` at
+  `8818bb6`, and `v0.1.0-preview.3` at `58af737`; no GitHub release was
+  created.
 
 ## What Does Not Exist
 
@@ -212,7 +213,7 @@ documents that own history, rationale, and evidence.
 
 ## Near-Term Priorities
 
-- Plan 009 is complete and is being published as `0.1.0-preview.3` with
+- Plan 009 is complete and published as `0.1.0-preview.3` with
   `zig build preview-gate` in its release gate. Text fallback duplication stays
   unchanged until
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
