@@ -1,9 +1,9 @@
 ---
 title: "External-scale graph query indexes progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-18"
 ---
 
@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-Stages 0 through 4 are complete. The cost model in the plan's
+**Plan 011 is complete.** The cost model in the plan's
 [Current Evidence](../plans/011_external_scale_graph_query_indexes.md#current-evidence)
 is confirmed on a local synthetic graph, so the plan's stage order stands and its
 Start Rule stop condition is not triggered. Identity lookups are now constant
@@ -38,8 +38,8 @@ reproduction was available. See
 | Stage 2: Relationship adjacency index | Completed | Three derived indexes built in `publish`: outgoing and incoming as compressed sparse row, designators as a map. An anchored query now inspects exactly as many assertions as it returns — 5,045 candidates down to 4, and the depth-2 traversal 25,225 down to 16. Parity against the linear oracle is asserted on ids and order over 2,400 filter combinations. |
 | Stage 3: MCP hot path parity | Completed | No MCP code needed changing: `semidx_references` and `semidx_context` already anchor every pass and never reach past `Snapshot.relationships`. Parity is proved by sending the same request down both access paths and comparing the responses byte for byte. |
 | Stage 4: Deterministic scale proof | Completed | Inspected candidates equal returned answers for anchored queries and depth-2 traversal, asserted at three sizes up to 244,559 assertions — past the 230,753 measured on apache/dubbo. The same assertions fail under the restored full-scan path, in the same test. Index memory is 1.008× its computed expectation against D8's 2× ceiling. |
-| Stage 5: Java write-path measurement | Not started | — |
-| Stage 6: Documentation and closure | Not started | — |
+| Stage 5: Java write-path measurement | Completed | No code changed, which the plan names a valid outcome. On 600- and 1,200-unit Java corpora every write-path term is linear in units, a one-file-edit refresh costs 13 ms and is indistinguishable from one that analyzes nothing, and the units reanalyzed when a package's exports change is constant at 41. |
+| Stage 6: Documentation and closure | Completed | `MEMORY.md` states the indexed access path as current reality, Follow-up 012 is closed against Plan 011 with its two deliberate departures recorded, and the plan is marked executed. |
 
 ## Plan Readiness Gate
 
@@ -489,3 +489,163 @@ structure needs, and unable to fail.
 `preview-gate` prints `failed command:` lines during the dogfood recovery
 scenario. Those are its deliberate allocation-failure injections, not failures:
 the step reports success and the build exits 0.
+
+## Stage 5: Java Write-Path Measurement
+
+### Outcome
+
+**No code changed.** The plan names this a valid and expected outcome, and the
+measurements support it: every write-path term is linear in units or constant,
+and Java binding work is not the largest term in the refresh a user pays on
+every edit.
+
+### Method
+
+Two synthetic Java corpora, 600 and 1,200 files, 20 classes per package, each
+class carrying a single-type import of a class in another package so that import
+binding has to look outside the unit's own package. Driven through the real
+stdio server (`zig-out/bin/semidx-mcp`, ReleaseFast), one process per run, best
+of five runs, warm filesystem cache. The corpora are throwaway and live outside
+the repository: no external repository is committed and none is a conformance
+target.
+
+### Measurements
+
+| Measurement | 600 units | 1,200 units | Growth for 2× units |
+| --- | --- | --- | --- |
+| Cold `--root` index, to first answered call | 33.6 ms | 66.9 ms | **1.99×** |
+| `semidx_health`, warm | 0.15 ms | 0.25 ms | 1.67× |
+| `semidx_refresh`, nothing changed | 6.49 ms | 13.95 ms | 2.15× |
+| `semidx_refresh` after editing one file | 6.16 ms | 13.29 ms | 2.16× |
+| `semidx_refresh` after a class appears in a package | 7.06 ms | 13.61 ms | 1.93× |
+| Units reanalyzed when a package's exports change | **41** | **41** | **1.00×** |
+
+### The Two Terms, Measured Apart
+
+Plan 010's Stage 4 introduced two costs, and the plan is explicit that reporting
+one number for both is how the wrong fix gets chosen.
+
+**Per-unit binding lookup — not the dominant term, and not visible in refresh.**
+A refresh that analyzes one edited unit costs 13.29 ms at 1,200 units; a refresh
+that analyzes *nothing* costs 13.95 ms. The edit adds nothing measurable. What
+the refresh actually pays for is walking the tree and comparing content ids for
+every unit, which is inherent to a scan-based refresh with no file watching, and
+which the plan puts out of scope. A Java-side candidate projection would
+therefore optimize a term that is already below the noise of the term beside it.
+
+**Extra reanalysis passes — bounded, and constant in repository size.** When a
+class appears in a package, 41 units are reanalyzed: the package's 20 classes,
+the 20 importers of that package, and the new unit. That number is **identical**
+at 600 and 1,200 units. The importer hint widens what a package change
+invalidates, exactly as Plan 010 recorded, but it widens it by package size and
+importer count — not by repository size. That is the shape the plan predicted in
+D10, now measured rather than assumed.
+
+### Against The Plan's Criteria
+
+| Criterion | Threshold | Measured | Act? |
+| --- | --- | --- | --- |
+| `semidx_refresh` after editing one file | above ~1 s, or Java binding work is its largest term | 13.3 ms, and Java binding work is not measurable in it | No |
+| Cold `--root` index time | only if super-linear in units | 1.99× for 2× units | No |
+| Growth shape across two sizes | any term growing faster than linear | every term linear or constant | No |
+
+### What This Does Not Say
+
+These corpora are 1,200 small files. Plan 010's probe was 4,050 real Java units
+and its cold index cost 17.5 s, about 5 ms per unit, against 0.056 ms per unit
+here. That gap is file size and real Java complexity, not access-path shape, so
+what transfers from this measurement is the **growth shape** — linear in units,
+constant in repository size for the reanalysis term — and not the constants.
+
+**Plan 010's 17.5 s → 21.5 s ingestion regression was not re-measured.** Doing so
+needs the external repository, which the plan keeps optional and out of
+conformance. The decision to change no code rests on the growth shape and on
+binding work being immeasurable inside refresh, not on a claim that the
+regression is gone.
+
+### Verification
+
+No code changed, so Stage 4's command set stands unchanged and was re-run in
+Stage 6.
+
+## Stage 6: Documentation And Closure
+
+### Work
+
+- `MEMORY.md`: the indexed access path is stated as current implementation
+  reality beside the snapshot bullet, not as a changelog entry; the external-scale
+  latency risk is replaced by what is actually still unknown; Plan 011's outcome
+  and the Java write-path measurement join the near-term priorities; the report
+  joins the evidence pointers; the named ReleaseFast command joins the command
+  list. The settled ADR 007 text-fallback block was compressed into its ADR to
+  stay inside the document's own 350-line bound.
+- `docs/followups/012_external_scale_query_latency.md`: **closed**, with both
+  departures from its acceptance direction recorded in it rather than left to be
+  noticed — the latency gate became a work bound, and the Java write-path work
+  was measured and declined.
+- `docs/followups/README.md`: 012 moves from open to completed.
+- `docs/plans/011_external_scale_graph_query_indexes.md`: marked executed.
+- This log: marked completed.
+
+`docs/mcp/habit_loop_gate.md` was **not** changed. The scale proof adds no gate
+command and changes no gate expectation: `zig build preview-gate` runs exactly
+what it ran before and its hard gates are untouched. The named command the plan
+asked to be documented is a test lane variant, so it is recorded in `MEMORY.md`'s
+command list and in Stage 4 above, where an agent would look for it.
+
+### Drift Control
+
+| Owner | State |
+| --- | --- |
+| `ARCHITECTURE_CONSTITUTION.md` | Untouched and not in tension. §1 and §3 hold because every index is a projection whose answers are read from assertions; §5 holds because indexes are built per published state and never mutated afterwards; §7 holds because no MCP shape changed; §8 holds because nothing was added to any build or lane. |
+| `SPEC.md`, `CORE.md` | Unchanged. No core kind, contract, schema field, or `semantic_contract_version` moved. |
+| `CONFORMANCE.md` | Unchanged. The work bound is a core test, not a new scenario family. |
+| `GLOSSARY.md` | Unchanged. No durable vocabulary was introduced: "adjacency index" and "position table" are implementation structures owned by `src/core/relationship_index.zig` and `src/core/graph.zig`. |
+| ADRs | None needed. No new dependency, no changed architectural answer — this is an access path behind an unchanged API, and constitution §11's questions are answered the same way they were before it. |
+| `MEMORY.md`, follow-ups | Updated above. |
+
+### Residual Risk
+
+1. **Product latency at external Java scale is unproven.** Stage 1's and
+   Stage 2's wins are proven as work bounds, at a synthetic size past the probe.
+   No post-change wall clock was taken on apache/dubbo, and the plan is explicit
+   that the Stage 1 measurement in particular cannot be taken later without
+   conflating the two stages. Re-running the Plan 010 probe is the cheapest
+   closure and is recorded in `MEMORY.md` as the next step.
+2. **The entity index key space follows ids, not live entity count.** A long
+   session with heavy churn makes both the position tables and the two offset
+   arrays grow with the highest id issued rather than with what is live. Nothing
+   reclaims ids while the graph lives, which `MEMORY.md` already records as a
+   known risk. At 244,559 assertions the whole index is 2.6 MB, so this is a
+   shape to watch, not a present cost.
+3. **Two test-only globals now exist in the core** — the work counters and
+   `bypass_relationship_index`. Both compile away outside a test build, and both
+   are process-wide rather than per-snapshot, so a future parallel test runner
+   would need them scoped.
+4. **The write-path decision rests on synthetic Java.** 1,200 small files are
+   not 4,050 real ones. What transfers is the growth shape, not the constants.
+
+### Verification
+
+Run after the last code change, on `dev`, Zig 0.16.0.
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Zig 0.16.0 matches semidx target |
+| `zig fmt --check build.zig src tests` | clean |
+| `zig build test-core` | 97/98 passed, 1 skipped (external-scale proof, by design in debug) |
+| `zig build test-core -Doptimize=ReleaseFast` | 98/98 passed |
+| `zig build test` | 233/235 passed, 2 skipped |
+| `zig build test-mcp` | 29/30 passed, 1 skipped |
+| `zig build dogfood` | success |
+| `zig build preview-gate` | success, 14/14 steps, 6/6 tests passed |
+
+### Commits
+
+| Stage | Commit |
+| --- | --- |
+| Stage 0 | `54adcb4` |
+| Stage 1 | `b593633` |
+| Stage 2 | `97f541a` |
+| Stages 3 and 4 | `df6287c` |
+| Stages 5 and 6 | this commit |

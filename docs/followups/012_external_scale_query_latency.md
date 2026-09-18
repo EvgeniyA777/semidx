@@ -1,9 +1,9 @@
 ---
 title: "External-scale graph query latency"
 doc_type: "follow_up"
-lifecycle: "active"
-status: "open"
-agent_action: "use_as_input_for_future_plan_only"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-18"
 ---
 
@@ -81,6 +81,44 @@ to decide whether cross-boundary Java facts were permitted and to keep false
 facts out of the graph. The plan correctly recorded the latency finding as
 out-of-scope instead of mixing a graph-storage redesign into a Java semantic
 boundary plan.
+
+## Resolution
+
+**Completed by [Plan 011](../plans/011_external_scale_graph_query_indexes.md)**
+([report](../reports/011_external_scale_graph_query_indexes_progress.md)).
+
+Both terms named below were removed, and neither was traded against exactness.
+A published snapshot derives dense id-to-position tables for identity lookups
+and compressed-sparse-row adjacency by source entity, target entity, and
+designator for relationship queries. They are projections of that snapshot's own
+assertions: no result exists only in an index, an anchor the index does not hold
+returns empty rather than falling back to a scan, and every other filter stays a
+post-filter. Parity against the pre-index path is asserted on assertion ids and
+order, and at the MCP surface by comparing responses byte for byte.
+
+Two departures from the direction below are deliberate and recorded here rather
+than left to be noticed.
+
+**The latency gate became a work bound.** The direction asked for a gate
+recording latency on a scale fixture. Plan 011's D9 replaced it: the committed
+assertion is an inspected-candidate count, because a timing threshold would make
+the lane unreliable for every later agent while proving less. The proof runs at
+244,559 assertions, past the 230,753 measured on apache/dubbo, and fails under
+the access path it replaced.
+
+**Java write-path work was measured and declined.** Refresh after a one-file
+edit costs 13 ms at 1,200 Java units and is indistinguishable from a refresh
+that analyzes nothing; the units reanalyzed when a package's exports change is
+constant at 41 across a doubling of the corpus. Nothing in the write path grows
+faster than linearly in units, so no candidate projection was added.
+
+One thing this closure does **not** claim: the equivalent latency on apache/dubbo
+was not re-measured. The claim rests on the work bound, not on a new wall clock.
+Re-running the Plan 010 probe would close that, and is recorded as the next step
+in `MEMORY.md`.
+
+Persistence is untouched and stays open as a separate question; see
+[SQLite Position](../plans/011_external_scale_graph_query_indexes.md#sqlite-position).
 
 ## Acceptance Direction
 

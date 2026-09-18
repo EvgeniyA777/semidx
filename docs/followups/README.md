@@ -33,12 +33,12 @@ evidence would make it ready to implement or close.
 | [008](008_clojure_lexical_scope_coverage.md) | open | `coverage_gap` | [Plan 005 report](../reports/005_mcp_preview_release_readiness_progress.md#stage-25-same-unit-name-resolution-facts-java-and-clojure) | Clojure symbols under forms that may bind names stay unresolved until lexical scope is modeled. |
 | [010](010_mcp_text_fallback_client_measurement.md) | open | `release_readiness` | [Plan 009 report](../reports/009_mcp_progressive_discovery_and_budgets_progress.md#payload-copies) | Measure how real MCP clients expose the duplicated text fallback before changing it. |
 | [011](011_java_cross_module_visibility.md) | open | `coverage_gap` | [Plan 010 report](../reports/010_java_resolution_boundaries_progress.md) | Java cross-module same-package references stay unresolved, because no build descriptor is read. |
-| [012](012_external_scale_query_latency.md) | open | `performance_gap` | [Plan 010 report](../reports/010_java_resolution_boundaries_progress.md#architecture-review-addendum) | Relationship and context queries need indexed graph access paths before external-scale impact analysis can be interactive. |
 
 ## Completed Follow-ups
 
 | ID | Status | Classification | Resolution | Summary |
 | --- | --- | --- | --- | --- |
+| [012](012_external_scale_query_latency.md) | completed | `performance_gap` | [Plan 011](../plans/011_external_scale_graph_query_indexes.md) | Snapshot identity lookups and anchored relationship queries are indexed projections of the snapshot's own assertions; a work bound at 244,559 assertions replaced the proposed latency gate, and the Java write path was measured and left unchanged. |
 | [004](004_release_discipline_for_mcp_preview.md) | completed | `release_readiness` | [Plan 005](../plans/005_mcp_preview_release_readiness.md) | Preview release discipline, source-built release notes, and release gate were completed for `v0.1.0-preview.1`. |
 | [005](005_mcp_source_derived_consent_boundary.md) | completed | `release_readiness` | [Plan 005](../plans/005_mcp_preview_release_readiness.md) | Hosted-client consent wording and default no-source-text evidence were completed for the preview release. |
 | [009](009_mcp_progressive_discovery_and_response_budgets.md) | completed | `release_readiness` | [Plan 009](../plans/009_mcp_progressive_discovery_and_budgets.md) | Outline, compact references, truncation hints, whole-response budgets, snapshot-bound cursors, and bounded traversal were delivered; text fallback measurement split into 010. |

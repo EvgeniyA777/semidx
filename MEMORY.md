@@ -67,7 +67,8 @@ documents that own history, rationale, and evidence.
   `zig build mcp -- --root <dir>`, `zig build test-mcp`, `zig build dogfood`,
   and `zig build preview-gate`. The format check names its paths because
   `zig fmt --check .` can never pass: `fixtures/` holds source that is
-  deliberately unparsable.
+  deliberately unparsable. `zig build test-core -Doptimize=ReleaseFast` also
+  runs the query work-bound proof at external scale, which a debug build skips.
 - `zig build preview-gate` is the one canonical local habit-loop gate
   ([specification](docs/mcp/habit_loop_gate.md)): the dogfood proofs as its
   `repository-copy` profile plus a `fixture` profile over a temporary root that
@@ -101,6 +102,15 @@ documents that own history, rationale, and evidence.
 - `Graph` is mutable; `Snapshot` is the immutable published state observed by
   consumers. `publish` still walks the graph and is acceptable for edit batches,
   not for per-query publication.
+- A published snapshot carries its own read indexes, derived in `publish` and
+  nowhere else: dense id-to-position tables behind `Snapshot.unit` and
+  `Snapshot.entityById`, and compressed-sparse-row adjacency by source entity,
+  by target entity, and by designator behind `Snapshot.relationships`. They are
+  projections of that snapshot's own assertions, rebuildable from them with
+  nothing lost, and no answer exists only in an index. An anchor the index does
+  not hold returns empty rather than falling back to a scan; `kind`,
+  `reference_query`, `resolution`, and `freshness` stay post-filters
+  ([Plan 011](docs/plans/011_external_scale_graph_query_indexes.md)).
 - Java cross-unit references are graph facts only when ADR 004's exact rule
   holds, the provider unit dependency is declared, and ADR 008's visibility
   boundary permits it. A unit's scope is its **Java source root**: what remains
@@ -226,10 +236,10 @@ documents that own history, rationale, and evidence.
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java coverage, not its boundary, is what limits it — the supertype guard and
-  unresolved receivers dominate what stays unresolved; external-scale graph
-  query latency needs indexed access paths before impact analysis can be
-  interactive ([Follow-up 012](docs/followups/012_external_scale_query_latency.md));
-  definition renames are identity loss; a file moved and changed in one rescan
+  unresolved receivers dominate what stays unresolved; the query access paths
+  Plan 011 indexed are proven by a deterministic work bound at 244,559
+  assertions but were never re-measured as latency on the external repository
+  that motivated them; definition renames are identity loss; a file moved and changed in one rescan
   loses identity; dependency invalidation is intentionally coarse and
   transitive; a Zig importer of a relative file that did not exist when it was
   analyzed is not reanalyzed when the file appears (unresolved, never false);
@@ -259,30 +269,38 @@ documents that own history, rationale, and evidence.
   (62% of in-working-copy unresolved references) and unresolved receivers
   (4,624 of 5,662 unresolved calls in the sample). No shared-core `module` or
   `IMPORTS` was admitted.
-- Per-call latency is a known product problem, not a suspicion: on that
-  repository `semidx_context` at `depth=2` cost 90 s and `semidx_references`
-  about 1.3 s, against 0.02 s for `semidx_find_definitions`. Follow-up 012 owns
-  the architectural response: relationship/context queries need indexed graph
-  access paths, and SQLite is a possible future persistence/query-index backend
-  only if graph assertions remain the semantic authority. Plan 011 is the
-  prepared implementation route and next adoption-track priority: first make
-  `semidx_health`, `semidx_references`, and `semidx_context` interactive at
-  Java-adoption scale; then widen Java where Plan 010 found the real blockers
-  (supertypes and receivers); consider future SQLite storage only behind the
-  proven in-memory projection contract.
+- [Plan 011](docs/plans/011_external_scale_graph_query_indexes.md) is executed
+  and Follow-up 012 is closed. Per-call latency on that repository —
+  `semidx_context` at `depth=2` 90 s, `semidx_references` 1.3 s, `semidx_health`
+  3.0 s — had two causes, and both are gone: a snapshot recovered identity by
+  scanning, and every relationship query scanned every assertion. Identity
+  lookups are now constant time, and anchored queries inspect exactly as many
+  assertions as they return, proven at 244,559 assertions (past Dubbo's 230,753)
+  by a committed work bound that fails under the old path
+  ([report](docs/reports/011_external_scale_graph_query_indexes_progress.md)).
+- **The equivalent latency on apache/dubbo was not re-measured**, so that
+  product claim rests on the work bound rather than on a new wall clock.
+  Re-running the Plan 010 probe is the cheapest way to close the gap and is the
+  next thing worth doing before widening Java where Plan 010 found the real
+  blockers (supertypes and receivers). SQLite remains a possible future
+  persistence and query-index backend, now behind a proven in-memory projection
+  contract, and only if graph assertions stay the semantic authority.
+- The Java write path was measured and deliberately left alone: on synthetic
+  Java corpora of 600 and 1,200 units, cold index and refresh grow linearly in
+  units, a one-file-edit refresh costs 13 ms at 1,200 units and is indistinct
+  from a refresh that analyzes nothing, and the units reanalyzed when a package's
+  exports change is **constant** at 41 across both sizes — it grows with package
+  size, not repository size.
 - Text fallback duplication is **kept by decision**, not left open, by
-  [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`). Ecosystem
-  evidence reversed the initial intent to shorten it: most MCP clients ignore
-  `structuredContent` and read `content`, so the text copy is load-bearing, not
-  legacy. MCP SEP-2200, which proposed exactly the model-optimized-text change
-  semidx was considering, was declined by Core Maintainers on 2026-05-25 pending
-  polymorphic result types. Only a `--text-fallback=full|none` probe is added;
-  `none` is a diagnostic for identifying whether a given client reads structured
-  content, never a production value. A `summary` value is rejected for now —
-  SEP-1624 semantic equivalence would make it a second complete renderer.
+  [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
+  clients ignore `structuredContent` and read `content`, so the text copy is
+  load-bearing rather than legacy, and MCP SEP-2200 — the same change semidx was
+  considering — was declined upstream on 2026-05-25. Only a
+  `--text-fallback=full|none` diagnostic probe is added; `none` identifies
+  whether a client reads structured content and is never a production value. The
+  ADR owns the reasoning, including why `summary` is rejected, and
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
-  closes against that ADR; its client-measurement stages were redundant because
-  the ecosystem published stronger evidence than a local observation could.
+  closes against it.
 - Source identity needs stronger evidence for move-plus-edit refactors. Prefer
   explicit VCS/IDE move events or language-aware refactoring evidence over
   similarity presented as fact.
@@ -321,6 +339,9 @@ documents that own history, rationale, and evidence.
 - Plan 010 Java resolution boundaries, and the first external-repository
   evidence:
   [docs/reports/010_java_resolution_boundaries_progress.md](docs/reports/010_java_resolution_boundaries_progress.md).
+- Plan 011 external-scale graph query indexes, including the query cost model,
+  its measurements, and the Java write-path decision:
+  [docs/reports/011_external_scale_graph_query_indexes_progress.md](docs/reports/011_external_scale_graph_query_indexes_progress.md).
 - Active follow-ups:
   [docs/followups/README.md](docs/followups/README.md).
 - Product direction:

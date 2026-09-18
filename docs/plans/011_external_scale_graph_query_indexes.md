@@ -1,13 +1,18 @@
 ---
 title: "External-scale graph query indexes"
 doc_type: "plan"
-lifecycle: "active"
-status: "planned"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-18"
 ---
 
 # 011: External-Scale Graph Query Indexes
+
+> **Executed on 2026-09-18.** Every stage is complete; Stage 5 measured the
+> write path and deliberately changed no code. Evidence, measurements, the two
+> decisions the plan left open, and residual risk are in
+> [the progress log](../reports/011_external_scale_graph_query_indexes_progress.md).
 
 ## Goal
 
