@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-Stage 1 is complete and its verdict is **go**, with one correction to the plan's
+Stages 1 and 2 are complete. Stage 1's verdict is **go**, with one correction to the plan's
 premise that later stages must carry: the false fact Stage 3 exists to remove is
 latent, not active. It is reproducible in two directories but occurs zero times
 in a 119-module, 4,050-unit external Java repository. Stage 4's execution
@@ -26,7 +26,7 @@ condition is met. Details and evidence are in
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 1: External Java evidence probe | Completed | Apache Dubbo at `df9c5e1`: 4,050 units in 17.5 s, 290 MB; orientation and refresh useful, reference and neighborhood answers thin; cross-module false facts **0 of 336** cross-unit reference facts; single-type imports are 28% of in-working-copy unresolved references, so Stage 4 executes. Verdict: go. |
-| Stage 2: Boundary representation decision | Not started | Depends on the direction decision below. |
+| Stage 2: Boundary representation decision | Completed (`691f9ac`) | [ADR 008](../adr/008_java_visibility_boundaries.md): visibility is the derived Java source root, plus standard-layout test → main in that direction only. No build descriptor is read and no core kind is admitted. |
 | Stage 3: Boundary-aware same-package resolution | Not started | |
 | Stage 4: Java single-type imports | Not started | Condition met by Stage 1 evidence. |
 | Stage 5: Documentation, capability matrix, and closure | Not started | |
@@ -332,3 +332,38 @@ fact that real source does not currently produce. What the evidence says instead
 - The one stage with measured value on real source is Stage 4: single-type
   imports are 28% of in-working-copy unresolved references, and its condition to
   execute is met.
+
+## Stage 2: Boundary Representation Decision
+
+[ADR 008](../adr/008_java_visibility_boundaries.md) decides it, answers all eight
+questions of constitution section 11, and names the checks Stage 3 must satisfy.
+
+The decision in one line: a Java source unit's **source root** is what remains of
+its path once its declared package path and file name are stripped from the end;
+two units share a visibility scope when their source roots are equal, or when the
+referring unit is in `<base>/src/test/<lang>` and the provider is in
+`<base>/src/main/<lang>` — that direction only. Everything else is unresolved.
+
+### Options Considered
+
+The three candidates the plan names, scored against the Stage 1 census of 336
+cross-unit reference facts and against what each would have to read:
+
+| Option | False facts left | True facts lost | Reads |
+| --- | ---: | ---: | --- |
+| A: same source root only | 0 | 166 of 336 (49%) | unit path, package declaration |
+| **B: same source root, plus standard-layout test → main (chosen)** | **0** | **5 of 336 (1.5%)** | unit path, package declaration |
+| C: B plus declared module dependencies | 0 | 0 | the above plus every `pom.xml` |
+
+B was chosen. A discards nearly half the true cross-unit facts for no additional
+safety. C recovers 1.5% more at the cost of interpreting Maven inheritance,
+`dependencyManagement`, property interpolation, and profiles — where a misread
+invents a dependency that does not exist, which is the same class of defect this
+plan exists to remove, and where Gradle offers no data to read at all because its
+build files are programs. B reads nothing that is not already parsed.
+
+### What Stage 2 Deliberately Leaves Open
+
+Cross-module same-package resolution stays unresolved even where a build tool
+would permit it. That is a decision, not an oversight, and it is carried into
+Stage 5 as a narrower follow-up rather than closed here.

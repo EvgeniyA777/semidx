@@ -22,3 +22,4 @@ ratified constitution.
 - [005: Add Zig Frontend And Local MCP Preview](005_add_zig_frontend_and_local_mcp_preview.md)
 - [006: Allow Narrow Zig Member Definitions And Local-Import Calls](006_allow_narrow_zig_member_definitions_and_local_import_calls.md)
 - [007: Keep The MCP Text Fallback And Add A Diagnostic Probe Flag](007_text_fallback_migration_flag.md)
+- [008: Bound Java Same-Package Resolution To A Derived Source Root](008_java_visibility_boundaries.md)
