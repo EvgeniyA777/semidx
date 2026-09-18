@@ -35,35 +35,19 @@ honest semantic context that is local, queryable, and explicit about its limits.
 
 ## Current Preview
 
-**Status: first vertical slice, `0.1.0-preview.3`.** The repository contains a
-small in-memory graph implementation over Java, Clojure, and Zig source under
-`src/`, `tests/`, and `fixtures/`, plus an experimental local MCP stdio preview
-called `semidx-mcp`.
+**Status: first vertical slice, `0.1.0-preview.3`.** semidx currently ships as a
+source-built local MCP stdio preview called `semidx-mcp`. It indexes Java,
+Clojure, and Zig source narrowly enough to support the agent habit loop, while
+keeping unsupported and unresolved cases visible.
 
-Implemented today:
+This preview does not publish a stable semantic contract, broad language-support
+promise, packaged binary release, remote service, persistence, file watching, or
+source-text output by default.
 
-- parser-free shared core for entities, assertions, facts, unresolved targets,
-  stale state, diagnostics, identity evidence, dependency invalidation, and
-  published snapshots;
-- repository-scale source ingestion with source-unit identity across edits and
-  exact single-file moves;
-- narrow Java, Clojure, and Zig frontends with declared fixture-scoped coverage;
-- Java same-package top-level type facts under a deliberately narrow rule;
-- Zig top-level functions and containers, direct member functions, same-unit
-  bare calls, and exact local relative `@import` alias calls;
-- local MCP tools: `semidx_health`, `semidx_outline`, `semidx_repo_map`,
-  `semidx_find_definitions`, `semidx_references`, `semidx_context`, and
-  `semidx_refresh`, with response budgets and snapshot-bound continuation.
-
-Not present yet:
-
-- persistence, file watching, daemon lifecycle, HTTP/gRPC, subscriptions, package-manager distribution, or binary releases;
-- a published semantic contract version or stable public schema set;
-- complete Java, Clojure, or Zig language support;
-- vectors, embeddings, a retrieval pipeline, or source-text output by default.
-
-See the [preview capability matrix](docs/spec/capability_matrix.md) for the
-exact current coverage and known false negatives.
+See the [preview capability matrix](docs/spec/capability_matrix.md) for exact
+coverage and limitations, and the
+[v0.1.0-preview.3 release notes](docs/releases/v0.1.0-preview.3.md) for what
+changed in the current preview.
 
 ## Quick Start
 
