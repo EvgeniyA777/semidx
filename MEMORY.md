@@ -265,9 +265,11 @@ documents that own history, rationale, and evidence.
   the architectural response: relationship/context queries need indexed graph
   access paths, and SQLite is a possible future persistence/query-index backend
   only if graph assertions remain the semantic authority. Plan 011 is the
-  prepared implementation route: prove in-memory snapshot relationship indexes
-  first, then consider Java write-path indexing and future SQLite storage only
-  behind that projection contract.
+  prepared implementation route and next adoption-track priority: first make
+  `semidx_health`, `semidx_references`, and `semidx_context` interactive at
+  Java-adoption scale; then widen Java where Plan 010 found the real blockers
+  (supertypes and receivers); consider future SQLite storage only behind the
+  proven in-memory projection contract.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`). Ecosystem
   evidence reversed the initial intent to shorten it: most MCP clients ignore

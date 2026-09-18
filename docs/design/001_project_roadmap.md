@@ -136,15 +136,26 @@ What it showed, in
 
 The next useful sequence follows from that, not from the plan that preceded it:
 
-1. Decide Java's direction on evidence, not momentum. What limits Java is
-   coverage, not boundaries: the supertype guard declined 62% of the unresolved
-   references whose target does have source in the working copy, and unresolved
-   receivers accounted for 4,624 of 5,662 unresolved calls in the sample. Either
-   of those is worth more than any remaining boundary work.
-2. Treat per-call latency as product work. A default focused-context tool that
-   takes 90 s on a mid-sized repository is not one an agent will keep using, and
-   no amount of coverage fixes that.
-3. Use the MCP preview while developing semidx itself and collect evidence for
+1. **Make the habit loop interactive at Java-adoption scale.**
+   [Plan 011](../plans/011_external_scale_graph_query_indexes.md) is the next
+   implementation priority. `semidx_health`, `semidx_references`, and
+   `semidx_context` must stop paying multiplicative snapshot lookup and
+   assertion-scan costs before more Java coverage can matter productively. A
+   graph that knows more but takes 90 s to answer focused context will be
+   bypassed by agents and developers.
+2. **Then widen Java where the probe showed impact-analysis pain.** Java is not
+   just another language in the adoption track; it is the enterprise stress test
+   for whether semidx can help on serious local codebases. After Plan 011,
+   coverage work should target the measured blockers: the supertype guard
+   declined 62% of the unresolved references whose target does have source in
+   the working copy, and unresolved receivers accounted for 4,624 of 5,662
+   unresolved calls in the sample. Either of those is worth more than any
+   remaining boundary work.
+3. **Defer SQLite and persistence until the in-memory projection contract is
+   proven.** Storage can help cold start, memory pressure, and long-running
+   local use later, but it should back the same graph-authoritative snapshot and
+   query-index contract rather than becoming the first fix for query latency.
+4. Use the MCP preview while developing semidx itself and collect evidence for
    the next semantic expansion, including how real clients show tool results to
    models ([follow-up 010](../followups/010_mcp_text_fallback_client_measurement.md)).
 
@@ -152,8 +163,9 @@ Current follow-ups should be picked up where they naturally fit:
 
 | Timing | Follow-up | Why then |
 | --- | --- | --- |
+| Now, before widening Java coverage | [012: External-scale graph query latency](../followups/012_external_scale_query_latency.md) through [Plan 011](../plans/011_external_scale_graph_query_indexes.md) | The first Java adoption probe showed semantically honest but non-interactive impact queries. Fixing snapshot identity lookups and anchored relationship access protects the habit loop before the graph grows wider. |
 | Before changing MCP fallback output; useful during or right after the next preview release pass | [010: MCP text fallback client measurement](../followups/010_mcp_text_fallback_client_measurement.md) | The Plan 009 response budget controls structured output, but every result still carries the JSON text fallback. Measure real clients before shortening or configuring it. This does not block publishing the Plan 009 preview unless the release notes need fresh client observations. |
-| Next Zig dogfood semantic-coverage plan | [006: Zig cross-unit and member call resolution](../followups/006_zig_cross_unit_and_member_calls.md) | This is the highest-value open semantic gap for semidx's own development: receiver/value calls, nested namespaces, member targets, package imports, and missing-provider invalidation shape day-to-day impact analysis. |
+| After Java-adoption latency and the next Java coverage decision | [006: Zig cross-unit and member call resolution](../followups/006_zig_cross_unit_and_member_calls.md) | This remains the highest-value open semantic gap for semidx's own development, but dogfood-only coverage is no longer ahead of proving the adoption-track habit loop. |
 | When the next Zig frontend plan touches callee parsing or call-shape normalization | [001: Zig logical negation calls](../followups/001_zig_logical_negation_calls.md) | Keep it small and parser-evidenced. It is a correctness improvement, but not worth a standalone plan unless the Zig call walker is already open. |
 | Parser maintenance or grammar upgrade pass | [002: Zig empty container grammar](../followups/002_zig_empty_container_grammar.md) | First check whether a newer pinned grammar fixes the tree. Until then, the current analysis failure is honest and safer than guessing declarations from an erroneous parse tree. |
 | Only with a second language asking a comparable question | [011: Java cross-module visibility](../followups/011_java_cross_module_visibility.md) | Follow-up 003 is closed by [ADR 008](../adr/008_java_visibility_boundaries.md); what remains is recovering cross-module references a build descriptor would permit, worth 1.5% of cross-unit facts on the probed repository. Reading build descriptors badly reintroduces the false fact that was just removed, so this waits for evidence, not appetite. |
@@ -162,12 +174,18 @@ Current follow-ups should be picked up where they naturally fit:
 After the preview is usable, prioritize work that increases exact graph value
 for real local development:
 
-- Zig frontend depth where dogfood shows the highest pain.
-- Java coverage where the probe showed it stops — supertypes and receiver calls — rather than further boundary work.
+- Plan 011's snapshot lookup and relationship-index work, because interactive
+  impact analysis is prerequisite product infrastructure for every larger
+  repository.
+- Java coverage where the probe showed it stops — supertypes and receiver calls
+  — rather than further boundary work.
+- Zig frontend depth where dogfood shows the highest pain, after the adoption
+  track's Java-scale latency and coverage priorities are not being displaced.
 - Source identity evidence for move-plus-edit refactors.
 - Capability matrix and public contract lifecycle before promising stable
   consumer semantics.
-- Persistence only after the snapshot and contract story is clear.
+- Persistence only after the in-memory snapshot/query-index contract and stable
+  consumer contract story are clear.
 
 ## Direction Checks
 
