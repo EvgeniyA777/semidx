@@ -28,12 +28,27 @@ orientation and definition lookup were fast, but impact-style context was not:
 `semidx_find_definitions` cost about 0.02 s, `semidx_references` about 1.3 s,
 and `semidx_context` at `depth=2` about 90 s.
 
-The root cause is the physical access path, not MCP rendering. A
-`Snapshot.relationships` query returns a `RelationshipIterator` over every
-assertion in the snapshot, and the source, target, kind, designator, resolution,
-and freshness filters are applied inside the iterator. Traversal therefore costs
-roughly `frontier * assertions`, so response budgets, `detail`, and
-`max_response_bytes` can cap bytes but cannot cap the search work.
+The root cause is the physical access path, not MCP rendering, and it has two
+independent terms.
+
+**Identity lookup, paid per assertion visited.** `Snapshot.publish` copies only
+live entities and units, so the `id == position` relation `Graph` relies on does
+not hold in `Snapshot`: `Snapshot.unit` and `Snapshot.entityById` are linear
+scans. `RelationshipIterator.next` applies the `freshness` filter first, for
+every assertion, and that filter calls `assertionFreshness` → `freshnessAt` →
+`Snapshot.unit`. Freshness defaults to `.current`, so this is always on.
+
+**Candidate selection, paid per query.** `Snapshot.relationships` iterates every
+assertion in the snapshot and applies the source, target, kind, designator,
+resolution, and freshness filters inside the loop.
+
+Traversal therefore costs roughly `frontier * assertions * units`, not
+`frontier * assertions`. Response budgets, `detail`, and `max_response_bytes` can
+cap bytes but cannot cap either term of the search work.
+
+`semidx_health` is the case that separates the two: it walks no relationships at
+all, so only the identity-lookup term explains its 2.96 s. It is also step 1 of
+the documented habit loop.
 
 The same missing access-path family also affects indexing work. Java package and
 single-type-import binding lookup currently relies on package/import hints and
@@ -76,6 +91,9 @@ A future plan should separate graph authority from graph access paths:
 
 - Keep the graph's assertions, resolution, freshness, producer, and identity
   evidence as the semantic authority.
+- Give the snapshot constant-time identity lookups first. It is the smaller fix,
+  it changes no signature and no result, and it is the term that explains
+  `semidx_health`, which no adjacency index can help.
 - Add derived query indexes that can always be rebuilt from that authority:
   outgoing relationships by source entity, incoming relationships by target
   entity, and whatever secondary keys the measured hot paths need, such as kind,

@@ -11,559 +11,499 @@ updated: "2026-09-18"
 
 ## Goal
 
-Make semidx impact-analysis queries interactive at external Java scale without
-weakening graph authority.
+Make semidx answer impact questions at external Java scale fast enough to stay
+in an agent's habit loop, without weakening graph authority.
 
-The user-facing problem is direct: `semidx_context` and `semidx_references` are
-the tools an agent reaches for when it asks "who uses this?" and "what would
-this edit touch?". On the Plan 010 apache/dubbo probe, definition lookup took
-about 0.02 s, references took about 1.3 s, and `semidx_context` at `depth=2`
-took about 90 s. That breaks the IDE and agent habit loop even when every fact
-returned is honest.
+On the Plan 010 apache/dubbo probe (4,050 units, 230,753 assertions):
+`semidx_find_definitions` 0.02 s, `semidx_health` 2.96 s, `semidx_references`
+1.33 s, `semidx_context` at `depth=2` 90.71 s. Every answer was honest. None of
+the last three is interactive.
 
-This plan turns the graph's current append-only scan access path into derived
-query indexes. The assertions remain the semantic authority; indexes only make
-known assertions findable in time proportional to the local neighborhood a query
-asks for.
+This plan changes only how known assertions are *found*. It adds no assertion,
+removes none, and changes no claim's resolution, freshness, producer, or
+evidence.
 
 ## Product Principle
 
-Prefer the interaction that keeps a developer in flow:
+When a stage offers a choice, decide in this order:
 
-- A focused context query should feel like navigation, not like a batch job.
-- Budgets should bound response size, but query latency must be bounded by the
-  graph access path before rendering begins.
-- When scale forces a trade-off, keep exactness and freshness visible. Return a
-  smaller exact answer or an honest degradation before returning a guessed one.
-- Do not move complexity into the user interface. The same MCP calls should get
-  faster without asking agents or IDE users to choose a storage backend, profile,
-  or implementation mode.
+1. **Exactness is not negotiable.** A faster answer that is less exact, or that
+   hides how far a claim was resolved, is not an improvement. Return a smaller
+   exact answer or an honest degradation before a guessed one.
+2. **The habit loop is the product.** `semidx_health` → `semidx_outline` →
+   `semidx_repo_map` → `semidx_find_definitions` → `semidx_references` /
+   `semidx_context` is the documented loop. A step that takes seconds gets
+   replaced by `grep`, and then the graph stops being used at all.
+3. **No new surface for the user.** No tool argument, profile, storage mode, or
+   flag for performance. The same calls get faster.
+4. **Cheapest sufficient fix first, measured each time.** Fix the dominant term,
+   re-measure, then decide whether the next term is still worth work.
 
 ## Start Rule
 
-Start only after reading:
+Read before starting:
 
 - [Follow-up 012](../followups/012_external_scale_query_latency.md)
-- [Plan 010 progress](../reports/010_java_resolution_boundaries_progress.md)
-- `src/core/graph.zig`, especially `Snapshot.relationships`,
-  `RelationshipIterator`, `countRelationships`, and `firstRelationship`
-- `src/mcp/tools.zig`, especially `semidx_references` and `semidx_context`
+- [Plan 010 progress](../reports/010_java_resolution_boundaries_progress.md),
+  for the measurements this plan is built on
+- `src/core/graph.zig`: `Snapshot`, `publish`, `RelationshipIterator`,
+  `Snapshot.unit`, `Snapshot.entityById`, `freshnessAt`
+- `src/mcp/tools.zig`: `semidx_references` and `semidx_context`
 
-Before code changes, create
-`docs/reports/011_external_scale_graph_query_indexes_progress.md` with standard
-progress-log frontmatter. Record the baseline commands and any local limitation
-there before Stage 1 implementation.
+Create `docs/reports/011_external_scale_graph_query_indexes_progress.md` with
+standard progress-log frontmatter before the first code change.
 
-Stop before implementation if the current code no longer has a linear
-`Snapshot.relationships` path or if another active plan already owns graph query
-storage. In that case, update this plan or cancel it; do not build a second
-indexing design beside an existing one.
+Stop and re-open this plan if Stage 0 measurement contradicts the cost model in
+[Current Evidence](#current-evidence) — for example if identity lookups turn out
+not to dominate. The stage order below follows from that model; if the model is
+wrong, the order is wrong.
 
 ## Scope
 
-- Add a derived relationship query index for immutable snapshots.
-- Make `Snapshot.relationships`, `countRelationships`, and
-  `firstRelationship` use indexed candidates for hot filters.
-- Preserve every existing graph assertion, entity id, assertion id, resolution,
-  freshness, producer, designator, evidence location, and result ordering
-  contract that current tests imply.
-- Move `semidx_references` and `semidx_context` onto the faster path through the
-  existing `Snapshot.relationships` API, not through MCP-specific caches.
-- Add a deterministic scale fitness check that exposes the Dubbo failure mode
-  without committing external repositories.
-- Reuse the same access-path discipline for Java package/import binding if the
-  post-relationship-index measurements still show candidate scans dominating the
-  write path.
-- Update documentation, operational memory, and Follow-up 012 closure state when
-  the plan is executed.
+- Make snapshot identity lookups (`unit`, `entityById`) constant-time.
+- Add a derived relationship adjacency index to `Snapshot` for source-entity,
+  target-entity, and designator anchored queries.
+- Route `Snapshot.relationships`, `countRelationships`, and `firstRelationship`
+  through it without changing their signatures or result contracts.
+- Add a deterministic, work-bound scale proof on a synthetic graph.
+- Measure the Java write path afterwards and fix it only if it still dominates.
+- Update documentation, `MEMORY.md`, and Follow-up 012 on closure.
 
 ## Non-Scope
 
-Do not change MCP tool JSON shape, cursor semantics, response-budget semantics,
-or `semantic_contract_version`.
+Do not change MCP tool JSON shape, tool arguments, cursor semantics,
+response-budget semantics, or `semantic_contract_version`.
 
-Do not add SQLite, another database, persistence, file watching, daemon state,
-HTTP, gRPC, or a storage migration in this plan. SQLite remains a plausible
-future backend for the same index contract, not the first implementation.
+Do not add SQLite, any database, persistence, file watching, a daemon, HTTP, or
+a storage migration. SQLite stays a candidate backend for the same contract
+later; see [SQLite Position](#sqlite-position).
 
-Do not read Maven, Gradle, class files, `.jar` files, or any build descriptor.
-Java semantic coverage and cross-module visibility are owned by separate
-follow-ups.
+Do not add approximate, vector, text-search, or name-match fallbacks. Faster
+false confidence is worse than a slow exact answer.
 
-Do not add shared-core `module` or `IMPORTS`. This plan is about physical access
-paths over already-authorized graph assertions.
+Do not change Java, Clojure, or Zig resolution rules. Stage 5 may change how
+Java *finds* candidates, never which candidates are facts.
 
-Do not add approximate, vector, text-search, or name-match fallbacks to make
-impact analysis look fuller. Faster false confidence is worse than a slow exact
-answer.
+Do not commit an external repository or make one a conformance target. The hard
+gate is synthetic and local.
 
-Do not commit external repositories or use an external repository as a
-conformance target. The hard gate must be synthetic and local.
+Do not add shared-core `module` or `IMPORTS`.
 
 ## Sources Of Truth
 
 - [ARCHITECTURE_CONSTITUTION.md](../../ARCHITECTURE_CONSTITUTION.md), especially
-  graph authority, local operation, freshness, and consumer boundaries.
-- [MEMORY.md](../../MEMORY.md), for current runtime reality and known risks.
-- [Follow-up 012](../followups/012_external_scale_query_latency.md), for the
-  accepted product problem and required tests.
-- [Plan 010 progress](../reports/010_java_resolution_boundaries_progress.md),
-  for the external Java evidence.
-- [Testing policy](../agent-policy/testing.md), for risk-based verification.
+  §1 graph authority, §3 exactness, §5 incrementality and consistent
+  observation, §7 consumers, §8 local operation.
+- [MEMORY.md](../../MEMORY.md), for current runtime reality.
+- [Follow-up 012](../followups/012_external_scale_query_latency.md).
+- [Plan 010 progress](../reports/010_java_resolution_boundaries_progress.md).
+- [Testing policy](../agent-policy/testing.md).
 
 ## Current Evidence
 
-The Plan 010 Dubbo probe indexed 4,050 Java files across 119 Maven modules. It
-found that Java truth boundaries were fixed, but product interactivity was not:
-`semidx_context` at `depth=2` cost about 90 s against 230,753 assertions.
+There are **two independent costs**, and they must not be conflated.
 
-The immediate cause is `RelationshipIterator.next`: it scans every assertion in
-the snapshot and applies `source`, `target`, `kind`, `reference_query`,
-`resolution`, `designator`, and `freshness` filters inside the loop. A traversal
-therefore costs roughly `frontier * assertions`.
+**Cost 1 — identity lookup, paid per assertion visited.** `Snapshot.publish`
+copies only live entities and units, so the `id == position` relation that
+`Graph` relies on does not hold in `Snapshot`. `Snapshot.unit(id)` and
+`Snapshot.entityById(id)` are linear scans. `RelationshipIterator.next` applies
+the `freshness` filter first, for every assertion, and that filter calls
+`assertionFreshness` → `freshnessAt` → `Snapshot.unit(id)`. Freshness defaults
+to `.current`, so this is always on.
 
-The current `preview-gate` cannot prove this class of behavior. Its
-repository-copy profile uses this repository, which has thousands of assertions,
-not hundreds of thousands. A timing threshold there would give false comfort at
-enterprise scale.
+**Cost 2 — candidate selection, paid per query.** `Snapshot.relationships`
+returns an iterator over *every* assertion and applies `source`, `target`,
+`kind`, `reference_query`, `resolution`, and `designator` inside the loop.
+
+Together the traversal cost is about `frontier × assertions × units`, not
+`frontier × assertions`. The model reproduces every Plan 010 measurement:
+
+| Call | Predicted work | Measured |
+| --- | --- | --- |
+| `semidx_find_definitions` (`name` + `path`) | no assertion walk | 0.02 s |
+| `semidx_health` | ~3 × assertions × unit scan, **no traversal** | 2.96 s |
+| `semidx_references` | ~2 × assertions × unit scan | 1.33 s |
+| `semidx_context` `depth=2` | frontier × the above | 90.71 s |
+
+`semidx_health` is the decisive case: it walks no relationships at all, so an
+adjacency index cannot help it. Only Cost 1 explains it. It is also step 1 of the
+documented habit loop.
+
+Order follows from this. Cost 1 is a few dozen lines, changes no signature, and
+cannot change results. Cost 2 is structural. Fix Cost 1 first and re-measure.
+
+The current `preview-gate` cannot observe either: its repository-copy profile has
+about 5,486 assertions against Dubbo's 230,753, and at `O(assertions × units)`
+the gap is roughly three orders of magnitude.
 
 ## Architecture Decisions
 
-**Assertions remain the authority.** The index stores assertion ids or offsets
-that point back to snapshot assertions. It must be rebuildable from the snapshot
-without loss. No query result may exist only in the index.
+These are decisions, not open questions. An executing agent applies them.
 
-**The snapshot owns the query index.** Consumers observe `Snapshot`, not mutable
-`Graph`, so the first correct place for an immutable query projection is the
-published snapshot. `Graph.publish` may pay the build cost once per published
-state; individual queries must not rebuild indexes.
+**D1 — Assertions remain the authority.** Every index stores positions into the
+snapshot's own assertion array and is rebuildable from it with no loss. No query
+result may exist only in an index. This keeps §1 and §3 intact: an index makes a
+recorded claim findable, it never establishes one.
 
-**The public API stays centered on `Snapshot.relationships`.** MCP tools,
-frontends, tests, and future consumers should keep using one graph query API.
-The index is an implementation detail behind the iterator.
+**D2 — The snapshot owns every index, built eagerly in `publish`.** Not lazily.
+`Snapshot.relationships` takes `*const Snapshot`, so a lazy build would need
+interior mutability, which would mean either a mutable published state or a lock
+— both at odds with §5's "one consistent state per query". Build cost is
+`O(assertions)` once per published state, against the `O(assertions × units)` per
+*query* it removes.
 
-**Hot keys come first.** Stage 2 must index at least:
+**D3 — Identity lookups are position tables.** In `publish`, build
+`unit_positions` and `entity_positions`: dense `[]u32` indexed by
+`id.index()`, holding the position in the published slice, with a sentinel for
+absent. Sized by the highest live id plus one. On the Dubbo shape that is about
+4 × 4,050 + 4 × 26,509 ≈ 122 KB. `Snapshot.unit`, `Snapshot.entityById`, and
+`Snapshot.unitAnalysis` read them; their signatures and return types do not
+change.
 
-- outgoing relationships by source entity
-- incoming relationships by target entity, for entity targets only
-- unresolved relationships by designator
+**D4 — Adjacency is compressed sparse row, not a map of lists.** Two passes over
+the assertion array: count per key, then fill. One allocation per index, no
+per-key allocation, and bucket contents come out in snapshot assertion order by
+construction — so **result ordering is preserved by design and is not a branch**.
+Three indexes:
 
-Secondary filters such as `kind`, `reference_query`, `resolution`, and
-`freshness` may be applied after candidate selection at first. Add compound
-indexes only when a measured hot path still scans a large candidate set.
+- outgoing: keyed by `source` entity position
+- incoming: keyed by `target` entity position, entity targets only
+- designator: a `StringHashMap` from designator to a position list, since string
+  keys have no dense space
 
-**Fallback is allowed only for unsupported filters.** A relationship query with
-no indexed anchor may still scan all assertions. A query with `source`, `target`,
-or `designator` must not fall back silently to a full snapshot scan unless the
-progress log records a correctness bug and the stage remains incomplete.
+**D5 — Anchor selection is explicit and never silently falls back.**
+`Snapshot.relationships` picks candidates in this order: if `target` and `source`
+are both given, take the shorter candidate list (CSR gives length in O(1)); else
+`target`; else `source`; else `designator`; else the full assertion array. A
+query anchored on `source`, `target`, or `designator` whose key is absent returns
+an **empty** iterator — never a full scan looking for the same thing.
 
-**Scale proof uses work, not wall-clock.** Required tests should prove candidate
-count or inspected-assertion count deterministically. Timings are useful
-observations, but wall-clock thresholds are too flaky for the first hard gate.
+**D6 — Every other filter stays a post-filter.** `kind`, `reference_query`,
+`resolution`, and `freshness` are applied per candidate as today. No compound
+index until Stage 4 measurement shows a hot path still scanning a large candidate
+list. Freshness stays exactly as strict; after D3 it is O(1) per candidate.
 
-**SQLite is deferred by design.** SQLite could later back persistence,
-cold-start avoidance, and very large local indexes. It should implement the same
-projection contract after the in-memory contract is proven. Adding it now would
-mix access-path semantics, lifecycle, dependency policy, and migration behavior
-into one plan.
+**D7 — `target` and `designator` are disjoint and stay disjoint.** A relationship
+target is either an entity or a designator. The `target` filter already skips
+designator targets and the `designator` filter skips entity targets. The incoming
+index therefore indexes entity targets only, the designator index indexes
+designator targets only, and `reference_query` — which spans kinds, not target
+shapes — remains a post-filter over whichever anchor was chosen.
+
+**D8 — Memory budget.** The indexes must add no more than 10% to peak RSS on the
+Dubbo-shaped synthetic graph. If they do, drop the designator index first (it is
+the least used anchor) and record the measurement. Local operation under §8
+includes fitting on the developer's machine.
+
+**D9 — Scale proof is a work bound, not a clock.** The hard assertion is an
+inspected-candidate count from a test-only counter. Wall-clock times are recorded
+as observations in the progress log. Timing thresholds are too flaky to gate on
+and would make the lane unreliable for every future agent.
+
+**D10 — The write path is a different problem and is diagnosed separately.**
+Stage 4's Plan 010 ingestion cost (17.5 s → 21.5 s) comes from
+`java_packages.importBindings` calling `exportsOf` per candidate unit against the
+mutable `Graph`. The snapshot indexes do not exist there. Stage 5 measures it on
+its own terms and may decide to do nothing.
 
 ## Architecture Boundaries
 
-1. Core graph
-Responsibility: assertions, entities, resolution, freshness, immutable snapshot
-publication, and derived relationship query indexes.
-Does not know about: MCP response rendering, Java package rules, external
-repository choices, or SQL.
+1. **Core graph.** Owns assertions, entities, freshness, immutable snapshot
+publication, and the derived lookup and adjacency indexes. Does not know about
+MCP rendering, Java rules, or SQL.
 
-2. Relationship index
-Responsibility: map indexed query anchors to assertion ids or offsets and expose
-candidate iteration without changing assertion meaning.
-Does not know about: user-facing budgets, rendering detail levels, language
-semantics, or source text.
+2. **Snapshot indexes.** Map an anchor to candidate positions. Do not know about
+budgets, detail levels, language semantics, or source text.
 
-3. MCP preview
-Responsibility: call graph query APIs and render exact results, budgets, and
-narrowing hints.
-Does not know about: whether candidates came from arrays, hash maps, or a future
-database.
+3. **MCP preview.** Calls the same graph query API and renders. Does not know
+whether candidates came from an array, a CSR index, or a future database. No
+tool shape changes.
 
-4. Java frontend
-Responsibility: Java package/import semantics and dependency invalidation.
-May receive a language-specific candidate index only after Stage 3 proves the
-core relationship path and Stage 4 measurements justify write-path work.
+4. **Java frontend.** Owns package and import semantics and invalidation. May get
+its own candidate projection in Stage 5, only if measured, and only over evidence
+ADR 004 and ADR 008 already authorize.
 
-5. Tests and gates
-Responsibility: prove semantic parity, deterministic scale behavior, freshness,
-incremental publication, and MCP output stability.
+5. **Tests and gates.** Prove semantic parity against a linear oracle,
+deterministic work bounds, freshness, and coherent publication.
 
 ## Implementation Stages
 
-### Stage 0: Execution Setup And Baseline
+### Stage 0: Baseline And Harness
 
-Purpose: make the implementation auditable before touching graph storage.
+Purpose: make every later claim comparable to a number recorded first.
 
 Likely files:
 
 - `docs/reports/011_external_scale_graph_query_indexes_progress.md`
+- a new core test file for the synthetic graph builder
 
 Required work:
 
-- Run `./scripts/check-zig-version.sh`.
-- Record the current git commit, dirty status, and baseline command set in the
-  progress log.
-- Reproduce the current hot path on a local synthetic graph or existing test
-  harness if one already exists. If no harness exists, record that Stage 1 will
-  add it; do not use an external repository as the required baseline.
-- Record the exact current shape of `RelationshipFilter`.
+- Run `./scripts/check-zig-version.sh`; record commit and worktree state.
+- Add a **synthetic graph builder** usable from core tests: parameterised by unit
+  count, entity count, and assertion count, producing a graph with unrelated
+  relationships, a small anchored incoming neighbourhood, a small anchored
+  outgoing neighbourhood, a depth-2 shape whose frontier stays tiny relative to
+  the assertion count, unresolved designator relationships, and stale assertions
+  mixed with current ones. This is the required baseline; it is local,
+  deterministic, and committed.
+- Record baseline inspected-work counts and wall-clock for: `countAssertions`
+  with the default freshness filter, an anchored `relationships` query, and a
+  depth-2 traversal shape, at the largest size that keeps `zig build test-core`
+  practical.
+- Reproducing the Dubbo numbers is **optional and never a gate**. If done, record
+  the clone commit and treat it as one observation, consistent with Plan 010's
+  decision to keep external repositories out of conformance.
 
 Done when:
 
-- The progress log exists and names this plan.
-- The log records the baseline evidence or explains why the first synthetic
-  baseline arrives in Stage 1.
+- The progress log names this plan and records baseline numbers from the
+  synthetic graph.
+- The builder is committed and used by at least one test.
 
-Verification:
+Verification: `zig build test-core`, `zig fmt --check build.zig src tests`.
 
-- Documentation-only setup may use `git diff --check`.
-- No code lane is required until Stage 1 changes code.
+### Stage 1: Constant-Time Identity Lookups
 
-### Stage 1: Relationship Index Contract And Oracle Tests
-
-Purpose: create the smallest core abstraction that can be proven against a
-linear oracle before any MCP path depends on it.
+Purpose: remove Cost 1, the term that explains `semidx_health` and multiplies
+everything else.
 
 Likely files:
 
 - `src/core/graph.zig`
-- optionally `src/core/relationship_index.zig`
-- any core module export needed by the existing build structure
 
 Required behavior:
 
-- Define a relationship-index projection that stores candidates as assertion
-  positions or assertion ids pointing back into one snapshot's assertion array.
-- Build the projection from a supplied assertion slice. The builder must ignore
-  non-relationship assertions for relationship-index keys.
-- Support candidate lookup by:
-  - source entity id
-  - target entity id when the relationship target is an entity
-  - designator when the relationship target is unresolved by designator
-- Preserve deterministic order. The easiest acceptable rule is snapshot
-  assertion order within every candidate list.
-- Add a linear oracle in tests that applies `RelationshipFilter` the old way and
-  compares returned assertion ids.
+- Build `unit_positions` and `entity_positions` in `publish` per D3.
+- `Snapshot.unit`, `Snapshot.entityById`, and `Snapshot.unitAnalysis` read them.
+  Signatures, return types, and null behavior are unchanged.
+- `Snapshot.deinit` frees them. They are owned like every other snapshot slice.
+- `unitByPath` and `findEntity` stay as they are: they are not on the per-
+  assertion path, and changing them is out of scope.
 
 Branch handling:
 
-- If the index cannot preserve assertion order cheaply, stop and record the
-  ordering conflict. Do not ship a faster path that reorders results unless an
-  explicit test and documentation update accepts that behavior.
-- If assertion id and assertion-array offset can diverge under current code, use
-  offsets internally but compare ids externally. Do not assume id equals offset.
+- If a live id exceeds what a dense table can size cheaply — for example after
+  heavy churn in a long session — keep the dense table sized by the highest live
+  id and treat any id beyond it as absent. Do not silently fall back to a scan:
+  a scan here is the defect being removed.
+- If any test observes a behavior change, it is a bug in this stage, not an
+  expectation to update. These functions must return exactly what they returned
+  before.
 
 Done when:
 
-- Core unit tests prove candidate lookup for source, target, designator, and
-  non-relationship assertions.
-- A parity test compares indexed candidates against the linear oracle for mixed
-  filters, including `kind`, `reference_query`, `resolution`, `freshness`, and
-  both fact and unresolved relationships.
+- A core test proves `unit` and `entityById` return the same results as a linear
+  reference implementation over a graph with removed units and entities, so the
+  id/position gap is actually exercised.
+- The Stage 0 `countAssertions` baseline improves, and the new number is
+  recorded. This is the stage's own evidence that the cost model was right.
 
-Verification:
+Verification: `zig build test-core`, `zig build test`,
+`zig fmt --check build.zig src tests`.
 
-- `zig build test-core`
-- `zig fmt --check build.zig src tests`
+### Stage 2: Relationship Adjacency Index
 
-### Stage 2: Snapshot Integration
-
-Purpose: make the existing graph query API use the index without changing
-callers.
+Purpose: remove Cost 2 for anchored queries.
 
 Likely files:
 
-- `src/core/graph.zig`
-- optionally `src/core/relationship_index.zig`
+- `src/core/graph.zig`, optionally `src/core/relationship_index.zig`
 
 Required behavior:
 
-- Add the relationship index to `Snapshot` lifetime management.
-- Build the index during snapshot publication after snapshot assertions are in
-  their final immutable order.
-- Change `Snapshot.relationships(filter)` so it selects the narrowest available
-  candidate source:
-  - `target` if present and indexed
-  - `source` if present and indexed
-  - `designator` if present and indexed
-  - full assertion scan only when no indexed anchor exists
-- When multiple indexed anchors are present, choose the smaller candidate list
-  and apply the remaining filters during iteration. If candidate-list size is
-  not available cheaply, make it available; do not guess based on field order.
-- Keep `countRelationships` and `firstRelationship` as callers of
-  `relationships`, so they inherit the same path.
-- Keep `freshness` filtering exactly as today. If the index stores stale
-  candidates, filtering them out during iteration is acceptable; publishing a
-  mixed current/stale answer is not.
+- Build the three CSR indexes per D4 in `publish`, after the assertion array is
+  in its final order.
+- `Snapshot.relationships` selects candidates per D5 and applies remaining
+  filters per D6.
+- `countRelationships` and `firstRelationship` keep calling `relationships` and
+  inherit the path unchanged.
+- Non-relationship assertions are skipped when building relationship keys.
 
 Branch handling:
 
-- If memory ownership for the index makes `Snapshot.deinit` ambiguous, stop and
-  split the index into an explicitly owned struct before continuing.
-- If any existing test observes a result-order change, treat it as a bug unless
-  the progress log records why old ordering was accidental and the user-facing
-  output remains stable.
-- If an anchor lookup returns no candidate list, return an empty iterator for
-  that anchored query. Do not fall back to a full scan looking for the same
-  source, target, or designator.
+- Ordering is settled by D4 and is not a decision to revisit. If observed order
+  changes, the build walked the assertions out of order — fix the build.
+- Assertion id and array position may diverge; index positions internally and
+  compare ids in tests.
+- If index ownership makes `Snapshot.deinit` ambiguous, put the indexes in one
+  explicitly owned struct with its own `deinit` before continuing.
 
 Done when:
 
-- Existing core tests pass unchanged or with only expectation changes justified
-  by documented order behavior.
-- A test proves a missing indexed source/target/designator returns zero results
-  without scanning all assertions.
-- A test proves snapshot publication after edits rebuilds or refreshes the index
-  so stale graph state is not mixed with current graph state.
+- A parity test compares indexed results against a linear oracle applying the old
+  filter logic, over mixed filters including `kind`, `reference_query`,
+  `resolution`, both freshness values, fact and unresolved relationships, and
+  entity and designator targets. It compares assertion ids **and order**.
+- A test proves an absent anchor returns empty without inspecting the full
+  assertion array.
+- A test proves publication after an edit yields one snapshot whose indexes match
+  its own assertions — never a mix of two states.
 
-Verification:
-
-- `zig build test-core`
-- `zig fmt --check build.zig src tests`
+Verification: `zig build test-core`, `zig build test`,
+`zig fmt --check build.zig src tests`.
 
 ### Stage 3: MCP Hot Path Parity
 
-Purpose: make the product-facing tools faster through the core API while keeping
-their public shape stable.
+Purpose: deliver the win to the tools users actually call, with no visible
+change other than speed.
 
 Likely files:
 
-- `src/mcp/tools.zig`
-- `src/core/graph.zig`
-- MCP tests under the current test layout
+- `src/mcp/tools.zig`, MCP tests
 
 Required behavior:
 
-- Keep `semidx_references` and `semidx_context` output schemas unchanged.
-- Do not add tool arguments for index mode, storage mode, or performance
-  profiles.
-- Ensure references' incoming and outgoing passes use indexed `target` and
-  `source` filters.
-- Ensure context traversal uses indexed incoming/outgoing relationship passes at
-  every frontier step.
-- Preserve de-duplication behavior for recursive calls, repeated targets, and
-  already listed relationships.
-- Preserve budget behavior: `limit`, `detail`, and `max_response_bytes` still
-  cap returned content, not search work.
+- `semidx_references` incoming and outgoing passes use `target` and `source`
+  anchors.
+- `semidx_context` uses anchored passes at every frontier step.
+- Output schemas, field order, de-duplication, traversal rendering, cursors, and
+  budget behavior are unchanged.
+- No new tool argument (Product Principle 3).
 
 Branch handling:
 
-- If an MCP test failure is only ordering, compare against Stage 2's documented
-  snapshot assertion order. Fix the implementation if the new order is not that
-  order.
-- If MCP code was bypassing `Snapshot.relationships` somewhere, route it through
-  the core API unless doing so loses required information. Record any exception
-  in the progress log and add a focused test.
+- If MCP code reaches past `Snapshot.relationships` anywhere, route it through
+  the core API; record any exception in the progress log with a focused test.
+- If an MCP test fails only on ordering, the implementation is wrong, not the
+  test: D4 fixes the order.
 
 Done when:
 
-- Existing MCP tests pass.
-- At least one focused MCP test or fixture proves `semidx_context depth=2`
-  returns the same structured relationship ids before and after the index path.
-  If no pre-index fixture is retained, use the linear oracle in the test.
+- `zig build test-mcp` and `zig build test` pass with no expectation changes.
+- A focused test proves `semidx_context` at `depth=2` returns the same structured
+  relationship ids, in the same order, as the linear oracle.
 
-Verification:
+Verification: `zig build test-mcp`, `zig build test`,
+`zig fmt --check build.zig src tests`.
 
-- `zig build test-mcp`
-- `zig build test`
-- `zig fmt --check build.zig src tests`
+### Stage 4: Deterministic Scale Proof
 
-### Stage 4: Deterministic External-Scale Fitness Check
-
-Purpose: prove the Dubbo failure mode is gone without depending on Dubbo or any
-other external repository.
+Purpose: make this failure mode impossible to reintroduce silently.
 
 Likely files:
 
-- `src/core/graph.zig` or a new core test file
-- optionally `src/mcp/` tests if the existing test harness can exercise a
-  synthetic snapshot without a subprocess
-- `docs/mcp/habit_loop_gate.md` only if the gate's documented observations
-  change
+- core test file from Stage 0, optionally `docs/mcp/habit_loop_gate.md`
 
 Required behavior:
 
-- Add a synthetic graph with hundreds of thousands of assertions or the nearest
-  local size that keeps `zig build test-core` practical. The graph must include:
-  - many unrelated relationships
-  - a small anchored incoming neighborhood
-  - a small anchored outgoing neighborhood
-  - a depth-2 shape where the frontier expands but remains tiny relative to the
-    assertion count
-  - unresolved designator relationships
-  - stale assertions mixed with current assertions
-- Prove indexed anchored queries inspect only candidate lists plus necessary
-  filter checks, not the full assertion set per frontier entity.
-- Prefer a deterministic inspected-candidate counter or test-only iterator
-  statistic over timing. Timing may be printed or recorded in the progress log
-  as an observation, but it must not be the only hard proof.
-- Add a regression test that would fail under the old
-  `frontier * assertions` scan path.
-
-Branch handling:
-
-- If a 230k-assertion synthetic test is too heavy for the required local lane,
-  keep the hard test deterministic at the largest practical size, record the
-  measured ceiling in the progress log, and add a separate non-default command
-  for larger local scale. Do not fake scale by lowering the acceptance claim.
-- If adding a scale test to `zig build test-core` makes the normal lane
-  materially slower, split the size: a small deterministic proof in
-  `test-core`, and a named scale lane documented in this plan's progress log.
+- Add a test-only inspected-candidate counter on the iterator.
+- Assert, on the Stage 0 synthetic graph, that anchored queries and depth-2
+  traversal inspect work proportional to the local neighbourhood, not to total
+  assertions per frontier step. The assertion must fail under the pre-Stage-2
+  path.
+- Record wall-clock and peak memory as observations, and check the D8 memory
+  budget.
+- Keep `zig build test-core` practical: if the largest meaningful size makes the
+  default lane materially slower, keep a smaller deterministic proof in
+  `test-core` and put the larger size behind a named command documented in the
+  progress log. Do not lower the acceptance claim to fit the lane.
 
 Done when:
 
-- The test suite contains a deterministic proof that anchored relationship and
-  depth-2 traversal work do not grow with total assertion count per frontier
-  step.
-- The progress log records observed time and memory on the synthetic scale
-  shape, while making clear that the hard assertion is the work bound.
+- The suite contains a work-bound proof that would fail under the old path.
+- The progress log records observed time, memory, and the measured index size
+  against D8.
 
-Verification:
+Verification: `zig build test-core`, `zig build test`, `zig build preview-gate`,
+`zig fmt --check build.zig src tests`.
 
-- `zig build test-core`
-- `zig build test-mcp` if Stage 4 adds MCP coverage
-- `zig build preview-gate` after the hard proof exists, even if preview-gate
-  remains observational for latency
-- `zig fmt --check build.zig src tests`
+### Stage 5: Java Write-Path Measurement
 
-### Stage 5: Java Write-Path Access-Path Review
-
-Purpose: decide, with measurements after the core query fix, whether Java
-package/import binding needs its own derived candidate index in this plan.
-
-Likely files if implementation is needed:
-
-- `src/frontends/java*.zig`
-- Java package helper files such as `src/frontends/java_packages.zig`
-- Java frontend tests and fixtures
+Purpose: decide with numbers whether the write path still needs work.
 
 Required work:
 
-- Measure Java indexing on the same kind of workload Plan 010 used or on the
-  largest available local Java fixture. Record whether package/import candidate
-  scans still dominate ingestion after Stages 1-4.
-- If package/import scans are not a meaningful share of ingestion anymore,
-  record "deferred, not needed for this plan's product goal" in the progress
-  log and skip code changes in Stage 5.
-- If scans still matter, add a Java-specific derived projection for package and
-  single-type-import lookup. It must be rebuilt from Java frontend evidence and
-  must not create facts independently of ADR 004 and ADR 008 rules.
-- Keep declarer and importer hint cleanup together. `Packages.note` and the
-  Stage 4 importer pattern from Plan 010 share the same stale-hint risk.
+- Re-measure Java ingestion after Stages 1–4, on the largest available local Java
+  fixture or a fresh external clone recorded as an observation.
+- Compare against Plan 010's 17.5 s → 21.5 s. Per D10 the cause is
+  `importBindings` calling `exportsOf` per candidate unit against `Graph`, so
+  Stages 1–4 may not have moved it at all.
+- **If import/package candidate scans are no longer a meaningful share of
+  ingestion, record that and change no code.** Skipping is a valid, expected
+  outcome.
+- If they still dominate, add a Java-side candidate projection rebuilt from Java
+  frontend evidence. It must not create, widen, or reorder facts: ADR 004 and
+  ADR 008 rules are untouched.
 
 Branch handling:
 
-- If the proposed Java index needs build-descriptor knowledge, stop and defer to
-  Follow-up 011. Do not smuggle module semantics into an access-path patch.
+- If a proposed optimization would need build-descriptor knowledge, stop; that is
+  [Follow-up 011](../followups/011_java_cross_module_visibility.md).
 - If an optimization would merge out-of-scope names with missing names, reject
-  it. Plan 010 explicitly made those reasons distinct.
-- If the Java write-path optimization increases semantic complexity more than it
-  improves measured ingestion, defer it and keep this plan focused on product
-  query latency.
+  it. Plan 010 made those reasons distinct on purpose.
+- If it adds more semantic complexity than measured ingestion it saves, defer it.
 
-Done when either:
+Done when either the progress log records that no change is needed, or Java tests
+prove facts, ambiguity, out-of-scope names, missing names, single-type imports,
+provider removal, and importer reanalysis all behave exactly as before.
 
-- The progress log records that Java write-path indexing is not needed for this
-  plan after measurement, or
-- Java tests prove the new candidate projection preserves facts, ambiguity,
-  out-of-scope names, missing names, single-type imports, provider removal, and
-  importer reanalysis.
+Verification: if no code changes, rerun Stage 4's command set and record the
+measurement. If code changes: `zig build test`, `zig build dogfood`,
+`zig fmt --check build.zig src tests`.
 
-Verification:
-
-- If no Java code changes: rerun the latest passing Stage 4 command set and
-  record the measurement.
-- If Java code changes: `zig build test`, `zig build dogfood`, and
-  `zig fmt --check build.zig src tests`.
-
-### Stage 6: Documentation And Follow-Up Closure
-
-Purpose: make the new access-path contract visible to the next agent without
-turning implementation notes into architecture folklore.
+### Stage 6: Documentation And Closure
 
 Likely files:
 
-- `docs/reports/011_external_scale_graph_query_indexes_progress.md`
-- `docs/followups/012_external_scale_query_latency.md`
-- `docs/followups/README.md`
-- `MEMORY.md`
-- maybe `docs/mcp/habit_loop_gate.md`
-- maybe release notes only if a preview release is being prepared
+- the progress log, `docs/followups/012_external_scale_query_latency.md`,
+  `docs/followups/README.md`, `MEMORY.md`, maybe
+  `docs/mcp/habit_loop_gate.md`
 
 Required behavior:
 
-- Mark Follow-up 012 fixed only if Stages 1-4 are implemented, verified, and the
-  product hot path is indexed. If Stage 5 is deferred by measurement, that does
-  not block closing Follow-up 012 unless Java ingestion remains the dominant
-  product wait.
-- Update `MEMORY.md` with the current reality, not a changelog entry.
-- Record the final verification commands, pass/fail results, and residual risks
-  in the progress log.
-- If the scale proof adds a named command or changes preview-gate expectations,
-  update the gate documentation in the same commit.
+- State in `MEMORY.md` that snapshot identity lookups and anchored relationship
+  queries are indexed, as current reality rather than a changelog entry.
+- Record the final latency numbers next to Plan 010's, so the before and after
+  are readable together.
+- Close Follow-up 012 if Stages 1–4 landed and the hot path is indexed; narrow it
+  if a storage or write-path concern remains.
+- If the scale proof adds a named command or changes gate expectations, update
+  the gate documentation in the same commit.
 
-Done when:
+Done when plan status, follow-up status, `MEMORY.md`, and the progress log agree,
+and no document still describes the linear query path as current.
 
-- Plan status, follow-up status, memory, and progress log agree.
-- No open document says relationship/context queries still require indexed
-  access paths unless a residual risk explains the remaining gap.
-
-Verification:
-
-- `zig build test-core`
-- `zig build test`
-- `zig build test-mcp`
-- `zig build dogfood`
-- `zig build preview-gate`
-- `zig fmt --check build.zig src tests`
-- `scripts/check-agent-attribution.sh`
+Verification: `./scripts/check-zig-version.sh`,
+`zig fmt --check build.zig src tests`, `zig build test-core`, `zig build test`,
+`zig build test-mcp`, `zig build dogfood`, `zig build preview-gate`.
 
 ## Risk Matrix
 
-| Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
+| Guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative case | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| Relationship indexes are projections only | Index becomes independent authority | Core unit | Returned assertions are loaded from snapshot storage | Index key exists for an assertion removed or not in snapshot | Stage 1 parity tests |
-| Anchored relationship queries avoid full scans | Product latency remains `frontier * assertions` | Core unit with synthetic scale | Candidate count stays local for `source`, `target`, and `designator` | Missing anchor returns empty without fallback scan | Stage 2 and Stage 4 work-bound tests |
-| MCP output shape remains stable | Existing clients break | MCP integration | Same fields and relationship ids for references/context | Budget exhaustion and pagination still render as before | Stage 3 `zig build test-mcp` |
-| Freshness and resolution remain visible | Stale or unresolved claims appear current | Core and MCP tests | Filters preserve `.current`, stale, fact, unresolved, approximate categories | Mixed stale/current synthetic graph | Stage 1, Stage 2, Stage 4 tests |
-| Incremental publication is coherent | Snapshot has assertions from one state and index from another | Core integration | Publish/rebuild creates one immutable indexed snapshot | Refresh failure keeps previous snapshot | Stage 2 tests plus existing refresh tests |
-| Java write-path optimization does not widen semantics | Faster indexing creates false Java facts | Frontend fixture | ADR 004/008 facts unchanged | Out-of-scope, ambiguous, missing, provider removal, importer reanalysis | Stage 5 tests if implemented |
-| Scale fitness is meaningful locally | Gate misses enterprise-scale failure again | Synthetic core test | Hundreds of thousands or documented largest practical assertion count | Old linear path would exceed inspected-work bound | Stage 4 hard proof |
-| No new external service dependency | Local/offline guarantee weakens | Documentation and build review | No SQLite or service startup in required lanes | Missing database has no effect because none is required | Stage 6 docs and normal test lanes |
+| Indexes are projections only | An index becomes independent authority | Core unit | Results are read from snapshot assertions | Key present for an assertion not in the snapshot | Stage 2 parity |
+| Identity lookups unchanged in meaning | A wrong unit or entity silently changes freshness | Core unit | Same results as a linear reference, over a graph with removals | Id beyond the table is absent, not scanned | Stage 1 |
+| Anchored queries avoid full scans | Latency stays multiplicative | Core unit, synthetic scale | Inspected work is local | Absent anchor returns empty without a scan | Stages 2 and 4 |
+| Result order stable | Clients and tests see reordered output | Core and MCP | CSR built in assertion order | Depth-2 traversal ids and order match the oracle | Stages 2 and 3 |
+| Freshness and resolution visible | Stale or unresolved claims read as current | Core and MCP | Filters preserve every category | Mixed stale/current synthetic graph | Stages 1, 2, 4 |
+| Publication coherent | Index and assertions from different states | Core integration | One immutable indexed snapshot per publish | Refresh failure keeps the previous snapshot | Stage 2 plus existing refresh tests |
+| Memory stays local-friendly | Large repositories stop fitting | Observation against D8 | Index ≤ 10% of peak RSS | Budget exceeded → drop designator index | Stage 4 |
+| MCP surface unchanged | Clients break | MCP integration | Same fields, ids, budgets, cursors | Budget exhaustion and pagination unchanged | Stage 3 |
+| Java semantics unchanged | Faster indexing invents facts | Frontend fixture | ADR 004/008 facts identical | Out-of-scope, ambiguous, missing, provider removal | Stage 5 if implemented |
+| No new external dependency | Local/offline guarantee weakens | Build review | No database in any lane | Nothing to miss, because nothing is required | Stage 6 |
 
 ## SQLite Position
 
-SQLite is a credible future backend, but not the first move.
+SQLite stays a credible backend for a later persistence plan: cold-start
+avoidance, memory-bounded very large repositories, multi-process reads. When that
+happens, SQL tables store assertions and derived projections; they must never
+decide semantic truth the graph cannot prove.
 
-Use it later if the product needs persistent cold-start avoidance, memory-bounded
-very large local repositories, or multi-process read access. When that happens,
-the design should treat SQLite tables as storage for graph assertions and
-derived projections. It must not let SQL rows decide semantic truth that the
-graph cannot prove.
+It is not the first move here. This plan proves the smaller contract — given one
+immutable snapshot, identity and relationship lookups are indexed — which keeps
+the win close to the measured pain, keeps every lane local and cheap, and leaves
+a clean interface a SQLite-backed implementation can satisfy later.
 
-This plan intentionally proves the smaller contract first: given one immutable
-snapshot in memory, relationship queries have indexed access paths. That keeps
-the user-visible win close to the measured pain, keeps tests local and cheap,
-and leaves a clean interface for a later SQLite-backed implementation.
+## Definition Of Done
 
-## Final Acceptance Criteria
-
-The plan is complete when:
-
-- `semidx_references` and `semidx_context` use indexed relationship access for
-  source, target, and designator anchored work.
-- A deterministic synthetic scale proof shows depth-2 relationship traversal is
-  bounded by local candidates, not by all assertions per frontier entity.
-- Existing semantic guarantees for ids, freshness, resolution, producer,
-  evidence, and designators are unchanged.
-- Follow-up 012 is closed or explicitly narrowed to a remaining storage or Java
-  write-path concern.
-- The progress log records final commands, results, residual risk, and commits.
+- `semidx_health`, `semidx_references`, and `semidx_context` no longer pay a
+  linear unit or entity scan per assertion, and anchored relationship queries no
+  longer scan the full assertion array.
+- A deterministic work-bound test would fail under the old path.
+- Ids, order, resolution, freshness, producer, evidence, and designator behavior
+  are provably unchanged against a linear oracle.
+- No MCP tool argument, schema field, or budget semantic changed.
+- Index memory is measured against D8 and recorded.
+- Follow-up 012 is closed or narrowed, and the progress log records final
+  commands, results, residual risk, and commits.
