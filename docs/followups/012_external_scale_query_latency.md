@@ -69,6 +69,9 @@ boundary plan.
 
 ## Acceptance Direction
 
+Implementation plan:
+[Plan 011: External-Scale Graph Query Indexes](../plans/011_external_scale_graph_query_indexes.md).
+
 A future plan should separate graph authority from graph access paths:
 
 - Keep the graph's assertions, resolution, freshness, producer, and identity
@@ -109,4 +112,3 @@ SQLite backs the same contract.
   ambiguous names, out-of-scope names, and missing names.
 - A gate records latency on the scale fixture. Thresholds are tied to the
   synthetic graph size and query shape, not to this repository's dogfood size.
-

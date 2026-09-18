@@ -264,7 +264,10 @@ documents that own history, rationale, and evidence.
   about 1.3 s, against 0.02 s for `semidx_find_definitions`. Follow-up 012 owns
   the architectural response: relationship/context queries need indexed graph
   access paths, and SQLite is a possible future persistence/query-index backend
-  only if graph assertions remain the semantic authority.
+  only if graph assertions remain the semantic authority. Plan 011 is the
+  prepared implementation route: prove in-memory snapshot relationship indexes
+  first, then consider Java write-path indexing and future SQLite storage only
+  behind that projection contract.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`). Ecosystem
   evidence reversed the initial intent to shorten it: most MCP clients ignore
