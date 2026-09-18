@@ -530,6 +530,237 @@ test "identity lookup cost does not grow with the graph" {
     }
 }
 
+// -- adjacency parity -------------------------------------------------------
+
+/// What `Snapshot.relationships` did before it had an index: walk every
+/// assertion and apply every filter inline.
+///
+/// This is the oracle, so it is written out in full rather than sharing code
+/// with the implementation. A parity test that shares the logic it is checking
+/// proves only that the logic equals itself.
+fn oracle(
+    snapshot: *const Snapshot,
+    filter: Snapshot.RelationshipFilter,
+    out: *std.ArrayList(model.AssertionId),
+    gpa: Allocator,
+) !void {
+    out.clearRetainingCapacity();
+    for (snapshot.assertions) |assertion| {
+        if (filter.freshness) |freshness| {
+            if (snapshot.assertionFreshness(assertion) != freshness) continue;
+        }
+        const relationship = assertion.relationship() orelse continue;
+        if (filter.reference_query) {
+            if (!relationship.kind.satisfiesReferenceQuery()) continue;
+        } else if (filter.kind) |kind| {
+            if (relationship.kind != kind) continue;
+        }
+        if (filter.source) |source| {
+            if (relationship.source != source) continue;
+        }
+        if (filter.target) |target| {
+            switch (relationship.target) {
+                .entity => |id| if (id != target) continue,
+                .designator => continue,
+            }
+        }
+        if (filter.designator) |designator| {
+            switch (relationship.target) {
+                .designator => |value| if (!std.mem.eql(u8, value, designator)) continue,
+                .entity => continue,
+            }
+        }
+        if (filter.resolution) |category| {
+            if (assertion.resolution.category() != category) continue;
+        }
+        try out.append(gpa, assertion.id);
+    }
+}
+
+fn indexed(
+    snapshot: *const Snapshot,
+    filter: Snapshot.RelationshipFilter,
+    out: *std.ArrayList(model.AssertionId),
+    gpa: Allocator,
+) !void {
+    out.clearRetainingCapacity();
+    var iterator = snapshot.relationships(filter);
+    while (iterator.next()) |assertion| try out.append(gpa, assertion.id);
+}
+
+/// The filter combinations the parity test runs. An anchor, crossed with every
+/// post-filter, because the anchor decides what is looked at and the
+/// post-filters decide what survives — a break in either direction has to show
+/// up as a different list.
+fn expectParityOverFilters(snapshot: *const Snapshot, anchors: []const Snapshot.RelationshipFilter) !void {
+    const gpa = testing.allocator;
+    var expected: std.ArrayList(model.AssertionId) = .empty;
+    defer expected.deinit(gpa);
+    var actual: std.ArrayList(model.AssertionId) = .empty;
+    defer actual.deinit(gpa);
+
+    const kinds = [_]?model.RelationshipKind{ null, .contains, .defines, .references, .calls };
+    const resolutions = [_]?model.ResolutionCategory{ null, .fact, .unresolved, .approximate };
+    const freshnesses = [_]?model.Freshness{ .current, .stale, null };
+
+    for (anchors) |anchor| {
+        for (kinds) |kind| {
+            for ([_]bool{ false, true }) |reference_query| {
+                for (resolutions) |resolution| {
+                    for (freshnesses) |freshness| {
+                        var filter = anchor;
+                        filter.kind = kind;
+                        filter.reference_query = reference_query;
+                        filter.resolution = resolution;
+                        filter.freshness = freshness;
+
+                        try oracle(snapshot, filter, &expected, gpa);
+                        try indexed(snapshot, filter, &actual, gpa);
+                        // Ids and order, not just counts: a consumer reads this
+                        // list in the order it arrives.
+                        try testing.expectEqualSlices(
+                            model.AssertionId,
+                            expected.items,
+                            actual.items,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// An entity id the snapshot no longer holds, and one past every id it ever
+/// issued.
+fn absentIds(snapshot: *const Snapshot) struct { removed: EntityId, beyond: EntityId } {
+    var highest: u32 = 0;
+    for (snapshot.entities) |item| highest = @max(highest, @intFromEnum(item.id));
+    var removed: EntityId = @enumFromInt(0);
+    for (0..highest) |index| {
+        const id: EntityId = @enumFromInt(@as(u32, @intCast(index)));
+        if (snapshot.entityById(id) == null) removed = id;
+    }
+    return .{ .removed = removed, .beyond = @enumFromInt(highest + 100) };
+}
+
+test "indexed relationship queries answer exactly what a full scan answered" {
+    var synthetic = try build(testing.allocator, .{ .units = 64 });
+    defer synthetic.deinit();
+    var snapshot = try synthetic.publish();
+    defer snapshot.deinit();
+
+    const absent = absentIds(&snapshot);
+    const anchors = [_]Snapshot.RelationshipFilter{
+        // No anchor: the whole array is the candidate list, as before.
+        .{},
+        // Entity anchors, each direction, including entities that have
+        // relationships in one direction only.
+        .{ .source = synthetic.focus },
+        .{ .target = synthetic.focus },
+        .{ .source = synthetic.outgoing[0] },
+        .{ .target = synthetic.depth2[0] },
+        .{ .source = synthetic.depth2[0] },
+        .{ .target = synthetic.incoming[0] },
+        // Both anchors, so the shorter candidate list is chosen and the other
+        // anchor still has to be applied.
+        .{ .source = synthetic.focus, .target = synthetic.outgoing[0] },
+        .{ .source = synthetic.focus, .target = synthetic.depth2[0] },
+        // Ids the snapshot does not hold: one removed, one never issued.
+        .{ .source = absent.removed },
+        .{ .target = absent.removed },
+        .{ .source = absent.beyond },
+        .{ .target = absent.beyond },
+        // Designators, including one several units share, one recorded by a
+        // unit whose contents changed afterwards, one whose unit left the
+        // index, and one nothing ever recorded.
+        .{ .designator = shared_designator },
+        .{ .designator = "synthetic.U24" },
+        .{ .designator = "synthetic.U48" },
+        .{ .designator = "synthetic.U32" },
+        .{ .designator = "synthetic.NeverRecorded" },
+        // A target is an entity or a designator and never both, so these must
+        // stay empty whichever anchor is chosen.
+        .{ .source = synthetic.focus, .designator = shared_designator },
+        .{ .target = synthetic.focus, .designator = shared_designator },
+    };
+
+    try expectParityOverFilters(&snapshot, &anchors);
+}
+
+test "an anchor the index does not hold returns empty without a scan" {
+    var synthetic = try build(testing.allocator, .{ .units = 64 });
+    defer synthetic.deinit();
+    var snapshot = try synthetic.publish();
+    defer snapshot.deinit();
+
+    const absent = absentIds(&snapshot);
+    const anchors = [_]Snapshot.RelationshipFilter{
+        .{ .source = absent.beyond },
+        .{ .target = absent.beyond },
+        .{ .designator = "synthetic.NeverRecorded" },
+        // An entity that exists and simply has nothing pointing out of it.
+        .{ .source = synthetic.depth2[0] },
+    };
+
+    for (anchors) |filter| {
+        graph_mod.work.reset();
+        var iterator = snapshot.relationships(filter);
+        try testing.expect(iterator.next() == null);
+        // Not "few". None: the index already said this key holds nothing, and
+        // looking anyway would be the linear path under another name.
+        try testing.expectEqual(@as(usize, 0), graph_mod.work.candidates);
+    }
+}
+
+test "a snapshot published after an edit is indexed against its own assertions" {
+    var synthetic = try build(testing.allocator, .{ .units = 64 });
+    defer synthetic.deinit();
+
+    var before = try synthetic.publish();
+    defer before.deinit();
+    const before_outgoing = before.countRelationships(.{ .source = synthetic.focus });
+    const before_assertions = before.assertions.len;
+
+    // An edit that adds a relationship the earlier snapshot never saw, in a
+    // unit that already carries part of the known shape.
+    const unit = before.unitByPath("synthetic/u000001.java").?.id;
+    const revision = try synthetic.graph.setSourceUnitBytes(unit, "// edited, then analyzed\n");
+    try testing.expect(revision > before.revision);
+    try addCall(
+        &synthetic.graph,
+        unit,
+        synthetic.outgoing[0],
+        synthetic.focus,
+        "call added by the edit",
+    );
+    try synthetic.graph.markAnalyzed(unit);
+
+    var after = try synthetic.publish();
+    defer after.deinit();
+
+    // The earlier snapshot is untouched by a later publication, index included.
+    try testing.expectEqual(before_assertions, before.assertions.len);
+    try testing.expectEqual(before_outgoing, before.countRelationships(.{ .source = synthetic.focus }));
+
+    // The new snapshot's index describes the new snapshot, not a mix of the
+    // two: the added relationship is reachable from both its anchors, and every
+    // filter still agrees with a full scan of the assertions this snapshot
+    // actually holds.
+    try testing.expectEqual(
+        @as(usize, fan_in + 1),
+        after.countRelationships(.{ .target = synthetic.focus }),
+    );
+    const anchors = [_]Snapshot.RelationshipFilter{
+        .{},
+        .{ .source = synthetic.focus },
+        .{ .target = synthetic.focus },
+        .{ .source = synthetic.outgoing[0] },
+        .{ .designator = shared_designator },
+    };
+    try expectParityOverFilters(&after, &anchors);
+    try expectParityOverFilters(&before, &anchors);
+}
+
 test "query cost over the synthetic graph is measured, not assumed" {
     var synthetic = try build(testing.allocator, .{});
     defer synthetic.deinit();

@@ -14,13 +14,14 @@ Companion log for
 
 ## Current Status
 
-Stages 0 and 1 are complete. The cost model in the plan's
+Stages 0 through 2 are complete. The cost model in the plan's
 [Current Evidence](../plans/011_external_scale_graph_query_indexes.md#current-evidence)
 is confirmed on a local synthetic graph, so the plan's stage order stands and its
 Start Rule stop condition is not triggered. Identity lookups are now constant
-time, which removed 124.8× of the work every query was paying. Nothing about
-graph semantics has changed: no assertion was added or removed, and no claim's
-resolution, freshness, producer, or evidence moved.
+time, and anchored relationship queries read from a derived adjacency index
+instead of scanning. Nothing about graph semantics has changed: no assertion was
+added or removed, and no claim's resolution, freshness, producer, or evidence
+moved.
 
 The open item carried forward is honest attribution, not code: Stage 1's product
 latency on external Java scale was **not measured**, because no external
@@ -33,7 +34,7 @@ reproduction was available. See
 | --- | --- | --- |
 | Stage 0: Baseline and harness | Completed | Synthetic graph committed at 5,045 assertions over 249 live units. Baseline confirms both costs: `countAssertions` examines 629,508 stored records to answer over 5,045 assertions, and an anchored query still walks all 5,045 candidates. |
 | Stage 1: Constant-time identity lookups | Completed | Identity lookups read position tables built in `publish`. Work to answer `countAssertions` over the synthetic graph fell from 629,508 examined records to 5,044 — a factor of 124.8, which is half the live unit count, exactly what the cost model predicted. Results are unchanged against a linear reference over every id the graph issued. |
-| Stage 2: Relationship adjacency index | Not started | — |
+| Stage 2: Relationship adjacency index | Completed | Three derived indexes built in `publish`: outgoing and incoming as compressed sparse row, designators as a map. An anchored query now inspects exactly as many assertions as it returns — 5,045 candidates down to 4, and the depth-2 traversal 25,225 down to 16. Parity against the linear oracle is asserted on ids and order over 2,400 filter combinations. |
 | Stage 3: MCP hot path parity | Not started | — |
 | Stage 4: Deterministic scale proof | Not started | — |
 | Stage 5: Java write-path measurement | Not started | — |
@@ -240,3 +241,94 @@ this record.
 | `zig build test` | 228/229 passed, 1 skipped (pre-existing dogfood skip; no repository root outside `zig build dogfood`) |
 
 No test expectation was changed. Two tests were added.
+
+## Stage 2: Relationship Adjacency Index
+
+### Work
+
+- `src/core/relationship_index.zig`: a new module owning three derived indexes
+  over one published assertion array — outgoing by source entity, incoming by
+  entity target, and a designator map. The two entity indexes are compressed
+  sparse row: one allocation each, built by counting per key and then filling
+  forward over the assertion array, so bucket contents come out in snapshot
+  order by construction rather than by a sort. It owns its own `deinit` and
+  reports its own `byteSize`.
+- `src/core/graph.zig`: `publish` builds the index after the assertion array is
+  in its final order. `Snapshot.relationships` chooses candidates and
+  `RelationshipIterator` walks either a chosen position list or the whole array.
+  `countRelationships` and `firstRelationship` were not touched; they call
+  `relationships` and inherited the path.
+- `src/core/scale_test.zig`: parity against the oracle, an absent-anchor proof,
+  and a coherent-publication test.
+
+### One Decision The Plan Did Not Settle
+
+**The entity indexes are keyed by entity id, not by entity position.** D4 says
+position, and position would be the smaller table. It is also wrong here, and
+the difference is a correctness one rather than a tuning one.
+
+A snapshot can hold a relationship whose target entity is no longer live:
+`checkAssertions` deliberately admits a stale claim that reached into another
+unit whose provider removed the definition. That entity has no position, because
+`publish` copies only live entities. Keying the incoming index by position would
+give that claim no key, and a query anchored on that target id — which the linear
+path answered by comparing ids, never liveness — would silently return nothing.
+Faster, and wrong in exactly the direction this plan forbids.
+
+Keying by id costs a table sized by the highest id any live entity or any
+assertion names, rather than by the live entity count. D8's expected-bytes
+formula is adjusted accordingly in Stage 4's measurement, and the adjustment is
+recorded there rather than applied quietly.
+
+### Result
+
+Same synthetic graph: 249 live units, 2,740 entities, 5,045 assertions.
+
+| Query | Answers | Candidates before | After | Factor |
+| --- | --- | --- | --- | --- |
+| `relationships` anchored on `source` | 4 | 5,045 | 4 | 1,261× |
+| `relationships` anchored on `target` | 4 | 5,045 | 4 | 1,261× |
+| Depth-2 traversal from the focus entity | 16 | 25,225 | 16 | 1,577× |
+
+An anchored query now inspects exactly as many assertions as it returns. That is
+not a coincidence of this fixture: the candidate list *is* the answer set before
+post-filters, so inspected work follows the neighbourhood and stops following
+the repository.
+
+`countAssertions` is unchanged at 0 candidates and 5,044 identity records. It
+walks no relationships, so no adjacency index can help it, and none did. That is
+the check that the two stages' wins are not being credited to each other.
+
+### Parity
+
+The oracle is the pre-index filter loop, written out in full rather than sharing
+code with the implementation — a parity test that shares the logic it checks
+proves only that the logic equals itself.
+
+The matrix is 20 anchors × 5 kinds × reference-query on and off × 4 resolutions
+× 3 freshness settings = 2,400 comparisons per snapshot, each on assertion
+**ids and order**, not counts. The anchors include: no anchor; both directions
+on entities that have relationships in one direction only; both anchors at once,
+so the shorter list is chosen and the other anchor still has to be applied; a
+removed entity id and an id never issued; a designator several units share, one
+from a unit edited afterwards, one from a unit that left the index, and one
+nothing ever recorded; and entity-plus-designator combinations that must stay
+empty because a target is one or the other and never both.
+
+### Coherent Publication
+
+A snapshot published before an edit keeps answering its own assertions after a
+later publication, and the later snapshot's index describes the later
+assertions. Both are re-checked against the oracle in the same test, so a mixed
+state would have to agree with a full scan of a state that does not exist.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | clean |
+| `zig build test-core` | 96/96 tests passed |
+| `zig build test` | 231/232 passed, 1 skipped (pre-existing dogfood skip) |
+| `zig build test-mcp` | 28/29 passed, 1 skipped |
+
+No test expectation was changed anywhere, including in the MCP lane.

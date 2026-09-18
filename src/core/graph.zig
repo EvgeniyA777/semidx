@@ -12,6 +12,7 @@ const model = @import("model.zig");
 const contract = @import("contract.zig");
 const StringPool = @import("strings.zig").StringPool;
 const dependencies_mod = @import("dependencies.zig");
+const RelationshipIndex = @import("relationship_index.zig").RelationshipIndex;
 
 pub const EntityId = model.EntityId;
 pub const SourceUnitId = model.SourceUnitId;
@@ -901,6 +902,19 @@ pub const Graph = struct {
         );
         errdefer self.gpa.free(unit_positions);
 
+        // The adjacency index is built here too, and eagerly. A lazy build
+        // would need a published state that can still change, or a lock around
+        // one that cannot — and either answers a query from something other
+        // than the single consistent state the consumer was promised. Building
+        // costs one pass over the assertions per published state, against the
+        // full scan it removes from every query against that state.
+        var relationship_index = try RelationshipIndex.build(
+            self.gpa,
+            assertions.items,
+            entity_positions.len,
+        );
+        errdefer relationship_index.deinit(self.gpa);
+
         return .{
             .gpa = self.gpa,
             .revision = self.revision,
@@ -911,6 +925,7 @@ pub const Graph = struct {
             .units = try units.toOwnedSlice(self.gpa),
             .entity_positions = entity_positions,
             .unit_positions = unit_positions,
+            .relationship_index = relationship_index,
         };
     }
 
@@ -1182,6 +1197,9 @@ pub const Snapshot = struct {
     /// they never establish one.
     entity_positions: []const u32,
     unit_positions: []const u32,
+    /// Which assertions answer a query anchored on a source entity, a target
+    /// entity, or a designator. Derived from `assertions` and owned here.
+    relationship_index: RelationshipIndex,
 
     pub fn deinit(self: *Snapshot) void {
         self.gpa.free(self.entities);
@@ -1191,6 +1209,7 @@ pub const Snapshot = struct {
         self.gpa.free(self.units);
         self.gpa.free(self.entity_positions);
         self.gpa.free(self.unit_positions);
+        self.relationship_index.deinit(self.gpa);
         self.* = undefined;
     }
 
@@ -1373,14 +1392,28 @@ pub const Snapshot = struct {
 
     pub const RelationshipIterator = struct {
         snapshot: *const Snapshot,
-        assertions: []const model.Assertion,
+        /// Which assertions this query has to look at: positions chosen by an
+        /// anchor, or `null` when the query named no anchor and the whole
+        /// array is the candidate list.
+        candidates: ?[]const u32,
         index: usize,
         filter: RelationshipFilter,
 
-        pub fn next(self: *RelationshipIterator) ?model.Assertion {
-            while (self.index < self.assertions.len) {
-                const assertion = self.assertions[self.index];
+        fn take(self: *RelationshipIterator) ?model.Assertion {
+            if (self.candidates) |positions| {
+                if (self.index >= positions.len) return null;
+                const at = positions[self.index];
                 self.index += 1;
+                return self.snapshot.assertions[at];
+            }
+            if (self.index >= self.snapshot.assertions.len) return null;
+            const at = self.index;
+            self.index += 1;
+            return self.snapshot.assertions[at];
+        }
+
+        pub fn next(self: *RelationshipIterator) ?model.Assertion {
+            while (self.take()) |assertion| {
                 work.candidate();
                 if (self.filter.freshness) |freshness| {
                     if (self.snapshot.assertionFreshness(assertion) != freshness) continue;
@@ -1418,10 +1451,39 @@ pub const Snapshot = struct {
     pub fn relationships(self: *const Snapshot, filter: RelationshipFilter) RelationshipIterator {
         return .{
             .snapshot = self,
-            .assertions = self.assertions,
+            .candidates = self.candidatesFor(filter),
             .index = 0,
             .filter = filter,
         };
+    }
+
+    /// Picks which candidate list answers this query.
+    ///
+    /// The order is explicit, and an anchor whose key the index does not hold
+    /// yields an empty candidate list rather than a scan. That is not a
+    /// shortcut: nothing in the assertion array carries that key either, so a
+    /// scan would be looking for something it has already been told is not
+    /// there. Every other filter stays a post-filter — the anchor narrows
+    /// where to look, and the answer is still read from the assertions.
+    fn candidatesFor(self: *const Snapshot, filter: RelationshipFilter) ?[]const u32 {
+        const by_source: ?[]const u32 = if (filter.source) |id|
+            self.relationship_index.outgoing.bucket(id.index())
+        else
+            null;
+        const by_target: ?[]const u32 = if (filter.target) |id|
+            self.relationship_index.incoming.bucket(id.index())
+        else
+            null;
+
+        if (by_source) |source| {
+            // Both anchors given: the shorter list is the cheaper one to walk,
+            // and a compressed sparse row knows its length without walking it.
+            const target = by_target orelse return source;
+            return if (target.len <= source.len) target else source;
+        }
+        if (by_target) |target| return target;
+        if (filter.designator) |name| return self.relationship_index.designator.bucket(name);
+        return null;
     }
 
     pub fn countRelationships(self: *const Snapshot, filter: RelationshipFilter) usize {
