@@ -1301,33 +1301,28 @@ test "cursors walk a result in pages over one snapshot and fail clearly across r
     try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_repo_map", other_tool)), "issued by semidx_find_definitions") != null);
     const other_arguments = try std.fmt.allocPrint(arena, "{{\"limit\":1,\"language\":\"zig\",\"cursor\":\"{s}\"}}", .{cursor});
     try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", other_arguments)), "different arguments") != null);
-    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", "{\"cursor\":\"sdx1.bm9wZQ\"}")), "not one this server process issued") != null);
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", "{\"cursor\":\"sdx2.bm9wZQ\"}")), "not one this server process issued") != null);
     try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", "{\"cursor\":\"abc\"}")), "not one this server process issued") != null);
 
     // A cursor changed after it was issued is refused, not honored as a
     // continuation of a page the server never issued.
     const Forge = struct {
-        /// The tag a cursor carries after its fields. It must match the MAC
-        /// length `Cursor` in `tools.zig` uses.
-        const tag_bytes = 16;
+        /// The cursor body `tools.zig` writes: tool, revision, position,
+        /// arguments length, arguments; then the tag.
+        const prefix = "sdx2.";
+        const position_offset = 1 + 8;
 
         /// Re-encodes `text` with `value` as its position, keeping the tag it
         /// was issued with.
-        fn position(a: Allocator, text: []const u8, value: usize) ![]const u8 {
-            const prefix = "sdx1.";
+        fn position(a: Allocator, text: []const u8, value: u64) ![]const u8 {
             const base64 = std.base64.url_safe_no_pad;
             const encoded = text[prefix.len..];
             const signed = try a.alloc(u8, try base64.Decoder.calcSizeForSlice(encoded));
             try base64.Decoder.decode(signed, encoded);
-            const body = signed[0 .. signed.len - tag_bytes];
-            const last_dot = std.mem.lastIndexOfScalar(u8, body, '.').?;
-            const forged = try std.mem.concat(a, u8, &.{
-                try std.fmt.allocPrint(a, "{s}.{d}", .{ body[0..last_dot], value }),
-                signed[signed.len - tag_bytes ..],
-            });
-            const out = try a.alloc(u8, prefix.len + base64.Encoder.calcSize(forged.len));
+            std.mem.writeInt(u64, signed[position_offset..][0..8], value, .little);
+            const out = try a.alloc(u8, prefix.len + base64.Encoder.calcSize(signed.len));
             @memcpy(out[0..prefix.len], prefix);
-            _ = base64.Encoder.encode(out[prefix.len..], forged);
+            _ = base64.Encoder.encode(out[prefix.len..], signed);
             return out;
         }
     };
@@ -1338,6 +1333,20 @@ test "cursors walk a result in pages over one snapshot and fail clearly across r
     const third = try std.fmt.allocPrint(arena, "{{\"limit\":1,\"cursor\":\"{s}\"}}", .{issued.get("next_cursor").?.string});
     const third_page = (try h.callTool(arena, "semidx_find_definitions", third)).object.get("structuredContent").?.object;
     try testing.expectEqual(@as(i64, 3), third_page.get("offset").?.integer);
+
+    // Arguments travel in the cursor and are compared byte for byte, so a
+    // genuine cursor is refused for any other argument set. An absent argument
+    // and an empty one are not the same set.
+    const empty_name = try std.fmt.allocPrint(arena, "{{\"limit\":1,\"name\":\"\",\"cursor\":\"{s}\"}}", .{cursor});
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", empty_name)), "different arguments") != null);
+    const empty_path = try std.fmt.allocPrint(arena, "{{\"limit\":1,\"path\":\"\",\"cursor\":\"{s}\"}}", .{cursor});
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", empty_path)), "different arguments") != null);
+    // Two sets whose values concatenate to the same text ("function" as one
+    // `role`, or as `name` "funct" plus `role` "ion") stay distinct.
+    const whole = (try h.callTool(arena, "semidx_find_definitions", "{\"limit\":1,\"role\":\"function\",\"freshness\":\"any\"}")).object.get("structuredContent").?.object;
+    try testing.expect(whole.get("total").?.integer > 1);
+    const split_across = try std.fmt.allocPrint(arena, "{{\"limit\":1,\"name\":\"funct\",\"role\":\"ion\",\"freshness\":\"any\",\"cursor\":\"{s}\"}}", .{whole.get("next_cursor").?.string});
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", split_across)), "different arguments") != null);
 
     // A cursor from another server process does not verify either.
     const key = h.server.cursor_key;

@@ -577,32 +577,47 @@ const Hints = struct {
 
 // -- cursors ----------------------------------------------------------------
 
-/// A continuation of one tool call over one snapshot. It names the tool, the
-/// snapshot revision, a hash of the call's canonical arguments, and the
-/// position of the next item in the call's deterministic order.
+/// A continuation of one tool call over one snapshot. It carries the tool, the
+/// snapshot revision, the call's canonical arguments, and the position of the
+/// next item in the call's deterministic order.
 ///
 /// The encoding is opaque to clients and authenticated: every cursor carries a
-/// tag over its fields, keyed by a secret this process generates at startup.
-/// A cursor whose tag does not verify — altered, truncated, or issued by
-/// another process, whose revision numbers start again — is refused rather
+/// tag over all of those fields, keyed by a secret this process generates at
+/// startup. A cursor whose tag does not verify — altered, truncated, or issued
+/// by another process, whose revision numbers start again — is refused rather
 /// than honored, so a page is never a continuation of something the server did
 /// not issue. The verified fields must still match the call the cursor arrives
-/// with.
+/// with, and the arguments are compared byte for byte, so no two argument sets
+/// can be taken for each other.
+///
+/// The body is `tool` (1 byte), `revision` and `position` (8 bytes each,
+/// little-endian), the canonical arguments' length (4 bytes), and those
+/// arguments; the tag follows it, and the whole is URL-safe base64 after the
+/// prefix.
 const Cursor = struct {
     tool: Tool,
     revision: u64,
-    arguments: u64,
     position: usize,
+    /// `canonicalArguments` of the call that issued it.
+    arguments: []const u8,
 
-    const prefix = "sdx1.";
+    const prefix = "sdx2.";
     const Base64 = std.base64.url_safe_no_pad;
     const Mac = std.crypto.auth.siphash.SipHash128(1, 3);
     pub const Key = [Mac.key_length]u8;
+    const header_bytes = 1 + 8 + 8 + 4;
+    /// Refuses an oversized string before decoding it. A cursor holds the
+    /// arguments of the call that issued it, so it grows with their length.
+    const max_text_bytes = 8192;
 
     fn encode(self: Cursor, arena: Allocator, key: *const Key) Allocator.Error![]const u8 {
-        const body = try std.fmt.allocPrint(arena, "{d}.{d}.{x:0>16}.{d}", .{ @intFromEnum(self.tool), self.revision, self.arguments, self.position });
-        const signed = try arena.alloc(u8, body.len + Mac.mac_length);
-        @memcpy(signed[0..body.len], body);
+        const signed = try arena.alloc(u8, header_bytes + self.arguments.len + Mac.mac_length);
+        signed[0] = @intFromEnum(self.tool);
+        std.mem.writeInt(u64, signed[1..9], self.revision, .little);
+        std.mem.writeInt(u64, signed[9..17], self.position, .little);
+        std.mem.writeInt(u32, signed[17..21], @intCast(self.arguments.len), .little);
+        @memcpy(signed[header_bytes..][0..self.arguments.len], self.arguments);
+        const body = signed[0 .. header_bytes + self.arguments.len];
         Mac.create(signed[body.len..][0..Mac.mac_length], body, key);
         const out = try arena.alloc(u8, prefix.len + Base64.Encoder.calcSize(signed.len));
         @memcpy(out[0..prefix.len], prefix);
@@ -613,64 +628,83 @@ const Cursor = struct {
     /// Null for anything this process did not issue, including a cursor whose
     /// fields were changed after it was issued.
     fn decode(arena: Allocator, text: []const u8, key: *const Key) Allocator.Error!?Cursor {
-        if (!std.mem.startsWith(u8, text, prefix) or text.len > 256) return null;
+        if (!std.mem.startsWith(u8, text, prefix) or text.len > max_text_bytes) return null;
         const encoded = text[prefix.len..];
         const size = Base64.Decoder.calcSizeForSlice(encoded) catch return null;
-        if (size <= Mac.mac_length) return null;
+        if (size < header_bytes + Mac.mac_length) return null;
         const signed = try arena.alloc(u8, size);
         Base64.Decoder.decode(signed, encoded) catch return null;
         const body = signed[0 .. size - Mac.mac_length];
         var expected: [Mac.mac_length]u8 = undefined;
         Mac.create(&expected, body, key);
         if (!std.crypto.timing_safe.eql([Mac.mac_length]u8, expected, signed[body.len..][0..Mac.mac_length].*)) return null;
-        var fields = std.mem.splitScalar(u8, body, '.');
-        const tool = std.fmt.parseInt(u8, fields.next() orelse return null, 10) catch return null;
-        const revision = std.fmt.parseInt(u64, fields.next() orelse return null, 10) catch return null;
-        const arguments = std.fmt.parseInt(u64, fields.next() orelse return null, 16) catch return null;
-        const position = std.fmt.parseInt(usize, fields.next() orelse return null, 10) catch return null;
-        if (fields.next() != null or tool >= std.enums.values(Tool).len) return null;
-        return .{ .tool = @enumFromInt(tool), .revision = revision, .arguments = arguments, .position = position };
+        if (body[0] >= std.enums.values(Tool).len) return null;
+        const arguments_len = std.mem.readInt(u32, body[17..21], .little);
+        if (body.len - header_bytes != arguments_len) return null;
+        return .{
+            .tool = @enumFromInt(body[0]),
+            .revision = std.mem.readInt(u64, body[1..9], .little),
+            .position = std.math.cast(usize, std.mem.readInt(u64, body[9..17], .little)) orelse return null,
+            .arguments = body[header_bytes..],
+        };
     }
 };
 
-/// A hash of every argument a tool declares, with its default applied when the
-/// call omits it, except those a caller may change between pages.
-fn canonicalArguments(comptime tool: Tool, map: ?ObjectMap) u64 {
-    var hasher = std.hash.Wyhash.init(0);
+/// Every argument a tool declares, in declaration order, with its default
+/// applied when the call omits it, except those a caller may change between
+/// pages (`cursor`, `limit`, `max_response_bytes`).
+///
+/// Each value is written with its type and, for a string, its length, so no
+/// two argument sets encode the same bytes: an absent argument, an empty
+/// string, and a string whose text continues into the next argument's are all
+/// distinct. A cursor carries these bytes and they are compared byte for byte,
+/// so page continuation never depends on a hash.
+fn canonicalArguments(comptime tool: Tool, map: ?ObjectMap, arena: Allocator) Allocator.Error![]const u8 {
+    const kind = struct {
+        const absent: u8 = 0;
+        const string: u8 = 1;
+        const integer: u8 = 2;
+        /// A JSON type argument validation refuses. Unreachable through a tool
+        /// call, which validates every argument before reading a cursor.
+        const invalid: u8 = 0xff;
+
+        fn writeString(out: *std.ArrayList(u8), a: Allocator, text: []const u8) Allocator.Error!void {
+            try out.append(a, string);
+            var length: [4]u8 = undefined;
+            std.mem.writeInt(u32, &length, @intCast(text.len), .little);
+            try out.appendSlice(a, &length);
+            try out.appendSlice(a, text);
+        }
+
+        fn writeInteger(out: *std.ArrayList(u8), a: Allocator, value: i64) Allocator.Error!void {
+            try out.append(a, integer);
+            var bytes: [8]u8 = undefined;
+            std.mem.writeInt(i64, &bytes, value, .little);
+            try out.appendSlice(a, &bytes);
+        }
+    };
+
+    var out: std.ArrayList(u8) = .empty;
     inline for (definitions[@intFromEnum(tool)].params) |param| {
         const paged = comptime std.mem.eql(u8, param.name, "cursor") or std.mem.eql(u8, param.name, "limit") or
             std.mem.eql(u8, param.name, "max_response_bytes");
         if (!paged) {
-            hasher.update(param.name);
-            hasher.update("=");
             const given: ?std.json.Value = if (map) |object| object.get(param.name) else null;
             if (given) |value| switch (value) {
-                .string => |text| {
-                    hasher.update("s");
-                    hasher.update(text);
-                },
-                .integer => |n| {
-                    hasher.update("i");
-                    hasher.update(std.mem.asBytes(&n));
-                },
-                // Validation refused every other JSON type before this.
-                else => hasher.update("?"),
+                .string => |text| try kind.writeString(&out, arena, text),
+                .integer => |n| try kind.writeInteger(&out, arena, n),
+                else => try out.append(arena, kind.invalid),
             } else switch (param.type) {
-                .count => |count| {
-                    const n: i64 = count.default;
-                    hasher.update("i");
-                    hasher.update(std.mem.asBytes(&n));
-                },
-                .choice => |choice| if (choice.default) |default| {
-                    hasher.update("s");
-                    hasher.update(default);
-                } else hasher.update("-"),
-                .string, .entity_id => hasher.update("-"),
+                .count => |count| try kind.writeInteger(&out, arena, count.default),
+                .choice => |choice| if (choice.default) |default|
+                    try kind.writeString(&out, arena, default)
+                else
+                    try out.append(arena, kind.absent),
+                .string, .entity_id => try out.append(arena, kind.absent),
             }
-            hasher.update("\x00");
         }
     }
-    return hasher.final();
+    return out.items;
 }
 
 /// The position a paged call starts at: 0 without a cursor, otherwise the
@@ -688,7 +722,7 @@ fn cursorPosition(ctx: *Context, comptime tool: Tool, args: Args(tool)) Error!us
         return ctx.fail("cursor was issued at snapshot revision {d}, but revision {d} is published; repeat the call without cursor " ++
             "to start over on the new snapshot", .{ cursor.revision, ctx.snapshot.revision });
     }
-    if (cursor.arguments != canonicalArguments(tool, args.map)) {
+    if (!std.mem.eql(u8, cursor.arguments, try canonicalArguments(tool, args.map, ctx.arena))) {
         return ctx.fail("cursor was issued for different arguments; repeat the call that returned it, changing only cursor, limit, " ++
             "or max_response_bytes", .{});
     }
@@ -707,7 +741,12 @@ fn writePage(ctx: *Context, s: *Stringify, comptime tool: Tool, args: Args(tool)
     try s.write(position);
     const next = position + returned;
     if (next >= total) return;
-    const cursor: Cursor = .{ .tool = tool, .revision = ctx.snapshot.revision, .arguments = canonicalArguments(tool, args.map), .position = next };
+    const cursor: Cursor = .{
+        .tool = tool,
+        .revision = ctx.snapshot.revision,
+        .position = next,
+        .arguments = try canonicalArguments(tool, args.map, ctx.arena),
+    };
     try s.objectField("next_cursor");
     try s.write(try cursor.encode(ctx.arena, &ctx.cursor_key));
     try hints.add(ctx.arena, list, .@"continue", &.{"cursor"});

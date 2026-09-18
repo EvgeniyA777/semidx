@@ -620,3 +620,51 @@ Zig 0.16.0, Debug, 2026-09-17, on the fix.
 | `zig build test --summary all` | Pass; 213 passed, 1 skipped |
 | `zig build preview-gate --summary all` | Pass; 14/14 steps, 6/6 tests |
 | Repro script, before and after | Before: forged position 10 accepted, `offset` 10. After: tool error, and the genuine cursor still returns `offset` 1 |
+
+### Hardening: Cursors Carry Their Canonical Arguments
+
+The fix above closed the forgery; this closed the one remaining "theoretically"
+in cursor integrity, before the preview.3 release. A cursor no longer carries a
+64-bit Wyhash of the call's arguments but the arguments themselves, and the
+same tag now covers them.
+
+- `canonicalArguments` writes every argument the tool declares, in declaration
+  order, with defaults applied and `cursor`, `limit`, and `max_response_bytes`
+  excluded, as typed, length-prefixed bytes: `0x00` absent, `0x01` plus a
+  4-byte length plus the text for a string (a choice is its value), `0x02` plus
+  an 8-byte little-endian integer for a count or entity id. No two argument
+  sets encode the same bytes, so an absent argument, an empty string, and
+  values that would run together are all distinct.
+- The cursor body is `tool` (1 byte), `revision` and `position` (8 bytes each,
+  little-endian), the arguments' length (4 bytes), and those bytes; the
+  SipHash-128 tag covers all of it. The prefix is `sdx2.`, since the shape
+  changed; cursors never outlive a process, so no version skew is possible.
+- `cursorPosition` compares the cursor's arguments with the call's byte for
+  byte, keeping the specific "different arguments" error instead of a hash
+  comparison.
+- A cursor now grows with the arguments it carries (a `semidx_repo_map` page
+  with `path_prefix` `src/mcp/` is 101 characters, 35 of them canonical
+  arguments); `decode` refuses text over 8,192 bytes before decoding it.
+
+**Tests.** The forged-position test writes the new position into the body's
+little-endian field and keeps the issued tag; the existing wrong-tool,
+wrong-revision, invented-cursor, and wrong-key cases stay. New cases: a
+genuine cursor replayed with `name: ""` or `path: ""` added is refused, so an
+absent argument is not an empty one; and a cursor issued for
+`role: "function"` replayed with `name: "funct"` and `role: "ion"` is refused,
+so values that concatenate to the same text are not the same set.
+
+**Residual risk closed.** Page continuation no longer depends on a hash, so
+two argument sets cannot collide into one. What remains is unchanged: the
+preview authenticates and authorizes nothing else, and trusts the client
+process that launched it.
+
+### Verification (Hardening)
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-mcp --summary all` | Pass; 28 passed, 1 skipped |
+| `zig build test --summary all` | Pass; 213 passed, 1 skipped |
+| `zig build preview-gate --summary all` | Pass; 14/14 steps, 6/6 tests |
+| Probe against the built server | Genuine cursor: `offset` 1. Position forged in the body: refused. Same cursor with another `path_prefix`: "different arguments". Same cursor with `limit` 50: accepted. Full walk of `path_prefix` `src/mcp/`: 5 files, 5 unique, `files_total` 5 |

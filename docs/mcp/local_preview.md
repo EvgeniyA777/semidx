@@ -445,9 +445,10 @@ or truncated, or that came from another server process, does not verify and is
 refused, so a page is never a continuation the server did not issue — a
 restarted server refuses every earlier cursor, because its revision numbers
 start again. A cursor that verifies is still used only for the tool that
-issued it, the snapshot revision it was issued at, and the same arguments;
-anything else is a tool error (`isError: true`) that says which of those
-differs. Treat the string as a token to pass back unchanged; do not build or
+issued it, the snapshot revision it was issued at, and the same arguments: it
+carries the arguments of the call that issued it, and they are compared byte
+for byte, so no two argument sets can be taken for each other. Anything else
+is a tool error (`isError: true`) that says which of those differs. Treat the string as a token to pass back unchanged; do not build or
 edit one. After
 `semidx_refresh` publishes a new revision, every earlier cursor fails, so a
 walk never mixes two graph states; repeat the call without `cursor`. A refresh
