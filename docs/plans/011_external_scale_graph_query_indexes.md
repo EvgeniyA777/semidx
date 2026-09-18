@@ -231,13 +231,26 @@ scale beyond the probe.** Removing Cost 1 removes a factor of about
 `semidx_health` near 5 ms. Stage 1 alone therefore probably makes the probed
 repository interactive.
 
-Stage 2 is still in scope, because after Stage 1 an unanchored query is still
-`O(assertions)` per step and this plan's goal is repositories an order of
-magnitude past the probe. But the two must not be conflated in the record: Stage
-1 measures and claims its own win, and Stage 2 is accepted on the synthetic graph
-at a size beyond Dubbo, never by pointing at Dubbo numbers Stage 1 already
-earned. Honest attribution here is what tells a future reader whether the
-structural index was worth its complexity.
+Those numbers are what the cost model predicts. They are **not acceptance
+thresholds**, and no stage passes or fails by hitting them. Stage 1 is accepted
+by its parity tests and by recording a before/after; Stage 2 is accepted by the
+work-bound proof. If the measured times land outside the predicted range, that is
+information about the model, to be recorded — not a defect to optimize toward a
+number.
+
+Stage 2 is still in scope, and not merely for unanchored queries: after Stage 1
+**every** relationship query is still `O(assertions)`, anchored ones included,
+because `source`, `target`, and `designator` are applied as inline filters while
+the iterator walks the whole array. Stage 1 makes each step cheap; only Stage 2
+makes the number of steps proportional to the neighbourhood. That is what decides
+behavior on repositories that make the probe look small, which is this plan's
+stated goal.
+
+But the two must not be conflated in the record: Stage 1 measures and claims its
+own win, and Stage 2 is accepted on the synthetic graph at a size beyond Dubbo,
+never by pointing at Dubbo numbers Stage 1 already earned. Honest attribution
+here is what tells a future reader whether the structural index was worth its
+complexity.
 
 ## Architecture Boundaries
 
@@ -335,7 +348,8 @@ Done when:
   exists, per D11. If an external reproduction is available, record
   `semidx_health`, `semidx_references`, and `semidx_context depth=2` here. This
   is the measurement that says how much of the product win Stage 1 earned, and
-  it cannot be taken later.
+  it cannot be taken later. Record what was measured; do not tune toward D11's
+  predicted range.
 
 Verification: `zig build test-core`, `zig build test`,
 `zig fmt --check build.zig src tests`.
