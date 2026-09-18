@@ -14,6 +14,8 @@ evidence would make it ready to implement or close.
 - `coverage_gap`: honest but incomplete semantic coverage.
 - `semantic_limitation`: exact current behavior with a known boundary that can
   produce incomplete or overbroad answers.
+- `performance_gap`: exact current behavior whose physical access path or
+  runtime cost blocks expected product use at measured scale.
 - `upstream_limitation`: behavior blocked or distorted by an external parser or
   tool source.
 - `process_defect`: project workflow or verification behavior that let a defect
@@ -31,6 +33,7 @@ evidence would make it ready to implement or close.
 | [008](008_clojure_lexical_scope_coverage.md) | open | `coverage_gap` | [Plan 005 report](../reports/005_mcp_preview_release_readiness_progress.md#stage-25-same-unit-name-resolution-facts-java-and-clojure) | Clojure symbols under forms that may bind names stay unresolved until lexical scope is modeled. |
 | [010](010_mcp_text_fallback_client_measurement.md) | open | `release_readiness` | [Plan 009 report](../reports/009_mcp_progressive_discovery_and_budgets_progress.md#payload-copies) | Measure how real MCP clients expose the duplicated text fallback before changing it. |
 | [011](011_java_cross_module_visibility.md) | open | `coverage_gap` | [Plan 010 report](../reports/010_java_resolution_boundaries_progress.md) | Java cross-module same-package references stay unresolved, because no build descriptor is read. |
+| [012](012_external_scale_query_latency.md) | open | `performance_gap` | [Plan 010 report](../reports/010_java_resolution_boundaries_progress.md#architecture-review-addendum) | Relationship and context queries need indexed graph access paths before external-scale impact analysis can be interactive. |
 
 ## Completed Follow-ups
 

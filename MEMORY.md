@@ -226,8 +226,9 @@ documents that own history, rationale, and evidence.
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java coverage, not its boundary, is what limits it — the supertype guard and
-  unresolved receivers dominate what stays unresolved; `semidx_context` at
-  `depth` 2 or more costs about 90 s on a 4,050-unit repository;
+  unresolved receivers dominate what stays unresolved; external-scale graph
+  query latency needs indexed access paths before impact analysis can be
+  interactive ([Follow-up 012](docs/followups/012_external_scale_query_latency.md));
   definition renames are identity loss; a file moved and changed in one rescan
   loses identity; dependency invalidation is intentionally coarse and
   transitive; a Zig importer of a relative file that did not exist when it was
@@ -260,8 +261,10 @@ documents that own history, rationale, and evidence.
   `IMPORTS` was admitted.
 - Per-call latency is a known product problem, not a suspicion: on that
   repository `semidx_context` at `depth=2` cost 90 s and `semidx_references`
-  about 1.3 s, against 0.02 s for `semidx_find_definitions`. The adoption
-  strategy names `semidx_context` the default focused-context tool.
+  about 1.3 s, against 0.02 s for `semidx_find_definitions`. Follow-up 012 owns
+  the architectural response: relationship/context queries need indexed graph
+  access paths, and SQLite is a possible future persistence/query-index backend
+  only if graph assertions remain the semantic authority.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`). Ecosystem
   evidence reversed the initial intent to shorten it: most MCP clients ignore
