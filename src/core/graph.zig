@@ -5,6 +5,7 @@
 //! Nothing here knows how a frontend parsed anything.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const model = @import("model.zig");
@@ -1052,6 +1053,45 @@ fn wholeUnitRange(bytes: []const u8) model.SourceRange {
     };
 }
 
+/// Test-only counters for the work a query does inside the snapshot.
+///
+/// What a query costs is a property this project has to be able to assert, not
+/// an implementation detail: an answer that is exact but proportional to the
+/// whole repository stops being asked, and then the graph stops being the thing
+/// consumers ask. Counting examined records says that directly, and says it
+/// deterministically — a wall-clock threshold would make the lane unreliable
+/// for every later agent while proving less.
+///
+/// The two counters stay separate because they are two different costs with two
+/// different fixes: `identity_records` is paid per assertion visited, and
+/// `candidates` is paid per query. One number for both is how the wrong term
+/// gets optimized.
+///
+/// Outside a test build every call here compiles away.
+pub const work = struct {
+    /// Stored unit and entity records examined while answering identity
+    /// lookups.
+    pub var identity_records: usize = 0;
+    /// Assertions a relationship iterator examined before deciding whether they
+    /// matched.
+    pub var candidates: usize = 0;
+
+    pub fn reset() void {
+        identity_records = 0;
+        candidates = 0;
+    }
+
+    inline fn identity(amount: usize) void {
+        if (!builtin.is_test) return;
+        identity_records += amount;
+    }
+
+    inline fn candidate() void {
+        if (!builtin.is_test) return;
+        candidates += 1;
+    }
+};
+
 /// What a consumer observes: one complete graph state.
 ///
 /// Queries default to current claims only. A claim recorded before its source
@@ -1079,9 +1119,13 @@ pub const Snapshot = struct {
     // -- freshness ----------------------------------------------------------
 
     pub fn unit(self: Snapshot, id: SourceUnitId) ?SourceUnitView {
-        for (self.units) |view| {
-            if (view.id == id) return view;
+        for (self.units, 1..) |view, examined| {
+            if (view.id == id) {
+                work.identity(examined);
+                return view;
+            }
         }
+        work.identity(self.units.len);
         return null;
     }
 
@@ -1225,9 +1269,13 @@ pub const Snapshot = struct {
     /// Entities are looked up by their id; this looks one up by the id it
     /// carries, not by anything derived from its evidence.
     pub fn entityById(self: Snapshot, id: EntityId) ?model.Entity {
-        for (self.entities) |item| {
-            if (item.id == id) return item;
+        for (self.entities, 1..) |item, examined| {
+            if (item.id == id) {
+                work.identity(examined);
+                return item;
+            }
         }
+        work.identity(self.entities.len);
         return null;
     }
 
@@ -1265,6 +1313,7 @@ pub const Snapshot = struct {
             while (self.index < self.assertions.len) {
                 const assertion = self.assertions[self.index];
                 self.index += 1;
+                work.candidate();
                 if (self.filter.freshness) |freshness| {
                     if (self.snapshot.assertionFreshness(assertion) != freshness) continue;
                 }

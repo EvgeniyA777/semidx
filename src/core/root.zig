@@ -19,4 +19,7 @@ test {
     _ = reconcile;
     _ = dependencies;
     _ = strings;
+    // Test-only: the synthetic graph this project's query-cost claims are
+    // measured against. It is not part of the core's API.
+    _ = @import("scale_test.zig");
 }
