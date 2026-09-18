@@ -192,6 +192,8 @@ documents that own history, rationale, and evidence.
 - The root README is the public project presentation and routing entry point.
   Proof workflows, release gates, stage evidence, and plan-specific checklists
   stay in their owning references, plans, reports, releases, or policies.
+  `scripts/check-readme-stewardship.sh` guards the obvious drift markers in
+  pre-commit and pre-push.
 - `MEMORY.md` is intentionally bounded. Compress stale detail into links to
   ADRs, reports, plans, follow-ups, specs, or implementation files instead of
   appending history.

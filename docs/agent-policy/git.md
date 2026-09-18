@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-13"
+updated: "2026-09-18"
 ---
 
 # Git Workflow Policy
@@ -86,6 +86,8 @@ owns the task procedure for applying this policy.
   `scripts/check-agent-attribution.sh` wired into all three,
   `scripts/check-constitution-freeze.sh` into `pre-commit`, and
   `scripts/check-memory-freshness.sh` into `pre-push`.
+- Keep `scripts/check-readme-stewardship.sh` wired into `pre-commit` for staged
+  README changes and into `pre-push` for pushed ranges.
 
 ## Command Ordering
 

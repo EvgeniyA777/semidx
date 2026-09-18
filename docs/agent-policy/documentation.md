@@ -87,6 +87,9 @@ checklists belong in their owning reference, plan, report, release, or policy
 document. The README may link to that owner, but must not accumulate a local
 copy of the evidence.
 
+`scripts/check-readme-stewardship.sh` guards the obvious drift markers for this
+rule in the root README. It is a backstop, not a substitute for judgment.
+
 Before editing the README, identify which presentation plane the change improves:
 search classification, AI-agent onboarding, or human project comprehension. If a
 change improves none of those, put it in the owning document instead.

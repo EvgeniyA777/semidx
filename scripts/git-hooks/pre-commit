@@ -6,3 +6,4 @@ cd "$repo_root"
 
 ./scripts/check-agent-attribution.sh --staged
 ./scripts/check-constitution-freeze.sh --staged
+./scripts/check-readme-stewardship.sh --staged
