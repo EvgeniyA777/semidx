@@ -190,10 +190,28 @@ index therefore indexes entity targets only, the designator index indexes
 designator targets only, and `reference_query` — which spans kinds, not target
 shapes — remains a post-filter over whichever anchor was chosen.
 
-**D8 — Memory budget.** The indexes must add no more than 10% to peak RSS on the
-Dubbo-shaped synthetic graph. If they do, drop the designator index first (it is
-the least used anchor) and record the measurement. Local operation under §8
-includes fitting on the developer's machine.
+**D8 — Memory is checked against its own structure, not against a share of RSS.**
+The sizes here are computable in advance, so the check is whether the
+implementation matches its own shape:
+
+| Index | Expected bytes |
+| --- | --- |
+| position tables | `4 × (max_unit_id + 1) + 4 × (max_entity_id + 1)` |
+| outgoing CSR | `4 × (entities + 1) + 4 × relationships` |
+| incoming CSR | `4 × (entities + 1) + 4 × entity_target_relationships` |
+| designator map | hash map over unique designators plus `4 × designator_relationships` |
+
+On the Dubbo shape that is roughly 3–4 MB against a 371 MB peak, about 1%.
+Stage 4 records the measured size and fails if it exceeds **twice** the computed
+expectation for the fixture's actual counts.
+
+A percentage-of-RSS ceiling was rejected deliberately: at 10% it would allow
+37 MB, ten times what the structure needs, so it could never fail — and in
+particular it would not catch a map-of-lists implementation allocating one list
+header per entity, which is exactly what D4 exists to prevent. A budget that
+cannot fail is decoration. If the measured size does exceed twice the
+expectation, find the structural cause; dropping the designator index is a last
+resort, recorded with the measurement.
 
 **D9 — Scale proof is a work bound, not a clock.** The hard assertion is an
 inspected-candidate count from a test-only counter. Wall-clock times are recorded
@@ -205,6 +223,21 @@ Stage 4's Plan 010 ingestion cost (17.5 s → 21.5 s) comes from
 `java_packages.importBindings` calling `exportsOf` per candidate unit against the
 mutable `Graph`. The snapshot indexes do not exist there. Stage 5 measures it on
 its own terms and may decide to do nothing.
+
+**D11 — Stage 1 is expected to deliver the measured product win; Stage 2 is for
+scale beyond the probe.** Removing Cost 1 removes a factor of about
+`units / 2` — on the Dubbo shape roughly 2,000× — which puts `semidx_context` at
+`depth=2` somewhere around 45–320 ms, `semidx_references` near 1 ms, and
+`semidx_health` near 5 ms. Stage 1 alone therefore probably makes the probed
+repository interactive.
+
+Stage 2 is still in scope, because after Stage 1 an unanchored query is still
+`O(assertions)` per step and this plan's goal is repositories an order of
+magnitude past the probe. But the two must not be conflated in the record: Stage
+1 measures and claims its own win, and Stage 2 is accepted on the synthetic graph
+at a size beyond Dubbo, never by pointing at Dubbo numbers Stage 1 already
+earned. Honest attribution here is what tells a future reader whether the
+structural index was worth its complexity.
 
 ## Architecture Boundaries
 
@@ -298,6 +331,11 @@ Done when:
   id/position gap is actually exercised.
 - The Stage 0 `countAssertions` baseline improves, and the new number is
   recorded. This is the stage's own evidence that the cost model was right.
+- The progress log records Stage 1's numbers **on their own**, before Stage 2
+  exists, per D11. If an external reproduction is available, record
+  `semidx_health`, `semidx_references`, and `semidx_context depth=2` here. This
+  is the measurement that says how much of the product win Stage 1 earned, and
+  it cannot be taken later.
 
 Verification: `zig build test-core`, `zig build test`,
 `zig fmt --check build.zig src tests`.
@@ -392,8 +430,9 @@ Required behavior:
   traversal inspect work proportional to the local neighbourhood, not to total
   assertions per frontier step. The assertion must fail under the pre-Stage-2
   path.
-- Record wall-clock and peak memory as observations, and check the D8 memory
-  budget.
+- Record wall-clock and peak memory as observations, compute D8's expected index
+  size from the fixture's actual entity, relationship, and designator counts, and
+  fail if the measured size exceeds twice it.
 - Keep `zig build test-core` practical: if the largest meaningful size makes the
   default lane materially slower, keep a smaller deterministic proof in
   `test-core` and put the larger size behind a named command documented in the
@@ -414,17 +453,36 @@ Purpose: decide with numbers whether the write path still needs work.
 
 Required work:
 
-- Re-measure Java ingestion after Stages 1–4, on the largest available local Java
-  fixture or a fresh external clone recorded as an observation.
-- Compare against Plan 010's 17.5 s → 21.5 s. Per D10 the cause is
-  `importBindings` calling `exportsOf` per candidate unit against `Graph`, so
-  Stages 1–4 may not have moved it at all.
-- **If import/package candidate scans are no longer a meaningful share of
-  ingestion, record that and change no code.** Skipping is a valid, expected
-  outcome.
-- If they still dominate, add a Java-side candidate projection rebuilt from Java
-  frontend evidence. It must not create, widen, or reorder facts: ADR 004 and
-  ADR 008 rules are untouched.
+- Separate the two costs Plan 010's Stage 4 introduced, because they have
+  different fixes and only one is an access-path problem:
+  1. **per-unit binding lookup** — `importBindings` calling `exportsOf` per
+     candidate unit, which a Java-side candidate projection would fix;
+  2. **extra reanalysis passes** — the importer hint widening what a package
+     change invalidates, visible in Plan 010 as the first-scan revision moving
+     from 6,783 to 7,274, which only hint pruning would fix.
+  Measure them apart. Reporting one number for both is how the wrong fix gets
+  chosen.
+- Measure against the **habit loop**, not against total ingestion:
+
+  | Measurement | Why it is the criterion | Act when |
+  | --- | --- | --- |
+  | `semidx_refresh` after editing one file | Paid repeatedly, inside the loop | above ~1 s, or Java binding work is the largest single term in it |
+  | Cold `--root` index time | Paid once per session | only if it grows super-linearly with units |
+  | Growth shape across two fixture sizes | Says whether this scales | any term growing faster than linear in units |
+
+- **If the refresh path is comfortable and growth is linear, record that and
+  change no code.** Skipping is a valid, expected outcome.
+- If Java binding work still dominates refresh, add a Java-side candidate
+  projection rebuilt from Java frontend evidence. It must not create, widen, or
+  reorder facts: ADR 004 and ADR 008 rules are untouched.
+
+A share-of-ingestion threshold and an absolute second count on a Dubbo-shaped
+corpus were both rejected. A percentage conflates a one-time cold start with the
+refresh the user pays on every edit, and the two deserve different answers. An
+absolute number tied to one corpus repeats the mistake `preview-gate` already
+made: 4,050 units cannot tell you what happens at 100,000, and `importBindings`
+grows with package size, not with repository size. Growth shape across two sizes
+answers the question a single number cannot.
 
 Branch handling:
 
@@ -478,7 +536,7 @@ Verification: `./scripts/check-zig-version.sh`,
 | Result order stable | Clients and tests see reordered output | Core and MCP | CSR built in assertion order | Depth-2 traversal ids and order match the oracle | Stages 2 and 3 |
 | Freshness and resolution visible | Stale or unresolved claims read as current | Core and MCP | Filters preserve every category | Mixed stale/current synthetic graph | Stages 1, 2, 4 |
 | Publication coherent | Index and assertions from different states | Core integration | One immutable indexed snapshot per publish | Refresh failure keeps the previous snapshot | Stage 2 plus existing refresh tests |
-| Memory stays local-friendly | Large repositories stop fitting | Observation against D8 | Index ≤ 10% of peak RSS | Budget exceeded → drop designator index | Stage 4 |
+| Memory matches its structure | A per-key allocation blowup ships unnoticed | Measurement against D8 | Measured size ≤ 2× the computed expectation | Map-of-lists shape would exceed it | Stage 4 |
 | MCP surface unchanged | Clients break | MCP integration | Same fields, ids, budgets, cursors | Budget exhaustion and pagination unchanged | Stage 3 |
 | Java semantics unchanged | Faster indexing invents facts | Frontend fixture | ADR 004/008 facts identical | Out-of-scope, ambiguous, missing, provider removal | Stage 5 if implemented |
 | No new external dependency | Local/offline guarantee weakens | Build review | No database in any lane | Nothing to miss, because nothing is required | Stage 6 |
@@ -504,6 +562,7 @@ a clean interface a SQLite-backed implementation can satisfy later.
 - Ids, order, resolution, freshness, producer, evidence, and designator behavior
   are provably unchanged against a linear oracle.
 - No MCP tool argument, schema field, or budget semantic changed.
-- Index memory is measured against D8 and recorded.
+- Index memory is within twice D8's computed expectation, and recorded.
+- Stage 1's win and Stage 2's win are recorded separately, per D11.
 - Follow-up 012 is closed or narrowed, and the progress log records final
   commands, results, residual risk, and commits.
