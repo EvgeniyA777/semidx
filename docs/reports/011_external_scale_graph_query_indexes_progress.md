@@ -14,14 +14,15 @@ Companion log for
 
 ## Current Status
 
-Stages 0 through 2 are complete. The cost model in the plan's
+Stages 0 through 4 are complete. The cost model in the plan's
 [Current Evidence](../plans/011_external_scale_graph_query_indexes.md#current-evidence)
 is confirmed on a local synthetic graph, so the plan's stage order stands and its
 Start Rule stop condition is not triggered. Identity lookups are now constant
-time, and anchored relationship queries read from a derived adjacency index
-instead of scanning. Nothing about graph semantics has changed: no assertion was
-added or removed, and no claim's resolution, freshness, producer, or evidence
-moved.
+time, anchored relationship queries read from a derived adjacency index instead
+of scanning, and a committed test proves the bound at a size past the external
+Java probe that motivated the plan. Nothing about graph semantics has changed:
+no assertion was added or removed, and no claim's resolution, freshness,
+producer, or evidence moved.
 
 The open item carried forward is honest attribution, not code: Stage 1's product
 latency on external Java scale was **not measured**, because no external
@@ -35,8 +36,8 @@ reproduction was available. See
 | Stage 0: Baseline and harness | Completed | Synthetic graph committed at 5,045 assertions over 249 live units. Baseline confirms both costs: `countAssertions` examines 629,508 stored records to answer over 5,045 assertions, and an anchored query still walks all 5,045 candidates. |
 | Stage 1: Constant-time identity lookups | Completed | Identity lookups read position tables built in `publish`. Work to answer `countAssertions` over the synthetic graph fell from 629,508 examined records to 5,044 — a factor of 124.8, which is half the live unit count, exactly what the cost model predicted. Results are unchanged against a linear reference over every id the graph issued. |
 | Stage 2: Relationship adjacency index | Completed | Three derived indexes built in `publish`: outgoing and incoming as compressed sparse row, designators as a map. An anchored query now inspects exactly as many assertions as it returns — 5,045 candidates down to 4, and the depth-2 traversal 25,225 down to 16. Parity against the linear oracle is asserted on ids and order over 2,400 filter combinations. |
-| Stage 3: MCP hot path parity | Not started | — |
-| Stage 4: Deterministic scale proof | Not started | — |
+| Stage 3: MCP hot path parity | Completed | No MCP code needed changing: `semidx_references` and `semidx_context` already anchor every pass and never reach past `Snapshot.relationships`. Parity is proved by sending the same request down both access paths and comparing the responses byte for byte. |
+| Stage 4: Deterministic scale proof | Completed | Inspected candidates equal returned answers for anchored queries and depth-2 traversal, asserted at three sizes up to 244,559 assertions — past the 230,753 measured on apache/dubbo. The same assertions fail under the restored full-scan path, in the same test. Index memory is 1.008× its computed expectation against D8's 2× ceiling. |
 | Stage 5: Java write-path measurement | Not started | — |
 | Stage 6: Documentation and closure | Not started | — |
 
@@ -332,3 +333,159 @@ state would have to agree with a full scan of a state that does not exist.
 | `zig build test-mcp` | 28/29 passed, 1 skipped |
 
 No test expectation was changed anywhere, including in the MCP lane.
+
+## Stage 3: MCP Hot Path Parity
+
+### Work
+
+**No MCP code changed, and that is the finding rather than a shortcut.**
+`semidx_references` already anchors its two passes on `target` and `source`, and
+`semidx_context` already anchors every focus pass and every traversal step
+through the same `relationshipPasses` helper. All three relationship call sites
+in `src/mcp/tools.zig` go through `Snapshot.relationships`; nothing in the MCP
+layer reaches past it into the assertion array. The hot path therefore inherited
+Stage 2 without an edit, which is what a boundary is for.
+
+- `src/mcp/root.zig`: one test.
+- `src/core/graph.zig`: `bypass_relationship_index`, a test-only switch that
+  sends relationship queries back down the full-scan path. The branch reading it
+  is guarded by `builtin.is_test`, so it compiles away outside a test build.
+
+### How Parity Is Proved
+
+A hand-written oracle shows that two implementations agree with the oracle. The
+switch above allows something stronger: send the *same request* down both access
+paths and compare what comes back, **byte for byte**. That covers far more than
+relationship ids and their order — the same fields, the same de-duplication, the
+same traversal rendering, the same budget outcome, the same hints.
+
+Three calls are compared this way, over a fixture with a call cycle and a
+repeated neighbour so that an entity is reached from two ends:
+`semidx_context` at `depth=2` with `direction=both`, `semidx_context` at
+`depth=3` with `direction=outgoing`, and `semidx_references` with
+`direction=both`. Each comparison also asserts that the indexed run inspected
+strictly fewer candidates than the scanned run, so a byte-identical result can
+never come from both runs taking the same path.
+
+### Teeth
+
+The parity tests were checked by breaking the implementation on purpose: filling
+the compressed sparse rows backwards over the assertion array, which is the
+exact defect D4's build order exists to prevent. Three tests failed — the core
+parity test, the coherent-publication test, and this MCP byte-for-byte test. The
+change was then reverted. A parity test that has never failed is a hypothesis.
+
+### Latency Observed On This Repository
+
+From `zig build preview-gate`, over a copy of this repository, after the change:
+
+| Call | Time | Bytes |
+| --- | --- | --- |
+| `semidx_references writeString` (limit 1000) | 0 ms | 27,968 |
+| `semidx_context writeString incoming depth 2` | 1 ms | 66,996 |
+| `semidx_context health` (relationship_limit 500) | 1 ms | 61,472 |
+| `semidx_refresh` after a one-file edit | 22 ms | 1,213 |
+
+These are observations, not gates, and this corpus is about 5,500 assertions —
+three orders of magnitude below the probe that motivated the plan. They say the
+hot path is not slow here; they cannot say what happens at Java scale. That
+question is answered by the work bound in Stage 4, not by these numbers.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-mcp` | 29/30 passed, 1 skipped |
+| `zig build test` | 233/235 passed, 2 skipped |
+| `zig fmt --check build.zig src tests` | clean |
+
+No expectation changed. Tool schemas, field order, de-duplication, traversal
+rendering, cursors, budgets, and `semantic_contract_version` are untouched, and
+no tool argument was added.
+
+## Stage 4: Deterministic Scale Proof
+
+### Work
+
+- `src/core/scale_test.zig`: the work-bound proof at two default sizes, the same
+  proof at external scale, and the index memory check.
+
+### The Bound
+
+For an anchored query and for a depth-2 traversal, **inspected candidates equal
+returned answers**. Not "fewer", not "proportional": exact, because the
+synthetic graph's answers are exact and the candidate list is the answer set
+before post-filters.
+
+The same assertions are then re-run with `bypass_relationship_index` set, which
+restores the access path this plan replaced. There the anchored query inspects
+every assertion in the snapshot, and the depth-2 traversal inspects every
+assertion **once per frontier step** — `assertions × (1 + fan_out)`. Both are
+asserted exactly. The bound is therefore not a number with no claim attached: it
+is a bound the old path provably breaks, in the same test, on the same graph.
+
+| Size | Live units | Entities | Assertions | Anchored candidates | Depth-2 candidates |
+| --- | --- | --- | --- | --- | --- |
+| default | 249 | 2,740 | 5,045 | 4 | 16 |
+| external | 12,110 | 133,211 | 244,559 | 4 | 16 |
+
+The graph grows by a factor of about 48 in assertions between these two rows and
+the bound does not move. The proof also runs at a third, smaller size (64 units)
+whose counts are asserted but not recorded here; three sizes rather than one is
+what makes this a bound rather than a coincidence.
+
+Under `bypass_relationship_index`, the depth-2 traversal at the default size
+inspects 25,225 candidates and at external scale 1,222,795 — `assertions ×
+(1 + fan_out)` in both cases, asserted exactly.
+
+### External Scale
+
+`external_scale` builds 12,500 units and publishes **244,559 assertions**, past
+the 230,753 measured on apache/dubbo in Plan 010 — which is the size the plan
+asks Stage 2 to be accepted at. The test asserts that count, so the claim cannot
+quietly stop being true if the builder's shape changes.
+
+It is skipped in a debug build and runs outside one. Debug is what makes this
+size impractical, not the size itself, and the default lane has to stay quick
+enough that agents keep running it. The acceptance claim was not lowered to fit
+the default lane; it was moved to the lane that can carry it.
+
+**Named command:** `zig build test-core -Doptimize=ReleaseFast`.
+
+### Memory Against D8
+
+| Fact | Value |
+| --- | --- |
+| Expected index bytes, from the fixture's actual counts | 2,620,054 |
+| Measured index bytes | 2,642,004 |
+| Ratio | 1.008× |
+| D8's ceiling | 2× |
+| Peak RSS of the test process at that size | 543 MB |
+| Index as a share of peak | ~0.5% |
+
+D8's expected-bytes formula is adjusted for the Stage 2 decision to key the
+entity indexes by entity id rather than entity position: the two offset arrays
+are `4 × (key space + 1)` rather than `4 × (entities + 1)`, where the key space
+is the highest id any live entity or any assertion names. Nothing else in the
+formula changes, and the measured value is computed by the index reporting its
+own size rather than by inference.
+
+The ratio being 1.008 rather than, say, 1.7 is itself worth recording: it says
+there is no per-key allocation hiding anywhere, which is the failure D4 exists
+to prevent and the reason a percentage-of-RSS ceiling was rejected. At 10% of
+this run's peak the ceiling would have been 54 MB — twenty times what the
+structure needs, and unable to fail.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core` | 97/98 passed, 1 skipped (the external-scale proof, skipped in debug by design) |
+| `zig build test-core -Doptimize=ReleaseFast` | 98/98 passed, 873 ms, peak RSS 543 MB |
+| `zig build test` | 233/235 passed, 2 skipped |
+| `zig build preview-gate` | success, 14/14 steps, 6/6 tests passed |
+| `zig fmt --check build.zig src tests` | clean |
+
+`preview-gate` prints `failed command:` lines during the dogfood recovery
+scenario. Those are its deliberate allocation-failure injections, not failures:
+the step reports success and the build exits 0.

@@ -1136,6 +1136,18 @@ fn positionOf(table: []const u32, index: usize) ?usize {
     return position;
 }
 
+/// Test-only: answer every relationship query from the full assertion array, as
+/// if no adjacency index existed.
+///
+/// This is here so a test can send one real request down both access paths and
+/// compare what came back. A hand-written oracle proves that both paths agree
+/// with the oracle; this proves the indexed path agrees with the path it
+/// replaced, on the rendering a consumer actually receives, ordering included.
+///
+/// The branch that reads it is guarded by `builtin.is_test`, so outside a test
+/// build it compiles away along with this variable's every use.
+pub var bypass_relationship_index = false;
+
 /// Test-only counters for the work a query does inside the snapshot.
 ///
 /// What a query costs is a property this project has to be able to assert, not
@@ -1466,6 +1478,7 @@ pub const Snapshot = struct {
     /// there. Every other filter stays a post-filter — the anchor narrows
     /// where to look, and the answer is still read from the assertions.
     fn candidatesFor(self: *const Snapshot, filter: RelationshipFilter) ?[]const u32 {
+        if (builtin.is_test and bypass_relationship_index) return null;
         const by_source: ?[]const u32 = if (filter.source) |id|
             self.relationship_index.outgoing.bucket(id.index())
         else

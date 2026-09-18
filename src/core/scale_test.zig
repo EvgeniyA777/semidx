@@ -12,6 +12,7 @@
 //! conformance target here.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const model = @import("model.zig");
@@ -759,6 +760,158 @@ test "a snapshot published after an edit is indexed against its own assertions" 
     };
     try expectParityOverFilters(&after, &anchors);
     try expectParityOverFilters(&before, &anchors);
+}
+
+// -- scale proof ------------------------------------------------------------
+
+/// What the indexes should cost, computed from what the snapshot actually
+/// holds.
+///
+/// This is deliberately not a share of resident memory. At any percentage worth
+/// setting, a budget that size could never fail — it would still admit an
+/// implementation allocating a list header per entity, which is exactly the
+/// shape compressed sparse row exists to prevent. A budget that cannot fail is
+/// decoration.
+fn expectedIndexBytes(snapshot: *const Snapshot) usize {
+    var keys: usize = snapshot.entity_positions.len;
+    var relationships: usize = 0;
+    var entity_targets: usize = 0;
+    var designator_targets: usize = 0;
+    var designators: std.StringHashMapUnmanaged(void) = .empty;
+    defer designators.deinit(testing.allocator);
+
+    for (snapshot.assertions) |assertion| {
+        const relationship = assertion.relationship() orelse continue;
+        relationships += 1;
+        keys = @max(keys, @as(usize, @intFromEnum(relationship.source)) + 1);
+        switch (relationship.target) {
+            .entity => |id| {
+                entity_targets += 1;
+                keys = @max(keys, @as(usize, @intFromEnum(id)) + 1);
+            },
+            .designator => |value| {
+                designator_targets += 1;
+                designators.put(testing.allocator, value, {}) catch unreachable;
+            },
+        }
+    }
+
+    const u32_size = @sizeOf(u32);
+    // Position tables.
+    var bytes = (snapshot.entity_positions.len + snapshot.unit_positions.len) * u32_size;
+    // Outgoing and incoming, each an offset per key plus one, and a position
+    // per relationship it indexes.
+    bytes += (keys + 1) * u32_size + relationships * u32_size;
+    bytes += (keys + 1) * u32_size + entity_targets * u32_size;
+    // The designator map: one entry per distinct designator, one position per
+    // designator relationship.
+    bytes += designators.count() * (@sizeOf([]const u8) + @sizeOf(u32) * 2 + 1);
+    bytes += designator_targets * u32_size;
+    return bytes;
+}
+
+fn measuredIndexBytes(snapshot: *const Snapshot) usize {
+    const tables = (snapshot.entity_positions.len + snapshot.unit_positions.len) * @sizeOf(u32);
+    return tables + snapshot.relationship_index.byteSize();
+}
+
+/// The work bound, asserted at one size.
+///
+/// Every number here is exact rather than a ceiling, because the synthetic
+/// graph's answers are exact. "Proportional to the neighbourhood" is not a
+/// direction of travel to be satisfied by getting smaller; it is `answers`.
+fn expectWorkFollowsTheNeighbourhood(synthetic: *const Synthetic, snapshot: *const Snapshot) !void {
+    const outgoing = try measure(countAnchoredOutgoing, .{ snapshot, synthetic.focus });
+    try testing.expectEqual(@as(usize, fan_out), outgoing.answers);
+    try testing.expectEqual(outgoing.answers, outgoing.candidates);
+
+    const incoming = try measure(countAnchoredIncoming, .{ snapshot, synthetic.focus });
+    try testing.expectEqual(@as(usize, fan_in), incoming.answers);
+    try testing.expectEqual(incoming.answers, incoming.candidates);
+
+    const traversal = try measure(traverseDepth2, .{ snapshot, synthetic.focus, testing.allocator });
+    try testing.expectEqual(synthetic.depth2Reach(), traversal.answers);
+    try testing.expectEqual(traversal.answers, traversal.candidates);
+
+    // One identity lookup per candidate at most, and each of those is one
+    // examined record. Stage 1's term has to stay removed for Stage 2's bound
+    // to mean anything.
+    try testing.expect(traversal.identity_records <= traversal.candidates);
+
+    // The same assertions under the access path this replaced. Without this the
+    // bound above is a number with no claim attached: it has to be a bound that
+    // the old path breaks.
+    graph_mod.bypass_relationship_index = true;
+    defer graph_mod.bypass_relationship_index = false;
+
+    const scanned = try measure(countAnchoredOutgoing, .{ snapshot, synthetic.focus });
+    try testing.expectEqual(outgoing.answers, scanned.answers);
+    try testing.expectEqual(snapshot.assertions.len, scanned.candidates);
+    try testing.expect(scanned.candidates > scanned.answers);
+
+    const scanned_traversal = try measure(traverseDepth2, .{ snapshot, synthetic.focus, testing.allocator });
+    try testing.expectEqual(traversal.answers, scanned_traversal.answers);
+    // Per frontier step, not once: this is the term that turns a depth-2
+    // question into a repository-sized one.
+    try testing.expectEqual(
+        snapshot.assertions.len * (1 + fan_out),
+        scanned_traversal.candidates,
+    );
+}
+
+fn expectIndexFitsItsOwnShape(snapshot: *const Snapshot) !void {
+    const expected = expectedIndexBytes(snapshot);
+    const measured = measuredIndexBytes(snapshot);
+    try testing.expect(measured <= 2 * expected);
+}
+
+test "anchored work follows the neighbourhood and not the repository" {
+    // Two sizes, because a bound that holds at one size is a coincidence. The
+    // graph grows by a factor of four here and the bound does not move at all.
+    for ([_]u32{ 64, 256 }) |units| {
+        var synthetic = try build(testing.allocator, .{ .units = units });
+        defer synthetic.deinit();
+        var snapshot = try synthetic.publish();
+        defer snapshot.deinit();
+
+        try expectWorkFollowsTheNeighbourhood(&synthetic, &snapshot);
+        try expectIndexFitsItsOwnShape(&snapshot);
+    }
+}
+
+/// The size the plan asks Stage 2 to be accepted at: past the external Java
+/// probe that motivated it.
+const external_scale: Spec = .{ .units = 12_500 };
+
+/// Built and run only outside a debug build.
+///
+/// Debug is what makes this size impractical, not the size itself, and the
+/// default lane has to stay quick enough that agents keep running it. The
+/// command is named in the progress log: `zig build test-core
+/// -Doptimize=ReleaseFast`. The acceptance claim is not lowered to fit the
+/// default lane; it is moved to the lane that can carry it.
+const run_external_scale = builtin.mode != .Debug;
+
+test "the work bound holds past the scale that motivated it" {
+    if (!run_external_scale) return error.SkipZigTest;
+
+    var synthetic = try build(testing.allocator, external_scale);
+    defer synthetic.deinit();
+    var snapshot = try synthetic.publish();
+    defer snapshot.deinit();
+
+    // Past apache/dubbo's 230,753 assertions, which is the point.
+    try testing.expect(snapshot.assertions.len > 230_753);
+
+    try expectWorkFollowsTheNeighbourhood(&synthetic, &snapshot);
+    try expectIndexFitsItsOwnShape(&snapshot);
+
+    reportHeader(synthetic.spec, &snapshot);
+    report("index bytes expected", .{
+        .answers = expectedIndexBytes(&snapshot),
+        .identity_records = measuredIndexBytes(&snapshot),
+        .candidates = 0,
+    });
 }
 
 test "query cost over the synthetic graph is measured, not assumed" {

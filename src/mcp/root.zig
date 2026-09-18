@@ -1496,6 +1496,49 @@ test "context traversal is explicit, bounded, renders each entity once, and keep
     try Ids.check(tight.object.get("structuredContent").?, &tight_counts);
 }
 
+test "an indexed hot path renders exactly what the full-scan path rendered" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    // The same cycle-with-a-repeated-neighbour shape the traversal test uses.
+    // A reordering that only appears when an entity is reached from two ends
+    // would have nowhere to hide here.
+    try h.init(false, "const std = @import(\"std\");\n\n" ++
+        "pub fn a() void {\n    b();\n    c();\n}\n\n" ++
+        "fn b() void {\n    c();\n    a();\n}\n\n" ++
+        "fn c() void {\n    b();\n    std.debug.print(\"x\", .{});\n}\n");
+    defer h.deinit();
+
+    const graph = semidx.core.graph;
+    const calls = [_][2][]const u8{
+        .{ "semidx_context", "{\"name\":\"a\",\"depth\":2,\"direction\":\"both\"}" },
+        .{ "semidx_context", "{\"name\":\"a\",\"depth\":3,\"direction\":\"outgoing\"}" },
+        .{ "semidx_references", "{\"name\":\"a\",\"direction\":\"both\"}" },
+    };
+
+    for (calls) |call| {
+        graph.work.reset();
+        _ = try h.callTool(arena, call[0], call[1]);
+        const indexed = try arena.dupe(u8, h.out.written());
+        const indexed_candidates = graph.work.candidates;
+
+        graph.bypass_relationship_index = true;
+        defer graph.bypass_relationship_index = false;
+        graph.work.reset();
+        _ = try h.callTool(arena, call[0], call[1]);
+        const scanned_candidates = graph.work.candidates;
+
+        // Byte for byte, so this covers more than relationship ids and their
+        // order: the same fields, the same de-duplication, the same traversal
+        // rendering, the same budget outcome, the same hints.
+        try testing.expectEqualStrings(h.out.written(), indexed);
+        // And the two runs really did take different paths, so the comparison
+        // above is not one implementation agreeing with itself.
+        try testing.expect(indexed_candidates < scanned_candidates);
+    }
+}
+
 test "a worst-case multi-focus context cannot exceed the default response budget silently" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
