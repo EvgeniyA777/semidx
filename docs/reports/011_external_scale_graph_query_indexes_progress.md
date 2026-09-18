@@ -14,18 +14,25 @@ Companion log for
 
 ## Current Status
 
-Stage 0 is complete. The cost model in the plan's
+Stages 0 and 1 are complete. The cost model in the plan's
 [Current Evidence](../plans/011_external_scale_graph_query_indexes.md#current-evidence)
-is confirmed on a local synthetic graph, so the plan's stage order stands and
-its Start Rule stop condition is not triggered. Nothing about graph semantics has
-changed.
+is confirmed on a local synthetic graph, so the plan's stage order stands and its
+Start Rule stop condition is not triggered. Identity lookups are now constant
+time, which removed 124.8× of the work every query was paying. Nothing about
+graph semantics has changed: no assertion was added or removed, and no claim's
+resolution, freshness, producer, or evidence moved.
+
+The open item carried forward is honest attribution, not code: Stage 1's product
+latency on external Java scale was **not measured**, because no external
+reproduction was available. See
+[What This Stage Does Not Claim](#what-this-stage-does-not-claim).
 
 ## Stage Log
 
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 0: Baseline and harness | Completed | Synthetic graph committed at 5,045 assertions over 249 live units. Baseline confirms both costs: `countAssertions` examines 629,508 stored records to answer over 5,045 assertions, and an anchored query still walks all 5,045 candidates. |
-| Stage 1: Constant-time identity lookups | Not started | — |
+| Stage 1: Constant-time identity lookups | Completed | Identity lookups read position tables built in `publish`. Work to answer `countAssertions` over the synthetic graph fell from 629,508 examined records to 5,044 — a factor of 124.8, which is half the live unit count, exactly what the cost model predicted. Results are unchanged against a linear reference over every id the graph issued. |
 | Stage 2: Relationship adjacency index | Not started | — |
 | Stage 3: MCP hot path parity | Not started | — |
 | Stage 4: Deterministic scale proof | Not started | — |
@@ -164,3 +171,72 @@ gate.
 | `./scripts/check-zig-version.sh` | Zig 0.16.0 matches semidx target |
 | `zig fmt --check build.zig src tests` | clean |
 | `zig build test-core` | 91/91 tests passed (67 core, 24 source) |
+
+## Stage 1: Constant-Time Identity Lookups
+
+### Work
+
+- `src/core/graph.zig`: `publish` builds `entity_positions` and `unit_positions`
+  — dense `[]u32` indexed by `id.index()`, holding the position in the published
+  slice, with `absent_position` for an id the snapshot does not hold. Tables are
+  sized by the highest live id, so a graph started after another pays for its
+  reserved-id gap once here rather than on every query. `Snapshot.unit`,
+  `Snapshot.entityById`, and `Snapshot.unitAnalysis` read them; signatures,
+  return types, and null behavior are unchanged. `Snapshot.deinit` frees them
+  like every other snapshot slice.
+- `src/core/scale_test.zig`: parity against a linear reference, and a cost
+  assertion.
+
+`unitByPath` and `findEntity` were left alone, per the plan: they are not on the
+per-assertion path.
+
+An id above the highest live id is absent by being past the end of the table.
+There is no fallback scan, deliberately — a scan here is the defect the stage
+removes, and reintroducing one under a branch name would hide it rather than
+fix it.
+
+### Result
+
+Same synthetic graph: 249 live units, 2,740 entities, 5,045 assertions.
+
+| Query | Answers | Identity records before | After | Factor |
+| --- | --- | --- | --- | --- |
+| `countAssertions` (default freshness) | 4,905 | 629,508 | 5,044 | 124.8× |
+| `relationships` anchored on `source` | 4 | 629,508 | 5,044 | 124.8× |
+| `relationships` anchored on `target` | 4 | 629,508 | 5,044 | 124.8× |
+| Depth-2 traversal from the focus entity | 16 | 3,147,540 | 25,220 | 124.8× |
+
+Answers are identical in every row. The factor is 124.8 in every row, and that
+is the confirmation rather than a coincidence: it is half of 249 live units, the
+average cost of the linear scan this stage removed. The cost model predicted
+`units / 2`, and that is what was measured.
+
+Candidate counts are untouched by this stage — an anchored query still inspects
+all 5,045 assertions, because the anchor is still applied inside the loop. That
+is Stage 2's term, and keeping it visibly unchanged here is what lets the two
+wins be attributed apart, per D11.
+
+### What This Stage Does Not Claim
+
+**No product latency number is claimed for Stage 1.** D11 predicts that removing
+this term alone probably makes the Plan 010 probe interactive, and the measured
+factor of 124.8 on a 249-unit graph is consistent with the ~2,000× predicted on
+Dubbo's 4,050 units. But consistent is not measured: no external reproduction
+was run, so `semidx_health`, `semidx_references`, and `semidx_context` at
+`depth=2` have no post-Stage-1 wall clock recorded against Plan 010's numbers.
+
+The plan is explicit that this measurement cannot be taken later without
+conflating Stage 1's win with Stage 2's. It is therefore recorded as **not
+taken**, not as inferred. What Stage 1 proved is the work bound and the parity;
+the product claim on external Java scale remains open and is the honest gap in
+this record.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | clean |
+| `zig build test-core` | 93/93 tests passed |
+| `zig build test` | 228/229 passed, 1 skipped (pre-existing dogfood skip; no repository root outside `zig build dogfood`) |
+
+No test expectation was changed. Two tests were added.

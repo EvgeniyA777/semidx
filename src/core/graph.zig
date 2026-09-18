@@ -880,6 +880,27 @@ pub const Graph = struct {
             try diagnostics.appendSlice(self.gpa, bucket.items);
         }
 
+        // Only live records are copied above, so the `id == position` relation
+        // the mutable store relies on does not survive publication. Without a
+        // table, recovering it is a scan — and that scan is paid once per
+        // assertion visited, because freshness is checked for every one of
+        // them. The table is built here, once, against a state that can no
+        // longer change.
+        const entity_positions = try positionTable(
+            self.gpa,
+            model.Entity,
+            entities.items,
+            entityIdentity,
+        );
+        errdefer self.gpa.free(entity_positions);
+        const unit_positions = try positionTable(
+            self.gpa,
+            SourceUnitView,
+            units.items,
+            unitIdentity,
+        );
+        errdefer self.gpa.free(unit_positions);
+
         return .{
             .gpa = self.gpa,
             .revision = self.revision,
@@ -888,6 +909,8 @@ pub const Graph = struct {
             .diagnostics = try diagnostics.toOwnedSlice(self.gpa),
             .identity_events = try self.gpa.dupe(model.IdentityEvent, self.identity_events.items),
             .units = try units.toOwnedSlice(self.gpa),
+            .entity_positions = entity_positions,
+            .unit_positions = unit_positions,
         };
     }
 
@@ -1053,6 +1076,51 @@ fn wholeUnitRange(bytes: []const u8) model.SourceRange {
     };
 }
 
+/// What a position table records for an id the snapshot does not hold.
+///
+/// Absence has to be representable, because a query may legitimately name an
+/// entity that has been removed. A scan answered `null` for that; the table
+/// must answer the same thing, and must answer it without looking at anything
+/// else.
+const absent_position: u32 = std.math.maxInt(u32);
+
+fn entityIdentity(item: model.Entity) u32 {
+    return @intFromEnum(item.id);
+}
+
+fn unitIdentity(item: SourceUnitView) u32 {
+    return @intFromEnum(item.id);
+}
+
+/// Builds the id-to-position table for one published slice.
+///
+/// Dense, and sized by the highest live id rather than by the id space: a graph
+/// started after another reserves ids it never issues, and the gap is paid once
+/// here instead of on every query. An id above the highest live one is absent
+/// by being past the end — the same answer as before, reached without a scan.
+fn positionTable(
+    gpa: Allocator,
+    comptime Item: type,
+    items: []const Item,
+    comptime idOf: fn (Item) u32,
+) Allocator.Error![]u32 {
+    var highest: u32 = 0;
+    for (items) |item| highest = @max(highest, idOf(item));
+    const size: usize = if (items.len == 0) 0 else @as(usize, highest) + 1;
+
+    const table = try gpa.alloc(u32, size);
+    @memset(table, absent_position);
+    for (items, 0..) |item, position| table[idOf(item)] = @intCast(position);
+    return table;
+}
+
+fn positionOf(table: []const u32, index: usize) ?usize {
+    if (index >= table.len) return null;
+    const position = table[index];
+    if (position == absent_position) return null;
+    return position;
+}
+
 /// Test-only counters for the work a query does inside the snapshot.
 ///
 /// What a query costs is a property this project has to be able to assert, not
@@ -1106,6 +1174,14 @@ pub const Snapshot = struct {
     diagnostics: []const model.Diagnostic,
     identity_events: []const model.IdentityEvent,
     units: []const SourceUnitView,
+    /// Where each live entity id sits in `entities`, and each live unit id in
+    /// `units`.
+    ///
+    /// Derived: both are rebuildable from the slices above with nothing lost,
+    /// and no answer exists only here. They make a recorded claim findable;
+    /// they never establish one.
+    entity_positions: []const u32,
+    unit_positions: []const u32,
 
     pub fn deinit(self: *Snapshot) void {
         self.gpa.free(self.entities);
@@ -1113,20 +1189,17 @@ pub const Snapshot = struct {
         self.gpa.free(self.diagnostics);
         self.gpa.free(self.identity_events);
         self.gpa.free(self.units);
+        self.gpa.free(self.entity_positions);
+        self.gpa.free(self.unit_positions);
         self.* = undefined;
     }
 
     // -- freshness ----------------------------------------------------------
 
     pub fn unit(self: Snapshot, id: SourceUnitId) ?SourceUnitView {
-        for (self.units, 1..) |view, examined| {
-            if (view.id == id) {
-                work.identity(examined);
-                return view;
-            }
-        }
-        work.identity(self.units.len);
-        return null;
+        work.identity(1);
+        const position = positionOf(self.unit_positions, id.index()) orelse return null;
+        return self.units[position];
     }
 
     pub fn unitByPath(self: Snapshot, path: []const u8) ?SourceUnitView {
@@ -1269,14 +1342,9 @@ pub const Snapshot = struct {
     /// Entities are looked up by their id; this looks one up by the id it
     /// carries, not by anything derived from its evidence.
     pub fn entityById(self: Snapshot, id: EntityId) ?model.Entity {
-        for (self.entities, 1..) |item, examined| {
-            if (item.id == id) {
-                work.identity(examined);
-                return item;
-            }
-        }
-        work.identity(self.entities.len);
-        return null;
+        work.identity(1);
+        const position = positionOf(self.entity_positions, id.index()) orelse return null;
+        return self.entities[position];
     }
 
     /// Looks a definition up by the unit it is currently found in and its name.

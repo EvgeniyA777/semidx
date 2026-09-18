@@ -430,6 +430,106 @@ test "the synthetic graph has the shape its measurements assume" {
     try testing.expect(snapshot.assertions.len > 50 * synthetic.depth2Reach());
 }
 
+/// What `Snapshot.unit` did before it had a table: walk the published slice.
+fn referenceUnit(snapshot: *const Snapshot, id: SourceUnitId) ?graph_mod.SourceUnitView {
+    for (snapshot.units) |view| {
+        if (view.id == id) return view;
+    }
+    return null;
+}
+
+/// What `Snapshot.entityById` did before it had a table.
+fn referenceEntity(snapshot: *const Snapshot, id: EntityId) ?model.Entity {
+    for (snapshot.entities) |item| {
+        if (item.id == id) return item;
+    }
+    return null;
+}
+
+test "indexed identity lookups answer exactly what a scan answered" {
+    var synthetic = try build(testing.allocator, .{});
+    defer synthetic.deinit();
+    var snapshot = try synthetic.publish();
+    defer snapshot.deinit();
+
+    // The graph has removed units and removed entities, so ids and published
+    // positions have diverged. Without that this proves nothing.
+    try testing.expect(snapshot.units.len < synthetic.spec.units);
+
+    // Every id the graph ever issued is asked for, plus a margin past the
+    // highest one: an id above the table is absent, and must be answered as
+    // absent rather than searched for.
+    const unit_ids = synthetic.spec.units + 8;
+    for (0..unit_ids) |index| {
+        const id: SourceUnitId = @enumFromInt(@as(u32, @intCast(index)));
+        const expected = referenceUnit(&snapshot, id);
+        const actual = snapshot.unit(id);
+        if (expected) |view| {
+            try testing.expect(actual != null);
+            try testing.expect(std.meta.eql(view, actual.?));
+            try testing.expectEqual(view.analysis(), snapshot.unitAnalysis(id).?);
+        } else {
+            try testing.expect(actual == null);
+            try testing.expect(snapshot.unitAnalysis(id) == null);
+        }
+    }
+
+    var highest_entity: u32 = 0;
+    for (snapshot.entities) |item| highest_entity = @max(highest_entity, @intFromEnum(item.id));
+    for (0..highest_entity + 8) |index| {
+        const id: EntityId = @enumFromInt(@as(u32, @intCast(index)));
+        const expected = referenceEntity(&snapshot, id);
+        const actual = snapshot.entityById(id);
+        if (expected) |item| {
+            try testing.expect(actual != null);
+            try testing.expect(std.meta.eql(item, actual.?));
+        } else {
+            try testing.expect(actual == null);
+        }
+    }
+
+    // A removed entity is absent, not a neighbour of the position its id once
+    // named. This is the failure a position table makes possible and the reason
+    // parity is asserted over the whole id range rather than over live ids.
+    var removed_seen = false;
+    for (0..highest_entity) |index| {
+        const id: EntityId = @enumFromInt(@as(u32, @intCast(index)));
+        if (snapshot.entityById(id) == null) removed_seen = true;
+    }
+    try testing.expect(removed_seen);
+}
+
+test "identity lookup cost does not grow with the graph" {
+    for ([_]u32{ 64, 256 }) |units| {
+        var synthetic = try build(testing.allocator, .{ .units = units });
+        defer synthetic.deinit();
+        var snapshot = try synthetic.publish();
+        defer snapshot.deinit();
+
+        // One lookup examines one record, at either size. Before the position
+        // table this was half the live units on average, and it was paid once
+        // per assertion visited.
+        graph_mod.work.reset();
+        _ = snapshot.unit(@enumFromInt(0));
+        try testing.expectEqual(@as(usize, 1), graph_mod.work.identity_records);
+
+        graph_mod.work.reset();
+        _ = snapshot.entityById(synthetic.focus);
+        try testing.expectEqual(@as(usize, 1), graph_mod.work.identity_records);
+
+        // An id the snapshot does not hold costs the same. A fallback scan here
+        // would be the defect this stage removes, wearing a different name.
+        graph_mod.work.reset();
+        _ = snapshot.unit(@enumFromInt(units + 1000));
+        try testing.expectEqual(@as(usize, 1), graph_mod.work.identity_records);
+
+        // A freshness-filtered walk therefore costs one lookup per assertion,
+        // not one scan per assertion.
+        const counting = try measure(countCurrentAssertions, .{&snapshot});
+        try testing.expect(counting.identity_records <= snapshot.assertions.len);
+    }
+}
+
 test "query cost over the synthetic graph is measured, not assumed" {
     var synthetic = try build(testing.allocator, .{});
     defer synthetic.deinit();
