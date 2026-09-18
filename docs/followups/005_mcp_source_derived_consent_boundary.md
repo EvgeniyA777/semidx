@@ -1,7 +1,6 @@
 ---
 title: "MCP source-derived consent boundary"
 doc_type: "follow_up"
-lifecycle: "active"
 lifecycle: "completed"
 status: "completed"
 agent_action: "historical_reference_only"
