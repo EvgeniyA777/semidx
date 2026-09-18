@@ -136,8 +136,8 @@ documents that own history, rationale, and evidence.
   stops at `max_response_bytes` (32000 structured bytes by default, whole
   items only) and reports `budget_exhausted`; cut lists carry
   `narrowing_hints`; outline, map, definitions, and references return
-  `next_cursor`, valid only for the same server process, tool, arguments,
-  and snapshot revision; `semidx_context` takes `direction` and `depth` (max 3) for a
+  `next_cursor`, authenticated by a per-process secret and valid only for the
+  same tool, arguments, and snapshot revision; `semidx_context` takes `direction` and `depth` (max 3) for a
   traversal that renders each entity once. All are projection mechanics, not
   graph semantics.
 - `semidx_refresh` keeps the previous snapshot on failure. If a refresh fails

@@ -61,9 +61,10 @@ pub const Server = struct {
     last_scan: semidx.Index.ScanOutcome,
     /// Set by a legacy `initialize`. Modern requests never read it.
     legacy_initialized: bool,
-    /// Random per process, so a cursor from an earlier process, whose
-    /// revision numbers may repeat, is refused.
-    instance: u64,
+    /// Secret per process, authenticating the cursors it issues: a cursor
+    /// from an earlier process, whose revision numbers may repeat, or one a
+    /// client changed, does not verify under it.
+    cursor_key: tools.CursorKey,
     message_arena: std.heap.ArenaAllocator,
 
     /// Scans `options.root` and publishes the first snapshot.
@@ -85,8 +86,8 @@ pub const Server = struct {
         });
         try log.flush();
 
-        var instance: [8]u8 = undefined;
-        io.random(&instance);
+        var cursor_key: tools.CursorKey = undefined;
+        try io.randomSecure(&cursor_key);
 
         return .{
             .gpa = gpa,
@@ -100,7 +101,7 @@ pub const Server = struct {
             .rebuilds = 0,
             .last_scan = outcome,
             .legacy_initialized = false,
-            .instance = std.mem.readInt(u64, &instance, .little),
+            .cursor_key = cursor_key,
             .message_arena = std.heap.ArenaAllocator.init(gpa),
         };
     }
@@ -282,7 +283,7 @@ pub const Server = struct {
             .arena = arena,
             .snapshot = &self.snapshot,
             .evidence_text = self.options.evidence_text,
-            .instance = self.instance,
+            .cursor_key = self.cursor_key,
         };
         const outcome = switch (tool) {
             .semidx_health => tools.health(&ctx, &body_stringify, arguments, try self.status(arena)),
@@ -1300,14 +1301,49 @@ test "cursors walk a result in pages over one snapshot and fail clearly across r
     try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_repo_map", other_tool)), "issued by semidx_find_definitions") != null);
     const other_arguments = try std.fmt.allocPrint(arena, "{{\"limit\":1,\"language\":\"zig\",\"cursor\":\"{s}\"}}", .{cursor});
     try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", other_arguments)), "different arguments") != null);
-    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", "{\"cursor\":\"sdx1.bm9wZQ\"}")), "not one this server issued") != null);
-    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", "{\"cursor\":\"abc\"}")), "not one this server issued") != null);
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", "{\"cursor\":\"sdx1.bm9wZQ\"}")), "not one this server process issued") != null);
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", "{\"cursor\":\"abc\"}")), "not one this server process issued") != null);
 
-    // A cursor from another server process is refused, whatever its revision.
-    const instance = h.server.instance;
-    h.server.instance +%= 1;
-    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", rest_body)), "another server process") != null);
-    h.server.instance = instance;
+    // A cursor changed after it was issued is refused, not honored as a
+    // continuation of a page the server never issued.
+    const Forge = struct {
+        /// The tag a cursor carries after its fields. It must match the MAC
+        /// length `Cursor` in `tools.zig` uses.
+        const tag_bytes = 16;
+
+        /// Re-encodes `text` with `value` as its position, keeping the tag it
+        /// was issued with.
+        fn position(a: Allocator, text: []const u8, value: usize) ![]const u8 {
+            const prefix = "sdx1.";
+            const base64 = std.base64.url_safe_no_pad;
+            const encoded = text[prefix.len..];
+            const signed = try a.alloc(u8, try base64.Decoder.calcSizeForSlice(encoded));
+            try base64.Decoder.decode(signed, encoded);
+            const body = signed[0 .. signed.len - tag_bytes];
+            const last_dot = std.mem.lastIndexOfScalar(u8, body, '.').?;
+            const forged = try std.mem.concat(a, u8, &.{
+                try std.fmt.allocPrint(a, "{s}.{d}", .{ body[0..last_dot], value }),
+                signed[signed.len - tag_bytes ..],
+            });
+            const out = try a.alloc(u8, prefix.len + base64.Encoder.calcSize(forged.len));
+            @memcpy(out[0..prefix.len], prefix);
+            _ = base64.Encoder.encode(out[prefix.len..], forged);
+            return out;
+        }
+    };
+    const forged = try std.fmt.allocPrint(arena, "{{\"limit\":1,\"cursor\":\"{s}\"}}", .{try Forge.position(arena, cursor, 3)});
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", forged)), "changed after it was issued") != null);
+    // The same position, in a cursor the server issued, is honored.
+    const issued = (try h.callTool(arena, "semidx_find_definitions", "{\"limit\":3}")).object.get("structuredContent").?.object;
+    const third = try std.fmt.allocPrint(arena, "{{\"limit\":1,\"cursor\":\"{s}\"}}", .{issued.get("next_cursor").?.string});
+    const third_page = (try h.callTool(arena, "semidx_find_definitions", third)).object.get("structuredContent").?.object;
+    try testing.expectEqual(@as(i64, 3), third_page.get("offset").?.integer);
+
+    // A cursor from another server process does not verify either.
+    const key = h.server.cursor_key;
+    h.server.cursor_key[0] +%= 1;
+    try testing.expect(std.mem.indexOf(u8, try toolError(try h.callTool(arena, "semidx_find_definitions", rest_body)), "not one this server process issued") != null);
+    h.server.cursor_key = key;
 
     // After a refresh publishes a new revision, the old cursor fails.
     try h.tmp.dir.writeFile(test_io, .{ .sub_path = "added.zig", .data = "pub fn added() void {}\n" });

@@ -83,8 +83,8 @@ stages do not guess:
   is a tool error (`isError: true`) naming which of those differs. A rebuilt
   index publishes revisions above the old ones (`Graph.idFloor`), so a revision
   number never names two graph states within one process. (Stage 8 review
-  added the server process to the cursor: numbering restarts in a new
-  process.)
+  added the server process to the cursor, and the post-closure review below
+  replaced that field with a per-process authentication tag.)
 - **Traversal** extends `semidx_context` with `direction` (`both` default,
   `incoming`, `outgoing`) and `depth` (1 default, maximum 3). At depth 1 the
   result is unchanged except that `direction` can omit one list. At depth 2 or
@@ -553,3 +553,70 @@ Cut the next preview (`0.1.0-preview.3`) so installed users get these tools,
 with `zig build preview-gate` as the habit-loop part of its release gate and
 release notes that name the new arguments and fields. Then measure real
 clients for Follow-up 010 before touching the text fallback.
+
+## Post-Closure Review
+
+An independent review of the closed plan on 2026-09-17 raised one finding. It
+is fixed; the plan's other surfaces were re-checked and matched the plan.
+
+### Finding: Cursors Were Not Integrity-Protected
+
+**Confirmed, fixed.** `Cursor.encode`/`decode` serialized the fields as
+URL-safe base64 with no authentication, and validation checked only that the
+decoded tool, process instance, revision, and argument hash matched the call.
+A client could therefore decode a cursor, change its position, re-encode it,
+and be served that page as an ordinary continuation.
+
+Reproduced against the built server before the fix: a `semidx_repo_map`
+`limit` 1 cursor at position 1 was decoded to
+`<instance>.2.90.<arguments>.1`, re-encoded with position `10`, and accepted —
+the response returned `offset` 10, silently skipping pages 1 to 9. The
+documented promise that cursor pages "return every item exactly once, in
+order" therefore held only for clients that left the string alone.
+
+Impact is integrity, not access: this is a local, single-client, read-only
+surface, and every item behind a forged position is one the same client can
+already ask for. What was wrong is that the server presented a page as a
+faithful continuation of its own ordering when it was not, and that a cursor
+corrupted in transit produced a wrong page instead of an error.
+
+**Fix.** A cursor now carries a SipHash-128 tag over its fields, keyed by a
+16-byte secret each server process draws from `io.randomSecure` at startup.
+`decode` recomputes the tag and compares it in constant time; anything that
+does not verify is refused with "cursor is not one this server process issued,
+or it was changed after it was issued; repeat the call without cursor". The
+separate `instance` field and `Server.instance` are gone: the per-process key
+subsumes them, since a cursor from another process cannot verify. The verified
+fields are still matched against the call, so a genuine cursor given to the
+wrong tool, revision, or arguments still says which differs.
+
+Changed files: `src/mcp/tools.zig`, `src/mcp/root.zig` (server key, tests),
+`docs/mcp/local_preview.md`, `docs/spec/capability_matrix.md`, `MEMORY.md`,
+this log.
+
+**Tests.** The cursor test now decodes a real cursor, replaces its position
+while keeping the issued tag, re-encodes it, and expects the tool error; it
+also checks that the same position in a cursor the server issued is honored
+(`offset` 3), and that flipping a byte of the server's key makes an
+outstanding cursor fail. The existing invented-cursor, wrong-tool,
+wrong-arguments, and post-refresh cases are unchanged apart from the new
+message.
+
+**Residual risk.** The canonical-argument field stays a 64-bit Wyhash, now
+covered by the tag: a cursor cannot be forged into other arguments, but two
+argument sets that collide would still be treated as one. Nothing else in the
+preview authenticates or authorizes anything; the server trusts the client
+process that launched it.
+
+### Verification
+
+Zig 0.16.0, Debug, 2026-09-17, on the fix.
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Pass |
+| `zig fmt --check build.zig src tests` | Pass |
+| `zig build test-mcp --summary all` | Pass; 28 passed, 1 skipped |
+| `zig build test --summary all` | Pass; 213 passed, 1 skipped |
+| `zig build preview-gate --summary all` | Pass; 14/14 steps, 6/6 tests |
+| Repro script, before and after | Before: forged position 10 accepted, `offset` 10. After: tool error, and the genuine cursor still returns `offset` 1 |

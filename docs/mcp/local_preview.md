@@ -439,11 +439,16 @@ revision return every item exactly once, in order, and keep the whole call's
 totals. `semidx_context` has no cursor: narrow it with `entity_id`,
 `direction`, or its limits.
 
-A cursor is opaque. It is valid only for the server process and tool that
+A cursor is opaque and authenticated: it carries a tag over its fields, keyed
+by a secret the server process generates at startup. A cursor that was altered
+or truncated, or that came from another server process, does not verify and is
+refused, so a page is never a continuation the server did not issue — a
+restarted server refuses every earlier cursor, because its revision numbers
+start again. A cursor that verifies is still used only for the tool that
 issued it, the snapshot revision it was issued at, and the same arguments;
 anything else is a tool error (`isError: true`) that says which of those
-differs. A restarted server refuses every earlier cursor, because its revision
-numbers start again. After
+differs. Treat the string as a token to pass back unchanged; do not build or
+edit one. After
 `semidx_refresh` publishes a new revision, every earlier cursor fails, so a
 walk never mixes two graph states; repeat the call without `cursor`. A refresh
 that finds no change keeps the revision, and cursors stay valid because the
@@ -503,7 +508,7 @@ and `from`, the entity it was found from. In a traversal result:
 | Non-object `params` or `_meta`; non-string `io.modelcontextprotocol/protocolVersion`; `2026-07-28` request without `clientCapabilities`; `tools/call` without a string `name` or with non-object `arguments`; unknown tool; any `cursor`; `tools/list` or `tools/call` in `2025-06-18` form before `initialize`; `initialize` without a string `protocolVersion` | `-32602` |
 | `io.modelcontextprotocol/protocolVersion` other than `2026-07-28` | `-32022` with `data.supported` and `data.requested` |
 | Invalid argument value or unknown argument | Tool result with `isError: true` |
-| `cursor` not issued by this server, issued by another server process or another tool, at another snapshot revision, or for other arguments | Tool result with `isError: true` saying which, and to repeat the call without `cursor` after a refresh |
+| `cursor` altered after it was issued, issued by another server process, or issued by another tool, at another snapshot revision, or for other arguments | Tool result with `isError: true` saying which, and to repeat the call without `cursor` after a refresh |
 | Refresh cannot scan the root | Tool result with `isError: true`; the index is unchanged and the previous snapshot stays published |
 | Refresh fails while reconciling or publishing | Tool result with `isError: true` saying whether the index was rebuilt; the previous snapshot stays published, and the next refresh publishes the rebuilt index or retries the rebuild |
 

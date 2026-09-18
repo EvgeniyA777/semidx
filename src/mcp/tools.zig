@@ -220,6 +220,9 @@ pub const definitions = [_]Definition{
         "snapshot. Later calls observe the new snapshot; a failed refresh keeps the previous one.", &.{}),
 };
 
+/// The secret a server generates per process to authenticate its cursors.
+pub const CursorKey = Cursor.Key;
+
 pub fn byName(name: []const u8) ?Tool {
     return std.meta.stringToEnum(Tool, name);
 }
@@ -294,9 +297,10 @@ pub const Context = struct {
     snapshot: *const Snapshot,
     /// Whether evidence text may be rendered.
     evidence_text: bool,
-    /// Identifies the server process. Revision numbers start again in a new
-    /// process, so a cursor also names the process that issued it.
-    instance: u64 = 0,
+    /// Authenticates the cursors this process issues. Revision numbers start
+    /// again in a new process, and a client may hand back anything, so a
+    /// cursor is honored only when it verifies under this key.
+    cursor_key: Cursor.Key = @splat(0),
     /// Why a call failed, reported as a tool execution error.
     failure: ?[]const u8 = null,
     existence: ?std.AutoHashMapUnmanaged(model.EntityId, usize) = null,
@@ -575,11 +579,16 @@ const Hints = struct {
 
 /// A continuation of one tool call over one snapshot. It names the tool, the
 /// snapshot revision, a hash of the call's canonical arguments, and the
-/// position of the next item in the call's deterministic order. Clients treat
-/// the encoding as opaque; the server only ever honors a cursor whose tool,
-/// revision, and arguments match the call it arrives with.
+/// position of the next item in the call's deterministic order.
+///
+/// The encoding is opaque to clients and authenticated: every cursor carries a
+/// tag over its fields, keyed by a secret this process generates at startup.
+/// A cursor whose tag does not verify — altered, truncated, or issued by
+/// another process, whose revision numbers start again — is refused rather
+/// than honored, so a page is never a continuation of something the server did
+/// not issue. The verified fields must still match the call the cursor arrives
+/// with.
 const Cursor = struct {
-    instance: u64,
     tool: Tool,
     revision: u64,
     arguments: u64,
@@ -587,30 +596,40 @@ const Cursor = struct {
 
     const prefix = "sdx1.";
     const Base64 = std.base64.url_safe_no_pad;
+    const Mac = std.crypto.auth.siphash.SipHash128(1, 3);
+    pub const Key = [Mac.key_length]u8;
 
-    fn encode(self: Cursor, arena: Allocator) Allocator.Error![]const u8 {
-        const payload = try std.fmt.allocPrint(arena, "{x:0>16}.{d}.{d}.{x:0>16}.{d}", .{ self.instance, @intFromEnum(self.tool), self.revision, self.arguments, self.position });
-        const out = try arena.alloc(u8, prefix.len + Base64.Encoder.calcSize(payload.len));
+    fn encode(self: Cursor, arena: Allocator, key: *const Key) Allocator.Error![]const u8 {
+        const body = try std.fmt.allocPrint(arena, "{d}.{d}.{x:0>16}.{d}", .{ @intFromEnum(self.tool), self.revision, self.arguments, self.position });
+        const signed = try arena.alloc(u8, body.len + Mac.mac_length);
+        @memcpy(signed[0..body.len], body);
+        Mac.create(signed[body.len..][0..Mac.mac_length], body, key);
+        const out = try arena.alloc(u8, prefix.len + Base64.Encoder.calcSize(signed.len));
         @memcpy(out[0..prefix.len], prefix);
-        _ = Base64.Encoder.encode(out[prefix.len..], payload);
+        _ = Base64.Encoder.encode(out[prefix.len..], signed);
         return out;
     }
 
-    /// Null for anything this server did not issue.
-    fn decode(arena: Allocator, text: []const u8) Allocator.Error!?Cursor {
+    /// Null for anything this process did not issue, including a cursor whose
+    /// fields were changed after it was issued.
+    fn decode(arena: Allocator, text: []const u8, key: *const Key) Allocator.Error!?Cursor {
         if (!std.mem.startsWith(u8, text, prefix) or text.len > 256) return null;
         const encoded = text[prefix.len..];
         const size = Base64.Decoder.calcSizeForSlice(encoded) catch return null;
-        const payload = try arena.alloc(u8, size);
-        Base64.Decoder.decode(payload, encoded) catch return null;
-        var fields = std.mem.splitScalar(u8, payload, '.');
-        const instance = std.fmt.parseInt(u64, fields.next() orelse return null, 16) catch return null;
+        if (size <= Mac.mac_length) return null;
+        const signed = try arena.alloc(u8, size);
+        Base64.Decoder.decode(signed, encoded) catch return null;
+        const body = signed[0 .. size - Mac.mac_length];
+        var expected: [Mac.mac_length]u8 = undefined;
+        Mac.create(&expected, body, key);
+        if (!std.crypto.timing_safe.eql([Mac.mac_length]u8, expected, signed[body.len..][0..Mac.mac_length].*)) return null;
+        var fields = std.mem.splitScalar(u8, body, '.');
         const tool = std.fmt.parseInt(u8, fields.next() orelse return null, 10) catch return null;
         const revision = std.fmt.parseInt(u64, fields.next() orelse return null, 10) catch return null;
         const arguments = std.fmt.parseInt(u64, fields.next() orelse return null, 16) catch return null;
         const position = std.fmt.parseInt(usize, fields.next() orelse return null, 10) catch return null;
         if (fields.next() != null or tool >= std.enums.values(Tool).len) return null;
-        return .{ .instance = instance, .tool = @enumFromInt(tool), .revision = revision, .arguments = arguments, .position = position };
+        return .{ .tool = @enumFromInt(tool), .revision = revision, .arguments = arguments, .position = position };
     }
 };
 
@@ -659,10 +678,9 @@ fn canonicalArguments(comptime tool: Tool, map: ?ObjectMap) u64 {
 /// same canonical arguments. Every mismatch is a tool error naming it.
 fn cursorPosition(ctx: *Context, comptime tool: Tool, args: Args(tool)) Error!usize {
     const text = try args.string("cursor") orelse return 0;
-    const cursor = try Cursor.decode(ctx.arena, text) orelse return ctx.fail("cursor is not one this server issued", .{});
-    if (cursor.instance != ctx.instance) {
-        return ctx.fail("cursor was issued by another server process; repeat the call without cursor", .{});
-    }
+    const cursor = try Cursor.decode(ctx.arena, text, &ctx.cursor_key) orelse
+        return ctx.fail("cursor is not one this server process issued, or it was changed after it was issued; " ++
+            "repeat the call without cursor", .{});
     if (cursor.tool != tool) {
         return ctx.fail("cursor was issued by {t}, not {t}; pass it to {t}", .{ cursor.tool, tool, cursor.tool });
     }
@@ -689,9 +707,9 @@ fn writePage(ctx: *Context, s: *Stringify, comptime tool: Tool, args: Args(tool)
     try s.write(position);
     const next = position + returned;
     if (next >= total) return;
-    const cursor: Cursor = .{ .instance = ctx.instance, .tool = tool, .revision = ctx.snapshot.revision, .arguments = canonicalArguments(tool, args.map), .position = next };
+    const cursor: Cursor = .{ .tool = tool, .revision = ctx.snapshot.revision, .arguments = canonicalArguments(tool, args.map), .position = next };
     try s.objectField("next_cursor");
-    try s.write(try cursor.encode(ctx.arena));
+    try s.write(try cursor.encode(ctx.arena, &ctx.cursor_key));
     try hints.add(ctx.arena, list, .@"continue", &.{"cursor"});
 }
 
