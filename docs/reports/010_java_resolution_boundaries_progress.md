@@ -643,6 +643,25 @@ Review verification on the closed tree:
 | `zig build preview-gate --summary all` | 14/14 steps, 6/6 tests passed |
 | `zig fmt --check .` | Failed on the intentionally unparsable fixture `fixtures/vertical-slice/zig/edits/05_unparsable.zig`; the plan's scoped format command remains `zig fmt --check build.zig src tests` |
 
+### Review Findings Disposition
+
+| Finding | Disposition |
+| --- | --- |
+| High: `semidx_context(depth >= 2)` not ready as the default impact tool | Accepted, deferred to its own plan. Confirmed and narrowed: the cost is not the number of calls but that `Snapshot.RelationshipIterator` scans every assertion with no index, so traversal is O(frontier × assertions). On this repository that is 230,753 assertions per pass, which also explains why `detail`, `limit`, and `max_response_bytes` changed nothing. The same missing index costs the write path too: it is the 17.5 s → 21.5 s of Stage 4 ingestion. One index serves both. |
+| Medium: the next Java bottleneck is coverage, not the boundary | Accepted; already recorded in [Residual Risk](#residual-risk), the roadmap, and `MEMORY.md`. One correction: Stages 3 and 4 moved the denominator, so cross-module visibility is now worth 5 of 496 facts (~1%), not 1.5%. |
+| Medium: growing package/import hints | Accepted, deferred to persistence or watching, as the finding says. One correction to attribution: `Packages.note` for declarers has had the same property since Plan 003; Stage 4 extended that pattern rather than introducing it, so both hints should be pruned together. Today the hints are per-process, because the graph is rebuilt on every start. |
+| Verification: `zig fmt --check .` cannot pass | **Fixed.** `MEMORY.md` was the only document in the repository naming that form; every policy, skill, plan, and release already used `zig fmt --check build.zig src tests`. `MEMORY.md` now names the paths and says why. |
+
+A latency fitness gate for the first finding needs a corpus this project does
+not have: `preview-gate` runs over a copy of this repository, 5,486 assertions
+against Dubbo's 230,753. At O(frontier × assertions) that gap is roughly three
+orders of magnitude, so the gate cannot observe this class of defect at any
+threshold. Either an external-scale root enters the gate — which
+[Verification Strategy](../plans/010_java_resolution_boundaries.md#verification-strategy)
+deliberately declined, keeping one repository as evidence rather than a
+conformance target — or the threshold is measured against a synthetic graph
+built to size.
+
 ### Drift Check At Closure
 
 Owners checked and aligned: `CORE.md` unchanged and correct — no kind was

@@ -62,9 +62,12 @@ documents that own history, rationale, and evidence.
 - The source tree contains the rebuilt first vertical slice: an in-memory graph
   over Java, Clojure, and Zig source units under `src/`, `tests/`, and
   `fixtures/`.
-- Main commands: `zig build test-core`, `zig build test`, `zig fmt --check .`,
-  `zig build run -- <files>`, `zig build mcp -- --root <dir>`,
-  `zig build test-mcp`, `zig build dogfood`, and `zig build preview-gate`.
+- Main commands: `zig build test-core`, `zig build test`,
+  `zig fmt --check build.zig src tests`, `zig build run -- <files>`,
+  `zig build mcp -- --root <dir>`, `zig build test-mcp`, `zig build dogfood`,
+  and `zig build preview-gate`. The format check names its paths because
+  `zig fmt --check .` can never pass: `fixtures/` holds source that is
+  deliberately unparsable.
 - `zig build preview-gate` is the one canonical local habit-loop gate
   ([specification](docs/mcp/habit_loop_gate.md)): the dogfood proofs as its
   `repository-copy` profile plus a `fixture` profile over a temporary root that
