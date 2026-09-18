@@ -35,7 +35,7 @@ honest semantic context that is local, queryable, and explicit about its limits.
 
 ## Current Preview
 
-**Status: first vertical slice, `0.1.0-preview.2`.** The repository contains a
+**Status: first vertical slice, `0.1.0-preview.3`.** The repository contains a
 small in-memory graph implementation over Java, Clojure, and Zig source under
 `src/`, `tests/`, and `fixtures/`, plus an experimental local MCP stdio preview
 called `semidx-mcp`.

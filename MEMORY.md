@@ -147,12 +147,11 @@ documents that own history, rationale, and evidence.
 - `scripts/semidx-mcp.sh` is the stable local launcher for agents. The older
   `scripts/start-mcp-server.sh` and `scripts/mcp-stdio.sh` remain compatibility
   aliases.
-- The product version is `0.1.0-preview.2` (`build.zig.zon`): the preview.1
-  surface plus Plan 006 Zig coverage
-  ([release notes](docs/releases/v0.1.0-preview.2.md)). Plan 005's
-  `v0.1.0-preview.1` handoff describes the tree at `e36693a`. Both are annotated
-  tags pushed to `origin` (`v0.1.0-preview.1` at `e36693a`,
-  `v0.1.0-preview.2` at `8818bb6`); no GitHub release was created.
+- The product version is `0.1.0-preview.3` (`build.zig.zon`): the preview.2
+  surface plus Plan 009 progressive MCP discovery and response-budget behavior
+  ([release notes](docs/releases/v0.1.0-preview.3.md)). Previous annotated tags
+  pushed to `origin`: `v0.1.0-preview.1` at `e36693a` and
+  `v0.1.0-preview.2` at `8818bb6`; no GitHub release was created.
 
 ## What Does Not Exist
 
@@ -213,10 +212,9 @@ documents that own history, rationale, and evidence.
 
 ## Near-Term Priorities
 
-- Plan 009 is complete, and `semidx-mcp` behavior changed after
-  `0.1.0-preview.2`: cut the next preview with `zig build preview-gate` in its
-  release gate before telling installed users about outline, budgets, cursors,
-  or traversal. Text fallback duplication stays unchanged until
+- Plan 009 is complete and is being published as `0.1.0-preview.3` with
+  `zig build preview-gate` in its release gate. Text fallback duplication stays
+  unchanged until
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
   measures real clients.
 - The roadmap now schedules active follow-ups by natural execution window:
@@ -252,8 +250,9 @@ documents that own history, rationale, and evidence.
   [docs/reports/004_zig_frontend_and_mcp_preview_progress.md](docs/reports/004_zig_frontend_and_mcp_preview_progress.md).
 - Plan 005 release readiness:
   [docs/reports/005_mcp_preview_release_readiness_progress.md](docs/reports/005_mcp_preview_release_readiness_progress.md)
-  and [docs/releases/v0.1.0-preview.1.md](docs/releases/v0.1.0-preview.1.md);
-  current candidate: [docs/releases/v0.1.0-preview.2.md](docs/releases/v0.1.0-preview.2.md).
+  [docs/releases/v0.1.0-preview.1.md](docs/releases/v0.1.0-preview.1.md), and
+  [docs/releases/v0.1.0-preview.2.md](docs/releases/v0.1.0-preview.2.md);
+  current candidate: [docs/releases/v0.1.0-preview.3.md](docs/releases/v0.1.0-preview.3.md).
 - Plan 006 Zig dogfood coverage:
   [docs/reports/006_zig_dogfood_semantic_coverage_progress.md](docs/reports/006_zig_dogfood_semantic_coverage_progress.md).
 - Plan 007 MCP response budgets and schema ergonomics:

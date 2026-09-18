@@ -4,12 +4,12 @@ doc_type: "specification"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-17"
+updated: "2026-09-18"
 ---
 
 # Preview Capability Matrix
 
-What the `0.1.0-preview.2` implementation records, per producer, and what it
+What the `0.1.0-preview.3` implementation records, per producer, and what it
 does not. Owned by [SPEC.md](../../SPEC.md#coverage-and-conformance).
 
 This is an **unversioned preview matrix**. It describes current implementation
@@ -112,7 +112,7 @@ claim.
 | Traversal | `semidx_context` with `depth` 2 or 3 and a `direction` lists further relationships step by step, renders each entity once and names it by id afterwards, never expands an entity twice or follows a designator, and keeps each edge's resolution, producer, and freshness. |
 | Source text | Off by default: no unit contents are ever returned. `--allow-evidence-text` adds each claim's recorded evidence text, at most 400 bytes; current producers record a name or callee there, not a body. |
 | Source-derived values | Always returned: root and unit paths, entity names, designators, ranges, ids, and diagnostic messages. They are derived from the indexed source and go to the client process that launched the server. |
-| Versions | Product version `0.1.0-preview.2` in `--version`, `serverInfo.version`, and `semidx_health`; `semantic_contract_version` is always `null`. |
+| Versions | Product version `0.1.0-preview.3` in `--version`, `serverInfo.version`, and `semidx_health`; `semantic_contract_version` is always `null`. |
 | Refresh | Publishes a new snapshot only on success. A failure after reconciliation started never publishes a partly updated graph: the index is rebuilt from the same scan and published by the next refresh, which then reports `entity_ids_preserved: false`; ids from earlier snapshots name nothing in the rebuilt index. |
 
 The full tool and field reference is [docs/mcp/local_preview.md](../mcp/local_preview.md).
