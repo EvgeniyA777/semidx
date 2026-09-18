@@ -458,6 +458,14 @@ const Upkeep = struct {
                     break;
                 }
             }
+            // A unit that imports from the package resolves names against it
+            // too, and its import may have resolved to nothing last time, so it
+            // has no dependency to propagate along. Imports are not in the
+            // graph, so the hint is taken as it stands and the unit decides.
+            for (self.index.analyzer.java_packages.importersOf(package)) |unit| {
+                if ((self.analyzed_at.get(unit) orelse 0) >= changed_at) continue;
+                try appendOwed(self.gpa, &owed, graph, unit);
+            }
         }
 
         // Independent of hash-map iteration order.

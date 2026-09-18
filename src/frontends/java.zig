@@ -41,11 +41,16 @@ const max_depth: u32 = 64;
 /// What a simple type name can mean among the other source units of one
 /// explicit Java package, as read from current graph facts.
 pub const Binding = union(enum) {
-    /// Exactly one current top-level class of this name, in another unit.
+    /// Exactly one current top-level class of this name, in another unit the
+    /// analyzed unit can see.
     unique: contract.ExternalTarget,
-    /// More than one, counted. The name does not identify a class, and no
-    /// candidate is preferred.
+    /// More than one visible, counted. The name does not identify a class, and
+    /// no candidate is preferred.
     ambiguous: u32,
+    /// None visible, but the package declares the name elsewhere, counted. The
+    /// reference is unresolved for a different reason than a name nothing
+    /// declares, and a consumer must be able to tell the two apart.
+    out_of_scope: u32,
 };
 
 pub const TypeBinding = struct {
@@ -63,13 +68,25 @@ pub const Context = struct {
     package: []const u8,
     /// Top-level classes other units currently declare in `package`.
     types: []const TypeBinding,
+    /// What each simple name the unit's single-type imports bring in currently
+    /// means, read under the same visibility rule as `types`.
+    imports: []const TypeBinding = &.{},
 
-    pub const empty: Context = .{ .package = "", .types = &.{} };
+    pub const empty: Context = .{ .package = "", .types = &.{}, .imports = &.{} };
 
     /// A binding is only an answer for the package it was read for.
     pub fn lookup(self: Context, package: []const u8, name: []const u8) ?Binding {
         if (package.len == 0 or !std.mem.eql(u8, self.package, package)) return null;
         for (self.types) |entry| {
+            if (std.mem.eql(u8, entry.name, name)) return entry.binding;
+        }
+        return null;
+    }
+
+    /// What a single-type import of `name` currently names, or null when the
+    /// unit imports no such name or nothing indexed declares it.
+    pub fn importLookup(self: Context, name: []const u8) ?Binding {
+        for (self.imports) |entry| {
             if (std.mem.eql(u8, entry.name, name)) return entry.binding;
         }
         return null;
@@ -125,6 +142,131 @@ fn appendName(
     return true;
 }
 
+/// One `import a.b.C;`: a type named by its package and its simple name.
+pub const SingleTypeImport = struct {
+    package: []const u8,
+    name: []const u8,
+};
+
+/// The single-type imports a Java source unit declares.
+///
+/// A static import names a member, an on-demand import names a scope, and an
+/// unqualified import places nothing, so none of them appears here. Each name is
+/// rebuilt from its identifiers, so layout inside it cannot change it.
+pub fn singleTypeImports(
+    allocator: std.mem.Allocator,
+    root: ts.Node,
+    source: []const u8,
+) ![]const SingleTypeImport {
+    var found: std.ArrayList(SingleTypeImport) = .empty;
+    errdefer found.deinit(allocator);
+
+    var top_level = root.namedChildren();
+    while (top_level.next()) |node| {
+        if (!std.mem.eql(u8, node.kind(), "import_declaration")) continue;
+        if (importsStatically(node)) continue;
+
+        var named = node.namedChildren();
+        var qualified: ?ts.Node = null;
+        var on_demand = false;
+        while (named.next()) |child| {
+            const kind = child.kind();
+            if (std.mem.eql(u8, kind, "asterisk")) on_demand = true;
+            if (isName(kind)) qualified = child;
+        }
+        if (on_demand) continue;
+        const name_node = qualified orelse continue;
+        // `import C;` names no package, so there is nowhere to look for it.
+        if (!std.mem.eql(u8, name_node.kind(), "scoped_identifier")) continue;
+
+        const scope = name_node.childByFieldName("scope") orelse continue;
+        const simple = name_node.childByFieldName("name") orelse continue;
+        var package: std.ArrayList(u8) = .empty;
+        errdefer package.deinit(allocator);
+        if (!try appendName(allocator, &package, scope, source, 0)) {
+            package.deinit(allocator);
+            continue;
+        }
+        try found.append(allocator, .{
+            .package = try package.toOwnedSlice(allocator),
+            .name = simple.text(source),
+        });
+    }
+    return found.toOwnedSlice(allocator);
+}
+
+/// Whether an import declaration carries the `static` keyword, which is an
+/// anonymous token and so is invisible to a named-child walk.
+fn importsStatically(node: ts.Node) bool {
+    var index: u32 = 0;
+    while (index < node.childCount()) : (index += 1) {
+        const child = node.childAt(index) orelse continue;
+        if (std.mem.eql(u8, child.kind(), "static")) return true;
+    }
+    return false;
+}
+
+/// The Java source root a unit sits in, or null when it has none.
+///
+/// It is what remains of `path` once the directories the declared package spells
+/// and the file name are removed from the end: `a/b/src/main/java/demo/X.java`
+/// declaring `package demo` has source root `a/b/src/main/java`. A path that does
+/// not end the way its package says is not evidence of anything, so it has no
+/// source root and the unit resolves nothing beyond itself
+/// ([ADR 008](../../docs/adr/008_java_visibility_boundaries.md)).
+///
+/// The returned slice borrows from `path`.
+pub fn sourceRoot(path: []const u8, package: []const u8) ?[]const u8 {
+    if (package.len == 0) return null;
+    const cut = std.mem.lastIndexOfScalar(u8, path, '/');
+    const directory = if (cut) |index| path[0..index] else "";
+
+    // The package spells its own directories, so it is compared segment by
+    // segment from the end rather than as one string: a package `demo` must not
+    // match a directory ending in `mydemo`.
+    var remaining = directory;
+    var segments = std.mem.splitBackwardsScalar(u8, package, '.');
+    while (segments.next()) |segment| {
+        if (segment.len == 0) return null;
+        if (!std.mem.endsWith(u8, remaining, segment)) return null;
+        remaining = remaining[0 .. remaining.len - segment.len];
+        if (remaining.len == 0) break;
+        if (remaining[remaining.len - 1] != '/') return null;
+        remaining = remaining[0 .. remaining.len - 1];
+    }
+    // Every segment matched only if the walk consumed the whole package.
+    if (segments.next() != null) return null;
+    return remaining;
+}
+
+/// Whether a unit in source root `referring` may resolve a simple type name to a
+/// top-level class another unit declares in source root `provider`.
+///
+/// One root is one visibility scope. The single exception is the standard
+/// directory layout every Java build tool in common use imposes: a test source
+/// root reads its own module's main source root, and never the other way round,
+/// because main sources are compiled without test sources on the classpath.
+pub fn sharesScope(referring: []const u8, provider: []const u8) bool {
+    if (std.mem.eql(u8, referring, provider)) return true;
+
+    // `<base>/src/test/<lang>` may read `<base>/src/main/<lang>`.
+    const cut = std.mem.lastIndexOfScalar(u8, referring, '/');
+    const language_directory = if (cut) |index| referring[index + 1 ..] else return false;
+    const above = referring[0..cut.?];
+    const base = if (std.mem.eql(u8, above, "src/test"))
+        ""
+    else if (std.mem.endsWith(u8, above, "/src/test"))
+        above[0 .. above.len - "/src/test".len]
+    else
+        return false;
+
+    if (!std.mem.startsWith(u8, provider, base)) return false;
+    const tail = provider[base.len..];
+    const expected = if (base.len == 0) "src/main/" else "/src/main/";
+    if (!std.mem.startsWith(u8, tail, expected)) return false;
+    return std.mem.eql(u8, tail[expected.len..], language_directory);
+}
+
 const ClassInfo = struct {
     index: u32,
     name: []const u8,
@@ -174,6 +316,8 @@ pub fn analyze(
     // before the same package's other units are consulted.
     var imported: std.ArrayList([]const u8) = .empty;
     defer imported.deinit(gpa);
+    var static_imported: std.ArrayList([]const u8) = .empty;
+    defer static_imported.deinit(gpa);
     var other_types: std.ArrayList([]const u8) = .empty;
     defer other_types.deinit(gpa);
 
@@ -185,7 +329,10 @@ pub fn analyze(
 
         if (std.mem.eql(u8, kind, "package_declaration")) continue;
         if (std.mem.eql(u8, kind, "import_declaration")) {
-            if (importedName(node, source)) |name| try imported.append(gpa, name);
+            if (importedName(node, source)) |name| {
+                const into = if (importsStatically(node)) &static_imported else &imported;
+                try into.append(gpa, name);
+            }
         } else if (isTypeDeclaration(kind)) {
             if (node.childByFieldName("name")) |name_node| {
                 if (!std.mem.eql(u8, kind, "class_declaration")) try other_types.append(gpa, name_node.text(source));
@@ -301,6 +448,7 @@ pub fn analyze(
         .package = package,
         .classes = classes.items,
         .imported = imported.items,
+        .static_imported = static_imported.items,
         .other_types = other_types.items,
         .context = context,
     };
@@ -402,8 +550,11 @@ const UnitScope = struct {
     /// Empty for the default package.
     package: []const u8,
     classes: []const ClassInfo,
-    /// Simple names brought in by single-type and single static imports.
+    /// Simple names brought in by single-type imports.
     imported: []const []const u8,
+    /// Simple names brought in by single static imports. A static import names a
+    /// member, so it is a reason to decline, never a target.
+    static_imported: []const []const u8,
     /// Top-level interfaces, enums, records, and annotation types. This
     /// frontend does not cover them, but they still claim their names.
     other_types: []const []const u8,
@@ -445,15 +596,16 @@ fn emitTypeReference(
     if (resolved.provider) |provider| try declareProvider(builder, provider);
 }
 
-/// Resolves a type name the way ADR 004 permits and no further.
+/// Resolves a type name the way ADR 004 and ADR 008 permit and no further.
 ///
 /// A name declared in the unit is a local fact, as before. Otherwise only a
 /// simple name in a unit with an explicit package may reach another unit, and
-/// only after ruling out everything Java would let take precedence over a type
-/// of the same package: a type parameter, a member type (declared or
-/// inherited), a single-type or static import, and a type declared in this
-/// unit. When one of those cannot be ruled out the name stays unresolved and
-/// says why, because a same-package match that ignored them would be a string
+/// only after ruling out everything Java would let take precedence: a type
+/// parameter, a member type (declared or inherited), a static import, and a type
+/// declared in this unit. What remains is decided in Java's own order — a
+/// single-type import beats the unit's own package — and only ever inside the
+/// unit's visibility scope. When one of those cannot be ruled out the name stays
+/// unresolved and says why, because a match that ignored them would be a string
 /// match wearing the face of a fact.
 fn resolveType(
     builder: *contract.BatchBuilder,
@@ -497,12 +649,41 @@ fn resolveType(
         return unresolvedType(name, "the enclosing class has supertypes, and a member type " ++
             "it may inherit under this name is not resolved");
     }
-    if (containsName(unit.imported, name)) {
-        return unresolvedType(name, "an import names this type, and imports are not resolved");
+    if (containsName(unit.static_imported, name)) {
+        return unresolvedType(name, "a static import names this type, and a static import " ++
+            "names a member this frontend does not resolve");
     }
     if (containsName(unit.other_types, name)) {
         return unresolvedType(name, "the analyzed source unit declares a non-class type of this name, " ++
             "which this frontend does not cover");
+    }
+
+    // A single-type import beats the unit's own package, so it is asked first
+    // and its answer is final either way: a name Java takes from an import does
+    // not fall back to the package.
+    if (unit.context.importLookup(name)) |binding| return switch (binding) {
+        .unique => |target| .{
+            .target = .{ .external = target },
+            .resolution = .{ .fact = .{
+                .method = "the single-type import of this name, and the only current top-level " ++
+                    "class of it in the imported package",
+            } },
+            .provider = target.provider,
+        },
+        .ambiguous => |count| unresolvedType(name, try builder.print(
+            "the single-type import of this name reaches {d} current top-level classes of it, " ++
+                "so the name is ambiguous",
+            .{count},
+        )),
+        .out_of_scope => |count| unresolvedType(name, try builder.print(
+            "the single-type import of this name reaches {d} current top-level " ++
+                "{s} of it, none in a Java source root this unit can see",
+            .{ count, if (count == 1) "class" else "classes" },
+        )),
+    };
+    if (containsName(unit.imported, name)) {
+        return unresolvedType(name, "a single-type import names this type, and no indexed " ++
+            "source unit declares it in the package the import names");
     }
 
     const binding = unit.context.lookup(unit.package, name) orelse
@@ -523,6 +704,11 @@ fn resolveType(
             "{d} current top-level classes of this name are declared in package `{s}`, " ++
                 "so the name is ambiguous",
             .{ count, unit.package },
+        )),
+        .out_of_scope => |count| unresolvedType(name, try builder.print(
+            "package `{s}` declares {d} current top-level {s} of this name, " ++
+                "none of them in a Java source root this unit can see",
+            .{ unit.package, count, if (count == 1) "class" else "classes" },
         )),
     };
 }
@@ -740,4 +926,48 @@ fn findClass(classes: []const ClassInfo, name: []const u8) ?u32 {
         if (std.mem.eql(u8, class.name, name)) return class.index;
     }
     return null;
+}
+
+const testing = std.testing;
+
+test "a source root is what remains once the declared package and file name are stripped" {
+    try testing.expectEqualStrings("a/b/src/main/java", sourceRoot(
+        "a/b/src/main/java/org/apache/dubbo/rpc/RpcContext.java",
+        "org.apache.dubbo.rpc",
+    ).?);
+    try testing.expectEqualStrings("", sourceRoot("demo/Greeter.java", "demo").?);
+    try testing.expectEqualStrings("one", sourceRoot("one/demo/Greeter.java", "demo").?);
+}
+
+test "a path that does not spell its declared package has no source root" {
+    // The directory is not the package at all.
+    try testing.expect(sourceRoot("one/Helper.java", "demo") == null);
+    // A segment only ends with the package segment; `mydemo` is not `demo`.
+    try testing.expect(sourceRoot("src/mydemo/Helper.java", "demo") == null);
+    // The path is shorter than the package it claims.
+    try testing.expect(sourceRoot("sub/Deep.java", "demo.sub") == null);
+    // No package at all.
+    try testing.expect(sourceRoot("Loose.java", "") == null);
+}
+
+test "one source root is one scope, and a test root reads its own main root" {
+    const main_root = "dubbo-common/src/main/java";
+    const test_root = "dubbo-common/src/test/java";
+    const other_main = "dubbo-cluster/src/main/java";
+
+    try testing.expect(sharesScope(main_root, main_root));
+    try testing.expect(sharesScope(test_root, main_root));
+
+    // Never the other way round: main sources compile without test sources.
+    try testing.expect(!sharesScope(main_root, test_root));
+    // Never into another module, in either direction.
+    try testing.expect(!sharesScope(main_root, other_main));
+    try testing.expect(!sharesScope(test_root, other_main));
+    try testing.expect(!sharesScope(test_root, "dubbo-cluster/src/test/java"));
+    // The language directory must match too.
+    try testing.expect(!sharesScope(test_root, "dubbo-common/src/main/kotlin"));
+    // A repository whose roots are the layout itself.
+    try testing.expect(sharesScope("src/test/java", "src/main/java"));
+    // Two unrelated roots that share a package see nothing of each other.
+    try testing.expect(!sharesScope("moduleA/src/main/java", "moduleB/src/main/java"));
 }

@@ -214,7 +214,13 @@ pub const Analyzer = struct {
         if (root.hasError()) return java.Context.empty;
         const package = (try java.declaredPackage(allocator, root, bytes)) orelse
             return java.Context.empty;
-        return self.java_packages.context(graph, package, unit, allocator);
+        const record = graph.unit(unit) orelse return java.Context.empty;
+        const source_root = java.sourceRoot(record.path, package);
+        const imports = try java.singleTypeImports(allocator, root, bytes);
+        // Remember where this unit reads from even when nothing resolves, so a
+        // class appearing in an imported package later reaches the importer.
+        try self.java_packages.noteImports(unit, imports);
+        return self.java_packages.context(graph, package, unit, source_root, imports, allocator);
     }
 
     /// Reanalyzes one source unit and applies the result to the graph.
@@ -335,8 +341,11 @@ test "a class name declared twice in a package reaches the context as ambiguous"
     var graph = try core.Graph.init(testing.allocator, "fixtures");
     defer graph.deinit();
 
-    _ = try addJava(&analyzer, &graph, "one/Helper.java", "package demo;\nclass Helper {}\n");
-    _ = try addJava(&analyzer, &graph, "two/Helper.java", "package demo;\nclass Helper {}\n");
+    // Two files of one package may each declare a non-public class of the same
+    // name, so ambiguity is expressed the way Java allows it: one source root,
+    // one package, two file names.
+    _ = try addJava(&analyzer, &graph, "demo/First.java", "package demo;\nclass Helper {}\n");
+    _ = try addJava(&analyzer, &graph, "demo/Second.java", "package demo;\nclass Helper {}\n");
     const greeter = try addJava(&analyzer, &graph, "demo/Greeter.java", "package demo;\nclass Greeter {}\n");
 
     var scratch = std.heap.ArenaAllocator.init(testing.allocator);

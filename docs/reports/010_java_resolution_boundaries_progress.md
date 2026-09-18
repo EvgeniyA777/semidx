@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-Stages 1 and 2 are complete. Stage 1's verdict is **go**, with one correction to the plan's
+Stages 1 through 4 are complete; Stage 5 is closure. Stage 1's verdict is **go**, with one correction to the plan's
 premise that later stages must carry: the false fact Stage 3 exists to remove is
 latent, not active. It is reproducible in two directories but occurs zero times
 in a 119-module, 4,050-unit external Java repository. Stage 4's execution
@@ -27,8 +27,8 @@ condition is met. Details and evidence are in
 | --- | --- | --- |
 | Stage 1: External Java evidence probe | Completed | Apache Dubbo at `df9c5e1`: 4,050 units in 17.5 s, 290 MB; orientation and refresh useful, reference and neighborhood answers thin; cross-module false facts **0 of 336** cross-unit reference facts; single-type imports are 28% of in-working-copy unresolved references, so Stage 4 executes. Verdict: go. |
 | Stage 2: Boundary representation decision | Completed (`691f9ac`) | [ADR 008](../adr/008_java_visibility_boundaries.md): visibility is the derived Java source root, plus standard-layout test → main in that direction only. No build descriptor is read and no core kind is admitted. |
-| Stage 3: Boundary-aware same-package resolution | Not started | |
-| Stage 4: Java single-type imports | Not started | Condition met by Stage 1 evidence. |
+| Stage 3: Boundary-aware same-package resolution | Completed | Same-package resolution establishes facts only inside a shared visibility scope. A name the package declares out of reach is unresolved for its own stated reason, not folded into "nothing declares this". The minimal reproduction is unresolved with its designator intact. |
+| Stage 4: Java single-type imports | Completed | `import a.b.C;` resolves inside the boundary and is asked before the unit's own package, as Java orders them. On-demand, static, and unindexed imports each stay unresolved with their own reason. A package's importers are reanalyzed when its exports change, so a class appearing later reaches the unit that imported it. |
 | Stage 5: Documentation, capability matrix, and closure | Not started | |
 
 ## Plan Readiness Gate
@@ -367,3 +367,127 @@ build files are programs. B reads nothing that is not already parsed.
 Cross-module same-package resolution stays unresolved even where a build tool
 would permit it. That is a decision, not an oversight, and it is carried into
 Stage 5 as a narrower follow-up rather than closed here.
+
+## Stage 3: Boundary-Aware Same-Package Resolution
+
+[ADR 008](../adr/008_java_visibility_boundaries.md) implemented in the Java
+frontend and its package projection.
+
+### What Changed
+
+- `java.sourceRoot(path, package)` derives a unit's Java source root by walking
+  the declared package backwards through the path's directories, segment by
+  segment, so a directory ending in `mydemo` never satisfies a package `demo`. A
+  path that does not spell its package has no source root.
+- `java.sharesScope(referring, provider)` is the visibility rule: equal roots, or
+  `<base>/src/test/<lang>` reading `<base>/src/main/<lang>`, and nothing else.
+- `java_packages.Packages.context` now takes the analyzed unit's source root. A
+  candidate outside the scope is never offered as a target. A unit with no source
+  root gets an empty context and resolves nothing beyond itself.
+- `Binding` gained `out_of_scope`. A name the package declares but the unit
+  cannot see is not silently folded into "nothing declares this name": it is
+  unresolved for a stated, different reason. Constitution section 3 requires
+  every assertion to carry how far it was resolved, and "declared out of reach"
+  and "not declared" are not the same answer.
+
+### The Minimal Reproduction, After
+
+The same two directories from Stage 1 now answer:
+
+```
+references  {"category": "unresolved",
+             "missing": "target_entity",
+             "explanation": "package `demo` declares 1 current top-level class of
+                             this name, none of them in a Java source root this
+                             unit can see"}
+   -> designator "Helper"
+```
+
+The designator survives, the producer and freshness are unchanged, and the claim
+is neither a confirmed absence nor an unsupported construct.
+
+## Stage 4: Java Single-Type Imports
+
+Executed: Stage 1 measured single-type imports at 28% of the unresolved
+references whose target has source in the working copy, which is the plan's
+condition.
+
+### What Changed
+
+- `java.singleTypeImports` reads `import a.b.C;` declarations as a package and a
+  simple name. A static import, an on-demand import, and an unqualified import
+  are not single-type imports and are not read as ones.
+- `Context.imports` carries what each imported simple name currently means,
+  resolved by `java_packages.importBindings` under the same visibility rule as
+  the same-package table. A simple name imported twice is ambiguous whatever it
+  reaches, because Java forbids it and semidx must not pick one.
+- `resolveType` asks the import before the unit's own package, which is Java's
+  order, and the import's answer is final: a name Java takes from an import does
+  not fall back to the package. Every existing guard still runs first, so a type
+  parameter, a member type, a supertype that could introduce one, and a static
+  import all still decline before any import is consulted.
+- Static imports moved to their own `static_imported` list and decline with their
+  own reason. An import whose target no indexed unit declares declines with a
+  third, distinct reason.
+
+### Invalidation
+
+A unit whose import resolved to nothing declares no dependency, so nothing would
+have reached it when the class later appeared. `Packages` now also records which
+packages each unit imports from, and `Upkeep.finish` reanalyzes a package's
+importers along with its declarers when that package's exports change. The hint
+is a superset, exactly like the existing declarer hint: a unit that has since
+stopped importing from a package is reanalyzed for nothing, which costs a pass
+and changes no claim. `a class appearing in an imported package reaches the unit
+that imported it` proves the case that previously had no path at all.
+
+### Measured On The External Repository
+
+The same 1,200-definition sample as Stage 1, same seed, same calls, so the two
+runs are directly comparable.
+
+| Outgoing claim | Before | After |
+| --- | ---: | ---: |
+| `calls` unresolved | 5,662 | 5,662 |
+| `references` unresolved | 809 | 804 |
+| `calls` fact | 174 | 174 |
+| `references` fact | 65 | 70 |
+
+By how each fact was established:
+
+| Resolution method | Before | After |
+| --- | ---: | ---: |
+| Type name declared in the analyzed source unit | 54 | 54 |
+| The only top-level class of this simple name in the same package | 11 | 10 |
+| The single-type import of this name | 0 | 6 |
+
+Stage 3 cost one same-package fact in the sample — the boundary refusing a
+resolution it can no longer establish — and Stage 4 added six. Unresolved
+references whose target has source in the working copy fell from 103 to 98. Calls
+did not move at all, which is the expected result: neither stage touches them.
+
+Ingestion cost on the 4,050-unit repository rose from 17.5 s and 290 MB to 21.5 s
+and 371 MB. The increase is the import bindings plus the extra reanalysis the
+import hint causes; the snapshot revision after a first scan rose from 6,783 to
+7,274, which is those extra passes.
+
+### Checking The Graph Did Not Grow A Second Copy Of Anything
+
+Graph-wide, current facts rose by 1,941 and current unresolved fell by 160, which
+did not obviously balance, so it was checked rather than assumed.
+
+- `recorded` equals `fact + unresolved` exactly, both before (228,972 = 88,498 +
+  140,474) and after (230,753 = 90,439 + 140,314). No assertion is left behind as
+  current after being superseded.
+- On a four-unit reproduction with and without the imports, every relationship
+  kind balances: `contains` 4 and 4, `defines` 5 and 5, `references` 0 facts and
+  4 unresolved against 3 facts and 1 unresolved. Thirteen relationships in both.
+  The only change is the conversion.
+- The sample's reference population balances exactly: five facts gained, five
+  unresolved lost.
+
+What remains is not a relationship. Entities are unchanged (1 repository, 4,050
+files, 26,509 definitions), so the additional assertions are identity
+correspondences — the assertion kind a reanalysis records when it re-establishes
+that an entity it is seeing again is the same entity. More reanalysis passes
+record more of them.

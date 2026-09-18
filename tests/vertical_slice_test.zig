@@ -1536,8 +1536,10 @@ test "java type names outside the same-package rule stay unresolved and say why"
     _ = try index.addUnit("demo/Inner.java", .java, "package demo;\nclass Inner {}\n");
     _ = try index.addUnit("demo/Imported.java", .java, "package demo;\nclass Imported {}\n");
     _ = try index.addUnit("demo/Shape.java", .java, "package demo;\nclass Shape {}\n");
-    _ = try index.addUnit("one/Twin.java", .java, "package demo;\nclass Twin {}\n");
-    _ = try index.addUnit("two/Twin.java", .java, "package demo;\nclass Twin {}\n");
+    // One package, one source root, two files each declaring a non-public class
+    // of the same name: the ambiguity Java itself allows.
+    _ = try index.addUnit("demo/TwinFirst.java", .java, "package demo;\nclass Twin {}\n");
+    _ = try index.addUnit("demo/TwinSecond.java", .java, "package demo;\nclass Twin {}\n");
     _ = try index.addUnit("other/Elsewhere.java", .java, "package other;\nclass Elsewhere {}\n");
     _ = try index.addUnit("Loose.java", .java, "class Loose {}\n");
 
@@ -1895,6 +1897,334 @@ test "a snapshot taken before an edit keeps observing the state it was published
     try testing.expect(after.findDefinition(java_path, "farewell") != null);
     try testing.expectEqual(@as(usize, 8), before.countEntities(.{ .kind = .definition }));
     try testing.expectEqual(@as(usize, 9), after.countEntities(.{ .kind = .definition }));
+}
+
+// -- Plan 010: Java visibility boundaries ------------------------------------
+
+/// Every way a reference can fail to resolve must stay distinguishable, so a
+/// boundary-declined reference is checked for all of it: it is unresolved, it
+/// keeps the name as written, it names its producer, it is current rather than
+/// stale, and it is not reported as an absence or an unsupported construct.
+fn expectHonestlyUnresolved(
+    snapshot: *const semidx.Snapshot,
+    source: model.EntityId,
+    designator: []const u8,
+) !model.Assertion {
+    const found = try referenceFrom(snapshot, source, designator);
+    try testing.expectEqualStrings(
+        semidx.frontends.java.capabilities.producer.name,
+        found.producer.name,
+    );
+    try testing.expectEqual(model.Freshness.current, snapshot.assertionFreshness(found));
+    try testing.expectEqual(model.MissingPart.target_entity, found.resolution.unresolved.missing);
+    for (snapshot.diagnostics) |diagnostic| {
+        try testing.expect(diagnostic.kind != .confirmed_absence);
+    }
+    return found;
+}
+
+test "two source roots sharing a package do not become one visible package" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit(
+        "moduleA/src/main/java/demo/Helper.java",
+        .java,
+        "package demo;\nclass Helper {}\n",
+    );
+    _ = try index.addUnit(
+        "moduleB/src/main/java/demo/Consumer.java",
+        .java,
+        "package demo;\nclass Consumer { Helper helper; }\n",
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    const consumer = snapshot.findDefinition(
+        "moduleB/src/main/java/demo/Consumer.java",
+        "Consumer",
+    ).?;
+
+    // The name is carried as written, and nothing was resolved to the class the
+    // other module happens to declare. The reason says the class exists and is
+    // out of reach, which is not the same answer as a name nothing declares.
+    try expectExplanation(
+        try expectHonestlyUnresolved(&snapshot, consumer.id, "Helper"),
+        "none of them in a Java source root this unit can see",
+    );
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = consumer.id,
+        .target = snapshot.findDefinition(
+            "moduleA/src/main/java/demo/Helper.java",
+            "Helper",
+        ).?.id,
+    }));
+    // Nothing was read, so nothing is declared as a dependency.
+    try testing.expectEqual(@as(usize, 0), index.graph.dependencies.count());
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "a test source root reads its module's main source root, and not the other way round" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    const main_unit = try index.addUnit(
+        "module/src/main/java/demo/Helper.java",
+        .java,
+        "package demo;\nclass Helper { Fixture fixture; }\n",
+    );
+    const test_unit = try index.addUnit(
+        "module/src/test/java/demo/Fixture.java",
+        .java,
+        "package demo;\nclass Fixture { Helper helper; }\n",
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    const helper = snapshot.findDefinition("module/src/main/java/demo/Helper.java", "Helper").?;
+    const fixture = snapshot.findDefinition("module/src/test/java/demo/Fixture.java", "Fixture").?;
+
+    // The permitted direction is a fact about the entity in the main root.
+    const resolved = snapshot.firstRelationship(.{
+        .kind = .references,
+        .source = fixture.id,
+        .target = helper.id,
+    }).?;
+    try testing.expectEqual(model.ResolutionCategory.fact, resolved.resolution.category());
+
+    // The reverse is the same two units and the same package, and it is refused.
+    _ = try expectHonestlyUnresolved(&snapshot, helper.id, "Fixture");
+
+    // One dependency, in the direction that read something.
+    try testing.expectEqual(@as(usize, 1), index.graph.dependencies.count());
+    const declared = index.graph.dependencies.declarations.items[0];
+    try testing.expectEqual(test_unit, declared.dependent);
+    try testing.expectEqual(main_unit, declared.provider);
+}
+
+test "a path that does not spell its declared package resolves nothing and offers nothing" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    // Both units claim package `demo`; neither sits where that package says.
+    _ = try index.addUnit("one/Helper.java", .java, "package demo;\nclass Helper {}\n");
+    _ = try index.addUnit("two/Consumer.java", .java, "package demo;\nclass Consumer { Helper helper; }\n");
+    // A unit that does sit where its package says still cannot see them.
+    _ = try index.addUnit("demo/Laid.java", .java, "package demo;\nclass Laid { Helper helper; }\n");
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    // A unit with no source root has no scope, so it gets no table at all and
+    // cannot even see that the name is declared elsewhere.
+    try expectExplanation(
+        try expectHonestlyUnresolved(
+            &snapshot,
+            snapshot.findDefinition("two/Consumer.java", "Consumer").?.id,
+            "Helper",
+        ),
+        "no current top-level class of this name is declared in package `demo`",
+    );
+    // A unit that does have a source root is told the truth: the name is
+    // declared in its package, out of reach.
+    try expectExplanation(
+        try expectHonestlyUnresolved(
+            &snapshot,
+            snapshot.findDefinition("demo/Laid.java", "Laid").?.id,
+            "Helper",
+        ),
+        "none of them in a Java source root this unit can see",
+    );
+    try testing.expectEqual(@as(usize, 0), index.graph.dependencies.count());
+}
+
+test "ambiguity inside one shared scope stays unresolved and still says it is ambiguous" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit(
+        "module/src/main/java/demo/First.java",
+        .java,
+        "package demo;\nclass Twin {}\n",
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/demo/Second.java",
+        .java,
+        "package demo;\nclass Twin {}\n",
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/demo/Consumer.java",
+        .java,
+        "package demo;\nclass Consumer { Twin twin; }\n",
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    const consumer = snapshot.findDefinition(
+        "module/src/main/java/demo/Consumer.java",
+        "Consumer",
+    ).?;
+    try expectExplanation(
+        try expectHonestlyUnresolved(&snapshot, consumer.id, "Twin"),
+        "ambiguous",
+    );
+}
+
+test "a single-type import resolves to the one class the imported package declares" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    const provider = try index.addUnit(
+        "src/main/java/lib/Helper.java",
+        .java,
+        "package lib;\npublic class Helper {}\n",
+    );
+    const consumer = try index.addUnit(
+        "src/main/java/app/Consumer.java",
+        .java,
+        "package app;\n\nimport lib.Helper;\n\nclass Consumer { Helper helper; }\n",
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    const class = snapshot.findDefinition("src/main/java/app/Consumer.java", "Consumer").?;
+    const target = snapshot.findDefinition("src/main/java/lib/Helper.java", "Helper").?;
+
+    const reference = snapshot.firstRelationship(.{
+        .kind = .references,
+        .source = class.id,
+        .target = target.id,
+    }).?;
+    try testing.expectEqual(model.ResolutionCategory.fact, reference.resolution.category());
+    try testing.expectEqualStrings(
+        semidx.frontends.java.capabilities.producer.name,
+        reference.producer.name,
+    );
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .designator = "Helper" }));
+
+    // What it read is declared, so a later change to the provider reaches it.
+    try testing.expectEqual(@as(usize, 1), index.graph.dependencies.count());
+    const declared = index.graph.dependencies.declarations.items[0];
+    try testing.expectEqual(consumer, declared.dependent);
+    try testing.expectEqual(provider, declared.provider);
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "on-demand, static, and unindexed imports stay unresolved" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("src/main/java/lib/Helper.java", .java, "package lib;\nclass Helper {}\n");
+    _ = try index.addUnit("src/main/java/lib/Constants.java", .java, "package lib;\nclass Constants {}\n");
+
+    // An on-demand import names a scope, not a type.
+    _ = try index.addUnit(
+        "src/main/java/app/Wild.java",
+        .java,
+        "package app;\n\nimport lib.*;\n\nclass Wild { Helper helper; }\n",
+    );
+    // A static import names a member.
+    _ = try index.addUnit(
+        "src/main/java/app/Static.java",
+        .java,
+        "package app;\n\nimport static lib.Constants.Helper;\n\nclass Static { Helper helper; }\n",
+    );
+    // An import of a type no indexed unit declares.
+    _ = try index.addUnit(
+        "src/main/java/app/Absent.java",
+        .java,
+        "package app;\n\nimport java.util.List;\n\nclass Absent { List list; }\n",
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    try expectExplanation(
+        try expectHonestlyUnresolved(
+            &snapshot,
+            snapshot.findDefinition("src/main/java/app/Wild.java", "Wild").?.id,
+            "Helper",
+        ),
+        "no current top-level class of this name is declared in package `app`",
+    );
+    try expectExplanation(
+        try expectHonestlyUnresolved(
+            &snapshot,
+            snapshot.findDefinition("src/main/java/app/Static.java", "Static").?.id,
+            "Helper",
+        ),
+        "a static import names this type",
+    );
+    try expectExplanation(
+        try expectHonestlyUnresolved(
+            &snapshot,
+            snapshot.findDefinition("src/main/java/app/Absent.java", "Absent").?.id,
+            "List",
+        ),
+        "no indexed source unit declares it in the package the import names",
+    );
+}
+
+test "a single-type import does not cross a visibility boundary" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit(
+        "moduleA/src/main/java/lib/Helper.java",
+        .java,
+        "package lib;\nclass Helper {}\n",
+    );
+    _ = try index.addUnit(
+        "moduleB/src/main/java/app/Consumer.java",
+        .java,
+        "package app;\n\nimport lib.Helper;\n\nclass Consumer { Helper helper; }\n",
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    try expectExplanation(
+        try expectHonestlyUnresolved(
+            &snapshot,
+            snapshot.findDefinition("moduleB/src/main/java/app/Consumer.java", "Consumer").?.id,
+            "Helper",
+        ),
+        "none in a Java source root this unit can see",
+    );
+    try testing.expectEqual(@as(usize, 0), index.graph.dependencies.count());
+}
+
+test "a class appearing in an imported package reaches the unit that imported it" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write(
+        "src/main/java/app/Consumer.java",
+        "package app;\n\nimport lib.Helper;\n\nclass Consumer { Helper helper; }\n",
+    );
+    _ = try tree.rescan();
+
+    {
+        var before = try tree.index.publish();
+        defer before.deinit();
+        const class = before.findDefinition("src/main/java/app/Consumer.java", "Consumer").?;
+        // Nothing declares it yet, so the import resolves to nothing.
+        _ = try referenceFrom(&before, class.id, "Helper");
+    }
+
+    // The imported class appears. The importer declared no dependency, because
+    // it had nothing to depend on, so only the import hint can reach it.
+    try tree.write("src/main/java/lib/Helper.java", "package lib;\nclass Helper {}\n");
+    _ = try tree.rescan();
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    const class = after.findDefinition("src/main/java/app/Consumer.java", "Consumer").?;
+    try testing.expectEqual(@as(usize, 1), after.countRelationships(.{
+        .kind = .references,
+        .source = class.id,
+        .target = after.findDefinition("src/main/java/lib/Helper.java", "Helper").?.id,
+        .resolution = .fact,
+    }));
 }
 
 // -- Plan 004: Zig fixture coverage -----------------------------------------
