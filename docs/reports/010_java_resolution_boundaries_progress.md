@@ -601,6 +601,48 @@ invalidation case.
   against 0.02 s for `semidx_find_definitions`. The adoption strategy names it
   the default focused-context tool.
 
+### Architecture Review Addendum
+
+Post-closure architecture review found no new correctness defect in the Java
+source-root boundary or single-type-import rule. The decision remains sound:
+ADR 008 narrows graph authority, keeps the source root as Java frontend
+projection vocabulary, and turns unestablished cross-boundary names into
+unresolved assertions with designator, producer, freshness, and missing-part
+evidence intact. That is the right architectural trade: less coverage, no false
+fact.
+
+Findings recorded for future planning:
+
+- **High: `semidx_context(depth >= 2)` is not architecturally ready to be the
+  default impact tool on external-scale repositories.** The 90 s Dubbo result is
+  supported by the current traversal shape: it repeatedly asks the snapshot for
+  relationships of each focus/frontier entity. Response budgets cap output size,
+  not traversal work. Future work should add graph or snapshot adjacency indexes
+  and a latency fitness check against an external-scale root before treating
+  depth-2 context as an adoption-path default.
+- **Medium: the next Java bottleneck is coverage, not the boundary.** The
+  supertype guard and receiver-qualified invocation gap explain far more missing
+  value than cross-module visibility. The next Java semantic plan should prefer
+  exact supertype/member-type evidence or receiver-qualified calls over another
+  boundary plan.
+- **Medium: growing Java package/import hints are a bounded maintenance tradeoff
+  today and a persistence/watch risk later.** The hints are correctly
+  non-authoritative and re-read from the graph before use, so they do not create
+  false facts. Before long-running watch or persistent indexes, add pruning,
+  compaction, or per-unit current import-package ownership so historical imports
+  do not accumulate unnecessary invalidation work.
+
+Review verification on the closed tree:
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Zig 0.16.0 matches the target |
+| `zig build test-core --summary all` | 5/5 steps, 89/89 tests passed |
+| `zig build test --summary all` | 20/20 steps, 224/225 tests passed, 1 skipped |
+| `zig build dogfood --summary all` | 10/10 steps, 5/5 tests passed |
+| `zig build preview-gate --summary all` | 14/14 steps, 6/6 tests passed |
+| `zig fmt --check .` | Failed on the intentionally unparsable fixture `fixtures/vertical-slice/zig/edits/05_unparsable.zig`; the plan's scoped format command remains `zig fmt --check build.zig src tests` |
+
 ### Drift Check At Closure
 
 Owners checked and aligned: `CORE.md` unchanged and correct — no kind was
