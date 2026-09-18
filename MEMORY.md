@@ -216,19 +216,32 @@ documents that own history, rationale, and evidence.
 ## Near-Term Priorities
 
 - Plan 009 is complete and published as `0.1.0-preview.3` with
-  `zig build preview-gate` in its release gate. Text fallback duplication stays
-  unchanged until
+  `zig build preview-gate` in its release gate.
+- The project has entered the adoption track: work is now chosen because it
+  moves semidx toward the audience named in
+  [the adoption strategy](docs/design/002_product_adoption_strategy.md), not
+  because it improves semidx's view of itself. Dogfood-only coverage work,
+  including [Follow-up 006](docs/followups/006_zig_cross_unit_and_member_calls.md),
+  is deprioritized behind that.
+- [Plan 010](docs/plans/010_java_resolution_boundaries.md) is drafted and owns
+  the first step: prove semidx on a Java repository it does not own, then remove
+  the multi-module false-fact risk from
+  [Follow-up 003](docs/followups/003_java_classpath_boundaries.md) before any
+  Java widening. Its Stage 1 is a real go/no-go probe; a thin result re-opens the
+  language choice. No shared-core `module` or `IMPORTS` admission is in scope.
+- Text fallback duplication is **kept by decision**, not left open, by
+  [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`). Ecosystem
+  evidence reversed the initial intent to shorten it: most MCP clients ignore
+  `structuredContent` and read `content`, so the text copy is load-bearing, not
+  legacy. MCP SEP-2200, which proposed exactly the model-optimized-text change
+  semidx was considering, was declined by Core Maintainers on 2026-05-25 pending
+  polymorphic result types. Only a `--text-fallback=full|none` probe is added;
+  `none` is a diagnostic for identifying whether a given client reads structured
+  content, never a production value. A `summary` value is rejected for now —
+  SEP-1624 semantic equivalence would make it a second complete renderer.
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
-  measures real clients.
-- The roadmap now schedules active follow-ups by natural execution window:
-  010 with MCP fallback/release-readiness measurement; 006 as the next Zig
-  dogfood coverage lane; 001 when Zig call-shape work is open; 002 during parser
-  maintenance; 003 before broader Java resolution; and 008 when Clojure becomes
-  an active coverage target.
-- The next Java ADR candidate should be multi-module classpath boundaries before
-  Java facts are widened. This is the sharper exactness risk because independent
-  roots can share a package name. Java single-type imports are useful, but should
-  follow or explicitly account for that boundary.
+  closes against that ADR; its client-measurement stages were redundant because
+  the ecosystem published stronger evidence than a local observation could.
 - Source identity needs stronger evidence for move-plus-edit refactors. Prefer
   explicit VCS/IDE move events or language-aware refactoring evidence over
   similarity presented as fact.
