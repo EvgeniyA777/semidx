@@ -223,10 +223,10 @@ that reason accounted for 4,624 of 5,662 unresolved calls.
 The supertype guard is also deliberate. `resolveType` declines cross-unit simple
 type resolution when the enclosing class declares a superclass or interfaces,
 because an inherited member type could shadow the apparent target. The often
-quoted "62%" is a pre-import Stage 1 measurement: 64 of 103 in-working-copy
-unresolved references. After single-type imports, that denominator became 98
-and the exact current share was not remeasured. This plan must not preserve the
-old percentage as a current claim.
+quoted "62%" is a pre-import Plan 010 Stage 1 measurement: 64 of 103
+in-working-copy unresolved references. After single-type imports, that
+denominator became 98 and the exact current share was not remeasured. This plan
+must not preserve the old percentage as a current claim.
 
 The Java package table is the right precedent for projection discipline. It is
 an analyzer-side projection, not a graph model; it keeps only hints, re-reads
@@ -424,13 +424,21 @@ Depends on: Stage 0 go.
 Likely files:
 
 - `docs/adr/009_java_receiver_qualified_calls.md`
+- [docs/adr/README.md](../adr/README.md), whose `## Records` list ends at 008
 - `docs/reports/012_java_semantic_quality_without_query_regression_progress.md`
 - [GLOSSARY.md](../../GLOSSARY.md), for any durable term the ADR settles
 - this plan, if the ADR changes the stage contract
 
 Required behavior:
 
-- Write an ADR with all eight answers from constitution section 11.
+- Write an ADR with all eight answers from constitution section 11, and add it
+  to the `## Records` list in `docs/adr/README.md` in the same commit.
+- Record, for every decision below, at least one rejected alternative and why it
+  was rejected. This plan states a proposed answer for most of them; a proposal
+  is input, not the decision. An ADR that only restates this plan leaves no
+  record of what was weighed, and a later plan asking why receiver resolution
+  stops where it does would have to read this plan's git history instead of a
+  decision record.
 - Decide whether Java `CALLS` means static target only, and explicitly leave
   dynamic dispatch and overriding subtype analysis unrecorded.
 - Decide whether receiver type evidence from parameters, locals, fields, and
@@ -481,6 +489,9 @@ Likely files:
   filesystem layout; if used, the stage must state how global scans and
   `preview-gate` observe them.
 - Java frontend tests in the existing full Zig test lane.
+- `src/core/dependencies.zig`, only if the propagation-rounds counter below
+  needs exposing; that counter is the one piece of this stage whose narrow lane
+  is `zig build test-core`.
 - `docs/reports/012_java_semantic_quality_without_query_regression_progress.md`
 
 Required behavior:
@@ -513,10 +524,17 @@ Required behavior:
   - provider adds a declared supertype after a fact, making the call unresolved;
   - provider removes a declared supertype after an unresolved call, making it
     eligible for resolution if every other condition holds.
-- Add or expose test-only counters that let the lane compare call-resolution
-  work, class-shape reader work, dependency declaration count, propagation
-  rounds/exhaustion, and provider reanalysis work without relying on flaky
-  timing thresholds.
+- Add or expose the test-only counters that need no mechanism this stage has not
+  built yet: call-resolution work, dependency declaration count, provider
+  reanalysis work, and propagation exhaustion. `Dependencies.propagate` already
+  reports `exhausted`; the round count is a local variable, so exposing it is a
+  small shared-core change rather than a fixture change, and it belongs here
+  only because Stage 3 and Stage 5 both measure against it.
+- Leave class-shape reader-work counters to Stage 3, which builds the readers
+  they count. A counter lands with its mechanism; this stage does not stub
+  counters for work that does not exist.
+- Every counter is test-only and must not change MCP output, budgets, or any
+  published claim.
 - Stage 2 fixtures pin cases, not old reason strings. Stage 4 is expected to
   replace some unresolved explanations with more precise ones.
 
@@ -595,6 +613,10 @@ Done when:
   reanalyzes only relevant hinted readers, not every declarer/importer in the
   package.
 - Existing Java package/import tests still pass unchanged.
+- `zig build test-mcp` passes. The new class-shape labels are MCP-visible:
+  `extension.labels` is serialized into tool responses, so this stage changes
+  payload content even though it changes no tool contract and emits no new call
+  fact.
 - No new Java receiver-qualified call fact is emitted by this stage.
 
 ### Stage 4: Exact Receiver Type Environment
@@ -779,7 +801,12 @@ Required behavior:
   - memory impact of new projection tables and new Java extension labels where
     measured. On apache/dubbo, report label overhead against the observed class
     and method counts and the Plan 010 371 MB baseline; on a substitute sample,
-    report the substitute's counts instead.
+    report the substitute's counts instead;
+  - response-size impact of the new labels: bytes per Java definition item at
+    `detail=full`, and whether any habit-loop call now exhausts its budget or
+    needs more pages than the Stage 0 baseline at the same
+    `max_response_bytes`. Budget semantics are unchanged; what the same budget
+    now fits is an observation this plan owes its consumers.
 - Compare receiver-call results against the Stage 0 addressable subset. The
   denominator is the measured subset under the access subset ADR 009 accepted.
   If ADR 009 accepts more than public methods, Stage 7 must recalculate that
