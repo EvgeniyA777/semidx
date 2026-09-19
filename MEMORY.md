@@ -275,17 +275,18 @@ documents that own history, rationale, and evidence.
   bounds. Java write-path measurement was left as-is: one-file refresh at 1,200
   units is 13 ms, and package-export reanalysis is constant at 41 units.
 - [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
-  is **blocked at its own Stage 0 gate**, and no Java semantic code or ADR 009
-  exists. The external baseline was re-run and recorded in
-  [its progress log](docs/reports/012_java_semantic_quality_without_query_regression_progress.md):
-  the addressable receiver-qualified subset is 63 public-method invocations
-  against a required 100, so the plan stops. The same sample prices the
-  alternatives: exact static `ClassName.method()` calls are worth 135 and need
-  no method-body type environment; generic/array receiver base types 18;
-  admitting target classes with supertypes 211, but none of those hierarchies is
-  closed in indexed source, so it cannot be exact. The supertype guard stays and
-  no follow-up was opened: lifting it converts 38 of 335 guarded references, 13
-  safely. A revised plan direction is the open decision.
+  is in progress at Stage 1 and **amended**: its Stage 0 gate declined
+  receiver-qualified instance calls at 63 addressable public invocations against
+  a required 100, so the plan now targets static `ClassName.method()` calls,
+  measured at 135 in the same sample and needing no method-body type
+  environment. No Java semantic code and no ADR 009 exist yet. Deferred with
+  measurements: instance receivers as
+  [Follow-up 014](docs/followups/014_java_instance_receiver_calls.md), the
+  supertype guard as
+  [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md)
+  (lifting it converts 38 of 335 guarded references, 13 safely). The baseline,
+  the classification method, and the counts every threshold refers to are in
+  [the progress log](docs/reports/012_java_semantic_quality_without_query_regression_progress.md).
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients ignore `structuredContent` and read `content`, so the text copy is

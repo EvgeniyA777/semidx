@@ -2,7 +2,7 @@
 title: "Java semantic quality without query regression progress"
 doc_type: "progress_log"
 lifecycle: "active"
-status: "blocked"
+status: "in_progress"
 agent_action: "reference_for_context"
 updated: "2026-09-19"
 ---
@@ -14,18 +14,20 @@ Companion log for
 
 ## Current Status
 
-**Stage 0 is complete and its verdict is no-go.** The plan's Start Rule requires
-two things before any ADR or code work; the first holds and the second does not.
+**Stage 0 is complete. Its verdict on the plan's original subject was no-go, and
+the plan was amended rather than abandoned.** The Start Rule requires two things
+before any ADR or code work; the first held and the second did not.
 
 - The local Plan 011 work-bound lane still passes, so anchored relationship work
   still scales with anchored candidates.
 - The external Java sample contains **63** public-method addressable
   receiver-qualified invocations against a required threshold of **100**.
 
-Per the plan's own stop rule, no Java semantic code has changed, ADR 009 has not
-been written, and the plan stops here until a revised direction is chosen. The
-measured evidence for that choice, including three quantified alternatives, is in
-[Where The Java Value Actually Is](#where-the-java-value-actually-is).
+No Java semantic code changed and ADR 009 was not written. The same measurement
+priced the alternatives, and the plan now targets static `ClassName.method()`
+calls at **135** in the same sample, which clears the same threshold with less
+machinery. See [The Decision](#the-decision) and
+[Amendment 1](../plans/012_java_semantic_quality_without_query_regression.md#amendment-1-from-instance-receivers-to-static-calls).
 
 Stage 0 also settles the question Plan 011 deliberately left open: the external
 latency observation now exists, and it supports the Plan 011 product claim
@@ -37,8 +39,9 @@ strongly. `semidx_context depth=2` on apache/dubbo fell from **90.71 s to
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 0: Post-Plan-011 external baseline and addressability gate | Completed | apache/dubbo re-probed at the Plan 010 commit. Habit-loop latency is no longer a product problem: the worst call fell from 90.71 s to 0.019 s. Quality is unchanged: 244 of 6,710 sampled outgoing claims are facts, and 4,624 of 5,662 unresolved calls are still receiver-qualified. The addressable public-method subset is 63, below the go threshold of 100. **Verdict: no-go.** |
-| Stage 1: ADR for Java receiver-qualified calls | Not started | Blocked by the Stage 0 verdict. |
-| Stages 2-7 | Not started | Blocked by the Stage 0 verdict. |
+| Stage 0 closure: Amendment 1 | Completed | Plan re-aimed at static `ClassName.method()` calls (135 in the sample). Instance receivers deferred to [Follow-up 014](../followups/014_java_instance_receiver_calls.md), the supertype guard to [Follow-up 013](../followups/013_java_supertype_guard_relaxation.md). No code changed. |
+| Stage 1: ADR for Java static calls | Not started | Next. |
+| Stages 2-7 | Not started | Depend on Stage 1. |
 
 ## Plan Readiness Gate
 
@@ -326,6 +329,32 @@ supertypes, which is the `resolveType` guard, not the static-call rule. That is
 the supertype-guard item below, and it compounds with direction A rather than
 competing with it.
 
+### The Decision
+
+Direction A was chosen on 2026-09-19 and recorded as
+[Amendment 1](../plans/012_java_semantic_quality_without_query_regression.md#amendment-1-from-instance-receivers-to-static-calls):
+the plan keeps every rule it had and changes its subject from instance receivers
+to static calls. Direction B stays unimplemented and becomes
+[Follow-up 013](../followups/013_java_supertype_guard_relaxation.md); the
+original instance-receiver subject becomes
+[Follow-up 014](../followups/014_java_instance_receiver_calls.md), so the 63 and
+their blockers are not lost with the amendment.
+
+One exactness rule had to be settled before the amendment could be trusted,
+because it could have eaten the 135. Java lets a variable obscure a type of the
+same name (`foo.m()` where `foo` is both a local and a class means the local),
+so reading a receiver name as a class requires proving that nothing binds that
+name — including a field inherited from a supertype, which the working copy may
+not be able to see. The strict rule is therefore: no parameter, local, field, or
+other binding introducer in scope may declare the name, and the enclosing class
+must declare no supertypes.
+
+Measured on the same sample, that rule costs **nothing**: all 135 already
+satisfy it, because every one resolves its receiver through `resolveType`, which
+already declines cross-unit names inside a class with supertypes. Same-unit
+class-name receivers contributed 0 to the subset, which is the case where the
+rule would have had to do work of its own.
+
 ### Supertype Guard Opportunity
 
 Measured on the same sample, as Stage 0 requires and without implementing
@@ -418,10 +447,13 @@ this repository. `zig fmt --check` likewise has nothing to check.
 
 ### Residual Risk And Next Step
 
-- The plan is **blocked at its own gate** and must not proceed to ADR 009 or any
-  Java semantic change until a revised direction is agreed. Writing ADR 009 for
-  receiver-qualified calls under the current stage contract would authorize work
-  the measurement does not support.
+- **Next step is Stage 1**: ADR 009 for Java static calls, under the amended
+  plan. No Java semantic code may change before it is accepted.
+- The 135 is a lower bound produced by an offline classifier, not by the
+  frontend. Stage 7 measures what the implementation actually converts, and the
+  plan's closure bar (at least 100, and at least 80% of the accepted-access
+  subset) is stated against it. If the implementation reaches fewer, the gap is
+  a finding to record, not a reason to widen the rule.
 - The external clone lives outside this repository at
   `~/.cache/semidx-external/dubbo` at commit `df9c5e1`. It is evidence, not a
   conformance target, and nothing in a local lane depends on it.

@@ -33,6 +33,8 @@ evidence would make it ready to implement or close.
 | [008](008_clojure_lexical_scope_coverage.md) | open | `coverage_gap` | [Plan 005 report](../reports/005_mcp_preview_release_readiness_progress.md#stage-25-same-unit-name-resolution-facts-java-and-clojure) | Clojure symbols under forms that may bind names stay unresolved until lexical scope is modeled. |
 | [010](010_mcp_text_fallback_client_measurement.md) | open | `release_readiness` | [Plan 009 report](../reports/009_mcp_progressive_discovery_and_budgets_progress.md#payload-copies) | Measure how real MCP clients expose the duplicated text fallback before changing it. |
 | [011](011_java_cross_module_visibility.md) | open | `coverage_gap` | [Plan 010 report](../reports/010_java_resolution_boundaries_progress.md) | Java cross-module same-package references stay unresolved, because no build descriptor is read. |
+| [013](013_java_supertype_guard_relaxation.md) | open | `coverage_gap` | [Plan 012 report](../reports/012_java_semantic_quality_without_query_regression_progress.md#supertype-guard-opportunity) | A class with supertypes resolves no simple type name beyond its unit; lifting the guard safely needs a hierarchy closed in indexed source, which 13 of 335 measured cases have. |
+| [014](014_java_instance_receiver_calls.md) | open | `coverage_gap` | [Plan 012 report](../reports/012_java_semantic_quality_without_query_regression_progress.md#the-addressable-receiver-subset) | Calls through a value receiver stay unresolved; the type environment they need was measured at 63 exact facts and declined by Plan 012's gate. |
 
 ## Completed Follow-ups
 

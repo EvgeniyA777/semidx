@@ -2,39 +2,67 @@
 title: "Java semantic quality without query regression"
 doc_type: "plan"
 lifecycle: "active"
-status: "blocked"
+status: "in_progress"
 agent_action: "reference_for_context"
 updated: "2026-09-19"
 ---
 
 # 012: Java Semantic Quality Without Query Regression
 
-**Execution stopped at the Stage 0 gate.** The addressable receiver subset
-measured 63 public-method invocations against the Start Rule's required 100. Do
-not write ADR 009 or change Java semantics under this plan until a revised
-direction is agreed; the measurement, the alternatives it prices, and the
-verdict are in
+**Amended after Stage 0.** This plan originally widened Java toward
+receiver-qualified instance calls. Its own Stage 0 gate measured that subset at
+63 addressable public-method invocations against a required 100 and stopped the
+plan. The same measurement priced the alternatives on the same sample, and this
+plan is now aimed at the one that clears the gate with less machinery: static
+`ClassName.method()` calls, worth 135. See
+[Amendment 1](#amendment-1-from-instance-receivers-to-static-calls) and
 [the progress log](../reports/012_java_semantic_quality_without_query_regression_progress.md).
 
 ## Goal
 
 Increase exact Java impact answers on an external-scale Java repository without
-losing the graph-query speed Plan 011 just bought.
+losing the graph-query speed Plan 011 bought.
 
 Plan 010 showed that Java's next value gap is semantic coverage, not the
-source-root boundary. In its external sample, 4,624 of 5,662 unresolved calls
-were qualified by a receiver the frontend did not resolve. The supertype guard
-was also material: before Plan 010's single-type import stage, it declined 64
-of 103 unresolved references whose target had source in the working copy. After
-single-type imports landed, that denominator fell to 98 and the supertype
-bucket was not remeasured. Stage 0 of this plan therefore remeasures both
-receiver and supertype opportunities instead of inheriting the old percentage.
+source-root boundary: in its external sample 4,624 of 5,662 unresolved calls
+were qualified by a receiver the frontend did not resolve. Stage 0 of this plan
+took that bucket apart. **1,041 of those 4,624 qualified receivers are class
+names, not values** — `StringUtils.isNotEmpty(...)`, `CollectionUtils.isEmptyMap(...)`,
+`NetUtils.getLocalHost()` — and 135 of them resolve exactly today under rules the
+frontend already has. That is more than twice the instance-receiver subset, and
+it needs no method-body type environment at all, because a class name is
+resolved by the existing `resolveType`, not by inferring the type of an
+expression.
 
-Plan 011 removed the known query-work bottleneck but did not re-run the external
-apache/dubbo wall-clock probe. This plan joins those facts: first prove the
-habit loop is still fast enough after Plan 011 and that the receiver subset is
-large enough to justify work, then widen Java only where the frontend can
-establish exact source-derived facts.
+Stage 0 also settled the speed question this plan exists to protect: the habit
+loop is no longer slow on external Java. `semidx_context depth=2` on apache/dubbo
+fell from 90.71 s to 0.019 s in the comparable build mode.
+
+## Amendment 1: From Instance Receivers To Static Calls
+
+Recorded 2026-09-19, after Stage 0 and before any ADR or code change.
+
+| | Before | After |
+| --- | --- | --- |
+| Subject | receiver-qualified instance calls (`local.m()`, `field.m()`, `new T().m()`) | static calls (`ClassName.m()`) |
+| Measured exact subset in the Stage 0 sample | 63 public | **135 public** |
+| Receiver evidence needed | a lexical receiver **type** environment over method bodies | **no type environment**: the existing `resolveType`, plus proof that the name is not obscured by a binding |
+| Stage 4 | build the type environment | prove the receiver name is not bound |
+| Instance receivers | this plan's subject | non-scope, recorded as [Follow-up 014](../followups/014_java_instance_receiver_calls.md) |
+| Supertype guard | measured for a possible follow-up | measured and deferred as [Follow-up 013](../followups/013_java_supertype_guard_relaxation.md) |
+
+What did not change: the exactness rule, the ADR-before-implementation gate, the
+source-root boundary, the projection discipline, the invalidation requirements,
+the query-work budget, and the prohibition on build descriptors, shared-core
+kinds, approximate assertions, and MCP contract changes.
+
+Why not the alternatives Stage 0 priced: admitting target classes that declare
+supertypes would be worth 211, but of 210 such hierarchies re-derived from the
+sample **none** is closed in indexed source, so the target could not be
+established and the fact would be a guess. Lifting the supertype guard on the
+referring class would convert 38 of 335 guarded references, only 13 of them
+safely — below this plan's own follow-up threshold, which is why it leaves as a
+follow-up rather than a stage.
 
 ## Product Principle
 
@@ -47,18 +75,17 @@ When a choice is available, decide in this order:
    `semidx_health` -> `semidx_outline` -> `semidx_repo_map` ->
    `semidx_find_definitions` -> `semidx_references` / `semidx_context` slow
    enough to abandon is a product regression.
-3. **Durable semantics need an ADR.** Cross-unit receiver-qualified Java
-   `CALLS` facts are new language semantics. This plan may propose them, but
-   implementation waits for an accepted ADR that answers the constitutional
-   decision test.
+3. **Durable semantics need an ADR.** Cross-unit static Java `CALLS` facts are
+   new language semantics. This plan may propose them, but implementation waits
+   for an accepted ADR that answers the constitutional decision test.
 4. **Java projections are not graph authority.** Package, source-root, method,
-   receiver, and class-shape lookup tables may find candidates. The graph
-   records only the resulting assertion, its resolution, producer, evidence,
-   freshness, and dependencies.
+   and class-shape lookup tables may find candidates. The graph records only the
+   resulting assertion, its resolution, producer, evidence, freshness, and
+   dependencies.
 5. **Unresolved reasons are product output.** A negative answer must say whether
-   the frontend lacked a receiver type, saw overloads, hit supertypes, crossed a
-   source-root boundary, hit an uncovered Java declaration kind, or found no
-   source.
+   the frontend could not read the receiver as a type, found the name obscured by
+   a binding, saw overloads, found a non-static or inaccessible method, hit
+   supertypes, crossed a source-root boundary, or found no source.
 6. **No Java build system enters by accident.** Build descriptors, classpaths,
    modules, jars, and dependency graphs stay out unless a future plan and ADR
    admit them explicitly.
@@ -67,18 +94,20 @@ When a choice is available, decide in this order:
 
 Read before starting implementation:
 
+- [Plan 012 progress](../reports/012_java_semantic_quality_without_query_regression_progress.md),
+  which holds the Stage 0 baseline, the classification method, and every count
+  this plan's thresholds refer to.
 - [Plan 010 progress](../reports/010_java_resolution_boundaries_progress.md),
-  especially the external Java probe, unresolved-reason measurements, and
-  residual risk.
+  especially the external Java probe and unresolved-reason measurements.
 - [Plan 011 progress](../reports/011_external_scale_graph_query_indexes_progress.md),
-  especially the statement that external Java latency was not re-measured.
-- [Follow-up 012](../followups/012_external_scale_query_latency.md), because
-  Stage 0 is the external observation Plan 011 deliberately did not claim.
+  for the indexed access model this plan must not regress.
 - [ADR 003](../adr/003_reject_name_match_assertions.md),
   [ADR 004](../adr/004_allow_java_same_package_type_resolution.md),
   [ADR 006](../adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md),
   and [ADR 008](../adr/008_java_visibility_boundaries.md).
-- [Follow-up 011](../followups/011_java_cross_module_visibility.md).
+- [Follow-up 011](../followups/011_java_cross_module_visibility.md),
+  [Follow-up 013](../followups/013_java_supertype_guard_relaxation.md), and
+  [Follow-up 014](../followups/014_java_instance_receiver_calls.md).
 - [SPEC.md](../../SPEC.md), [CORE.md](../../CORE.md), and
   [docs/spec/capability_matrix.md](../spec/capability_matrix.md).
 - [Product adoption strategy](../design/002_product_adoption_strategy.md).
@@ -87,56 +116,57 @@ Read before starting implementation:
   `src/core/dependencies.zig`.
 - [Testing policy](../agent-policy/testing.md).
 
-Run `./scripts/check-zig-version.sh` before code work. Create
-`docs/reports/012_java_semantic_quality_without_query_regression_progress.md`
-with progress-log frontmatter before the first code change.
+Run `./scripts/check-zig-version.sh` before code work. The progress log already
+exists; update it per stage rather than creating a second one.
 
 Before pushing any stage commit, either update `MEMORY.md` when current
 implementation reality, priorities, or known gaps changed, or record in the
 progress log why the memory entry is still accurate before using
 `SCI_SKIP_MEMORY_FRESHNESS=1`.
 
-Stage 0 is a real go/no-go. Re-run the post-Plan-011 external Java speed and
-quality baseline before changing Java semantics. Prefer the same apache/dubbo
-commit used by Plan 010. If that root is unavailable, stop before code changes
-and either make the external root available or amend this plan explicitly to
-name a substitute repository. Do not infer a post-Plan-011 product latency from
-Plan 011's synthetic work bound.
-
-Proceed past Stage 0 only if both are true:
+**Stage 0 is complete and its gate is met under this amendment.** Both Start
+Rule conditions hold:
 
 - the local Plan 011 work-bound lane still proves anchored relationship work
-  scales with anchored candidates rather than total assertions; and
-- the external Java sample contains a public-method lower-bound addressable
-  receiver subset of at least 100 invocations, or at least 5% of
+  scales with anchored candidates (`zig build test-core -Doptimize=ReleaseFast`,
+  98/98); and
+- the external Java sample contains an addressable subset of **135** public
+  static invocations, against a threshold of at least 100 invocations or 5% of
   receiver-qualified unresolved calls, whichever is smaller.
 
-If the external MCP run cannot expose deterministic counters, record that
-limitation and run the local work-bound lane before proceeding. Wall-clock
-timing is recorded because users feel it; a slow clock alone reopens the plan
-only when the work shape is also wrong or the habit loop is not usable.
+Do not re-open the gate on the old subject. If a later stage discovers that the
+135 cannot be reached exactly, stop and amend this plan again rather than
+widening the rule to reach the number.
 
 ## Scope
 
-- Re-measure the Plan 010 external Java habit-loop probe after Plan 011's query
-  indexes.
-- Measure the addressable receiver-qualified call subset before implementation.
-- Write an ADR for Java receiver-qualified `CALLS` facts before semantic code
-  changes.
-- Add a deterministic Java semantic-quality fixture matrix for receiver calls,
+- Write an ADR for Java static `CALLS` facts before semantic code changes.
+- Add a deterministic Java fixture matrix for static calls, name obscuring,
   unresolved reasons, provider/class-shape changes, and exact negative cases.
-- Add Java analyzer-side projection(s) for current declared methods, method
-  access within the covered subset, class shape, and the units that may read
-  them.
-- Add a conservative receiver type environment for Java method bodies.
-- Resolve receiver-qualified Java calls only when receiver type, method target,
-  access, source-root visibility, and class shape are exactly established.
-- Measure the supertype-guard opportunity and write a follow-up if it is worth
-  its own plan. This plan does not implement supertype relaxation.
+- Add a Java analyzer-side projection for current declared methods, their
+  `static` modifier, their access within the covered subset, class shape, and the
+  units that may read them.
+- Prove, for a simple-name receiver, that no binding introducer in scope gives
+  the name another meaning, so a class name is never read past a variable.
+- Resolve static-qualified Java calls only when receiver type, method target,
+  `static` modifier, access, source-root visibility, and class shape are exactly
+  established.
+- Re-measure the external sample after implementation and compare against the
+  Stage 0 baseline.
 - Update capability documentation, local preview coverage notes, `MEMORY.md`,
   and the progress log.
 
 ## Non-Scope
+
+Do not resolve **instance** receivers: locals, parameters, fields,
+`new Type(...)`, chained or field receivers, `super`, class literals, or string
+literals. That subset is measured and deferred in
+[Follow-up 014](../followups/014_java_instance_receiver_calls.md). A call whose
+receiver is a value stays unresolved with its current reason.
+
+Do not relax the supertype guard on the referring class, and do not traverse a
+type hierarchy. That is
+[Follow-up 013](../followups/013_java_supertype_guard_relaxation.md).
 
 Do not read or execute Maven, Gradle, Bazel, `module-info.java`, jars, class
 files, generated sources outside the indexed working copy, or any network
@@ -153,21 +183,13 @@ instead of smuggling it through a Java plan. Method signatures may remain part
 of existing Java method definition identity.
 
 Do not add approximate, name-match, text-search, vector, popularity, or
-best-effort receiver resolution. A receiver-qualified call whose receiver type,
-access, target method, or class shape is not exactly established stays
-unresolved.
+best-effort resolution. A call whose receiver type, obscuring status, target
+method, access, or class shape is not exactly established stays unresolved.
 
-Do not record parameter-type or local-variable-type `REFERENCES` in this plan.
-Receiver type evidence may be used internally by the Java frontend only if the
-ADR accepts that as source-derived evidence for `CALLS` facts. If the ADR
-requires those types to become graph assertions, this plan must be amended
-before implementation because the graph population, measurements, and
-capability matrix change materially.
-
-Do not implement Java inheritance, virtual dispatch, interface method
-resolution, overload selection by argument type, constructor calls, field reads
-or writes, static method resolution through `ClassName.m()`, wildcard imports,
-or build-tool classpaths.
+Do not resolve static imports (`import static a.b.C.m;` used as a bare `m()`),
+scoped receivers (`a.b.C.m()`), static field reads, constructor calls, field
+reads or writes, wildcard imports, inheritance, virtual dispatch, interface
+method resolution, or overload selection by argument type.
 
 Do not change MCP tool JSON shape, tool arguments, cursor semantics,
 response-budget semantics, `semantic_contract_version`, or the text fallback.
@@ -200,14 +222,10 @@ Do not change Clojure or Zig frontend semantics.
   for the closest accepted cross-unit `CALLS` precedent.
 - [ADR 008](../adr/008_java_visibility_boundaries.md), for derived source-root
   visibility.
-- [Follow-up 011](../followups/011_java_cross_module_visibility.md), for the
-  explicit cross-module boundary left open.
-- [Follow-up 012](../followups/012_external_scale_query_latency.md), for the
-  external latency observation Plan 011 intentionally did not claim.
-- [Plan 010 progress](../reports/010_java_resolution_boundaries_progress.md),
-  for external Java quality evidence.
-- [Plan 011 progress](../reports/011_external_scale_graph_query_indexes_progress.md),
-  for query-index evidence and the unmeasured external-latency gap.
+- [Plan 012 progress](../reports/012_java_semantic_quality_without_query_regression_progress.md),
+  for the Stage 0 baseline and every threshold count.
+- [Plan 010 progress](../reports/010_java_resolution_boundaries_progress.md) and
+  [Plan 011 progress](../reports/011_external_scale_graph_query_indexes_progress.md).
 - [docs/spec/capability_matrix.md](../spec/capability_matrix.md), for supported
   language coverage wording.
 - [docs/mcp/local_preview.md](../mcp/local_preview.md), for MCP preview coverage
@@ -221,19 +239,33 @@ The current Java frontend records top-level class and method definitions, field
 and method-return type references, same-source-root/single-type-import type
 references, and very narrow same-class unqualified invocation facts.
 
-Qualified calls are intentionally unresolved today. `emitInvocation` treats any
+Qualified calls are intentionally unresolved. `emitInvocation` treats any
 `method_invocation` with an `object` field as a designator carrying the full
 invocation text, and `invocationTarget` returns the reason "the invocation is
-qualified by a receiver this frontend does not resolve". On the Plan 010 sample,
-that reason accounted for 4,624 of 5,662 unresolved calls.
+qualified by a receiver this frontend does not resolve". Stage 0 classified all
+4,624 of those in its sample:
 
-The supertype guard is also deliberate. `resolveType` declines cross-unit simple
-type resolution when the enclosing class declares a superclass or interfaces,
-because an inherited member type could shadow the apparent target. The often
-quoted "62%" is a pre-import Plan 010 Stage 1 measurement: 64 of 103
-in-working-copy unresolved references. After single-type imports, that
-denominator became 98 and the exact current share was not remeasured. This plan
-must not preserve the old percentage as a current claim.
+| Receiver | Count | This plan |
+| --- | ---: | --- |
+| Class name (static call) | 1,041 | **subject** |
+| Value: local, parameter, field, `new`, chained, `super`, literal | 3,583 | Follow-up 014 |
+
+Of the 1,041 class-name receivers, the exact subset is 135: the receiver
+resolves through `resolveType` to one current top-level class inside the ADR 008
+boundary, the class declares no supertypes, exactly one method of the invoked
+name is declared in it, and that method is `static` and public. The rest are
+blocked by evidence that does not exist in the working copy — 382 name a class
+no indexed unit declares, 247 are blocked by the supertype guard on the referring
+class, 113 reach a class outside the ADR 008 boundary, 74 are overloaded.
+
+`resolveType` already does the receiver half of this work. What it does **not**
+do is prove that a simple name is a type rather than a variable: Java lets a
+variable obscure a type of the same name, so a static-call rule that reads
+`foo.m()` as a type whenever a class named `foo` exists would invent targets.
+Stage 0 measured the strict rule — no parameter, local, field, or other binding
+introducer may declare the name, and the enclosing class must declare no
+supertypes so no inherited field can obscure it — and it costs nothing: all 135
+already satisfy it.
 
 The Java package table is the right precedent for projection discipline. It is
 an analyzer-side projection, not a graph model; it keeps only hints, re-reads
@@ -242,77 +274,76 @@ import relationship. `Upkeep` reanalyzes providers, dependents, package
 declarers, and single-type importers so cross-unit facts and
 unresolved-to-resolved transitions stay maintainable.
 
-Method lookup can re-read method entities from the graph, but some receiver-call
-preconditions are not graph facts today. A Java class entity currently carries
-`java.construct` and `java.package`, not whether it declares supertypes; a Java
-method entity currently does not carry access, and parameter/local-variable
-types are not recorded as relationships. The ADR and implementation stages must
-decide and document which intermediate evidence is source-derived frontend
-evidence and which, if any, becomes graph content.
+Method lookup can re-read method entities from the graph, but two preconditions
+are not graph facts today. A Java class entity carries `java.construct` and
+`java.package`, not whether it declares supertypes; a Java method entity carries
+`java.construct`, `java.return_type` and `java.package`, not its access and not
+whether it is `static`. Stage 1 and Stage 3 must decide and document how that
+evidence is carried.
 
-Plan 011 proved anchored query work with synthetic local bounds past the size of
-apache/dubbo, but it deliberately did not claim a new Dubbo wall-clock latency.
-This plan cannot treat speed as already measured on the target adoption shape.
+Plan 011's indexed access model is confirmed externally by Stage 0 and must not
+regress.
 
 ## Plan-Level Decisions
 
 **D1 - ADR before semantic implementation.** Stage 1 creates
-`docs/adr/009_java_receiver_qualified_calls.md`. No stage after Stage 0 may emit
-new Java receiver-qualified `CALLS` facts until that ADR is accepted. If the ADR
-rejects or materially changes the semantics proposed here, update this plan
-before continuing.
+`docs/adr/009_java_static_calls.md`. No stage after Stage 0 may emit new Java
+static `CALLS` facts until that ADR is accepted. If the ADR rejects or materially
+changes the semantics proposed here, update this plan before continuing.
 
-**D2 - The proposed `CALLS` meaning is static target, not dispatch.** The ADR
-must decide explicitly whether Java `CALLS` names the statically selected
-declared method. The proposed rule is that an overriding subtype does not make a
-static call target approximate; dynamic dispatch remains not recorded and must
-be stated in the capability matrix.
+**D2 - The proposed `CALLS` meaning is the declared static method.** A static
+method is selected at compile time and is not dispatched, so this plan's `CALLS`
+names the one static method the target class declares under that name. Dynamic
+dispatch, overriding, and hiding remain not recorded and must be stated in the
+capability matrix.
 
-**D3 - Parameter and local types stay internal evidence unless the ADR says
-otherwise.** This plan's default is to use covered parameter/local/new-expression
-types as source-derived evidence for receiver call resolution without emitting
-new `REFERENCES` for those types. If that is unacceptable, the ADR must force a
-plan amendment before implementation.
+**D3 - A simple-name receiver is a type only when nothing can obscure it.** The
+frontend must prove that no parameter, local variable, field, or other
+binding-introducing construct in scope declares that name, and that the
+enclosing class declares no supertypes, so no inherited field can obscure it.
+An uncovered binding introducer poisons the name exactly as it would a value
+receiver. This is the cheap half of the receiver environment: it needs the set
+of names bound at the invocation, never their types.
 
-**D4 - Class shape is graph-carried Java extension evidence.** The proposed
-Stage 1 answer is to add Java extension labels to existing Java definitions, not
-to pass provider source into another unit's frontend and not to reparse provider
-source during lookup. At minimum, class definitions need a label such as
-`java.supertypes = none|declared`, and method definitions need a covered access
-label. These labels are graph assertions produced by the Java frontend, visible
-as extension data, and owned by SPEC/capability documentation. If ADR 009
-rejects labels or requires provider-source re-reading instead, this plan must be
-amended before Stage 3 because the current frontend contract does not expose
-provider bytes or trees to dependent analysis.
+**D4 - Class shape and method modifiers are graph-carried Java extension
+evidence.** The proposed Stage 1 answer is additive Java extension labels on
+existing Java definitions, not passing provider source into another unit's
+frontend and not reparsing provider source during lookup. At minimum, class
+definitions need a label such as `java.supertypes = none|declared`, and method
+definitions need covered access and a `static` marker. These labels are graph
+assertions produced by the Java frontend, visible as extension data, and owned by
+SPEC/capability documentation. If ADR 009 rejects labels or requires
+provider-source re-reading instead, this plan must be amended before Stage 3
+because the current frontend contract does not expose provider bytes or trees to
+dependent analysis.
 
-**D5 - Receiver facts require a closed lexical receiver environment.** A simple
-identifier receiver may be resolved only when every name-introducing construct
-that could shadow it is either covered exactly or poisons the binding so the
-call stays unresolved. Field fallback must not cross an unknown local binding.
+**D5 - Method targets require uniqueness, `static`, covered access,
+source-root visibility, and safe class shape.** Overloads stay unresolved
+because this plan does not type arguments. A non-static method named through a
+class receiver stays unresolved, because it is not a call Java would compile.
+Methods in target classes with declared supertypes stay unresolved, because a
+hidden static method could change the target. Cross-unit private/protected/
+package access must be either proven inside the covered access subset or left
+unresolved.
 
-**D6 - Method targets require uniqueness, covered access, source-root
-visibility, and safe class shape.** Overloads stay unresolved because this plan
-does not type arguments. Methods in target classes with declared supertypes stay
-unresolved. Cross-unit private/protected/package access must be either proven
-inside the covered access subset or left unresolved.
-
-**D7 - Incremental maintenance covers class-shape changes, not only method-set
+**D6 - Incremental maintenance covers class-shape changes, not only method-set
 changes.** A unit whose call depends on a receiver class must be reachable when
-that class adds/removes/renames/overloads a method, changes method access within
-the covered subset, or adds/removes declared supertypes. Resolved cross-unit
-calls must also declare provider dependencies.
+that class adds, removes, renames or overloads a method, changes a method's
+access or `static` modifier within the covered subset, or adds or removes
+declared supertypes. Resolved cross-unit calls must also declare provider
+dependencies.
 
-**D8 - Speed regressions are measured as work first.** External wall-clock
+**D7 - Speed regressions are measured as work first.** External wall-clock
 numbers are recorded because users feel them, but acceptance relies on
-deterministic work bounds and growth shape: receiver/member lookup must use
+deterministic work bounds and growth shape: receiver and member lookup must use
 bounded candidate tables, not repository-wide scans in per-call paths.
 Dependency propagation cost and exhaustion are part of the write-path budget.
 
-**D9 - Supertype relaxation is follow-up work.** This plan measures the
-supertype guard after receiver work. It may create a follow-up with acceptance
-direction, but it does not implement hierarchy traversal or relax the guard.
+**D8 - Instance receivers and the supertype guard are follow-up work.** Both are
+measured; neither is implemented here. Follow-ups 013 and 014 own their
+acceptance direction.
 
-**D10 - Public surfaces stay shape-compatible.** Better Java resolution changes
+**D9 - Public surfaces stay shape-compatible.** Better Java resolution changes
 graph content and capability docs, not MCP tool contracts. New outcomes appear
 as existing `fact` or `unresolved` relationships with evidence and producer
 metadata.
@@ -320,15 +351,16 @@ metadata.
 ## Architecture Boundaries
 
 1. **Java frontend**
-Responsibility: Java receiver/type evidence, local lexical scopes, class-shape
-evidence, Java method candidates, access checks in the covered subset, and the
-rules that decide whether a Java relationship is a fact or unresolved.
+Responsibility: reading a receiver name as a type, proving nothing obscures it,
+class-shape evidence, Java method candidates, `static` and access checks in the
+covered subset, and the rules that decide whether a Java relationship is a fact
+or unresolved.
 Does not know about: MCP payload shape, response budgets, storage backends, or
 other frontends' semantics.
 
 2. **Java analyzer projections**
 Responsibility: candidate tables for packages, imports, methods, class shape,
-receiver readers, and method readers. Hints may be conservative supersets.
+and readers. Hints may be conservative supersets.
 Does not know about: graph authority. A projection may find or re-read graph
 facts and Java extension labels, but a fact exists only when the frontend
 records it in the graph with exact evidence.
@@ -336,8 +368,8 @@ records it in the graph with exact evidence.
 3. **Shared core**
 Responsibility: entities, relationships, assertions, resolution categories,
 freshness, identity, dependencies, and snapshots.
-Does not know about: Java receiver scoping, Java packages, Java source roots,
-method overloads, access modifiers, class shape, or inheritance.
+Does not know about: Java scoping, Java packages, Java source roots, method
+overloads, access modifiers, `static`, class shape, or inheritance.
 
 4. **Incremental upkeep**
 Responsibility: reanalyzing units affected by provider, class-shape, and
@@ -354,83 +386,22 @@ Does not know about: this plan. Tool contracts do not change.
 
 ### Stage 0: Post-Plan-011 External Baseline And Addressability Gate
 
-Purpose: establish the speed baseline, Java-quality baseline, and addressable
-receiver subset this plan must preserve and improve.
+**Completed 2026-09-19. Verdict on the original subject: no-go. Verdict under
+Amendment 1: go, at 135 against a threshold of 100.**
 
-Likely files:
+Its required behavior, results, method, and limits are in
+[the progress log](../reports/012_java_semantic_quality_without_query_regression_progress.md).
+Do not re-run it before Stage 7; Stage 7 re-runs the same probe for comparison.
 
-- `docs/reports/012_java_semantic_quality_without_query_regression_progress.md`
-
-Required behavior:
-
-- Re-run the Plan 010 probe on apache/dubbo at the same commit when available,
-  or on a substitute open-source Java repository named in the progress log with
-  its commit, module/source-unit counts, and reason for substitution.
-- Record the habit-loop calls used in Plan 010: `semidx_health`,
-  `semidx_outline`, scoped `semidx_repo_map`, `semidx_find_definitions`,
-  `semidx_references`, `semidx_context depth=1`, `semidx_context depth=2`,
-  no-op refresh, and one-file refresh.
-- Record wall clock, output size, source-unit counts, graph counts, diagnostic
-  counts, current dependency declaration count, propagation exhaustion count if
-  observable, and any deterministic work counters available from local scale
-  lanes.
-- Re-run the same unresolved-reason sample shape as Plan 010, or record why the
-  exact sample cannot be repeated. Split unresolved calls by receiver,
-  overload, supertypes, nested class body, missing method, static class-name
-  receiver, unsupported declaration kind, and other reasons. Split unresolved
-  references by no-source, source-root boundary, imports, supertype guard,
-  ambiguity, unsupported construct, and stale/unavailable provider.
-- Measure the addressable receiver subset on the same sample. For each
-  receiver-qualified unresolved call, classify:
-  - receiver expression shape: `this`, simple identifier, `new Type(...)`,
-    class-name/static-looking receiver, chained/field receiver, or other;
-  - whether the receiver type can be established from current covered evidence;
-  - whether the referring class itself declares supertypes, so current
-    `resolveType` would decline cross-unit receiver type evidence before the
-    call target is considered;
-  - whether the receiver type names a current top-level class, or instead an
-    interface, enum, record, annotation, JDK/dependency type, or unsupported
-    construct;
-  - whether the receiver class declares supertypes;
-  - whether exactly one method of the invoked name is declared in that class;
-  - method access distribution: public, protected, package-private, private, or
-    unavailable;
-  - whether the invocation is inside a nested class body; and
-  - whether source-root visibility permits the receiver type and method.
-- Treat the interface/enum/record/annotation split here as an offline
-  measurement classification, not as a product runtime reason. The current graph
-  only exports Java classes across units, so cross-unit uncovered top-level type
-  declarations are not distinguishable from "no current top-level class" unless
-  ADR 009 explicitly admits a new minimal uncovered-type evidence channel.
-- Compute the go/no-go addressable subset from a conservative public-method
-  lower bound. Later ADR 009 decisions may expand the covered access subset, but
-  they must not retroactively make the Stage 0 go decision depend on Stage 1.
-- Measure the supertype-guard opportunity separately: count references that
-  would need hierarchy evidence beyond this plan, and estimate how many have a
-  source-available superclass chain with no interfaces or dependency/JDK gaps.
-- State whether the Plan 011 product claim is now supported by an external
-  latency observation, still supported only by local work bounds, or contradicted
-  by measured work.
-
-Done when:
-
-- The progress log records the repository identity, baseline commands, results,
-  quality counts, addressable receiver count, supertype opportunity estimate,
-  and go/no-go verdict against the Start Rule.
-- If the addressable receiver subset is below the threshold, the plan stops
-  before ADR/code work and records either a revised plan direction or a
-  follow-up.
-- No Java semantic code has changed before this verdict.
-
-### Stage 1: ADR For Java Receiver-Qualified Calls
+### Stage 1: ADR For Java Static Calls
 
 Purpose: record the durable Java semantic decision before implementation.
 
-Depends on: Stage 0 go.
+Depends on: Stage 0.
 
 Likely files:
 
-- `docs/adr/009_java_receiver_qualified_calls.md`
+- `docs/adr/009_java_static_calls.md`
 - [docs/adr/README.md](../adr/README.md), whose `## Records` list ends at 008
 - `docs/reports/012_java_semantic_quality_without_query_regression_progress.md`
 - [GLOSSARY.md](../../GLOSSARY.md), for any durable term the ADR settles
@@ -443,35 +414,30 @@ Required behavior:
 - Record, for every decision below, at least one rejected alternative and why it
   was rejected. This plan states a proposed answer for most of them; a proposal
   is input, not the decision. An ADR that only restates this plan leaves no
-  record of what was weighed, and a later plan asking why receiver resolution
-  stops where it does would have to read this plan's git history instead of a
-  decision record.
-- Decide whether Java `CALLS` means static target only, and explicitly leave
-  dynamic dispatch and overriding subtype analysis unrecorded.
-- Decide whether receiver type evidence from parameters, locals, fields, and
-  `new Type(...)` is internal frontend evidence or graph content. If it becomes
-  graph content, amend this plan before implementation.
-- Decide how class-shape evidence is established. This plan's proposed answer
-  is additive Java extension labels on existing Java definitions, not
-  provider-source re-reading by the Java projection.
-- Decide whether uncovered top-level Java declaration kinds get any minimal
-  evidence. This plan's proposed answer is no: same-unit non-class type
-  declarations may produce a precise unsupported reason from current source, but
-  cross-unit interfaces/enums/records/annotations remain indistinguishable from
-  missing current class exports. If ADR 009 admits minimal cross-unit
-  uncovered-type evidence instead, amend this plan before Stage 4.
+  record of what was weighed.
+- Decide that Java `CALLS` through a class-name receiver means the declared
+  static method of that class, and explicitly leave hiding, dispatch, and
+  overload selection unrecorded.
+- Decide the obscuring rule: what must be proved before a simple name is read as
+  a type, which binding introducers poison it, and what happens when the
+  enclosing class declares supertypes.
+- Decide how class-shape and method-modifier evidence is established. This
+  plan's proposed answer is additive Java extension labels on existing Java
+  definitions, not provider-source re-reading by the Java projection.
 - Decide the covered method-access subset, and state what happens to private,
   protected, package-private, and public methods outside that subset.
+- Decide whether a non-static method reached through a class receiver gets its
+  own unresolved reason, or shares one with "no such method".
 - State that build descriptors, cross-module visibility, inheritance entities,
-  dispatch, overload resolution by argument type, `module`, and `IMPORTS` are
-  not admitted.
+  dispatch, overload resolution by argument type, static imports, scoped
+  receivers, `module`, and `IMPORTS` are not admitted.
 - Name the fixture families Stage 2 and Stage 5 must satisfy.
 - Own the Java semantic vocabulary it introduces, and record that ownership.
-  Receiver type environment, binding introducer, shadow-only poison, covered
-  access subset, and static target versus dispatch are ADR-owned normative
-  terms, not glossary entries: `GLOSSARY.md` is not normative and must not
-  restate them. Add or revise a glossary entry only for a term whose meaning is
-  project-wide rather than Java-specific, such as class shape.
+  Obscuring proof, binding introducer, covered access subset, and static target
+  are ADR-owned normative terms, not glossary entries: `GLOSSARY.md` is not
+  normative and must not restate them. Add or revise a glossary entry only for a
+  term whose meaning is project-wide rather than Java-specific, such as class
+  shape.
 
 Done when:
 
@@ -503,29 +469,34 @@ Likely files:
 
 Required behavior:
 
-- Add committed fixture cases for receiver-qualified calls:
-  - `this.m()` and `local.m()` to a unique declared method in a class with no
-    supertypes;
-  - parameter, local variable, field, and `new Type().m()` receiver shapes;
-  - receiver type supplied by same unit, same source root, standard-layout
-    test-to-main root, and single-type import;
-  - unknown receiver, out-of-scope receiver class, duplicate local binding,
-    overloads, target class with supertypes, nested class body, `super.m()`,
-    `ClassName.staticLike()`, chained receivers, unsupported receiver type, and
-    unresolved receiver type.
-- Add shadowing fixtures for every binding-introducing Java node Stage 4 must
-  treat as poison unless explicitly covered:
+- Add committed fixture cases for static calls:
+  - `Helper.m()` to a unique public static method of a class with no supertypes,
+    with the class supplied by the same unit, the same source root, a
+    standard-layout test-to-main root, and a single-type import;
+  - the same call where the method is not static, is overloaded, is
+    package-private, protected or private, or does not exist;
+  - the target class declares a superclass, and separately an interface;
+  - the receiver class is outside the ADR 008 boundary;
+  - the receiver name is ambiguous, is a type parameter, names a member type, or
+    names a non-class type declared in the unit;
+  - the invocation is inside a nested class body.
+- Add obscuring fixtures, one per binding-introducing Java node that must poison
+  a receiver name unless the ADR covers it:
+  - `formal_parameter` and `spread_parameter`;
+  - `local_variable_declaration`, including a declaration after the call;
+  - `field_declaration`, including a field whose name equals a class name;
   - `enhanced_for_statement`;
   - `catch_formal_parameter`;
   - `resource`;
   - `lambda_expression` / `inferred_parameters`;
   - `type_pattern` and `record_pattern`;
-  - `spread_parameter`;
-  - `formal_parameter` or local declarators with `dimensions`.
+  - an enclosing class with supertypes, where an inherited field could obscure
+    the name.
 - Add provider/class-shape edit cases:
   - target method added after an unresolved call;
   - target method removed after a fact;
   - target method overloaded after a fact;
+  - target method loses `static` after a fact;
   - target method access changed so a fact becomes unresolved;
   - receiver class moved across the ADR 008 boundary;
   - provider adds a declared supertype after a fact, making the call unresolved;
@@ -542,8 +513,8 @@ Required behavior:
   counters for work that does not exist.
 - Every counter is test-only and must not change MCP output, budgets, or any
   published claim.
-- Stage 2 fixtures pin cases, not old reason strings. Stage 4 is expected to
-  replace some unresolved explanations with more precise ones.
+- Stage 2 fixtures pin cases, not old reason strings. Stage 4 and Stage 5 are
+  expected to replace some unresolved explanations with more precise ones.
 
 Done when:
 
@@ -556,8 +527,8 @@ Done when:
 
 ### Stage 3: Java Method Projection, Class Shape, And Invalidation
 
-Purpose: add the candidate infrastructure needed for receiver calls, without
-yet emitting new receiver-qualified call facts.
+Purpose: add the candidate infrastructure needed for static calls, without yet
+emitting new call facts.
 
 Depends on: Stage 2.
 
@@ -575,21 +546,21 @@ Required behavior:
 - Build a Java method/class projection from current graph facts and Java
   extension labels. At minimum, each current top-level Java class candidate
   carries: package, simple class name, class entity id, provider unit, source
-  root, declared-supertypes shape, covered method access, and current declared
-  methods grouped by simple method name.
+  root, declared-supertypes shape, and current declared methods grouped by
+  simple method name, each with its covered access and `static` marker.
 - Re-read graph facts for entities/methods and Java extension labels for class
   shape before answering. Hints may grow and over-invalidate, but they must not
   be authority.
 - Preserve snapshot/query indexes from Plan 011. No relationship query path may
-  scan every assertion to answer one receiver call.
+  scan every assertion to answer one call.
 - Add reader-hint storage and the `Upkeep` path that Stage 5 will populate for
   units that mention an exact receiver class and method name. The path must
   cover calls that are currently unresolved because the method is missing,
-  overloaded, access-blocked, or blocked by class shape.
+  overloaded, non-static, access-blocked, or blocked by class shape.
 - Extend `Upkeep` so a class-shape change reanalyzes affected readers even when
   the previous relationship had no provider dependency because it was
   unresolved. Class shape for this plan includes method set, covered method
-  access, and declared supertypes.
+  access, method `static` modifiers, and declared supertypes.
 - Do not reuse Java package-export invalidation for method or class-shape
   changes. The existing `java_packages.Export`/`Export.eql`/`Upkeep.markMissing`
   path detects only package plus top-level class-name export presence. Adding a
@@ -613,9 +584,9 @@ Required behavior:
 Done when:
 
 - Projection tests prove method-set lookup, uniqueness/overload classification,
-  covered access classification, source-root visibility, stale-provider
-  rejection, class-shape change detection, and reader invalidation through
-  seeded reader hints.
+  `static` and covered access classification, source-root visibility,
+  stale-provider rejection, class-shape change detection, and reader
+  invalidation through seeded reader hints.
 - Edit-history tests prove that changing one method or class-shape label
   reanalyzes only relevant hinted readers, not every declarer/importer in the
   package.
@@ -624,12 +595,12 @@ Done when:
   `extension.labels` is serialized into tool responses, so this stage changes
   payload content even though it changes no tool contract and emits no new call
   fact.
-- No new Java receiver-qualified call fact is emitted by this stage.
+- No new Java call fact is emitted by this stage.
 
-### Stage 4: Exact Receiver Type Environment
+### Stage 4: Reading A Receiver Name As A Type
 
-Purpose: let the Java frontend know enough local static receiver types to make
-Stage 5 possible without inventing bindings.
+Purpose: let the Java frontend decide, exactly, whether a simple-name receiver is
+a class name or a value, without inferring any value's type.
 
 Depends on: Stage 3.
 
@@ -640,52 +611,37 @@ Likely files:
 
 Required behavior:
 
-- Build a method-body receiver environment with lexical scoping and a closed
-  covered binding list. Supported bindings are:
-  - `this` as the enclosing class;
-  - non-spread `formal_parameter` nodes with a simple class type that resolves
-    exactly, no array/varargs dimensions, and no unsupported type shape;
-  - `local_variable_declaration` declarators with a simple class type that
-    resolves exactly, visible only after declaration and inside their lexical
-    scope, with no variable dimensions;
-  - class `field_declaration` names with simple class types, consulted only when
-    no parameter, local, or shadow-only binding claims the name; and
-  - `object_creation_expression` receiver expressions where the constructed
-    type resolves as an exact current class under existing Java type rules.
-- Treat every binding-introducing construct outside that covered list as a
-  shadow-only poison in its lexical region, so field fallback and outer locals
-  cannot produce a false receiver. The stage must cover at least the node kinds
-  named in Stage 2's shadowing fixture list.
-- Treat duplicate declarations in the same lexical scope, malformed
-  declarations, generic/array/wildcard receiver types outside the covered shape,
-  assignments, casts, method-return receivers, chained field access, `super`,
-  class-name receivers, and lambda/local-class body interactions as unresolved.
+- Collect the set of names bound at an invocation, by lexical scope: formal and
+  spread parameters, local variable declarators visible at that point, class
+  field names, and every other binding-introducing construct in the ADR's list.
+  Only names are needed, never their types.
+- Treat a receiver name as a class name only when no such binding claims it and
+  the enclosing class declares no supertypes, so no inherited field can obscure
+  it. Anything else leaves the call unresolved.
+- Resolve the name through the existing `resolveType`, unchanged, so type
+  parameters, member types, static imports, non-class types, single-type
+  imports, the same-package rule, and the ADR 008 boundary all keep their current
+  meanings and their current explanations.
 - Keep nested class bodies as a boundary. A call inside a class body declared
-  within a method is still analyzed as nested and does not borrow the outer
-  method's receiver environment.
-- Record distinct unresolved reasons for receiver type unknown, receiver type
-  ambiguous, receiver type out of scope, receiver declaration kind unsupported,
-  receiver expression outside covered shapes, and receiver type declared here
-  but unsupported as interface/enum/record/annotation rather than top-level
-  class.
-- The interface/enum/record/annotation reason is required only when the current
-  unit's own source proves the non-class declaration. For another unit, the
-  current Java graph exports only classes; unless ADR 009 admits new uncovered
-  top-level type evidence, a cross-unit non-class declaration remains the same
-  reason family as "no current top-level class export/source".
+  within a method is still analyzed as nested and is not resolved.
+- Record distinct unresolved reasons for: the name is bound by a binding
+  introducer; the enclosing class has supertypes so an inherited field could
+  obscure the name; the name does not resolve to a current top-level class; the
+  class is outside the visibility boundary; and the receiver expression is not a
+  simple name.
+- Emit no call fact in this stage; the decision must be testable on its own.
 
 Done when:
 
-- The type environment can be tested without emitting receiver-qualified call
-  facts.
-- Fixture cases prove lexical shadowing, before-declaration use, duplicate
-  bindings, field fallback, shadow-only poisoning, unsupported declaration-kind
-  reasons, and source-root visibility.
+- Fixture cases prove obscuring by every binding introducer in the ADR's list,
+  before-declaration use, field names that equal class names, inherited-field
+  poisoning, nested class bodies, and source-root visibility.
+- Existing `resolveType` explanations are unchanged for every case that reached
+  them before.
 
-### Stage 5: Receiver-Qualified Call Facts
+### Stage 5: Static Call Facts
 
-Purpose: convert the measured receiver gap into exact Java `CALLS` facts where
-the frontend has enough evidence.
+Purpose: convert the measured static-call gap into exact Java `CALLS` facts.
 
 Depends on: Stage 4.
 
@@ -697,84 +653,67 @@ Likely files:
 
 Required behavior:
 
-- Resolve a receiver-qualified invocation to a fact only when all of these hold:
-  - the receiver type environment establishes exactly one current Java top-level
-    class;
+- Resolve a class-qualified invocation to a fact only when all of these hold:
+  - Stage 4 established the receiver name as exactly one current Java top-level
+    class, with nothing obscuring it;
   - the class is inside the ADR 008 visibility boundary;
   - the method projection finds exactly one current declared method of that name
     in the target class;
-  - method access is inside the subset accepted by ADR 009;
+  - that method is `static`;
+  - its access is inside the subset accepted by ADR 009;
   - the target class declares no supertypes;
-  - the invocation is not inside a nested class body;
-  - no overload, unsupported receiver shape, unsupported binding introducer, or
-    unsupported class shape could change the target.
+  - the invocation is not inside a nested class body.
 - Keep the full invocation text as the designator for unresolved qualified
   calls, as today.
-- Declare provider dependencies for external receiver type and method provider
-  units.
+- Declare provider dependencies for the receiver class's provider unit.
 - Populate method/class-shape reader hints for exact receiver class and
   method-name pairs, including unresolved calls that could become facts after a
-  provider method/class-shape change.
+  provider method or class-shape change.
 - Record distinct unresolved reasons for missing method, overloaded method,
-  inaccessible method outside the covered subset, target class has supertypes,
-  receiver out of scope, unsupported receiver declaration kind, and unsupported
-  receiver expression.
-- Re-run Stage 2 fixtures with expected facts enabled for covered positive
-  cases and expected unresolved reason families for every negative case.
+  non-static method, inaccessible method outside the covered subset, and target
+  class has supertypes.
+- Re-run Stage 2 fixtures with expected facts enabled for covered positive cases
+  and expected unresolved reason families for every negative case.
 
 Done when:
 
-- Covered receiver-qualified calls become `CALLS` facts in committed fixtures.
+- Covered static calls become `CALLS` facts in committed fixtures.
 - Every negative case remains unresolved with an exact reason family.
-- Provider method add/remove/overload/access edits reanalyze the caller and
-  change only the affected claim.
+- Provider method add/remove/overload/access/`static` edits reanalyze the caller
+  and change only the affected claim.
 - Provider class-shape edits, especially adding a declared supertype after a
   fact, reanalyze the caller and remove stale facts from default current
   queries.
-- Focused counters show lookup work bounded by candidate tables, not by all
-  Java units or all graph assertions per invocation.
+- Focused counters show lookup work bounded by candidate tables, not by all Java
+  units or all graph assertions per invocation.
 - Dependency declaration count, propagation rounds, and propagation exhaustion
   are recorded.
 
-### Stage 6: Supertype Guard Reassessment And Follow-Up
+### Stage 6: Follow-Up Discipline
 
-Purpose: decide whether the supertype-driven reference gap deserves its own
-future plan after receiver calls land.
+Purpose: keep the deferred Java work honest after the facts land.
 
 Depends on: Stage 5.
 
 Likely files:
 
+- `docs/followups/013_java_supertype_guard_relaxation.md`
+- `docs/followups/014_java_instance_receiver_calls.md`
 - `docs/reports/012_java_semantic_quality_without_query_regression_progress.md`
-- optional follow-up under `docs/followups/`
 
 Required behavior:
 
-- Re-run the Stage 0 unresolved-reference sample after Stage 5. Record whether
-  the supertype guard is still the dominant in-working-copy reference gap and
-  give concrete examples.
-- Record the addressable closed-hierarchy subset separately from the full
-  supertype bucket:
-  - every superclass in the chain would have to resolve to a current Java class
-    inside the ADR 008 visibility boundary;
-  - no interface or unknown/non-class supertype may keep the hierarchy open;
-  - cycles would have to be detected;
-  - member type declarations with the referenced name would have to be checked
-    through the reachable hierarchy; and
-  - any unsupported member type, missing provider, stale provider, or out-of-
-    scope provider would keep the current unresolved answer.
-- Do not implement this relaxation in Plan 012.
-- Create a follow-up only if the measured subset is large enough to justify a
-  dedicated plan. As a default threshold, record a follow-up when the subset is
-  at least 50 references in the sample or at least 1% of sampled outgoing
-  claims, whichever is smaller; otherwise record that the risk is not justified
-  by current evidence.
+- Re-run the Stage 0 classification after Stage 5 and record what moved. Static
+  calls that land as facts must leave both follow-ups' measured subsets
+  unchanged or smaller, never larger by side effect.
+- Update Follow-up 013 and Follow-up 014 with the post-implementation counts, or
+  record that the Stage 0 counts still stand.
+- Do not implement either follow-up in this plan.
 
 Done when:
 
-- The progress log records why the supertype guard stays unchanged in Plan 012.
-- Any follow-up created has exact acceptance direction, required tests, and
-  explicit class-shape/invalidation requirements.
+- Both follow-ups carry current counts and an acceptance direction that a future
+  plan can execute without re-deriving this plan's measurements.
 
 ### Stage 7: External Remeasurement, Documentation, And Closure
 
@@ -796,7 +735,8 @@ Likely files:
 
 Required behavior:
 
-- Re-run the Stage 0 external probe and compare:
+- Re-run the Stage 0 external probe, at the same commit and in both build modes,
+  and compare:
   - exact call facts and unresolved reasons;
   - exact reference facts and unresolved reasons;
   - `semidx_health`, `semidx_references`, and `semidx_context depth=2` work
@@ -805,33 +745,31 @@ Required behavior:
     and provider-class-shape-change refresh work;
   - dependency declaration count, propagation rounds, and propagation
     exhaustion;
-  - memory impact of new projection tables and new Java extension labels where
-    measured. On apache/dubbo, report label overhead against the observed class
-    and method counts and the Plan 010 371 MB baseline; on a substitute sample,
-    report the substitute's counts instead;
+  - memory impact of new projection tables and new Java extension labels, against
+    the Stage 0 baselines of 351 MB (Debug) and 186 MB (ReleaseFast) maximum
+    resident set size;
   - response-size impact of the new labels: bytes per Java definition item at
     `detail=full`, and whether any habit-loop call now exhausts its budget or
     needs more pages than the Stage 0 baseline at the same
     `max_response_bytes`. Budget semantics are unchanged; what the same budget
     now fits is an observation this plan owes its consumers.
-- Compare receiver-call results against the Stage 0 addressable subset. The
-  denominator is the measured subset under the access subset ADR 009 accepted.
-  If ADR 009 accepts more than public methods, Stage 7 must recalculate that
-  denominator and record both the public lower-bound and accepted-access counts.
-  The plan is not complete unless at least the Stage 0 go-threshold count and at
+- Compare results against the Stage 0 addressable subset of **135** public static
+  invocations. If ADR 009 accepts more than public methods, Stage 7 must
+  recalculate that denominator and record both the public lower-bound and
+  accepted-access counts. The plan is not complete unless at least 100 and at
   least 80% of the accepted-access measured subset become exact `CALLS` facts in
   the same sample. If the 80% bar is missed, closure is allowed only when every
   miss has a recorded out-of-subset reason; otherwise reopen the plan.
 - Update the capability matrix and preview reference with the exact covered Java
-  receiver cases and the cases left unresolved, including static target versus
-  dispatch, access subset, receiver declaration-kind limits, class-shape labels,
-  and class-shape limits.
+  static-call cases and the cases left unresolved, including static target versus
+  dispatch, the access subset, the obscuring rule, class-shape labels, and the
+  instance receivers that stay unresolved.
 - Update `SPEC.md` where this plan moved requirements it owns: name the new Java
-  receiver/member class-shape invalidation producer and Java extension labels,
-  or explicitly record why those owner rows do not change.
+  member/class-shape invalidation producer and Java extension labels, or
+  explicitly record why those owner rows do not change.
 - Update the Java capability matrix definition-label and "Not recorded" rows so
-  `java.supertypes`, method access labels, and the remaining inheritance and
-  dispatch exclusions do not contradict each other.
+  `java.supertypes`, method access and `static` labels, and the remaining
+  inheritance and dispatch exclusions do not contradict each other.
 - Check every durable term this plan or ADR 009 introduced against
   `GLOSSARY.md`, and either add the entry or record which document owns the
   term. Terms that stay owned elsewhere are listed in the progress log with
@@ -846,12 +784,13 @@ Required behavior:
 
 Done when:
 
-- The external remeasurement shows at least the Stage 0 go-threshold count and
-  at least 80% of the accepted-access measured subset as new exact Java receiver
-  call facts in the covered cases. If the 80% bar is missed, every miss has a
-  recorded out-of-subset reason; otherwise the plan is reopened before closure.
+- The external remeasurement shows at least 100 and at least 80% of the
+  accepted-access measured subset as new exact Java static call facts in the
+  covered cases. If the 80% bar is missed, every miss has a recorded
+  out-of-subset reason; otherwise the plan is reopened before closure.
 - No new approximate assertions are introduced.
-- Plan 011's anchored query work bound still holds.
+- Plan 011's anchored query work bound still holds, and the Stage 0 external
+  latency observations have not regressed.
 - Dependency propagation does not silently leave current stale facts behind; any
   exhaustion is reported and treated as residual risk.
 - Documentation states the exact capability boundary without broad Java claims.
@@ -861,18 +800,18 @@ Done when:
 | Requirement / guarantee | Failure risk | Lowest sufficient level | Boundary proof | Negative or bypass case | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | Durable Java `CALLS` semantics are authorized | Plan implements a new semantic relationship without an ADR | ADR plus plan gate | ADR 009 answers all eight constitutional questions | ADR rejects or changes the proposed rule, requiring plan amendment | Stage 1 ADR and progress log |
-| Receiver-qualified facts are exact | False `CALLS` facts from guessed receiver or method target | Java fixture/golden plus frontend integration | Covered receiver shapes resolve to one current method | Unknown receiver, overload, supertypes, out-of-scope type, nested class body | Stage 5 fixture tests and progress-log counts |
-| Receiver bindings are safe | Uncovered binding introducer shadows a field/local but frontend still resolves | Fixture/golden | Covered binding list and shadow-only poison rules | for-each, catch, resource, lambda, pattern, varargs, dimensions | Stage 2/4 fixtures |
-| Intermediate evidence stays honest | Parameter/local types silently become graph facts or unsupported evidence becomes authority | ADR plus fixture/golden | ADR decides internal evidence versus emitted references | ADR requires emitted references, forcing plan amendment | Stage 1 ADR, Stage 4 fixtures |
-| Unresolved remains distinguishable | Unsupported, unavailable, ambiguous, and inaccessible cases look alike | Fixture/golden | Each decline reason family appears in graph output | No-source, out-of-scope, inaccessible, overloaded, duplicate local, unsupported declaration kind | Stage 2 and Stage 5 negative fixtures |
-| Incremental freshness holds | Caller stays stale after provider method/class-shape change | Focused integration/edit-history test | Provider method/class-shape change reanalyzes affected readers | Fact becomes unresolved after provider adds `extends`; unresolved becomes fact after method appears | Stage 3/5 edit tests |
-| Query speed is preserved | Per-call lookup scans all units/assertions | Test-only work counters plus external observation | Candidate work grows with receiver/method candidates, not repository size | Old full-scan path fails the bound | Stage 0/5/7 work measurements |
+| A receiver name is a type only when nothing obscures it | A variable named like a class turns into a static call fact | Fixture/golden | Bound-name set is proved empty for that name, and the enclosing class has no supertypes | Local, parameter, field, for-each, catch, resource, lambda, pattern with the same name; inherited field under a supertype | Stage 2 and Stage 4 fixtures |
+| Static call facts are exact | False `CALLS` facts from a non-static, overloaded, or inaccessible method | Java fixture/golden plus frontend integration | Exactly one declared method of that name, `static`, inside the access subset | Non-static method, overloads, package-private target, class with supertypes, nested class body | Stage 5 fixture tests and progress-log counts |
+| Unresolved remains distinguishable | Unsupported, unavailable, ambiguous, obscured, and inaccessible cases look alike | Fixture/golden | Each decline reason family appears in graph output | No-source, out-of-scope, obscured name, non-static, inaccessible, overloaded | Stage 2, Stage 4 and Stage 5 negative fixtures |
+| Instance receivers stay unresolved | The static rule leaks into value receivers | Fixture/golden | A value receiver keeps its current reason and designator | `local.m()`, `field.m()`, `new T().m()`, `a.b().c()`, `super.m()` | Stage 5 negative fixtures |
+| Incremental freshness holds | Caller stays stale after provider method/class-shape change | Focused integration/edit-history test | Provider method, `static`, access, or class-shape change reanalyzes affected readers | Fact becomes unresolved after provider adds `extends` or drops `static`; unresolved becomes fact after a static method appears | Stage 3/5 edit tests |
+| Query speed is preserved | Per-call lookup scans all units/assertions | Test-only work counters plus external observation | Candidate work grows with class/method candidates, not repository size | Old full-scan path fails the bound | Stage 0/5/7 work measurements |
 | Write path stays bounded | Method/class-shape reader hints cause repository-wide reanalysis | Synthetic doubled-corpus integration test | Provider change reanalyzes readers, not all units | Unit stops reading a method but remains hinted as harmless superset; editing one method does not reanalyze unrelated package declarers/importers | Stage 3/7 refresh measurements |
 | Dependency propagation stays useful | New cross-unit call dependencies exceed propagation budget or make propagation too costly | Integration and scale/work test | Declaration count, rounds, and exhaustion recorded | Chain over 64 rounds emits `analysis_unavailable` and residual risk | Stage 0/5/7 measurements |
-| Source-root boundary remains intact | Receiver/type/method lookup crosses modules by name | Fixture/golden | Same root and test-to-main resolve; other roots unresolved | Cross-module same package with no admitted dependency | ADR 008 fixtures reused in Stage 3/5 |
-| Method access is not guessed | Private/protected/package-private method becomes cross-unit fact without proof | Fixture/golden | Covered access subset is enforced | Private method in another class, protected method outside covered subset | Stage 1 ADR and Stage 5 fixtures |
+| Source-root boundary remains intact | Receiver class lookup crosses modules by name | Fixture/golden | Same root and test-to-main resolve; other roots unresolved | Cross-module same package with no admitted dependency | ADR 008 fixtures reused in Stage 3/5 |
+| Method access is not guessed | Private/protected/package-private method becomes cross-unit fact without proof | Fixture/golden | Covered access subset is enforced | Private static method in another class, protected static method outside covered subset | Stage 1 ADR and Stage 5 fixtures |
 | Public contracts unchanged | MCP clients see shape drift | MCP tests/runtime smoke | Existing tool schemas and payload families still pass | New Java facts through existing relationship fields only | `zig build test-mcp`, `zig build preview-gate` |
-| Capability docs stay honest | Docs imply broad Java receiver or dispatch support | Documentation review | Matrix names exact receiver cases and exclusions | Cross-module, overload, unknown hierarchy, classpath, dynamic dispatch left unresolved | Stage 7 doc diff |
+| Capability docs stay honest | Docs imply broad Java call or dispatch support | Documentation review | Matrix names exact static cases and exclusions | Instance receivers, cross-module, overloads, hiding, classpath, dynamic dispatch left unresolved | Stage 7 doc diff |
 
 ## Verification
 
@@ -900,10 +839,10 @@ not make network access part of a required local lane.
 ## Drift Control
 
 Before implementation, check this plan against `RULES.md`, the architecture
-constitution, ADR 003, ADR 004, ADR 006, ADR 008, Follow-up 011, Follow-up 012,
-Plan 010 progress, Plan 011 progress, `SPEC.md`, `CORE.md`, `MEMORY.md`,
-`GLOSSARY.md`, the capability matrix, the adoption strategy, and the current
-Java frontend.
+constitution, ADR 003, ADR 004, ADR 006, ADR 008, Follow-ups 011, 013 and 014,
+Plan 010 progress, Plan 011 progress, this plan's progress log, `SPEC.md`,
+`CORE.md`, `MEMORY.md`, `GLOSSARY.md`, the capability matrix, the adoption
+strategy, and the current Java frontend.
 
 During closure:
 
@@ -927,20 +866,24 @@ During closure:
 
 This plan is complete when:
 
-- the post-Plan-011 external Java baseline and addressable receiver subset are
-  recorded;
+- the post-Plan-011 external Java baseline and addressable subsets are recorded
+  (done in Stage 0);
 - ADR 009 is accepted and every later stage follows it;
-- receiver-qualified calls in the covered subset become exact facts at or above
-  the Stage 0 go-threshold count, and either at least 80% of the
-  accepted-access measured addressable subset becomes exact or every miss below
-  the 80% bar has a recorded out-of-subset reason;
-- unsupported, ambiguous, stale, out-of-scope, inaccessible, overloaded, and
-  open-hierarchy cases remain unresolved with distinct reason families;
+- static calls in the covered subset become exact facts at or above 100 in the
+  Stage 0 sample, and either at least 80% of the accepted-access measured subset
+  becomes exact or every miss below the 80% bar has a recorded out-of-subset
+  reason;
+- a simple-name receiver is never read as a type where a binding or an inherited
+  field could obscure it;
+- unsupported, ambiguous, stale, out-of-scope, inaccessible, non-static,
+  overloaded, obscured, and open-hierarchy cases remain unresolved with distinct
+  reason families;
+- instance receivers remain unresolved and are tracked by Follow-up 014;
 - provider method and class-shape changes maintain freshness incrementally;
 - query, write-path, and dependency-propagation work bounds show no regression
-  from Plan 011's indexed access model;
-- the supertype guard is either left unchanged with measured rationale or split
-  into a follow-up with precise acceptance direction;
+  from Plan 011's indexed access model, and the Stage 0 external latency
+  observations do not regress;
+- the supertype guard stays unchanged and is owned by Follow-up 013;
 - capability docs and `MEMORY.md` describe the new Java boundary honestly; and
 - every stage's verification, skipped checks, and residual risk are recorded in
   the progress log.
