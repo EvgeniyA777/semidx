@@ -183,7 +183,7 @@ Do not change Clojure or Zig frontend semantics.
 - [MEMORY.md](../../MEMORY.md), for current implementation reality and known
   gaps.
 - [SPEC.md](../../SPEC.md), for the language-extension catalogue and coverage
-  ownership.
+  ownership, including the invalidation-producer roster.
 - [CORE.md](../../CORE.md), for the shared-core roster and admission rules.
 - [ADR 003](../adr/003_reject_name_match_assertions.md), for rejecting
   repository-wide name matching as graph authority.
@@ -390,6 +390,11 @@ Required behavior:
     unavailable;
   - whether the invocation is inside a nested class body; and
   - whether source-root visibility permits the receiver type and method.
+- Treat the interface/enum/record/annotation split here as an offline
+  measurement classification, not as a product runtime reason. The current graph
+  only exports Java classes across units, so cross-unit uncovered top-level type
+  declarations are not distinguishable from "no current top-level class" unless
+  ADR 009 explicitly admits a new minimal uncovered-type evidence channel.
 - Compute the go/no-go addressable subset from a conservative public-method
   lower bound. Later ADR 009 decisions may expand the covered access subset, but
   they must not retroactively make the Stage 0 go decision depend on Stage 1.
@@ -420,6 +425,7 @@ Likely files:
 
 - `docs/adr/009_java_receiver_qualified_calls.md`
 - `docs/reports/012_java_semantic_quality_without_query_regression_progress.md`
+- [GLOSSARY.md](../../GLOSSARY.md), for any durable term the ADR settles
 - this plan, if the ADR changes the stage contract
 
 Required behavior:
@@ -433,12 +439,24 @@ Required behavior:
 - Decide how class-shape evidence is established. This plan's proposed answer
   is additive Java extension labels on existing Java definitions, not
   provider-source re-reading by the Java projection.
+- Decide whether uncovered top-level Java declaration kinds get any minimal
+  evidence. This plan's proposed answer is no: same-unit non-class type
+  declarations may produce a precise unsupported reason from current source, but
+  cross-unit interfaces/enums/records/annotations remain indistinguishable from
+  missing current class exports. If ADR 009 admits minimal cross-unit
+  uncovered-type evidence instead, amend this plan before Stage 4.
 - Decide the covered method-access subset, and state what happens to private,
   protected, package-private, and public methods outside that subset.
 - State that build descriptors, cross-module visibility, inheritance entities,
   dispatch, overload resolution by argument type, `module`, and `IMPORTS` are
   not admitted.
 - Name the fixture families Stage 2 and Stage 5 must satisfy.
+- Own the Java semantic vocabulary it introduces, and record that ownership.
+  Receiver type environment, binding introducer, shadow-only poison, covered
+  access subset, and static target versus dispatch are ADR-owned normative
+  terms, not glossary entries: `GLOSSARY.md` is not normative and must not
+  restate them. Add or revise a glossary entry only for a term whose meaning is
+  project-wide rather than Java-specific, such as class shape.
 
 Done when:
 
@@ -524,6 +542,7 @@ Likely files:
 - `src/frontends/java_packages.zig` or a new `src/frontends/java_members.zig`
 - `src/frontends/root.zig`
 - `src/root.zig`
+- [SPEC.md](../../SPEC.md)
 - focused tests/fixtures
 
 Required behavior:
@@ -546,6 +565,17 @@ Required behavior:
   the previous relationship had no provider dependency because it was
   unresolved. Class shape for this plan includes method set, covered method
   access, and declared supertypes.
+- Do not reuse Java package-export invalidation for method or class-shape
+  changes. The existing `java_packages.Export`/`Export.eql`/`Upkeep.markMissing`
+  path detects only package plus top-level class-name export presence. Adding a
+  shape fingerprint there would mark the whole package changed for a one-method
+  edit and would reanalyze package declarers/importers unrelated to that method.
+  Use a separate aspect-grained class-shape channel keyed at least by receiver
+  class and invoked method name, backed by reader hints.
+- Capture class-shape before/after in `Upkeep` alongside the package export
+  before/after path, and mark only readers of the changed class/method/aspect.
+  If the implementation cannot keep this bounded without package-wide
+  invalidation, stop and amend this plan before Stage 5.
 - Preserve the existing one-round-settles invariant for projection changes:
   method sets and class shape depend only on a unit's own contents. If an
   implementation violates that invariant, stop and redesign the invalidation
@@ -561,6 +591,9 @@ Done when:
   covered access classification, source-root visibility, stale-provider
   rejection, class-shape change detection, and reader invalidation through
   seeded reader hints.
+- Edit-history tests prove that changing one method or class-shape label
+  reanalyzes only relevant hinted readers, not every declarer/importer in the
+  package.
 - Existing Java package/import tests still pass unchanged.
 - No new Java receiver-qualified call fact is emitted by this stage.
 
@@ -606,6 +639,11 @@ Required behavior:
   receiver expression outside covered shapes, and receiver type declared here
   but unsupported as interface/enum/record/annotation rather than top-level
   class.
+- The interface/enum/record/annotation reason is required only when the current
+  unit's own source proves the non-class declaration. For another unit, the
+  current Java graph exports only classes; unless ADR 009 admits new uncovered
+  top-level type evidence, a cross-unit non-class declaration remains the same
+  reason family as "no current top-level class export/source".
 
 Done when:
 
@@ -720,8 +758,10 @@ Likely files:
 
 - `docs/reports/012_java_semantic_quality_without_query_regression_progress.md`
 - [docs/spec/capability_matrix.md](../spec/capability_matrix.md)
+- [SPEC.md](../../SPEC.md)
 - [docs/mcp/local_preview.md](../mcp/local_preview.md)
 - [MEMORY.md](../../MEMORY.md)
+- [GLOSSARY.md](../../GLOSSARY.md)
 - this plan document
 - optional follow-ups
 
@@ -736,16 +776,32 @@ Required behavior:
     and provider-class-shape-change refresh work;
   - dependency declaration count, propagation rounds, and propagation
     exhaustion;
-  - memory impact of new projection tables where measured.
+  - memory impact of new projection tables and new Java extension labels where
+    measured. On apache/dubbo, report label overhead against the observed class
+    and method counts and the Plan 010 371 MB baseline; on a substitute sample,
+    report the substitute's counts instead.
 - Compare receiver-call results against the Stage 0 addressable subset. The
-  plan is not complete unless at least the Stage 0 go-threshold count and at
-  least 80% of the measured addressable subset become exact `CALLS` facts in
+  denominator is the measured subset under the access subset ADR 009 accepted.
+  If ADR 009 accepts more than public methods, Stage 7 must recalculate that
+  denominator and record both the public lower-bound and accepted-access counts.
+  The plan is not complete unless at least the Stage 0 go-threshold count and at
+  least 80% of the accepted-access measured subset become exact `CALLS` facts in
   the same sample. If the 80% bar is missed, closure is allowed only when every
   miss has a recorded out-of-subset reason; otherwise reopen the plan.
 - Update the capability matrix and preview reference with the exact covered Java
   receiver cases and the cases left unresolved, including static target versus
   dispatch, access subset, receiver declaration-kind limits, class-shape labels,
   and class-shape limits.
+- Update `SPEC.md` where this plan moved requirements it owns: name the new Java
+  receiver/member class-shape invalidation producer and Java extension labels,
+  or explicitly record why those owner rows do not change.
+- Update the Java capability matrix definition-label and "Not recorded" rows so
+  `java.supertypes`, method access labels, and the remaining inheritance and
+  dispatch exclusions do not contradict each other.
+- Check every durable term this plan or ADR 009 introduced against
+  `GLOSSARY.md`, and either add the entry or record which document owns the
+  term. Terms that stay owned elsewhere are listed in the progress log with
+  their owner, not copied into the glossary.
 - Update `MEMORY.md` by compression, not by appending a progress log.
 - If a stage commit changes behavior that belongs in `MEMORY.md`, update it in
   that commit or record in the progress log why the current memory entry remains
@@ -757,7 +813,7 @@ Required behavior:
 Done when:
 
 - The external remeasurement shows at least the Stage 0 go-threshold count and
-  at least 80% of the measured addressable subset as new exact Java receiver
+  at least 80% of the accepted-access measured subset as new exact Java receiver
   call facts in the covered cases. If the 80% bar is missed, every miss has a
   recorded out-of-subset reason; otherwise the plan is reopened before closure.
 - No new approximate assertions are introduced.
@@ -777,7 +833,7 @@ Done when:
 | Unresolved remains distinguishable | Unsupported, unavailable, ambiguous, and inaccessible cases look alike | Fixture/golden | Each decline reason family appears in graph output | No-source, out-of-scope, inaccessible, overloaded, duplicate local, unsupported declaration kind | Stage 2 and Stage 5 negative fixtures |
 | Incremental freshness holds | Caller stays stale after provider method/class-shape change | Focused integration/edit-history test | Provider method/class-shape change reanalyzes affected readers | Fact becomes unresolved after provider adds `extends`; unresolved becomes fact after method appears | Stage 3/5 edit tests |
 | Query speed is preserved | Per-call lookup scans all units/assertions | Test-only work counters plus external observation | Candidate work grows with receiver/method candidates, not repository size | Old full-scan path fails the bound | Stage 0/5/7 work measurements |
-| Write path stays bounded | Method/class-shape reader hints cause repository-wide reanalysis | Synthetic doubled-corpus integration test | Provider change reanalyzes readers, not all units | Unit stops reading a method but remains hinted as harmless superset | Stage 3/7 refresh measurements |
+| Write path stays bounded | Method/class-shape reader hints cause repository-wide reanalysis | Synthetic doubled-corpus integration test | Provider change reanalyzes readers, not all units | Unit stops reading a method but remains hinted as harmless superset; editing one method does not reanalyze unrelated package declarers/importers | Stage 3/7 refresh measurements |
 | Dependency propagation stays useful | New cross-unit call dependencies exceed propagation budget or make propagation too costly | Integration and scale/work test | Declaration count, rounds, and exhaustion recorded | Chain over 64 rounds emits `analysis_unavailable` and residual risk | Stage 0/5/7 measurements |
 | Source-root boundary remains intact | Receiver/type/method lookup crosses modules by name | Fixture/golden | Same root and test-to-main resolve; other roots unresolved | Cross-module same package with no admitted dependency | ADR 008 fixtures reused in Stage 3/5 |
 | Method access is not guessed | Private/protected/package-private method becomes cross-unit fact without proof | Fixture/golden | Covered access subset is enforced | Private method in another class, protected method outside covered subset | Stage 1 ADR and Stage 5 fixtures |
@@ -811,8 +867,9 @@ not make network access part of a required local lane.
 
 Before implementation, check this plan against `RULES.md`, the architecture
 constitution, ADR 003, ADR 004, ADR 006, ADR 008, Follow-up 011, Follow-up 012,
-Plan 010 progress, Plan 011 progress, `SPEC.md`, `CORE.md`, `MEMORY.md`, the
-capability matrix, the adoption strategy, and the current Java frontend.
+Plan 010 progress, Plan 011 progress, `SPEC.md`, `CORE.md`, `MEMORY.md`,
+`GLOSSARY.md`, the capability matrix, the adoption strategy, and the current
+Java frontend.
 
 During closure:
 
@@ -822,6 +879,11 @@ During closure:
   revise an ADR instead of burying it in the progress log.
 - If a shared-core kind starts to look necessary, stop and route it through
   `CORE.md` and a future plan.
+- Give every durable term one owner. Java-specific normative vocabulary belongs
+  to ADR 009; measurement vocabulary that exists only for this plan, such as
+  addressable subset and go-threshold count, belongs to this plan and its
+  progress log; project-wide concepts belong to `GLOSSARY.md`. A term used in
+  two of those senses is drift, not shorthand.
 - Keep README out of this unless public positioning or quick-start behavior
   changes. Stage evidence belongs in the progress log.
 - Keep `MEMORY.md` below its policy limit by replacing stale near-term text with
@@ -835,9 +897,9 @@ This plan is complete when:
   recorded;
 - ADR 009 is accepted and every later stage follows it;
 - receiver-qualified calls in the covered subset become exact facts at or above
-  the Stage 0 go-threshold count, and either at least 80% of the measured
-  addressable subset becomes exact or every miss below the 80% bar has a
-  recorded out-of-subset reason;
+  the Stage 0 go-threshold count, and either at least 80% of the
+  accepted-access measured addressable subset becomes exact or every miss below
+  the 80% bar has a recorded out-of-subset reason;
 - unsupported, ambiguous, stale, out-of-scope, inaccessible, overloaded, and
   open-hierarchy cases remain unresolved with distinct reason families;
 - provider method and class-shape changes maintain freshness incrementally;
