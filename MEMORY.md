@@ -275,18 +275,21 @@ documents that own history, rationale, and evidence.
   bounds. Java write-path measurement was left as-is: one-file refresh at 1,200
   units is 13 ms, and package-export reanalysis is constant at 41 units.
 - [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
-  is in progress at Stage 3 and **amended**: its Stage 0 gate declined
+  is in progress at Stage 4 and **amended**: its Stage 0 gate declined
   receiver-qualified instance calls at 63 addressable public invocations against
   a required 100, so the plan now targets static `ClassName.method()` calls,
   measured at 135 in the same sample and needing no method-body type
-  environment. [ADR 009](docs/adr/009_java_static_calls.md) is accepted and a
-  47-case fixture matrix states what it requires, but no Java semantic code
-  answers it yet. Deferred with measurements: instance receivers as
+  environment. [ADR 009](docs/adr/009_java_static_calls.md) is accepted, a
+  47-case fixture matrix states what it requires, and Java definitions carry the
+  class shape a caller cannot read from its own source — `java.supertypes`,
+  `java.access`, `java.static` — behind an aspect-grained invalidation channel
+  reaching the readers of a changed `Class.method` pair and nothing else in the
+  package. No call fact resolves through it yet. Deferred: instance receivers as
   [Follow-up 014](docs/followups/014_java_instance_receiver_calls.md), the
   supertype guard as
   [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md)
-  (lifting it converts 38 of 335 guarded references, 13 safely). The baseline,
-  the classification method, and the counts every threshold refers to are in
+  (it converts 38 of 335 guarded references, 13 safely). The baseline,
+  the classification method, and every threshold count are in
   [the progress log](docs/reports/012_java_semantic_quality_without_query_regression_progress.md).
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP

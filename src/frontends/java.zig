@@ -39,6 +39,74 @@ pub const capabilities: contract.Capabilities = .{
 /// reported as an unsupported construct, never as an absence of invocations.
 const max_depth: u32 = 64;
 
+/// What a unit analyzing a call must know about a class it does not read.
+///
+/// A unit is analyzed from its own source and the graph; another unit's bytes
+/// and parse tree are not available to it, and re-reading them per lookup would
+/// make every answer a parse. So the Java frontend records the shape of what it
+/// declares as extension labels on the definitions themselves, and a later
+/// analysis reads them back as graph facts
+/// ([ADR 009](../../docs/adr/009_java_static_calls.md)).
+///
+/// They are labels rather than a shared-core kind because every one of them is
+/// a Java rule: what `static` selects, what `protected` reaches, and what a
+/// declared supertype may hide are Java's questions and no other language's.
+pub const class_shape = struct {
+    pub const key = "java.supertypes";
+    /// The class declares no superclass and no interface.
+    pub const none = "none";
+    /// It declares at least one, so a member it inherits could be the target
+    /// and the working copy cannot see that it is not.
+    pub const declared = "declared";
+};
+
+pub const method_access = struct {
+    pub const key = "java.access";
+    pub const public = "public";
+    pub const protected = "protected";
+    pub const package_private = "package_private";
+    pub const private = "private";
+};
+
+pub const method_static = struct {
+    pub const key = "java.static";
+    pub const yes = "true";
+    pub const no = "false";
+};
+
+const Modifiers = struct {
+    access: []const u8,
+    is_static: bool,
+};
+
+/// The declared modifiers of a member, as written. A member with no access
+/// keyword is package-private, which is a decision Java makes rather than an
+/// absence of information.
+fn modifiersOf(node: ts.Node) Modifiers {
+    var found: Modifiers = .{ .access = method_access.package_private, .is_static = false };
+    var index: u32 = 0;
+    while (index < node.childCount()) : (index += 1) {
+        const child = node.childAt(index) orelse continue;
+        if (!std.mem.eql(u8, child.kind(), "modifiers")) continue;
+        var keyword: u32 = 0;
+        while (keyword < child.childCount()) : (keyword += 1) {
+            const token = child.childAt(keyword) orelse continue;
+            const text = token.kind();
+            if (std.mem.eql(u8, text, "public")) {
+                found.access = method_access.public;
+            } else if (std.mem.eql(u8, text, "protected")) {
+                found.access = method_access.protected;
+            } else if (std.mem.eql(u8, text, "private")) {
+                found.access = method_access.private;
+            } else if (std.mem.eql(u8, text, "static")) {
+                found.is_static = true;
+            }
+        }
+        break;
+    }
+    return found;
+}
+
 /// Test-only counters for the work deciding one invocation's target costs.
 ///
 /// The same reason `core.graph.work` exists: what an answer costs is a property
@@ -381,6 +449,8 @@ pub fn analyze(
             continue;
         };
         const name = try builder.dupe(name_node.text(source));
+        const has_supertypes = node.childByFieldName("superclass") != null or
+            node.childByFieldName("interfaces") != null;
 
         const index = try builder.addEntity(.{
             .kind = .definition,
@@ -398,6 +468,10 @@ pub fn analyze(
                 .labels = try builder.labels(&.{
                     .{ .key = "java.construct", .value = "class_declaration" },
                     .{ .key = "java.package", .value = package },
+                    .{
+                        .key = class_shape.key,
+                        .value = if (has_supertypes) class_shape.declared else class_shape.none,
+                    },
                 }),
             },
             .resolution = .{ .fact = .{
@@ -427,6 +501,7 @@ pub fn analyze(
                 try builder.dupe(type_node.text(source))
             else
                 "";
+            const modifiers = modifiersOf(member);
 
             const method_index = try builder.addEntity(.{
                 .kind = .definition,
@@ -445,6 +520,11 @@ pub fn analyze(
                         .{ .key = "java.construct", .value = "method_declaration" },
                         .{ .key = "java.return_type", .value = return_type },
                         .{ .key = "java.package", .value = package },
+                        .{ .key = method_access.key, .value = modifiers.access },
+                        .{
+                            .key = method_static.key,
+                            .value = if (modifiers.is_static) method_static.yes else method_static.no,
+                        },
                     }),
                 },
                 .resolution = .{ .fact = .{
@@ -457,8 +537,7 @@ pub fn analyze(
                 .name = method_name,
                 .class_index = index,
                 .class_name = name,
-                .class_has_supertypes = node.childByFieldName("superclass") != null or
-                    node.childByFieldName("interfaces") != null,
+                .class_has_supertypes = has_supertypes,
                 .node = member,
             });
         }

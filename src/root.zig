@@ -369,6 +369,14 @@ pub const Index = struct {
 /// unit analyzed after the last change already saw the final ones and is not.
 /// Reanalysis cannot change exports — they depend only on a unit's own
 /// contents — so one round settles the batch.
+/// A `Class.method` aspect that changed, and the step it changed at. The
+/// class-level aspect has an empty method name.
+const ChangedAspect = struct {
+    class: []const u8,
+    method: []const u8,
+    step: u64,
+};
+
 const Upkeep = struct {
     index: *Index,
     gpa: Allocator,
@@ -382,6 +390,16 @@ const Upkeep = struct {
     /// The unit being changed, before and after the step.
     before: std.ArrayList(frontends.java_packages.Export),
     after: std.ArrayList(frontends.java_packages.Export),
+    /// The Java class shape the same unit exposed, before and after that step.
+    /// Kept apart from the package export above because they answer different
+    /// questions: a package export changes what a *name* can mean, a class
+    /// shape changes what a *call* on a named class can select. Folding a
+    /// method edit into the package channel would reanalyze every declarer and
+    /// importer of the package for a change none of them can see.
+    shape_before: std.ArrayList(frontends.java_members.Aspect),
+    shape_after: std.ArrayList(frontends.java_members.Aspect),
+    /// `Class.method` aspects whose answer may have changed, and when.
+    changed_shapes: std.ArrayList(ChangedAspect),
     /// Units owed reanalysis because a unit they read is changing.
     dependents: []const model.SourceUnitId,
     exhausted: bool,
@@ -404,6 +422,9 @@ const Upkeep = struct {
             .changed_packages = .empty,
             .before = .empty,
             .after = .empty,
+            .shape_before = .empty,
+            .shape_after = .empty,
+            .changed_shapes = .empty,
             .dependents = dependents,
             .exhausted = exhausted,
         };
@@ -414,20 +435,26 @@ const Upkeep = struct {
         self.changed_packages.deinit(self.gpa);
         self.before.deinit(self.gpa);
         self.after.deinit(self.gpa);
+        self.shape_before.deinit(self.gpa);
+        self.shape_after.deinit(self.gpa);
+        self.changed_shapes.deinit(self.gpa);
         self.gpa.free(self.dependents);
         self.* = undefined;
     }
 
-    /// Reads what `unit` exports before it is changed.
+    /// Reads what `unit` exports, and what shape it exposes, before it changes.
     fn captureBefore(self: *Upkeep, unit: model.SourceUnitId) !void {
         self.before.clearRetainingCapacity();
         try frontends.java_packages.exportsOf(&self.index.graph, unit, self.gpa, &self.before);
+        self.shape_before.clearRetainingCapacity();
+        try frontends.java_members.aspectsOf(&self.index.graph, unit, self.gpa, &self.shape_before);
     }
 
     /// The captured unit left the index and exports nothing now.
     fn recordRemoval(self: *Upkeep) !void {
         self.step += 1;
         self.after.clearRetainingCapacity();
+        self.shape_after.clearRetainingCapacity();
         try self.markChanges();
     }
 
@@ -437,6 +464,8 @@ const Upkeep = struct {
         try self.analyzed_at.put(self.gpa, unit, self.step);
         self.after.clearRetainingCapacity();
         try frontends.java_packages.exportsOf(&self.index.graph, unit, self.gpa, &self.after);
+        self.shape_after.clearRetainingCapacity();
+        try frontends.java_members.aspectsOf(&self.index.graph, unit, self.gpa, &self.shape_after);
         try self.markChanges();
     }
 
@@ -445,6 +474,38 @@ const Upkeep = struct {
     fn markChanges(self: *Upkeep) !void {
         try self.markMissing(self.before.items, self.after.items);
         try self.markMissing(self.after.items, self.before.items);
+        try self.markShapeMissing(self.shape_before.items, self.shape_after.items);
+        try self.markShapeMissing(self.shape_after.items, self.shape_before.items);
+    }
+
+    /// Every aspect present on one side and not answered identically on the
+    /// other changed at this step. The comparison is over one unit's own
+    /// classes and methods, which is work the edit already pays to analyze.
+    fn markShapeMissing(
+        self: *Upkeep,
+        from: []const frontends.java_members.Aspect,
+        against: []const frontends.java_members.Aspect,
+    ) !void {
+        outer: for (from) |candidate| {
+            for (against) |other| {
+                if (candidate.eql(other)) continue :outer;
+            }
+            try self.noteChangedAspect(candidate.class, candidate.method);
+        }
+    }
+
+    fn noteChangedAspect(self: *Upkeep, class: []const u8, method: []const u8) !void {
+        for (self.changed_shapes.items) |*existing| {
+            if (!std.mem.eql(u8, existing.class, class)) continue;
+            if (!std.mem.eql(u8, existing.method, method)) continue;
+            existing.step = self.step;
+            return;
+        }
+        try self.changed_shapes.append(self.gpa, .{
+            .class = class,
+            .method = method,
+            .step = self.step,
+        });
     }
 
     fn markMissing(
@@ -505,6 +566,22 @@ const Upkeep = struct {
             // graph, so the hint is taken as it stands and the unit decides.
             for (self.index.analyzer.java_packages.importersOf(package)) |unit| {
                 if ((self.analyzed_at.get(unit) orelse 0) >= changed_at) continue;
+                try appendOwed(self.gpa, &owed, graph, unit);
+            }
+        }
+
+        // A reader of a changed `Class.method` pair has no dependency to be
+        // found by: its call resolved to nothing, so it read nothing. Only the
+        // hint reaches it, and only the readers of what actually changed are
+        // owed anything — not the package's declarers, not its importers.
+        for (self.changed_shapes.items) |changed| {
+            const readers = try self.index.analyzer.java_members.readersOf(
+                changed.class,
+                changed.method,
+                self.gpa,
+            );
+            for (readers) |unit| {
+                if ((self.analyzed_at.get(unit) orelse 0) >= changed.step) continue;
                 try appendOwed(self.gpa, &owed, graph, unit);
             }
         }

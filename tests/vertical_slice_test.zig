@@ -2857,6 +2857,197 @@ test "a receiver that is a value stays unresolved, whatever the static rule admi
     try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
 }
 
+/// A provider, a reader of one of its methods, another class in the same
+/// package, and a unit importing from it. Only the reader is ever hinted, so
+/// what a change costs is visible as a count.
+const MemberTree = struct {
+    index: semidx.Index,
+    provider: model.SourceUnitId,
+    reader: model.SourceUnitId,
+
+    fn init() !MemberTree {
+        var index = try semidx.Index.init(testing.allocator, "tree");
+        errdefer index.deinit();
+
+        const provider = try index.addUnit(
+            "src/main/java/demo/Util.java",
+            .java,
+            "package demo;\n\nclass Util {\n    public static String make() { return null; }\n" ++
+                "    public static String keep() { return null; }\n}\n",
+        );
+        const reader = try index.addUnit(
+            "src/main/java/demo/Reader.java",
+            .java,
+            "package demo;\n\nclass Reader {\n    void run() { Util.make(); }\n}\n",
+        );
+        // A second declarer in the package, and a unit that imports from it.
+        // Both are reanalyzed when the package's exports change, and neither
+        // has any business being reanalyzed when one method's shape does. The
+        // importer names the class without referring to it, so it is reachable
+        // only through the import hint: a dependency of its own would make this
+        // a test of the dependency channel instead.
+        _ = try index.addUnit(
+            "src/main/java/demo/Sibling.java",
+            .java,
+            "package demo;\n\nclass Sibling {\n    void run() {}\n}\n",
+        );
+        _ = try index.addUnit(
+            "src/main/java/app/Importer.java",
+            .java,
+            "package app;\n\nimport demo.Util;\n\nclass Importer {\n    void run() {}\n}\n",
+        );
+        return .{ .index = index, .provider = provider, .reader = reader };
+    }
+
+    fn deinit(self: *MemberTree) void {
+        self.index.deinit();
+        self.* = undefined;
+    }
+
+    fn hint(self: *MemberTree, unit: model.SourceUnitId, class: []const u8, method: []const u8) !void {
+        try self.index.analyzer.java_members.noteReader(unit, class, method);
+    }
+
+    /// Replaces the provider and reports what keeping the graph current cost.
+    fn editProvider(self: *MemberTree, source: []const u8) !usize {
+        semidx.work.reset();
+        _ = try self.index.applyEdit(self.provider, source);
+        return semidx.work.upkeep_reanalyses;
+    }
+};
+
+test "a hinted reader is reanalyzed when the method it asked about changes" {
+    var tree = try MemberTree.init();
+    defer tree.deinit();
+    try tree.hint(tree.reader, "Util", "make");
+
+    // A body edit changes nothing a caller can see.
+    try testing.expectEqual(@as(usize, 0), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    public static String make() { return \"x\"; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    // Losing `public` is a different answer for that one name.
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    // So is losing `static`, gaining an overload, and disappearing entirely.
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    String make() { return null; }\n" ++
+            "    String make(String name) { return null; }\n    public static String keep() { return null; }\n}\n",
+    ));
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    public static String keep() { return null; }\n}\n",
+    ));
+
+    // And a method appearing where the reader found none: the case no
+    // dependency can carry, because an unresolved call read nothing.
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    // Measured, not assumed: not one of these readers declares a dependency,
+    // so propagation has nothing to walk and never runs. Every re-read above
+    // was the hint's doing, which is exactly what it exists for.
+    try testing.expectEqual(@as(usize, 0), tree.index.graph.dependencies.count());
+    try testing.expectEqual(@as(u32, 0), semidx.work.propagation_rounds);
+    try testing.expect(!semidx.work.propagation_exhausted);
+}
+
+test "editing one method does not reanalyze the package's declarers and importers" {
+    var tree = try MemberTree.init();
+    defer tree.deinit();
+    try tree.hint(tree.reader, "Util", "make");
+
+    // Four Java units share this package's scope, and one method changed. If
+    // the class shape travelled on the package export channel, the sibling
+    // declarer and the importer would both be re-read for a change neither can
+    // see; the count is how that stays a claim rather than a hope.
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    protected static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    // The package channel still does its own job: a class appearing in the
+    // package is what the declarers and the importer are owed.
+    semidx.work.reset();
+    _ = try tree.index.addUnit(
+        "src/main/java/demo/Extra.java",
+        .java,
+        "package demo;\n\nclass Extra {}\n",
+    );
+    try testing.expect(semidx.work.upkeep_reanalyses > 1);
+}
+
+test "a class-shape change reaches every reader of that class, not only of one method" {
+    var tree = try MemberTree.init();
+    defer tree.deinit();
+
+    // Two readers, each hinted on a different method of the same class.
+    const second = try tree.index.addUnit(
+        "src/main/java/demo/Second.java",
+        .java,
+        "package demo;\n\nclass Second {\n    void run() { Util.keep(); }\n}\n",
+    );
+    try tree.hint(tree.reader, "Util", "make");
+    try tree.hint(second, "Util", "keep");
+
+    // A declared supertype can hide a static method of any name, so every
+    // reader of the class is owed a re-read, not only the ones whose own
+    // method aspect moved.
+    try testing.expectEqual(@as(usize, 2), try tree.editProvider(
+        "package demo;\n\nclass Util extends Absent {\n    public static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    // And removing it again makes both eligible once more.
+    try testing.expectEqual(@as(usize, 2), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+}
+
+test "an unhinted reader is not reached, and a stale hint costs a pass and no claim" {
+    var tree = try MemberTree.init();
+    defer tree.deinit();
+
+    // Nothing hinted: the reader's call read nothing, so nothing is owed.
+    try testing.expectEqual(@as(usize, 0), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    protected static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    // A hint the reader has outgrown is a superset, not an error: the unit is
+    // re-read and says exactly what it said before.
+    try tree.hint(tree.reader, "Util", "make");
+    var before = try tree.index.publish();
+    const before_calls = before.countRelationships(.{ .kind = .calls, .resolution = .fact });
+    before.deinit();
+
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(before_calls, after.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+    // Stage 3 builds the channel and emits no new call fact through it.
+    try testing.expectEqual(@as(usize, 0), after.countRelationships(.{
+        .kind = .calls,
+        .source = definitionIn(&after, "src/main/java/demo/Reader.java", "Reader", "run").?.id,
+        .resolution = .fact,
+    }));
+    try testing.expectEqual(@as(usize, 0), after.countApproximateAssertions());
+}
+
 test "the write path and the java frontend report the work they do" {
     semidx.work.reset();
     semidx.frontends.java.work.reset();

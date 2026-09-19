@@ -27,7 +27,8 @@ No Java semantic code changed. The same measurement priced the alternatives, and
 the plan now targets static `ClassName.method()` calls at **135** in the same
 sample, which clears the same threshold with less machinery.
 [ADR 009](../adr/009_java_static_calls.md) is accepted, the Stage 2 fixture
-matrix states what it requires, and Stage 3 is next. See
+matrix states what it requires, Stage 3 built the projection and the
+invalidation channel it needs, and Stage 4 is next. See
 [The Decision](#the-decision) and
 [Amendment 1](../plans/012_java_semantic_quality_without_query_regression.md#amendment-1-from-instance-receivers-to-static-calls).
 
@@ -44,7 +45,8 @@ strongly. `semidx_context depth=2` on apache/dubbo fell from **90.71 s to
 | Stage 0 closure: Amendment 1 | Completed | Plan re-aimed at static `ClassName.method()` calls (135 in the sample). Instance receivers deferred to [Follow-up 014](../followups/014_java_instance_receiver_calls.md), the supertype guard to [Follow-up 013](../followups/013_java_supertype_guard_relaxation.md). No code changed. |
 | Stage 1: ADR for Java static calls | Completed | [ADR 009](../adr/009_java_static_calls.md) accepted: a class-name receiver resolves only when nothing can obscure it, the target class declares no supertypes, and the target is its one declared `static` method inside the covered access subset (public, plus any access inside the enclosing class). Rejected alternatives recorded: capitalization heuristic, method-only binding checks, admitting target classes with supertypes, widening access ahead of evidence, provider-source re-reading, a shared-core kind. |
 | Stage 2: Java quality fixtures and counters | Completed | 47 cases in five tests state what ADR 009 requires before any behavior changes: the covered and declined static calls, every binding introducer that obscures a receiver name, the provider edit sequence, the value receivers that must stay unresolved, and the work counters. Falsified by flipping the matrix switch: the three behavioral tests fail exactly where Stage 5 must deliver. `zig build test` 238/240, from 233/235. |
-| Stages 3-7 | Not started | Next: Stage 3 projection, class shape, and invalidation. |
+| Stage 3: Java method projection, class shape, and invalidation | Completed | Class shape and method modifiers are carried as MCP-visible extension labels; `java_members` reads them back as candidates; an aspect-grained channel reaches the readers of a changed `Class.method` pair and nothing else in the package. Measured: a one-method edit costs 1 reanalysis where 4 Java units share the scope, a body edit 0, a supertype edit 2 for two readers — with 0 declared dependencies and 0 propagation rounds behind it. No call fact emitted. |
+| Stages 4-7 | Not started | Next: Stage 4, reading a receiver name as a type. |
 
 ## Plan Readiness Gate
 
@@ -646,3 +648,155 @@ outside a test build and no assertion, label, or payload field moved.
 - **The counters are process-global test-only variables.** Tests reset them
   before use, which is correct while Zig runs a test binary's tests in sequence;
   a parallel test runner would need per-test isolation instead.
+
+## Stage 3: Java Method Projection, Class Shape, And Invalidation
+
+The candidate infrastructure a static call needs exists, and it emits no call
+fact. What a class is — its methods, their access, whether they are `static`,
+and whether it declares supertypes — is now carried by the graph, readable by a
+later analysis, and watched by an invalidation channel of its own.
+
+### Class Shape Is Carried, Not Re-Read
+
+A unit is analyzed from its own source. Another class's modifiers are not in it,
+the frontend contract hands out no provider bytes or trees, and re-reading the
+provider per lookup would make every answer a parse. So the frontend records
+what it declares, as extension labels on the definitions themselves:
+
+| Label | On | Values |
+| --- | --- | --- |
+| `java.supertypes` | class | `none`, `declared` |
+| `java.access` | method | `public`, `protected`, `package_private`, `private` |
+| `java.static` | method | `true`, `false` |
+
+They are MCP-visible, which is a payload change even though no tool contract
+moved, so it is proved rather than asserted: a new `zig build test-mcp` test
+starts a server on a Java unit and reads the four labels back out of a
+`semidx_find_definitions` result.
+
+`package_private` is a value rather than an absence, because a method that names
+no access keyword is package-private by Java's decision, not by missing
+information. The projection keeps a separate `unknown` for a definition that
+carries no label at all — something other than the current Java frontend
+recorded it — and `unknown` declines rather than assuming the permissive case.
+
+### The Projection
+
+`src/frontends/java_members.zig`, the same discipline as `java_packages`: it
+creates no entity, no signature kind, no inheritance relationship, decides
+nothing, and re-reads the graph on every call.
+
+- `classShapeOf` answers only for a current top-level Java class fact in a live
+  unit, so a stale or failed provider offers nothing to select against.
+- `methodsOf` returns the methods a class declares, in declaration order, with
+  their access and `static` marker.
+- `select` answers `missing`, `overloaded` with a count, or `unique` with the
+  one method — it never returns the first of several, because choosing between
+  overloads needs argument types this frontend does not have.
+
+### The Invalidation Channel, And Why It Is Not The Package One
+
+The existing `java_packages` export path detects a package plus a top-level
+class name appearing or disappearing. A method's access changing is invisible to
+it, and folding a shape fingerprint into it would mark the whole package changed
+for a one-method edit — reanalyzing declarers and importers for a change none of
+them can see.
+
+So class shape travels on its own channel, at two granularities:
+
+| Aspect | Changes when | Reaches |
+| --- | --- | --- |
+| `Class` | the class appears, disappears, or starts or stops declaring supertypes | every unit hinted as a reader of any method of that class |
+| `Class.method` | that name's whole selection changes: count, access, or `static` | the units hinted on that pair |
+
+Both exist because they are different questions. A class-level change can change
+the answer for a method name the class does not even declare — which is the
+reader whose call is unresolved today and could become a fact tomorrow, and the
+one no `Class.method` aspect can reach. Method aspects carry the class's
+supertype shape too, so a supertype edit reaches pair readers directly rather
+than only through the class bucket.
+
+`Upkeep` captures the shape a unit exposes before and after the step that
+changes it, beside the package-export capture that was already there, and marks
+only the aspects that actually differ.
+
+### Measured
+
+Four Java units share the fixture's scope: the provider, a reader hinted on one
+of its methods, a second declarer in the same package, and a unit that imports
+from it. Every number is a test assertion, not an observation.
+
+| Change to the provider | Units reanalyzed |
+| --- | ---: |
+| A method body | **0** |
+| `public` dropped from one method | **1** |
+| `static` dropped from one method | **1** |
+| One method gains an overload | **1** |
+| One method removed | **1** |
+| One method appears where the reader found none | **1** |
+| A declared supertype added, two readers on two different methods | **2** |
+| A new class appears in the package | **more than 1** — the package channel, still doing its own job |
+
+The one in every row is the hinted reader. The sibling declarer and the importer
+are never among them, which is the claim this stage exists to make.
+
+And the reach is measured where no dependency could carry it: **0** declared
+dependencies among those readers, **0** propagation rounds, propagation never
+exhausted. An unresolved call read nothing, so it declared nothing, so nothing
+but the hint can reach it — and the hint does.
+
+### Decisions Worth Recording
+
+- **Hints are keyed by the simple name as written, not by a resolved provider.**
+  A reader that could not resolve its receiver has no provider to key on, and
+  that reader is exactly the one the channel exists for. The cost is accepted
+  over-invalidation: a class of the same name in an unrelated module reanalyzes
+  readers whose answer cannot change. That is a pass and no claim, and it is the
+  side the plan requires — a hint may over-invalidate, never under.
+- **The aspect diff is quadratic in one unit's own classes and methods**, the
+  same shape as the existing package-export diff, and bounded by work the edit
+  already pays to analyze.
+- **Provider dependencies for resolved targets are not declared yet**, because
+  no target resolves yet. `declareProvider` already exists for the type rule and
+  Stage 5 uses it for method targets.
+
+### Documentation
+
+`SPEC.md`'s invalidation row named Java package-export invalidation as the only
+producer and listed aspect-grained invalidation as still to specify. It now
+names class shape as the second producer and the first aspect-grained one, and
+what remains open is narrowed to whether a hint should key on a resolved
+provider rather than a simple name. The capability matrix is Stage 7's, after
+the behavior exists.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | Clean |
+| `zig build test-core` | 97/98 passed, 1 skipped |
+| `zig build test` | 248/250 passed, 2 skipped — from 238/240 after Stage 2 |
+| `zig build test-mcp` | 30/31 passed, 1 skipped — from 29/30, the new label-visibility test |
+| `zig build preview-gate` | 14/14 steps, 6/6 tests, every hard gate passed |
+
+Existing Java package and import tests pass unchanged; no test needed editing to
+accommodate the labels or the channel.
+
+### Residual Risk
+
+- **Nothing populates the hints yet.** Stage 5 does, from the receiver names the
+  frontend reads. Until then the `Upkeep` path is proved with seeded hints,
+  which is what the plan asks for, and the frontend half is unproved.
+- **The name-keyed hint over-invalidates across modules**, as recorded above.
+  Narrowing it to a resolved provider would lose the unresolved reader, so it
+  needs a second key rather than a replacement; `SPEC.md` now carries that as
+  the open question.
+- **The labels add bytes to every Java definition item.** Stage 7 owes the
+  measurement against the Stage 0 baseline.
+- **`zig build dogfood` and `zig build preview-gate` are timing-sensitive on a
+  cold or busy machine.** The first two runs after a fresh compile failed with
+  no assertion message, and the test binaries passed when run directly; four
+  consecutive runs since have passed, including the gate's 14/14. This is **not
+  a Stage 3 regression**: it reproduces at `HEAD` with this stage's changes
+  stashed. Stage 7 depends on both lanes, so it is recorded here rather than
+  left to be rediscovered.

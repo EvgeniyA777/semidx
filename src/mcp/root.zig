@@ -2183,3 +2183,83 @@ test {
     _ = stdio;
     _ = tools;
 }
+
+/// The value of one extension label on a serialized definition.
+fn labelOf(definition: std.json.ObjectMap, key: []const u8) ?[]const u8 {
+    const labels = definition.get("extension").?.object.get("labels").?.array.items;
+    for (labels) |label| {
+        if (std.mem.eql(u8, label.object.get("key").?.string, key)) {
+            return label.object.get("value").?.string;
+        }
+    }
+    return null;
+}
+
+test "the java class-shape and modifier labels reach a tool result" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(test_io, .{
+        .sub_path = "Util.java",
+        .data =
+        \\class Util {
+        \\    public static String make() { return null; }
+        \\    String packaged() { return null; }
+        \\}
+        \\
+        \\class Shaped extends Absent {
+        \\}
+        \\
+        ,
+    });
+    const root = try tmp.dir.realPathFileAlloc(test_io, ".", testing.allocator);
+    defer testing.allocator.free(root);
+
+    var log: Writer.Allocating = .init(testing.allocator);
+    defer log.deinit();
+    var server = try Server.init(testing.allocator, test_io, .{ .root = root }, &log.writer);
+    defer server.deinit();
+
+    var out: Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try server.handleLine(
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{" ++ modern_meta ++
+            ",\"name\":\"semidx_find_definitions\",\"arguments\":{\"language\":\"java\"}}}",
+        &out.writer,
+    );
+    const parsed = try std.json.parseFromSliceLeaky(
+        std.json.Value,
+        arena,
+        try arena.dupe(u8, out.written()),
+        .{},
+    );
+    const definitions = parsed.object.get("result").?.object
+        .get("structuredContent").?.object.get("definitions").?.array.items;
+
+    // The shape a caller cannot read from its own source is carried by the
+    // definition itself, and a consumer sees exactly what the frontend recorded.
+    var checked: usize = 0;
+    for (definitions) |value| {
+        const definition = value.object;
+        const name = definition.get("name").?.string;
+        if (std.mem.eql(u8, name, "Util")) {
+            try testing.expectEqualStrings("none", labelOf(definition, "java.supertypes").?);
+            checked += 1;
+        } else if (std.mem.eql(u8, name, "Shaped")) {
+            try testing.expectEqualStrings("declared", labelOf(definition, "java.supertypes").?);
+            checked += 1;
+        } else if (std.mem.eql(u8, name, "make")) {
+            try testing.expectEqualStrings("public", labelOf(definition, "java.access").?);
+            try testing.expectEqualStrings("true", labelOf(definition, "java.static").?);
+            checked += 1;
+        } else if (std.mem.eql(u8, name, "packaged")) {
+            try testing.expectEqualStrings("package_private", labelOf(definition, "java.access").?);
+            try testing.expectEqualStrings("false", labelOf(definition, "java.static").?);
+            checked += 1;
+        }
+    }
+    try testing.expectEqual(@as(usize, 4), checked);
+}

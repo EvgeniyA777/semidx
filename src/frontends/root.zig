@@ -13,6 +13,7 @@ const ts = @import("semidx_tree_sitter");
 
 pub const java = @import("java.zig");
 pub const java_packages = @import("java_packages.zig");
+pub const java_members = @import("java_members.zig");
 pub const clojure = @import("clojure.zig");
 pub const zig = @import("zig.zig");
 
@@ -52,6 +53,10 @@ pub const Analyzer = struct {
     /// unit's context is built from its own package rather than from the whole
     /// repository. Meaningful for the one graph this analyzer indexes into.
     java_packages: java_packages.Packages,
+    /// Which units have read which `Class.method` pair, so a provider edit
+    /// reaches the callers it can change without reanalyzing a package.
+    /// Populated by the Java frontend's readers; a superset, never an answer.
+    java_members: java_members.Members,
 
     pub const default_budget: ts.Budget = .{ .max_bytes = 8 << 20 };
 
@@ -62,6 +67,7 @@ pub const Analyzer = struct {
             .budget = budget,
             .invocations = 0,
             .java_packages = java_packages.Packages.init(gpa),
+            .java_members = java_members.Members.init(gpa),
         };
     }
 
@@ -71,6 +77,7 @@ pub const Analyzer = struct {
             slot.* = null;
         }
         self.java_packages.deinit();
+        self.java_members.deinit();
         self.* = undefined;
     }
 
@@ -1094,4 +1101,227 @@ test "calls in a zig member body follow the same narrow rules, with the containe
     }
     try testing.expectEqual(@as(usize, 2), checked);
     try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+}
+
+// -- Plan 012: the Java member projection -------------------------------------
+
+/// The shape of the one class named `name` in `unit`, as the graph holds it.
+fn shapeOf(
+    graph: *core.Graph,
+    unit: model.SourceUnitId,
+    name: []const u8,
+    gpa: Allocator,
+) !?java_members.ClassShape {
+    var definitions: std.ArrayList(model.EntityId) = .empty;
+    defer definitions.deinit(gpa);
+    try graph.definitionsInUnit(unit, &definitions, gpa);
+    for (definitions.items) |id| {
+        const shape = java_members.classShapeOf(graph, id) orelse continue;
+        if (std.mem.eql(u8, shape.name, name)) return shape;
+    }
+    return null;
+}
+
+test "a java class carries the modifiers and supertype shape a static call must check" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const unit = try addJava(&analyzer, &graph, "demo/Util.java",
+        \\package demo;
+        \\
+        \\class Util {
+        \\    public static String make() { return null; }
+        \\    public static String twice() { return null; }
+        \\    public static String twice(String name) { return null; }
+        \\    protected static String guarded() { return null; }
+        \\    static String packaged() { return null; }
+        \\    private static String hidden() { return null; }
+        \\    public String instance() { return null; }
+        \\}
+        \\
+        \\class Shaped extends Absent {
+        \\    public static String make() { return null; }
+        \\}
+        \\
+    );
+
+    const util = (try shapeOf(&graph, unit, "Util", testing.allocator)).?;
+    try testing.expectEqual(java_members.Supertypes.none, util.supertypes);
+    try testing.expectEqualStrings("demo", util.package);
+
+    var methods: std.ArrayList(java_members.Method) = .empty;
+    defer methods.deinit(testing.allocator);
+    try java_members.methodsOf(&graph, util, testing.allocator, &methods);
+    try testing.expectEqual(@as(usize, 7), methods.items.len);
+
+    // One name, one method: the only selection a static call may act on.
+    const make = java_members.select(methods.items, "make").unique;
+    try testing.expectEqual(java_members.Access.public, make.access);
+    try testing.expect(make.is_static);
+
+    // Overloads are reported as what they are, not resolved to the first.
+    try testing.expectEqual(@as(u32, 2), java_members.select(methods.items, "twice").overloaded);
+    try testing.expectEqual(java_members.Selection.missing, java_members.select(methods.items, "absent"));
+
+    // Every access the frontend distinguishes, including the one Java gives a
+    // member that names none.
+    try testing.expectEqual(
+        java_members.Access.protected,
+        java_members.select(methods.items, "guarded").unique.access,
+    );
+    try testing.expectEqual(
+        java_members.Access.package_private,
+        java_members.select(methods.items, "packaged").unique.access,
+    );
+    try testing.expectEqual(
+        java_members.Access.private,
+        java_members.select(methods.items, "hidden").unique.access,
+    );
+    try testing.expect(!java_members.select(methods.items, "instance").unique.is_static);
+
+    // A class that declares a supertype says so, because what it may inherit is
+    // what a caller cannot see.
+    const shaped = (try shapeOf(&graph, unit, "Shaped", testing.allocator)).?;
+    try testing.expectEqual(java_members.Supertypes.declared, shaped.supertypes);
+}
+
+test "a provider whose analysis failed exposes no class shape at all" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const unit = try addJava(
+        &analyzer,
+        &graph,
+        "demo/Util.java",
+        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n}\n",
+    );
+    try testing.expect((try shapeOf(&graph, unit, "Util", testing.allocator)) != null);
+
+    // The unit no longer parses, so nothing it once declared is current, and a
+    // call must not select against what the working copy may not contain.
+    _ = try graph.setSourceUnitBytes(unit, "package demo;\n\nclass Util {\n");
+    _ = try analyzer.indexUnit(&graph, unit);
+    try testing.expect((try shapeOf(&graph, unit, "Util", testing.allocator)) == null);
+
+    var aspects: std.ArrayList(java_members.Aspect) = .empty;
+    defer aspects.deinit(testing.allocator);
+    try java_members.aspectsOf(&graph, unit, testing.allocator, &aspects);
+    try testing.expectEqual(@as(usize, 0), aspects.items.len);
+}
+
+test "one method edit changes one aspect, and leaves the class's others alone" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const unit = try addJava(&analyzer, &graph, "demo/Util.java",
+        \\package demo;
+        \\
+        \\class Util {
+        \\    public static String make() { return null; }
+        \\    public static String keep() { return null; }
+        \\}
+        \\
+    );
+
+    var before: std.ArrayList(java_members.Aspect) = .empty;
+    defer before.deinit(testing.allocator);
+    try java_members.aspectsOf(&graph, unit, testing.allocator, &before);
+    // The class itself, and one aspect per method name.
+    try testing.expectEqual(@as(usize, 3), before.items.len);
+
+    _ = try graph.setSourceUnitBytes(unit,
+        \\package demo;
+        \\
+        \\class Util {
+        \\    static String make() { return null; }
+        \\    public static String keep() { return null; }
+        \\}
+        \\
+    );
+    _ = try analyzer.indexUnit(&graph, unit);
+
+    var after: std.ArrayList(java_members.Aspect) = .empty;
+    defer after.deinit(testing.allocator);
+    try java_members.aspectsOf(&graph, unit, testing.allocator, &after);
+
+    var changed: usize = 0;
+    for (before.items) |candidate| {
+        var same = false;
+        for (after.items) |other| {
+            if (candidate.eql(other)) same = true;
+        }
+        if (!same) changed += 1;
+    }
+    // Only `make` moved: losing `public` is a different answer for that name
+    // and the same answer for every other.
+    try testing.expectEqual(@as(usize, 1), changed);
+    for (after.items) |aspect| {
+        if (!std.mem.eql(u8, aspect.method, "make")) continue;
+        try testing.expectEqual(java_members.Access.package_private, aspect.access);
+    }
+}
+
+test "a class outside the visibility boundary is never a candidate to select a member from" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    _ = try addJava(
+        &analyzer,
+        &graph,
+        "moduleA/src/main/java/demo/Util.java",
+        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n}\n",
+    );
+    const reader = try addJava(
+        &analyzer,
+        &graph,
+        "moduleB/src/main/java/demo/Caller.java",
+        "package demo;\n\nclass Caller {\n    void run() { Util.make(); }\n}\n",
+    );
+
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    const context = try contextFor(&analyzer, &graph, reader, scratch.allocator());
+
+    // The member projection is only ever reached through a class the type rule
+    // already selected, and across source roots there is none to hand it.
+    const binding = context.lookup("demo", "Util").?;
+    try testing.expectEqual(@as(u32, 1), binding.out_of_scope);
+}
+
+test "reader hints remember the pair and the class, and answer for both" {
+    var members = java_members.Members.init(testing.allocator);
+    defer members.deinit();
+
+    const caller: model.SourceUnitId = @enumFromInt(1);
+    const other: model.SourceUnitId = @enumFromInt(2);
+    try members.noteReader(caller, "Util", "make");
+    try members.noteReader(other, "Util", "keep");
+    // Noting the same pair twice does not make two readers of one unit.
+    try members.noteReader(caller, "Util", "make");
+
+    const make_readers = try members.readersOf("Util", "make", testing.allocator);
+    try testing.expectEqual(@as(usize, 1), make_readers.len);
+    try testing.expectEqual(caller, make_readers[0]);
+
+    // A class-level change reaches every reader of any of its methods.
+    const class_readers = try members.readersOf("Util", "", testing.allocator);
+    try testing.expectEqual(@as(usize, 2), class_readers.len);
+
+    // A pair nobody read has no readers, rather than falling back to the class.
+    try testing.expectEqual(
+        @as(usize, 0),
+        (try members.readersOf("Util", "absent", testing.allocator)).len,
+    );
+    try testing.expectEqual(
+        @as(usize, 0),
+        (try members.readersOf("Absent", "make", testing.allocator)).len,
+    );
 }
