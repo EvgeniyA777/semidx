@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-17"
+updated: "2026-09-19"
 ---
 
 # semidx Glossary
@@ -40,6 +40,15 @@ including identity limitations of frontends and source ingestion. It exists so
 partial coverage is visible to consumers rather than hidden behind a
 uniform-looking graph.
 
+**class shape** — The part of a class other units' analysis depends on, as
+distinct from the class's existence: its current declared member set, the access
+of those members within a frontend's covered rules, and whether it declares
+supertypes. It is not a graph kind and not an inheritance model; it names which
+provider changes oblige a dependent unit to be reanalyzed. What counts as class
+shape for a given language is owned by that language's ADR and reported in the
+[capability matrix](docs/spec/capability_matrix.md); this entry records the
+concept, not the roster.
+
 **consumer** — Anything that reads the graph rather than producing it: search,
 AI agents, IDE integration, impact analysis, documentation linkage, or future
 compilation tooling. The direction is the point: consumers depend on the graph,
@@ -53,6 +62,14 @@ example, a repository containing a file is containment.
 **content identity** — Evidence that two observed source-unit contents are the
 same bytes, currently recorded as a SHA-256 value. It is evidence used by
 source-unit correspondence; it is not a semantic identity by itself.
+
+**covered** — Inside a producer's currently implemented exact rules. A covered
+construct, shape, or rule is one the producer can decide exactly today; anything
+outside it stays unsupported or unresolved, and those answers stay
+distinguishable from each other. Covered is therefore a claim about a producer's
+present reach rather than about the language, it changes as frontends grow, and
+what it currently reaches per language is reported in the
+[capability matrix](docs/spec/capability_matrix.md).
 
 **dependency declaration** — A record that one source unit's analysis read
 something about another source unit. A change to the provider obliges the
@@ -87,6 +104,15 @@ modeled, the edge is how it is stored.
 **evidence text** — Bounded source text recorded with an assertion as evidence
 for what the producer observed, such as a name or callee. MCP output omits it by
 default; enabling it is separate from returning arbitrary source bodies.
+
+**extension label** — A language-specific key and value a frontend attaches to
+an entity or assertion it establishes, such as a construct kind or a package
+name. A label is part of what the producer recorded, so it is graph content a
+later analysis may read back — unlike a *projection*, which carries no
+authority. Labels are how language-specific meaning stays out of the shared
+core; the per-language roster is reported in the
+[capability matrix](docs/spec/capability_matrix.md), and the catalogue itself is
+owned by [SPEC.md](SPEC.md).
 
 **external target** — A relationship target entity that was established outside
 the source unit currently being analyzed and supplied to the frontend through
@@ -135,18 +161,26 @@ or `module`; those candidates are owned by [CORE.md](CORE.md).
 **invalidation** — The process of deciding which source units must be
 reanalyzed because a source change may affect assertions they previously
 produced. Invalidation is driven by changed contents, dependency declarations,
-and producer-specific context such as package exports.
+and producer-specific channels, of which Java package exports are the first. A
+producer-specific channel is needed exactly where an earlier answer was
+unresolved and so declared no dependency to propagate along; the roster of
+channels therefore grows with the producers that need one, and which channels
+are specified is owned by [SPEC.md](SPEC.md). *Reader hints* are how a channel
+finds the units it owes.
 
 **local MCP preview** — The experimental local stdio MCP consumer over published
 graph snapshots. It is a preview tool surface, not a published semantic
 contract, and it does not define graph semantics.
 
 **projection** — A derived view that is not a source of truth: a lexical index,
-a vector index, an embedding window, a rendered snippet, or a rendered subgraph.
-A projection may be derived from the graph or built directly from source text.
+a vector index, an embedding window, a rendered snippet, a rendered subgraph, or
+an analyzer-side candidate table such as a package, member, or hint lookup. A
+projection may be derived from the graph or built directly from source text.
 Either way it can be rebuilt or discarded without losing graph meaning, and
 either way it may discover, rank, or render — never establish a program
-relationship.
+relationship. *Analysis context* is what a projection hands one frontend for one
+source unit: the projection is the table, the context is the answer read out of
+it, and neither carries authority.
 
 **provenance** — The record of what produced an assertion: source ingestion, a
 frontend, an analyzer, exact system resolution, or another recorded method.
@@ -154,6 +188,20 @@ frontend, an analyzer, exact system resolution, or another recorded method.
 **provider source unit** — A source unit whose current graph facts were read by
 another unit's analysis. Provider changes can invalidate dependents through
 dependency declarations or producer-specific export tracking.
+
+**reader hint** — A conservative record of which source units may read some
+piece of another unit's evidence, kept by a projection so that a change to that
+evidence can reach a unit whose earlier answer declared no dependency, because
+an unresolved answer read no provider. A hint may be a superset: reanalyzing a
+unit that no longer reads the evidence costs a pass and changes no claim.
+Under-inclusion is a freshness defect, over-inclusion is only a cost, and the
+asymmetry is deliberate.
+
+**reason family** — The class an explanation of a negative answer belongs to,
+such as no source, out of scope, ambiguous, overloaded, or outside covered
+shapes. Tests and measurements assert the family so that the wording of an
+explanation can improve without reading as a regression, while a change of
+family stays a change of meaning.
 
 **release candidate** — A repository state that has passed the named local gate
 for a planned release but has not necessarily been tagged or distributed.
@@ -222,6 +270,13 @@ define graph meaning.
 items. Truncation must say which result set was bounded and preserve enough
 metadata for the consumer to decide whether to make a narrower or more detailed
 follow-up query.
+
+**work bound** — A deterministic assertion about how much work an operation
+inspects — candidates, records, or propagation rounds — committed as a test
+rather than as a wall-clock threshold. It is chosen because it fails under the
+access path it replaced and stays reliable on any machine, which a timing
+threshold does not. Wall-clock measurements remain useful as observations of
+what users feel; they are not the committed bound.
 
 ## Document Ownership
 
