@@ -1,18 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-
-if [ -n "${CLOJURE_BIN:-}" ]; then
-  clojure_bin="$CLOJURE_BIN"
-else
-  clojure_bin="$(command -v clojure || true)"
-fi
-
-if [ -z "${clojure_bin:-}" ]; then
-  echo "clojure command not found; set CLOJURE_BIN or add clojure to PATH" >&2
-  exit 1
-fi
-
-cd "$REPO_ROOT"
-exec "$clojure_bin" -M:mcp "$@"
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+exec "$script_dir/semidx-mcp.sh" "$@"

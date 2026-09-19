@@ -1,301 +1,189 @@
 ---
-title: "semidx Direction Spec"
-doc_type: "spec"
+title: "Companion requirements"
+doc_type: "specification"
 lifecycle: "active"
+status: "draft"
 agent_action: "reference_for_context"
-updated: "2026-08-27"
+updated: "2026-09-17"
 ---
 
-# semidx — Direction Spec
+# semidx Requirements
 
-## What this document is
+The companion requirements document named by role in
+[ARCHITECTURE_CONSTITUTION.md](ARCHITECTURE_CONSTITUTION.md). This is a draft
+requirements entry point, not a complete implementation specification or a
+published runtime contract. Document ownership is recorded in the
+[documentation policy](docs/agent-policy/documentation.md). The architecture
+rationale lives in [ARCHITECTURE_RATIONALE.md](ARCHITECTURE_RATIONALE.md), and
+reviewable checks live in [CONFORMANCE.md](CONFORMANCE.md).
 
-The single source of truth for the **current direction** of `semidx`: the axis
-(one graph over code and documentation), the phase we are in, the current
-authority state, and the falsifiable claims that must hold for the bet to be
-worth it.
+## Core Contract Lifecycle
 
-- **Covers**: the axis, the phased roadmap, non-goals, source authority, and the
-  value hypotheses with their kill-criteria.
-- **Does not cover**: feature status (see [`docs/roadmap-status.md`](docs/roadmap-status.md)),
-  human onboarding (see [`README.md`](README.md)), decision rationale (see
-  [`adr/`](adr/)), or agent operating rules (see [`RULES.md`](RULES.md)).
+[CORE.md](CORE.md) owns the kinds, definitions, and admission evidence. A
+candidate has no published-contract status: it may be edited, replaced, or
+rejected. Acceptance requires all constitutional admission requirements,
+resolved transitive dependencies, declared frontend coverage, and conformance
+fixtures. An accepted definition is not evidence of implemented support.
 
-This document is **not** a fourth governance layer. It exists because the
-direction is otherwise only reconstructable from a chain of superseding ADRs,
-which is error-prone — and because keeping every effort aligned to one line is
-itself Phase 3 payoff #4. Boundary between documents:
+A published roster has an explicit version identifying the accepted definitions
+and a published coverage matrix. Every snapshot and query contract must identify
+the semantic contract version it uses. Historical definitions remain available
+so old assertions retain their original interpretation.
 
-| Document | Answers |
+Corrections to membership or meaning require a new contract version and a
+migration record. That record names the affected kinds and consumers, explains
+the defect and replacement, and specifies conversion or reanalysis, identity
+handling, deprecation, compatibility, and retirement conditions. A conversion
+must not claim semantic equivalence it cannot establish. Version mismatches and
+unsupported versions produce explicit results, never silent reinterpretation.
+
+An erroneous kind may be absent from a corrected roster; consumers using that
+roster must be able to observe the change. Retiring support for an old version
+does not erase its definition or silently relabel its assertions. Exact version
+encoding and compatibility windows remain requirements to settle before the
+first contract publication.
+
+## Core Admission Criteria
+
+[CORE.md](CORE.md) assesses every candidate against the five criteria below.
+They were constitutional text before the constitution was distilled to product
+identity. Admission mechanics are changeable requirements, so they live here; the
+constitutional boundary they serve is
+[section 6](ARCHITECTURE_CONSTITUTION.md#6-language-frontends-preserve-meaning).
+
+**Adequacy.** The core must be sufficient for a consumer to ask, across
+languages, what entities exist and what refers to what. A core that cannot carry
+existence and reference does not make frontends comparable, which is the only
+reason it exists. This is a floor on the accepted roster, not on any one
+candidate: a candidate carrying it may be replaced by a better definition, but it
+cannot simply be rejected and leave the floor unmet.
+
+**Identical meaning.** A kind may be core only if it means the same thing in
+every supported language. This is a test of meaning, not of presence. A kind may
+satisfy it even where some language has no instances of that kind; it must also
+satisfy the other criteria.
+
+**Honest absence.** A frontend produces a core kind only where its language
+actually has one. Confirmed absence, absence of the construct from the language,
+and inability of the frontend to analyze that construct must remain
+distinguishable to consumers. A frontend must never substitute an approximation
+for a core kind it cannot produce. A language whose frontend cannot produce some
+core kind is supported with that coverage reported unavailable, not excluded.
+
+**Subsidiarity.** A kind may be core only when the cross-language question it
+answers is well-posed for every supported language and belongs to the guaranteed
+common model. A question confined to particular languages is answered by a
+declared mapping between those languages' extensions. The ability to map one
+pair does not disqualify a kind the common model needs. Requiring every language
+to map toward one common target is a core kind in disguise and is governed as
+one.
+
+**Common cost.** Adding a core kind obliges every existing frontend to conform to
+its definition when producing it and to declare its coverage. It does not require
+a frontend to extract an unsupported construct. The core therefore does not grow
+casually: each addition requires a conformance and coverage assessment across
+frontends, with limitations exposed through the capability matrix.
+
+A candidate is accepted only when all five criteria are assessed, its transitive
+dependencies are resolved, its frontend coverage is declared, and its conformance
+fixtures exist.
+
+## Coverage And Conformance
+
+The capability matrix identifies language, producer version, entity and
+relationship coverage, and identity limitations, including source ingestion.
+It distinguishes a construct
+absent from a language, unavailable frontend analysis, and confirmed absence in
+an analyzed source snapshot. Analysis failures are reported separately.
+
+For each supported kind, fixtures must establish admission meaning and expected
+facts, partially resolved assertions, and approximate assertions. Reference
+query fixtures include specialized relationships such as calls without counting
+the same occurrence twice. Resolution evidence and mapping provenance remain
+visible through every public surface.
+
+Conformance scenario families are owned by
+[CONFORMANCE.md](CONFORMANCE.md#required-scenario-families). Requirements that
+adopt one of those checks specify concrete fixtures, commands, expected results,
+and publication gates here or in subordinate specifications.
+
+The current implementation's coverage, per producer and per outcome, is stated
+in the [preview capability matrix](docs/spec/capability_matrix.md). That matrix
+is unversioned implementation guidance for the local preview, not the published
+coverage matrix this section requires of a semantic contract.
+
+A first in-memory implementation slice exists
+([plan](docs/plans/001_zig_vertical_slice.md),
+[evidence](docs/reports/001_zig_vertical_slice_progress.md)), with fixture
+coverage for two languages. There is still no published coverage matrix, no
+executable conformance suite, and no published coverage. The requirements above remain
+requirements for later verification, not claims of passing results.
+
+The repository-scale ingestion slice is also complete
+([plan](docs/plans/002_repository_scale_ingestion.md),
+[evidence](docs/reports/002_consolidated_progress.md#005-repository-scale-ingestion-progress)). It
+settles the first source-identity layer for implementation guidance: discovered
+source units have allocated identity, path is a property, exact moves preserve
+unit and contained entity identities, ambiguous or unsupported moves are
+reported, and move-plus-edit remains identity loss until stronger evidence
+exists. It also added the dependency propagation mechanism cross-unit facts
+need, before any producer declared dependencies.
+
+The first cross-unit producer is implemented
+([ADR 004](docs/adr/004_allow_java_same_package_type_resolution.md),
+[plan](docs/plans/003_java_package_type_resolution.md),
+[evidence](docs/reports/003_java_package_type_resolution_progress.md)). A Java
+simple type name in a unit with an explicit package can be a `REFERENCES` fact
+targeting the one current top-level class another unit declares in that package,
+once the Java frontend has ruled out every scope Java gives precedence over the
+package. The dependent declares a dependency on the provider unit, and a change
+to a package's exported classes reanalyzes that package's other units. This is
+implementation guidance for one Java rule, not a Java coverage claim: it admits
+no `module` or `IMPORTS`, publishes no contract or capability matrix, and treats
+the indexed repository as a single Java classpath.
+
+A Zig frontend and a local MCP preview exist
+([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md),
+[plan](docs/plans/004_zig_frontend_and_mcp_preview.md),
+[evidence](docs/reports/004_zig_frontend_and_mcp_preview_progress.md)). The Zig
+frontend covers top-level functions and containers, functions declared directly
+inside those containers, same-unit bare calls, and calls qualified by a local
+relative `@import` alias to the one function the imported unit exports, with a
+dependency on that unit
+([ADR 006](docs/adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md),
+[plan](docs/plans/006_zig_dogfood_semantic_coverage.md),
+[evidence](docs/reports/006_zig_dogfood_semantic_coverage_progress.md)). It
+reports everything else as unsupported or unresolved and admits no `module` or
+`IMPORTS`; this is dogfood coverage, not a Zig coverage claim. `semidx-mcp` is an experimental local stdio
+consumer over published snapshots
+([reference](docs/mcp/local_preview.md)). Its tool schemas are not a public
+contract, its results report `semantic_contract_version: null`, and source text
+is excluded unless the server is started with an explicit evidence-text opt-in.
+
+## Requirements Still To Specify
+
+| Area | Work needed before the dependent implementation or publication |
 | --- | --- |
-| `SPEC.md` (this file) | What is the axis, which phase are we in, and how will we know we are right? |
-| `adr/*.md` | Why did we decide each thing, and when? (decision log) |
-| `README.md` | What is this, for a new human reader? |
-| `docs/roadmap-status.md` | What is built vs not? (checklist) |
+| Implementation stack | Settled for the first slice: Zig ([ADR 001](docs/adr/001_choose_zig_implementation_language.md)), `zig build`, and local tree-sitter C sources ([ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md)). Packaging, distribution, product versioning, and any long-running process mode remain to specify ([follow-up 004](docs/followups/004_release_discipline_for_mcp_preview.md)) |
+| Initial coverage | Target languages, producer versions, admission fixtures, and measured limitations |
+| Core roster | Resolve the blocked candidates and admission evidence in CORE.md |
+| Extensions and mappings | Per-language definitions, declared mapping semantics, and evidence preservation |
+| Source identity | Discovered roots, source-unit identity, path-as-property, tombstones, and exact move correspondence are implemented for the in-memory slice. Still to specify: generated or virtual source origins, multi-root identity, and stronger evidence for move-plus-edit refactors |
+| Storage and snapshots | Representation, atomic publication, persistence, and contract-version encoding |
+| Public contracts | Schemas, resolution encoding, errors, ordering, pagination, and transport parity. The MCP preview's tool shapes are experimental consumer choices, not answers to these |
+| Invalidation | Unit-to-unit dependency propagation and Java package-export invalidation exist, with Java same-package type resolution as the first producer. Still to specify: further language-correct producers, name-grained or aspect-grained invalidation, and build-module or classpath boundaries for package scope |
+| Local budgets | Discovery has initial file-size, unit-count, and depth budgets with diagnostics; repository-scale tests guard affected-region work. Still to specify: benchmark repositories, memory/startup budgets, and publish/query cost budgets |
+| Optional outbound data | Destination/data consent settings and verification for projections and diagnostics |
 
-If this file and an ADR disagree on *current direction*, this file wins and the
-stale ADR line must be corrected. ADRs remain authoritative for the historical
-*why*.
+## Proposed Delivery Direction
 
-## Status tags
+Delivery can progress from structural entities and program relationships to
+finer dependency and impact analysis, then compilation-related consumers. This
+is a proposal, not a mandated sequence or an authorization to implement it.
+Incremental maintenance, consistent snapshots, identity, and the other
+constitutional properties apply to the first working graph; they are not a later
+phase.
 
-Every claim below is tagged:
-
-- **[committed]** — backed by an accepted decision or implemented behavior.
-- **[in-progress]** — decided, implementation not yet the default.
-- **[hypothesis-under-test]** — proposed direction, **not yet ratified or
-  proven**. Do not treat as fact.
-
-## 1. Axis (the one bet)
-
-semidx builds **one deterministic, typed graph that unifies a repository's code
-and its documentation**, and serves it to AI agents as staged, token-budgeted
-context. The bet: *a query should return the relevant code together with the
-docs and decisions bound to it — and the same graph that answers queries should
-also keep the documentation itself small, consistent, and hierarchical.*
-
-The graph is **deterministic first**. Any LLM use is for labels, summaries, and
-narration — never as the source of truth for code or documentation
-relationships. **[committed]** as a principle (see
-[`ideas/011_agent_graph_intelligence_layer.md`](ideas/011_agent_graph_intelligence_layer.md)).
-
-The bet is about **context quality per unit of cost** and **documentation
-discipline**, not about being a universal semantic analyzer, a compiler, or a
-general-purpose knowledge base.
-
-## 2. Phased roadmap
-
-The axis is delivered in three phases. Each phase must be *quality-proven*
-before the next begins — a low-quality code graph makes a docs graph and a
-linked graph worthless.
-
-### Phase 1 — Quality graph over code  ·  **[in-progress]** (current phase)
-
-A trustworthy typed-relation graph of the codebase, served through staged
-retrieval.
-
-- Typed-relation graph substrate:
-  [`adr/039-separate-relation-identity-from-resolution-and-evidence.md`](adr/039-separate-relation-identity-from-resolution-and-evidence.md). **[committed]**
-- Relations as a public query surface:
-  [`adr/040-expose-bounded-relation-traversal-as-a-public-query-surface.md`](adr/040-expose-bounded-relation-traversal-as-a-public-query-surface.md). **[committed]**
-- Staged retrieval as the canonical public contract:
-  [`adr/024-make-compact-first-staged-retrieval-the-canonical-public-flow.md`](adr/024-make-compact-first-staged-retrieval-the-canonical-public-flow.md). **[committed]**
-- Fact quality via the authority ladder (§4) — SCIP/LSP over tree-sitter over
-  regex:
-  [`adr/046-prefer-semantic-evidence-providers-over-structural-and-lexical-fallbacks.md`](adr/046-prefer-semantic-evidence-providers-over-structural-and-lexical-fallbacks.md),
-  [`plans/018_semantic_provider_authority_migration_plan.md`](plans/018_semantic_provider_authority_migration_plan.md). **[planned]**
-- One-shot context delivery on top of staging:
-  [`plans/019_llm_one_shot_context_delivery_and_evaluation_plan.md`](plans/019_llm_one_shot_context_delivery_and_evaluation_plan.md). **[planned]**
-- Persistent local runtime reuse for short-lived invocations:
-  [`plans/021_persistent_jvm_runtime_reuse_plan.md`](plans/021_persistent_jvm_runtime_reuse_plan.md). **[in-progress]**
-- Comparative real-repository value evidence:
-  [`plans/020_retrieval_value_benchmark_harness_plan.md`](plans/020_retrieval_value_benchmark_harness_plan.md). **[in-progress]**
-
-**Exit gate**: the code-graph value hypothesis (§5.1) passes on real repos.
-
-### Phase 2 — Quality graph over documentation  ·  **[hypothesis-under-test]** (next)
-
-Index the repository's own documentation (Markdown: README, `adr/`, `plans/`,
-`reports/`, `docs/`, `ideas/`, `notes/`) as first-class graph nodes, with the
-same determinism and provenance discipline as code.
-
-- Documentation authority reuses the existing frontmatter lifecycle discipline
-  (`lifecycle`, `status`, `agent_action`, supersession) so `active` beats
-  `superseded` deterministically (see [`RULES.md`](RULES.md) Documentation
-  Rules). **[hypothesis-under-test]**
-- Motivation: documentation has proliferated (dozens of ADRs/plans/reports) and
-  is expensive to keep consistent by hand.
-
-**Exit gate**: the docs-graph is fresh, deterministic, and its authority model
-(current vs superseded) is trustworthy.
-
-### Phase 3 — Link code and documentation  ·  **[hypothesis-under-test]** (after)
-
-Add edges between documentation nodes and the code they describe, enabling the
-four payoffs:
-
-1. **Reduce documentation volume** — detect redundant/overlapping docs.
-2. **Eliminate contradictions** — surface docs that disagree with code or with
-   each other (graph-lint over doc↔code edges).
-3. **Build a documentation hierarchy** — derive structure from the graph instead
-   of maintaining it by hand.
-4. **Hold the general line** — flag work and docs that drift from the direction
-   recorded here.
-
-Concept and prior art: [`ideas/011_agent_graph_intelligence_layer.md`](ideas/011_agent_graph_intelligence_layer.md)
-("docs/ADR-linked context", graph-lint checks).
-
-**Exit gate**: the doc-discipline value hypothesis (§5.2) passes.
-
-## 3. Non-Goals
-
-Deliberately excluded possibilities (not negated goals):
-
-- **Not a compiler.** No production-grade full interprocedural resolution across
-  all languages. **[committed]** (README "What This Project Does Not Do (Yet)")
-- **Not a universal 30+ language index** in the LSIF/SonarQube style. Language
-  lanes are added by parser risk and ceiling, not for breadth. **[committed]**
-  (see [`adr/028-prioritize-tree-sitter-adoption-by-language-risk-and-parser-ceiling.md`](adr/028-prioritize-tree-sitter-adoption-by-language-risk-and-parser-ceiling.md))
-- **Not a SCIP-only / build-required index.** External semantic providers raise
-  authority but are never *required*; the tool must still work on dirty and
-  unbuildable trees. **[committed]** (decision driver in
-  [`adr/046-...`](adr/046-prefer-semantic-evidence-providers-over-structural-and-lexical-fallbacks.md))
-- **Not a general-purpose RAG / knowledge base over arbitrary prose.** Phase 2/3
-  index the *repository's own* documentation (Markdown/ADRs), not external wikis,
-  tickets, or the open web. **[committed]** (scope boundary)
-- **Not an LLM-as-source-of-truth.** The graph is deterministic; LLMs only label
-  and summarize. **[committed]** (principle per [`ideas/011`](ideas/011_agent_graph_intelligence_layer.md))
-- **Not a REPL, formatter, or editor.** Retrieval only. **[committed]**
-  ([`RULES.md`](RULES.md) Preferred Tool Boundaries)
-
-## 4. Source authority (graph fact quality)
-
-Per-operation, per-fact authority ladder. Higher tiers are preferred; lower
-tiers fill gaps but must never overwrite or masquerade as a higher tier.
-**[committed]** — accepted in [`adr/046-...`](adr/046-prefer-semantic-evidence-providers-over-structural-and-lexical-fallbacks.md).
-
-1. `exact` — fresh SCIP / LSP / compiler evidence.
-2. `structural` — tree-sitter (repo-managed toolchain,
-   [`adr/047-...`](adr/047-retain-repo-managed-tree-sitter-toolchain-for-structural-providers.md)).
-3. `heuristic` — regex / bounded lexical extraction (always confidence-limited;
-   never presented as exact).
-4. `fallback` — generic file-section coverage.
-
-For documentation (Phase 2), authority derives from frontmatter lifecycle:
-`active`/`accepted` outrank `superseded`/`archived`; supersession links define
-replacement. **[hypothesis-under-test]**
-
-Staged retrieval (compact selection → optional widening → detail fetch) is the
-canonical delivery contract across code and, later, documentation nodes;
-`selection_id` + `snapshot_id` are reused across stages. **[committed]**
-([`RULES.md`](RULES.md) Contracts And Runtime Invariants)
-
-## 5. Value hypotheses and kill-criteria
-
-Each phase carries its own **Riskiest Assumption** — the belief that, if false,
-means the phase is not worth its cost. Stated as falsifiable claims with success
-and failure signals fixed in advance.
-
-### 5.1 Phase 1 — code-graph value  ·  **[hypothesis-under-test]**
-
-**Hypothesis (falsifiable).** *We believe that* an AI agent solving real tasks
-on a real repository *will* reach correct results with fewer tokens and less
-wall-clock using semidx retrieval *than* with `rg` + reading files (and `rg` +
-LSP where available), *because* graph-backed, structure-ranked, staged, budgeted
-context supplies the relevant code without whole-file dumping.
-
-**North Star candidate.** *Agent task success per unit cost* (provider-priced
-input/cache/output/reasoning/tool usage, normalized per agent) on a fixed
-real-repo suite, relative to the preregistered competent `rg`+read baseline.
-Inputs: retrieval precision/recall, packet compactness under budget,
-`exact`-tier coverage vs `heuristic` fallback.
-
-**Why not yet proven.** Current benchmarks build a synthetic repository and score
-against self-authored expectations
-([`src/semidx/runtime/benchmarks.clj`](src/semidx/runtime/benchmarks.clj)) —
-behavior validation, not comparative product value. Any "N× token savings" figure
-is an internal fixture result.
-
-**Test.** Reproducible real-repo benchmark with four strategy arms: (A) semidx,
-(B) competent `rg` + reading files, (C) `rg` + an LSP/SCIP navigation baseline
-where available, and (D) the agent's versioned native no-index browsing policy.
-Measured on task success, false negatives, wall-clock, tool calls, and cost
-(cost-weighted tokens, normalized per agent — raw usage semantics differ by
-provider). The four-arm measurement harness, per-agent usage normalization, and
-success-per-cost aggregation are specified in
-[`plans/020_retrieval_value_benchmark_harness_plan.md`](plans/020_retrieval_value_benchmark_harness_plan.md).
-
-B is the preregistered primary comparator for the Phase 1 verdict. C and D are
-reported controls; an unavailable C is explicit, and neither control may replace
-B or redefine the pass/fail rule after scoring begins.
-
-- **Success signal** (provisional, *moderate* posture — locked after the Stage 0
-  pilot, never after scoring): arm A runs at **≥50% lower cost (≥2×;
-  versioned provider/model price schedules)** than the competent `rg`+read
-  baseline B, at task success **≥ B − 5 percentage points** (parity within the
-  noise band), wall-clock **≤ 1.5× B**, over **≥30 tasks including ≥1 external
-  repository**.
-- **Failure signal**: A does not reach 2× lower cost against B at parity success,
-  or loses more than 5 percentage points of task success vs B. C and D inform
-  diagnosis but do not rescue the primary verdict.
-
-**Pilot-then-lock.** The margins above are provisional. Stage 0 of
-[`plans/020`](plans/020_retrieval_value_benchmark_harness_plan.md) runs a small
-calibration pilot that measures only the competent-baseline cost and the
-success-metric noise floor — not the verdict — then locks the final threshold
-before the scoring run, preserving falsifiability.
-
-**Kill-criterion.** On the failure signal, narrow scope to Clojure-first
-retrieval (strongest lane) and stop presenting semidx as a general index.
-
-### 5.2 Phase 3 — doc-discipline value  ·  **[hypothesis-under-test]**
-
-**Hypothesis (falsifiable).** *We believe that* linking docs to code in the graph
-*will* let maintainers cut documentation volume and catch code↔doc contradictions
-that manual review misses, *because* redundancy and disagreement become explicit
-graph queries rather than reading tasks.
-
-**North Star candidate (future).** Doc-graph health: count of unresolved
-code↔doc contradictions and redundant-doc clusters trending down while coverage
-holds.
-
-**Kill-criterion.** If graph-lint over doc↔code edges produces mostly
-false positives, or finds nothing manual review would not, Phase 3 does not ship
-as a product surface and stays an internal maintenance aid.
-
-**Priority implication.** Until Phase 1's §5.1 evidence exists, the top priority
-is that benchmark — not Phase 2/3, new transports, or governance surface.
-
-## 6. Open questions
-
-Hard questions surfaced deliberately (PR/FAQ style):
-
-- What real-world task suite and repositories make the Phase 1 benchmark
-  trustworthy rather than another synthetic fixture?
-- What is the fair `rg`/LSP baseline harness, so a win is not an artifact of a
-  weak baseline?
-- Which MCP clients should use the still-open MCP HTTP launcher profile instead
-  of stdio process-lifetime reuse?
-- For Phase 2, what is a documentation *fact*? Node granularity: whole file,
-  heading section, or claim-level?
-- For Phase 3, how are doc↔code edges established without an LLM as source of
-  truth — anchors, symbol mentions, path references, explicit frontmatter links?
-- If Phase 1's kill-criterion fires, which lanes survive the Clojure-first
-  narrowing?
-
-## 7. Honesty contract (what to infer)
-
-- **What semidx does today**: structure-ranked, staged, budgeted retrieval over a
-  typed-relation code graph with explicit provenance/confidence per fact.
-- **What it does not do yet**: index documentation, link docs to code, or
-  guarantee compiler-grade correctness of every relation (it degrades explicitly
-  to structural, then heuristic, then fallback). Runtime HTTP launcher reuse now
-  exists for short-lived request paths, while MCP HTTP reuse guidance and
-  launcher hardening remain in progress under `plans/021`.
-- **What a caller may infer**: facts tagged `exact` reflect fresh
-  compiler/LSP/SCIP evidence.
-- **What a caller must not infer**: that `heuristic`/`fallback` facts, the
-  internal token-savings figures, or any Phase 2/3 capability are validated
-  product guarantees.
-
-## 8. Maintenance
-
-- Update this file when the axis, a phase, a non-goal, the authority line, or a
-  value hypothesis changes — in the same commit as the change.
-- When a `hypothesis-under-test` item is ratified or proven, retag it and link
-  the ADR/plan/benchmark that backs it.
-- Do not start a phase before the prior phase's exit gate passes.
-- Keep this file short (a 1–3 page "mini design doc", not an implementation
-  manual). Detail belongs in ADRs, reference docs, and `docs/roadmap-status.md`.
-- Alternatives considered and their rationale live in [`adr/`](adr/); this file
-  states the chosen line, not the full decision history.
-- Revisit the North Star candidates and hypotheses at least every 6–12 months,
-  or on any event that changes them.
-
-## Structure basis
-
-Section shape follows established practice, adapted to a small living spec:
-Google design-doc *Context / Goals / Non-Goals / trade-offs* structure;
-falsifiable-hypothesis and Riskiest-Assumption-Test framing; the North Star
-Framework (metric + inputs); and Amazon working-backwards PR/FAQ open-questions
-discipline.
+Search, agents, MCP, documentation linkage, and IDE integrations may develop
+alongside that work. A concrete execution plan must first satisfy the repository
+Plan Readiness Gate.

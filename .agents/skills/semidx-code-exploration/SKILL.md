@@ -1,45 +1,51 @@
 ---
 name: semidx-code-exploration
-description: "Explore semidx source, callers, tests, and blast radius with CCC and Semantic Code Indexing before manual search. Use for cold-start orientation, symbol lookup, impact analysis, test discovery, or preparation for multi-file changes."
+description: "Explore semidx source, callers, tests, and blast radius with Semantic Code Indexing before manual search. Use for cold-start orientation, symbol lookup, impact analysis, test discovery, or preparation for multi-file changes."
 ---
 
 # semidx Code Exploration
 
 Use the global `semidx` skill and MCP tools as the canonical retrieval contract.
-This repository skill adds semidx-specific bootstrap and evidence requirements.
+This repository skill adds semidx-specific evidence requirements.
 
 ## Workflow
 
 1. Read `RULES.md`.
-2. Before first-pass exploration, read `docs/code-context.md` and `.ccc/state.edn`
-   when present; run `./scripts/agent-bootstrap.sh` only if CCC artifacts are
-   missing.
-3. Run the semantic flow with an absolute root:
+2. Run the semantic flow:
 
    ```text
-   create_index -> repo_map -> resolve_context
-   -> expand_context -> fetch_context_detail
+   semidx_health -> semidx_outline -> semidx_repo_map(path_prefix)
+   -> semidx_find_definitions -> semidx_references or semidx_context
    ```
 
-4. Verify reported root path, snapshot id, active languages, lifecycle state,
-   confidence, and diagnostics.
-5. Refine broad results with concrete paths, symbols, modules, tests, and
-   `freshness: current_snapshot` before concluding context is thin.
-6. For a change, inspect relevant definitions, callers, callees, related tests,
-   contracts, fixtures, provider descriptors, storage/runtime edges, and
+   Keep the default compact `detail`; ask for `detail: "full"` only on the one
+   target whose resolution explanations, producer versions, or byte offsets
+   the task needs ([detail levels](../../../docs/mcp/local_preview.md#detail-levels-and-budgets)).
+   When a result is cut, follow its `narrowing_hints`; for impact beyond one
+   step, use `semidx_context` with `direction` and `depth: 2`.
+3. Verify reported root path, snapshot revision, language counts, parser
+   availability, analysis state, and diagnostics.
+4. Refine broad results with concrete `path`, `path_prefix`, `language`, `role`,
+   `name`, or `entity_id` filters before concluding context is thin.
+5. For a change, inspect relevant definitions, callers, callees, related tests,
+   contracts, fixtures, frontend coverage, storage/runtime edges, and
    documentation ownership.
-7. Use manual `rg` or file reads only after semantic refinement is insufficient,
+6. Use manual `rg` or file reads only after semantic refinement is insufficient,
    the target is outside indexed source, or an MCP tool returns an explicit
    error. Record the fallback reason.
+7. After editing indexed source, call `semidx_refresh` before relying on later
+   graph answers.
 
 ## Required Output Before Non-Trivial Edits
 
 - relevant definitions and ownership boundaries;
 - inbound and outbound dependencies;
 - related tests, fixtures, and missing test seam;
-- contract, provider-authority, storage, runtime, and documentation impacts;
-- confidence, limitations, snapshot id, and exact files needing direct
+- contract, identity, storage, runtime, and documentation impacts;
+- resolution, freshness, limitations, snapshot revision, and exact files needing direct
   inspection.
 
-Do not stop after only `create_index` or `resolve_context`. Low confidence for a
-language with a low ceiling is not a tool failure.
+Do not stop after only `semidx_health`, `semidx_outline`, or `semidx_repo_map`. The preview is
+exact when it knows and honest when it does not; unresolved, unsupported,
+stale, approximate, and unavailable results are useful signals, not permission
+to present guesses as facts.

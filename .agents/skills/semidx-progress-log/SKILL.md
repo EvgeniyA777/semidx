@@ -35,8 +35,9 @@ credentials, or unbounded logs.
 ## Closure
 
 When a plan or stage finishes, mark completed work as historical instead of
-leaving stale checklists. Update `MEMORY.md` when runtime behavior, invariants,
-active assumptions, known gaps, or priorities materially changed.
+leaving stale checklists. Update `MEMORY.md` when runtime behavior,
+constitutional properties, conformance requirements, active assumptions, known
+gaps, or priorities materially changed.
 
 For a temporary clean-context handoff, use root `progress.txt` only when needed:
 

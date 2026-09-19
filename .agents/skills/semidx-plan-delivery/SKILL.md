@@ -22,10 +22,10 @@ Use this skill for non-trivial staged implementation work in semidx.
    - Create or update the companion progress log with `semidx-progress-log`.
 
 3. Implement the smallest coherent slice.
-   - Preserve existing module boundaries and provider contracts.
+   - Preserve existing module boundaries and published contracts.
    - Keep new behavior default-off or shadow when the plan requires it.
-   - Keep source identity, freshness, provider authority, and contract changes
-     explicit; do not let provider-native identifiers become stable merge keys.
+   - Keep source identity, freshness, and contract changes explicit; do not let
+     a frontend's native identifiers become stable identity keys.
 
 4. Prove the slice.
    - Use `semidx-test-design` to map risks to the lowest sufficient checks.

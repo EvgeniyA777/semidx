@@ -1,0 +1,17 @@
+.{
+    .name = .semidx,
+    // The product version: reported by `semidx-mcp --version` and in MCP
+    // server identity. Independent of any semantic contract version.
+    .version = "0.1.0-preview.3",
+    .fingerprint = 0xbca3ae2dc800f351,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "tests",
+        "fixtures",
+        "LICENSE",
+    },
+}

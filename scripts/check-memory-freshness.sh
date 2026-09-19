@@ -98,7 +98,7 @@ fi
 
 trigger_files="$(
   printf '%s\n' "$changed_files" |
-    grep -E '^(src/|test/|scripts/|contracts/|proto/|deps\.edn$|README\.md$|RULES\.md$|AGENTS\.md$|CLAUDE\.md$|docs/(runtime-api|mcp-api|roadmap-status)\.md$|plans/|adr/|docs/(adr|design|plans)/)' || true
+    grep -E '^(src/|test/|scripts/|contracts/|proto/|deps\.edn$|ARCHITECTURE_CONSTITUTION\.md$|ARCHITECTURE_RATIONALE\.md$|CONFORMANCE\.md$|CORE\.md$|SPEC\.md$|GLOSSARY\.md$|README\.md$|RULES\.md$|AGENTS\.md$|CLAUDE\.md$|docs/agent-policy/|docs/(runtime-api|mcp-api|roadmap-status)\.md$|plans/|adr/|docs/(adr|design|plans)/)' || true
 )"
 
 if [ -z "$trigger_files" ]; then
