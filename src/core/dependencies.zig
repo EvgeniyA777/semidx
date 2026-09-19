@@ -106,6 +106,12 @@ pub const Dependencies = struct {
         /// caller reports that the answer is incomplete rather than pretending
         /// it is not.
         exhausted: bool,
+        /// Rounds spent, each one a step further along the dependency chain.
+        /// Reported because the cost of a change is the shape of the chain it
+        /// sits in, not the number of units it ends up touching: one round over
+        /// many dependents is cheap, and many rounds is how a batch reaches its
+        /// budget. A caller that only wants the answer ignores it.
+        rounds: u32,
     };
 
     /// Units obliged to be reanalyzed by a change to `changed`, transitively.
@@ -134,6 +140,7 @@ pub const Dependencies = struct {
                 return .{
                     .affected = try affected.toOwnedSlice(gpa),
                     .exhausted = true,
+                    .rounds = rounds,
                 };
             }
             rounds += 1;
@@ -153,7 +160,7 @@ pub const Dependencies = struct {
             try frontier.appendSlice(gpa, next.items);
         }
 
-        return .{ .affected = try affected.toOwnedSlice(gpa), .exhausted = false };
+        return .{ .affected = try affected.toOwnedSlice(gpa), .exhausted = false, .rounds = rounds };
     }
 };
 
@@ -186,6 +193,8 @@ test "a change with no declared dependency affects nothing" {
     defer testing.allocator.free(result.affected);
     try testing.expectEqual(@as(usize, 0), result.affected.len);
     try testing.expect(!result.exhausted);
+    // One round asked the question and found nothing to follow.
+    try testing.expectEqual(@as(u32, 1), result.rounds);
 }
 
 test "a change reaches what declared a dependency on it" {
@@ -245,6 +254,9 @@ test "a dependency cycle terminates and reports each unit once" {
     try testing.expectEqual(@as(usize, 1), result.affected.len);
     try testing.expectEqual(id(1), result.affected[0]);
     try testing.expect(!result.exhausted);
+    // One round to reach the dependent, one to find it leads nowhere further:
+    // the count follows the chain, not the number of units reached.
+    try testing.expectEqual(@as(u32, 2), result.rounds);
 }
 
 test "a unit cannot declare a dependency on itself" {
@@ -294,4 +306,5 @@ test "propagation that runs out of rounds says so" {
     defer testing.allocator.free(result.affected);
     try testing.expect(result.exhausted);
     try testing.expectEqual(@as(usize, max_propagation_rounds), result.affected.len);
+    try testing.expectEqual(max_propagation_rounds, result.rounds);
 }

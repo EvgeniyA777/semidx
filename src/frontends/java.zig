@@ -7,6 +7,7 @@
 //! rather than silently omitted.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 const core = @import("semidx_core");
 const ts = @import("semidx_tree_sitter");
@@ -37,6 +38,32 @@ pub const capabilities: contract.Capabilities = .{
 /// Guards against unbounded recursion on pathological input. Exceeding it is
 /// reported as an unsupported construct, never as an absence of invocations.
 const max_depth: u32 = 64;
+
+/// Test-only counters for the work deciding one invocation's target costs.
+///
+/// The same reason `core.graph.work` exists: what an answer costs is a property
+/// this project asserts rather than hopes for. A call resolved by scanning every
+/// method in the repository is the same answer as one resolved from a bounded
+/// candidate table, and only a counter tells them apart — deterministically,
+/// where a wall clock would make the lane unreliable and prove less.
+///
+/// It counts candidates examined, not invocations answered, because the term at
+/// risk is the one inside the decision.
+///
+/// Outside a test build every call here compiles away.
+pub const work = struct {
+    /// Method candidates examined while deciding invocation targets.
+    pub var method_candidates: usize = 0;
+
+    pub fn reset() void {
+        method_candidates = 0;
+    }
+
+    inline fn candidate() void {
+        if (!builtin.is_test) return;
+        method_candidates += 1;
+    }
+};
 
 /// What a simple type name can mean among the other source units of one
 /// explicit Java package, as read from current graph facts.
@@ -894,6 +921,7 @@ fn invocationTarget(
     var found: ?u32 = null;
     var count: u32 = 0;
     for (methods) |candidate| {
+        work.candidate();
         if (!std.mem.eql(u8, candidate.class_name, method.class_name)) continue;
         if (!std.mem.eql(u8, candidate.name, name)) continue;
         found = candidate.index;

@@ -6,6 +6,7 @@
 //! they are never the source of an answer.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 pub const core = @import("semidx_core");
@@ -25,6 +26,45 @@ pub const Analyzer = frontends.Analyzer;
 ///
 /// One table, owned by `source/languages`. A second one here would drift.
 pub const languageForPath = source.languageForPath;
+
+/// Test-only counters for what keeping the graph current costs.
+///
+/// A dependent that is never reanalyzed is stale, and a dependent reanalyzed on
+/// every edit is a scan wearing the word incremental. Both are correct-looking
+/// from the outside, so the write path needs numbers the way the query path does
+/// (`core.graph.work`). Rounds and reanalyses are kept apart because they are
+/// two different costs: rounds measure how far along the dependency chain one
+/// change reached, reanalyses how much work that reach turned into.
+///
+/// Counts accumulate until `reset`, except `propagation_rounds`, which keeps the
+/// deepest chain any single batch walked in that window.
+///
+/// Outside a test build every call here compiles away.
+pub const work = struct {
+    /// Units reanalyzed by upkeep because something they read changed.
+    pub var upkeep_reanalyses: usize = 0;
+    /// The most propagation rounds one batch spent.
+    pub var propagation_rounds: u32 = 0;
+    /// Whether any batch stopped at `dependencies.max_propagation_rounds`.
+    pub var propagation_exhausted: bool = false;
+
+    pub fn reset() void {
+        upkeep_reanalyses = 0;
+        propagation_rounds = 0;
+        propagation_exhausted = false;
+    }
+
+    inline fn reanalysis() void {
+        if (!builtin.is_test) return;
+        upkeep_reanalyses += 1;
+    }
+
+    inline fn propagation(rounds: u32, exhausted: bool) void {
+        if (!builtin.is_test) return;
+        if (rounds > propagation_rounds) propagation_rounds = rounds;
+        if (exhausted) propagation_exhausted = true;
+    }
+};
 
 pub const Index = struct {
     graph: Graph,
@@ -354,6 +394,7 @@ const Upkeep = struct {
             const propagation = try index.graph.dependencies.propagate(gpa, seeds);
             dependents = propagation.affected;
             exhausted = propagation.exhausted;
+            work.propagation(propagation.rounds, propagation.exhausted);
         }
         return .{
             .index = index,
@@ -472,6 +513,7 @@ const Upkeep = struct {
         std.mem.sort(model.SourceUnitId, owed.items, {}, lessUnit);
         for (owed.items) |unit| {
             _ = try self.index.analyzer.indexUnit(graph, unit);
+            work.reanalysis();
             if (outcome) |counts| {
                 counts.invalidated += 1;
                 counts.analyzed += 1;

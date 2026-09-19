@@ -25,8 +25,9 @@ before any ADR or code work; the first held and the second did not.
 
 No Java semantic code changed. The same measurement priced the alternatives, and
 the plan now targets static `ClassName.method()` calls at **135** in the same
-sample, which clears the same threshold with less machinery. Stage 1 followed:
-[ADR 009](../adr/009_java_static_calls.md) is accepted and Stage 2 is next. See
+sample, which clears the same threshold with less machinery.
+[ADR 009](../adr/009_java_static_calls.md) is accepted, the Stage 2 fixture
+matrix states what it requires, and Stage 3 is next. See
 [The Decision](#the-decision) and
 [Amendment 1](../plans/012_java_semantic_quality_without_query_regression.md#amendment-1-from-instance-receivers-to-static-calls).
 
@@ -42,7 +43,8 @@ strongly. `semidx_context depth=2` on apache/dubbo fell from **90.71 s to
 | Stage 0: Post-Plan-011 external baseline and addressability gate | Completed | apache/dubbo re-probed at the Plan 010 commit. Habit-loop latency is no longer a product problem: the worst call fell from 90.71 s to 0.019 s. Quality is unchanged: 244 of 6,710 sampled outgoing claims are facts, and 4,624 of 5,662 unresolved calls are still receiver-qualified. The addressable public-method subset is 63, below the go threshold of 100. **Verdict: no-go.** |
 | Stage 0 closure: Amendment 1 | Completed | Plan re-aimed at static `ClassName.method()` calls (135 in the sample). Instance receivers deferred to [Follow-up 014](../followups/014_java_instance_receiver_calls.md), the supertype guard to [Follow-up 013](../followups/013_java_supertype_guard_relaxation.md). No code changed. |
 | Stage 1: ADR for Java static calls | Completed | [ADR 009](../adr/009_java_static_calls.md) accepted: a class-name receiver resolves only when nothing can obscure it, the target class declares no supertypes, and the target is its one declared `static` method inside the covered access subset (public, plus any access inside the enclosing class). Rejected alternatives recorded: capitalization heuristic, method-only binding checks, admitting target classes with supertypes, widening access ahead of evidence, provider-source re-reading, a shared-core kind. |
-| Stages 2-7 | Not started | Next: Stage 2 fixtures. |
+| Stage 2: Java quality fixtures and counters | Completed | 47 cases in five tests state what ADR 009 requires before any behavior changes: the covered and declined static calls, every binding introducer that obscures a receiver name, the provider edit sequence, the value receivers that must stay unresolved, and the work counters. Falsified by flipping the matrix switch: the three behavioral tests fail exactly where Stage 5 must deliver. `zig build test` 238/240, from 233/235. |
+| Stages 3-7 | Not started | Next: Stage 3 projection, class shape, and invalidation. |
 
 ## Plan Readiness Gate
 
@@ -521,3 +523,126 @@ Checked against the plan's source-of-truth list before the ADR was committed.
 - The access subset is deliberately narrower than what is decidable. If Stage 7
   finds the public-only subset leaves obvious value on the table, that is a
   future plan with its own measurement, not a widening during implementation.
+
+## Stage 2: Java Quality Fixtures And Counters
+
+The exactness target is executable before any behavior changes. Five tests in
+`tests/vertical_slice_test.zig` state what ADR 009 requires, and the frontend
+answers none of them yet.
+
+### The Matrix, And Why It Passes Today
+
+Every case is written against ADR 009 and says what the call must **become**,
+not what it currently gets. One constant decides which half is asserted:
+
+```zig
+const static_calls_resolved = false;
+```
+
+While it is false, a covered case asserts only that the call exists and is not a
+fact; a declined case additionally asserts that its designator survives intact.
+Stage 5 flips it, and the matrix turns from a specification into a regression
+test. That is the plan's "pin cases, not old reason strings": nothing here
+asserts the one reason the frontend has today for every receiver, because Stage 4
+and Stage 5 are expected to replace it.
+
+A switch like that is worthless if the cases behind it are vacuous, so it was
+falsified rather than trusted: flipping it to `true` fails all three behavioral
+tests, each at the case it should fail at — `expected .fact, found .unresolved`
+for the covered calls and `TestUnexpectedExplanation` for the obscuring
+families. Flipped back, the lane is green.
+
+| Test | Cases | What it pins |
+| --- | ---: | --- |
+| `the static-call matrix pins what each covered and declined case must answer` | 18 | Five covered calls (same package, test-to-main root, single-type import, same unit, same class private) and thirteen declined ones (overloaded, non-static, three access levels, private in another top-level class of the same unit, missing method, target class with supertypes, no such class, nested class body, outside the ADR 008 root, enclosing class with supertypes) |
+| `a receiver name any binding introducer declares is not read as a class` | 11 | Parameter, spread parameter, local, field, enhanced `for`, `catch` parameter, try-with-resources resource, lambda parameter, type pattern, record pattern — each obscuring the name; plus the one case that must still resolve, a call *before* a local declaration of that name |
+| `provider method and class-shape edits decide what a static call may claim` | 9 | The same call re-decided after each provider edit: method removed, restored, overloaded, made non-static, moved out of the covered access, given a supertype, given it back, and finally the class moved across the source-root boundary |
+| `a receiver that is a value stays unresolved, whatever the static rule admits` | 9 | Local, field, parameter, `new Other()`, chained call, string literal, class literal, `this`, `super` — the receivers Follow-up 014 owns, which the static rule must not pick up on the way past |
+| `the write path and the java frontend report the work they do` | — | The counters below are readable and move |
+
+The fixtures discriminate rather than merely exercise. Every shadowing receiver
+is a value of a type whose `make` is an **instance** method, while the class's
+`make` is **static**: a frontend that read the bound name as a class would name a
+different method, not the same one by another route, so a false fact cannot hide
+behind a passing assertion.
+
+### The Reason Families Stage 5 Owes
+
+The declined cases name the fragment each reason must contain. This is the
+contract Stage 5 implements, and the list is the ADR's reason families made
+executable:
+
+`overloads are not resolved`, `is not static`, `access`, `no method of this
+name`, `supertypes`, `no current top-level class`, `class body declared in the
+method`, `source root this unit can see`, `declared here as a binding`, and
+`receiver` for a value receiver.
+
+`receiver` is the one family that already holds, so those nine cases are marked
+`settled` and their reason is checked now rather than at Stage 5. A negative
+control confirmed the check bites: replacing one fragment with a string the
+frontend cannot produce fails the test with the explanation it did produce.
+
+### Counters
+
+Test-only, compiled away outside a test build, following `core.graph.work`:
+
+| Counter | Where | What it counts |
+| --- | --- | --- |
+| `semidx.frontends.java.work.method_candidates` | `src/frontends/java.zig` | Method candidates examined while deciding invocation targets. Candidates, not invocations: the term at risk is the one inside the decision. |
+| `semidx.work.upkeep_reanalyses` | `src/root.zig` | Units reanalyzed by upkeep because something they read changed. Previously visible only through `ScanOutcome`, which the edit and add paths do not fill in. |
+| `semidx.work.propagation_rounds` | `src/root.zig` | The deepest chain any batch walked since the last reset. |
+| `semidx.work.propagation_exhausted` | `src/root.zig` | Whether any batch stopped at `max_propagation_rounds`. |
+| `Dependencies.Propagation.rounds` | `src/core/dependencies.zig` | The rounds one propagation spent. The only shared-core change in this stage, and the reason `zig build test-core` is its narrow lane. |
+
+Dependency declaration count needed nothing new: `index.graph.dependencies.count()`
+already answers it, and the counters test asserts it.
+
+The counters test pins the current shape rather than a future one: deciding the
+invocations in a two-class unit examines at most that unit's own methods, one
+provider edit reanalyzes exactly one dependent, propagation spends two rounds —
+one to reach the dependent, one to find it leads nowhere further — and nothing
+exhausts its budget.
+
+### Risk Matrix Update
+
+| Plan risk row | State after Stage 2 |
+| --- | --- |
+| A receiver name is a type only when nothing obscures it | Fixtures exist for every binding introducer ADR 009 names, including the inherited-field case and the one case that must still resolve. Evidence is pending Stage 4. |
+| Static call facts are exact | The covered and declined cases are enumerated with their targets. Evidence is pending Stage 5. |
+| Unresolved remains distinguishable | Every declined case carries its own reason fragment, and the families are distinct. |
+| Instance receivers stay unresolved | **Covered now**, and asserted now rather than at Stage 5: nine value receivers keep the reason they have. |
+| Incremental freshness holds | The provider-edit sequence exists as a fixture; the reach it needs is Stage 3's to build. |
+| Write path stays bounded, dependency propagation stays useful | Counters exist and are asserted at the current shape; the bounds are Stage 3 and Stage 5's to tighten. |
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Zig 0.16.0 matches the semidx target |
+| `zig fmt --check build.zig src tests` | Clean |
+| `zig build test-core` | 97/98 passed, 1 skipped (external-scale proof, skipped in debug by design) |
+| `zig build test` | 238/240 passed, 2 skipped — from 233/235 before this stage |
+| `zig build test-mcp` | 29/30 passed, 1 skipped |
+| Falsification: `static_calls_resolved = true` | Three tests fail at the cases Stage 5 must deliver; reverted |
+| Negative control on a `settled` reason fragment | Fails with the explanation the frontend actually produced; reverted |
+
+Not run, and why: `zig build dogfood` and `zig build preview-gate` are closure
+lanes and no MCP-visible output changed in this stage — the counters compile away
+outside a test build and no assertion, label, or payload field moved.
+
+### Residual Risk
+
+- **The covered cases assert little until Stage 5.** That is the design, and the
+  falsification run is what keeps it honest. A future agent that changes the
+  matrix must re-run that flip rather than assume it.
+- **`beforeLocal` forbids the cheap implementation.** A Stage 4 that poisons a
+  name for the whole method, rather than from its declaration onward, is exact
+  but fails this case. That is deliberate: Java's scope rule is the rest of the
+  block, and the fixture holds Stage 4 to it rather than letting the easier rule
+  in silently.
+- **One snippet is parsed, not compilable.** `bySpread` binds the name to a
+  varargs array, and no valid Java call through one reaches this rule. What it
+  pins is the binding, which is the rule under test.
+- **The counters are process-global test-only variables.** Tests reset them
+  before use, which is correct while Zig runs a test binary's tests in sequence;
+  a parallel test runner would need per-test isolation instead.

@@ -275,12 +275,13 @@ documents that own history, rationale, and evidence.
   bounds. Java write-path measurement was left as-is: one-file refresh at 1,200
   units is 13 ms, and package-export reanalysis is constant at 41 units.
 - [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
-  is in progress at Stage 1 and **amended**: its Stage 0 gate declined
+  is in progress at Stage 3 and **amended**: its Stage 0 gate declined
   receiver-qualified instance calls at 63 addressable public invocations against
   a required 100, so the plan now targets static `ClassName.method()` calls,
   measured at 135 in the same sample and needing no method-body type
-  environment. No Java semantic code and no ADR 009 exist yet. Deferred with
-  measurements: instance receivers as
+  environment. [ADR 009](docs/adr/009_java_static_calls.md) is accepted and a
+  47-case fixture matrix states what it requires, but no Java semantic code
+  answers it yet. Deferred with measurements: instance receivers as
   [Follow-up 014](docs/followups/014_java_instance_receiver_calls.md), the
   supertype guard as
   [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md)
