@@ -263,9 +263,11 @@ documents that own history, rationale, and evidence.
   single-type imports resolve inside it, Follow-up 003 is closed, and
   cross-module visibility is split into
   [Follow-up 011](docs/followups/011_java_cross_module_visibility.md). The real
-  remaining Java blockers are coverage, not the boundary: the supertype guard
-  accounts for 62% of in-working-copy unresolved references and receiver
-  qualifiers for 4,624 of 5,662 unresolved calls in the sample.
+  remaining Java blockers are coverage, not the boundary: receiver qualifiers
+  account for 4,624 of 5,662 unresolved calls in the sample, and the supertype
+  guard was the largest in-working-copy unresolved-reference bucket before
+  single-type imports (64 of 103; the post-import denominator is 98 and must be
+  remeasured before more Java widening).
 - [Plan 011](docs/plans/011_external_scale_graph_query_indexes.md) is executed
   and Follow-up 012 is closed. Snapshot identity lookups are constant time, and
   anchored relationship queries inspect exactly as many assertions as they
@@ -276,10 +278,10 @@ documents that own history, rationale, and evidence.
   package-export reanalysis is constant at 41 units across the measured corpora.
 - [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
   is the next Java adoption plan: re-run the post-Plan-011 external Java
-  baseline, then improve exact receiver-qualified call and, conditionally,
-  supertype-guard coverage using Java analyzer projections without build
-  descriptors, shared-core `module`/`IMPORTS`, approximate facts, or query-work
-  regression.
+  baseline, then improve exact receiver-qualified calls behind an ADR and Java
+  analyzer projections without build descriptors, shared-core
+  `module`/`IMPORTS`, approximate facts, or query-work regression. The
+  supertype guard is measured for a possible follow-up, not relaxed in Plan 012.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients ignore `structuredContent` and read `content`, so the text copy is
