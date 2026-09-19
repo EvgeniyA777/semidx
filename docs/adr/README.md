@@ -23,3 +23,4 @@ ratified constitution.
 - [006: Allow Narrow Zig Member Definitions And Local-Import Calls](006_allow_narrow_zig_member_definitions_and_local_import_calls.md)
 - [007: Keep The MCP Text Fallback And Add A Diagnostic Probe Flag](007_text_fallback_migration_flag.md)
 - [008: Bound Java Same-Package Resolution To A Derived Source Root](008_java_visibility_boundaries.md)
+- [009: Allow Java Static Calls Through A Class-Name Receiver](009_java_static_calls.md)

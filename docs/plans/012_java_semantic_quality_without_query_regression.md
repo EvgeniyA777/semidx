@@ -104,7 +104,8 @@ Read before starting implementation:
 - [ADR 003](../adr/003_reject_name_match_assertions.md),
   [ADR 004](../adr/004_allow_java_same_package_type_resolution.md),
   [ADR 006](../adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md),
-  and [ADR 008](../adr/008_java_visibility_boundaries.md).
+  [ADR 008](../adr/008_java_visibility_boundaries.md), and
+  [ADR 009](../adr/009_java_static_calls.md), which this plan implements.
 - [Follow-up 011](../followups/011_java_cross_module_visibility.md),
   [Follow-up 013](../followups/013_java_supertype_guard_relaxation.md), and
   [Follow-up 014](../followups/014_java_instance_receiver_calls.md).
@@ -324,7 +325,8 @@ class receiver stays unresolved, because it is not a call Java would compile.
 Methods in target classes with declared supertypes stay unresolved, because a
 hidden static method could change the target. Cross-unit private/protected/
 package access must be either proven inside the covered access subset or left
-unresolved.
+unresolved. ADR 009 set that subset: `public`, plus any access when the target
+class is the top-level class enclosing the invocation.
 
 **D6 - Incremental maintenance covers class-shape changes, not only method-set
 changes.** A unit whose call depends on a receiver class must be reachable when
@@ -474,7 +476,9 @@ Required behavior:
     with the class supplied by the same unit, the same source root, a
     standard-layout test-to-main root, and a single-type import;
   - the same call where the method is not static, is overloaded, is
-    package-private, protected or private, or does not exist;
+    package-private, protected or private in another unit, or does not exist;
+  - `Self.m()` inside the class `Self` itself, where the static method is
+    private, which ADR 009 admits as the one non-public case;
   - the target class declares a superclass, and separately an interface;
   - the receiver class is outside the ADR 008 boundary;
   - the receiver name is ambiguous, is a type parameter, names a member type, or

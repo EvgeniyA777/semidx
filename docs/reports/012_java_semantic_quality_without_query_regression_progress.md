@@ -23,10 +23,11 @@ before any ADR or code work; the first held and the second did not.
 - The external Java sample contains **63** public-method addressable
   receiver-qualified invocations against a required threshold of **100**.
 
-No Java semantic code changed and ADR 009 was not written. The same measurement
-priced the alternatives, and the plan now targets static `ClassName.method()`
-calls at **135** in the same sample, which clears the same threshold with less
-machinery. See [The Decision](#the-decision) and
+No Java semantic code changed. The same measurement priced the alternatives, and
+the plan now targets static `ClassName.method()` calls at **135** in the same
+sample, which clears the same threshold with less machinery. Stage 1 followed:
+[ADR 009](../adr/009_java_static_calls.md) is accepted and Stage 2 is next. See
+[The Decision](#the-decision) and
 [Amendment 1](../plans/012_java_semantic_quality_without_query_regression.md#amendment-1-from-instance-receivers-to-static-calls).
 
 Stage 0 also settles the question Plan 011 deliberately left open: the external
@@ -40,8 +41,8 @@ strongly. `semidx_context depth=2` on apache/dubbo fell from **90.71 s to
 | --- | --- | --- |
 | Stage 0: Post-Plan-011 external baseline and addressability gate | Completed | apache/dubbo re-probed at the Plan 010 commit. Habit-loop latency is no longer a product problem: the worst call fell from 90.71 s to 0.019 s. Quality is unchanged: 244 of 6,710 sampled outgoing claims are facts, and 4,624 of 5,662 unresolved calls are still receiver-qualified. The addressable public-method subset is 63, below the go threshold of 100. **Verdict: no-go.** |
 | Stage 0 closure: Amendment 1 | Completed | Plan re-aimed at static `ClassName.method()` calls (135 in the sample). Instance receivers deferred to [Follow-up 014](../followups/014_java_instance_receiver_calls.md), the supertype guard to [Follow-up 013](../followups/013_java_supertype_guard_relaxation.md). No code changed. |
-| Stage 1: ADR for Java static calls | Not started | Next. |
-| Stages 2-7 | Not started | Depend on Stage 1. |
+| Stage 1: ADR for Java static calls | Completed | [ADR 009](../adr/009_java_static_calls.md) accepted: a class-name receiver resolves only when nothing can obscure it, the target class declares no supertypes, and the target is its one declared `static` method inside the covered access subset (public, plus any access inside the enclosing class). Rejected alternatives recorded: capitalization heuristic, method-only binding checks, admitting target classes with supertypes, widening access ahead of evidence, provider-source re-reading, a shared-core kind. |
+| Stages 2-7 | Not started | Next: Stage 2 fixtures. |
 
 ## Plan Readiness Gate
 
@@ -460,3 +461,63 @@ this repository. `zig fmt --check` likewise has nothing to check.
 - The ingestion regression from 17.5 s to 21.2 s in Debug is now measured and
   attributed to the Plan 010 import stage. It is not tracked as a defect here; at
   2.8 s in ReleaseFast it is not a product problem.
+
+## Stage 1: ADR For Java Static Calls
+
+[ADR 009](../adr/009_java_static_calls.md) is committed with
+`status: accepted` and listed in [docs/adr/README.md](../adr/README.md). It
+answers all eight questions of constitution section 11 and records a rejected
+alternative for every decision it makes.
+
+### What It Decided
+
+| Question | Decision | Rejected alternative |
+| --- | --- | --- |
+| What does a static `CALLS` fact mean? | The one `static` method the named class declares; static methods are not dispatched, so there is no dispatch question left open | Recording the call to any method of the class, which would assert a call Java does not compile |
+| When is a receiver name a type? | Only when no binding introducer in scope declares the name **and** the enclosing class declares no supertypes, so no inherited field can obscure it | Trusting the capitalization convention; checking only the enclosing method's bindings |
+| May the target class declare supertypes? | No. An inherited overload could change the selected target and a declared method may hide an inherited one | Resolving when the name is declared once in the class itself — worth 211 in the sample, exact in none of them |
+| Which access is covered? | `public`, plus any access when the target class is the top-level class enclosing the invocation | Admitting package-private and protected now, ahead of any measurement |
+| How is class shape and `static` evidence carried? | Additive Java extension labels on existing Java definitions | Re-parsing provider source during lookup; passing provider trees across the frontend contract; a shared-core kind |
+| What happens to a non-static method named through a class? | Its own unresolved reason, distinct from "no such method" | Folding it into the missing-method reason |
+
+The obscuring rule is the one decision that could have eaten the plan's
+denominator, and it does not: all 135 addressable calls already satisfy its
+strictest form.
+
+### Drift Control
+
+Checked against the plan's source-of-truth list before the ADR was committed.
+
+| Document | Outcome |
+| --- | --- |
+| `ARCHITECTURE_CONSTITUTION.md` | No conflict. The eight answers are in the ADR; sections 3, 5, 6 and 7 are the load-bearing ones and each is preserved rather than argued around. |
+| `RULES.md` | No conflict. ADR procedure followed, no attribution, English, single owner per rule. |
+| [ADR 003](../adr/003_reject_name_match_assertions.md) | Consistent. The obscuring rule exists precisely so a class name is never selected by name alone. |
+| [ADR 004](../adr/004_allow_java_same_package_type_resolution.md) | Unchanged. Static-call receiver resolution calls `resolveType` as it is; no guard is widened. |
+| [ADR 006](../adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md) | Precedent followed: a narrow, evidence-bound cross-unit `CALLS` fact. |
+| [ADR 008](../adr/008_java_visibility_boundaries.md) | Unchanged. The receiver class must be inside the same visibility scope, with that record's own explanations preserved. |
+| `SPEC.md` | One row will change at Stage 7: the invalidation row names Java package-export invalidation as the only producer, and Stage 3 adds an aspect-grained class-shape channel. No conflict now. |
+| `CORE.md` | No admission requested. Method signatures stay part of Java method identity; no `module`, `IMPORTS`, inheritance, or dispatch kind. |
+| [Capability matrix](../spec/capability_matrix.md) | **One stale claim corrected now**, not deferred: the Java "Known false negatives" row demanded a fresh supertype-guard measurement before further Java widening. Stage 0 made that measurement, so the row now carries it and links Follow-up 013. The covered static-call case is added at Stage 7, after the behavior exists. |
+| `MEMORY.md` | Updated with the amended plan state in the same series of commits. |
+| `GLOSSARY.md` | No entry added. Obscuring proof, binding introducer, covered access subset, and static target are Java-specific normative terms owned by ADR 009. Class shape is the one project-wide candidate; Stage 7 decides it. |
+| [Follow-up 011](../followups/011_java_cross_module_visibility.md) | Untouched. No cross-module visibility is admitted. |
+| [Follow-ups 013](../followups/013_java_supertype_guard_relaxation.md) and [014](../followups/014_java_instance_receiver_calls.md) | Consistent: the ADR names both as not enabled. |
+| [Adoption strategy](../design/002_product_adoption_strategy.md) | Served. Static utility calls are the shape of "who calls this" a Java reader asks first, and they are answered from the graph rather than from a name match. |
+| `src/frontends/java.zig` | Read before deciding. `resolveType`'s order, its explanations, and `emitInvocation`'s qualified-receiver reason are the mechanisms the ADR builds on; none is changed by this stage. |
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| Relative-link check over the plan, progress log, ADR index, and follow-ups | No missing targets |
+| `zig build` lanes | Not run: no code changed in this stage |
+
+### Residual Risk
+
+- The ADR is `accepted` as the procedure requires, but human review has not
+  happened yet. If review changes a decision, Stage 2 stops until the ADR and
+  the plan agree, per the plan's Stage 1 Done condition.
+- The access subset is deliberately narrower than what is decidable. If Stage 7
+  finds the public-only subset leaves obvious value on the table, that is a
+  future plan with its own measurement, not a widening during implementation.
