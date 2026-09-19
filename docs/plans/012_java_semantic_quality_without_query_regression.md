@@ -84,6 +84,11 @@ Run `./scripts/check-zig-version.sh` before code work. Create
 `docs/reports/012_java_semantic_quality_without_query_regression_progress.md`
 with progress-log frontmatter before the first code change.
 
+Before pushing any stage commit, either update `MEMORY.md` when current
+implementation reality, priorities, or known gaps changed, or record in the
+progress log why the memory entry is still accurate before using
+`SCI_SKIP_MEMORY_FRESHNESS=1`.
+
 Stage 0 is a real go/no-go. Re-run the post-Plan-011 external Java speed and
 quality baseline before changing Java semantics. Prefer the same apache/dubbo
 commit used by Plan 010. If that root is unavailable, stop before code changes
@@ -95,9 +100,9 @@ Proceed past Stage 0 only if both are true:
 
 - the local Plan 011 work-bound lane still proves anchored relationship work
   scales with anchored candidates rather than total assertions; and
-- the external Java sample contains an addressable receiver subset of at least
-  100 invocations, or at least 5% of receiver-qualified unresolved calls,
-  whichever is smaller.
+- the external Java sample contains a public-method lower-bound addressable
+  receiver subset of at least 100 invocations, or at least 5% of
+  receiver-qualified unresolved calls, whichever is smaller.
 
 If the external MCP run cannot expose deterministic counters, record that
 limitation and run the local work-bound lane before proceeding. Wall-clock
@@ -232,11 +237,11 @@ unresolved-to-resolved transitions stay maintainable.
 
 Method lookup can re-read method entities from the graph, but some receiver-call
 preconditions are not graph facts today. A Java class entity currently carries
-`java.construct` and `java.package`, not whether it declares supertypes or which
-member types it declares. Parameter and local-variable types are also not
-recorded as relationships. The ADR and implementation stages must decide and
-document which intermediate evidence is source-derived frontend evidence and
-which, if any, becomes graph content.
+`java.construct` and `java.package`, not whether it declares supertypes; a Java
+method entity currently does not carry access, and parameter/local-variable
+types are not recorded as relationships. The ADR and implementation stages must
+decide and document which intermediate evidence is source-derived frontend
+evidence and which, if any, becomes graph content.
 
 Plan 011 proved anchored query work with synthetic local bounds past the size of
 apache/dubbo, but it deliberately did not claim a new Dubbo wall-clock latency.
@@ -262,12 +267,16 @@ types as source-derived evidence for receiver call resolution without emitting
 new `REFERENCES` for those types. If that is unacceptable, the ADR must force a
 plan amendment before implementation.
 
-**D4 - Class shape is source-derived provider evidence.** Until a later plan
-adds Java class-shape labels or relationships, the method projection must
-re-read provider source to know method sets, method access in the covered
-subset, declared supertypes, and any member-type names it relies on. This
-projection is not graph authority; it is evidence the Java frontend uses to
-decide whether it can emit a graph assertion.
+**D4 - Class shape is graph-carried Java extension evidence.** The proposed
+Stage 1 answer is to add Java extension labels to existing Java definitions, not
+to pass provider source into another unit's frontend and not to reparse provider
+source during lookup. At minimum, class definitions need a label such as
+`java.supertypes = none|declared`, and method definitions need a covered access
+label. These labels are graph assertions produced by the Java frontend, visible
+as extension data, and owned by SPEC/capability documentation. If ADR 009
+rejects labels or requires provider-source re-reading instead, this plan must be
+amended before Stage 3 because the current frontend contract does not expose
+provider bytes or trees to dependent analysis.
 
 **D5 - Receiver facts require a closed lexical receiver environment.** A simple
 identifier receiver may be resolved only when every name-introducing construct
@@ -283,9 +292,8 @@ inside the covered access subset or left unresolved.
 **D7 - Incremental maintenance covers class-shape changes, not only method-set
 changes.** A unit whose call depends on a receiver class must be reachable when
 that class adds/removes/renames/overloads a method, changes method access within
-the covered subset, adds/removes declared supertypes, or changes any member-type
-evidence this plan relies on. Resolved cross-unit calls must also declare
-provider dependencies.
+the covered subset, or adds/removes declared supertypes. Resolved cross-unit
+calls must also declare provider dependencies.
 
 **D8 - Speed regressions are measured as work first.** External wall-clock
 numbers are recorded because users feel them, but acceptance relies on
@@ -314,9 +322,9 @@ other frontends' semantics.
 2. **Java analyzer projections**
 Responsibility: candidate tables for packages, imports, methods, class shape,
 receiver readers, and method readers. Hints may be conservative supersets.
-Does not know about: graph authority. A projection may find or re-read
-evidence, but a fact exists only when the frontend records it in the graph with
-exact evidence.
+Does not know about: graph authority. A projection may find or re-read graph
+facts and Java extension labels, but a fact exists only when the frontend
+records it in the graph with exact evidence.
 
 3. **Shared core**
 Responsibility: entities, relationships, assertions, resolution categories,
@@ -370,16 +378,23 @@ Required behavior:
   - receiver expression shape: `this`, simple identifier, `new Type(...)`,
     class-name/static-looking receiver, chained/field receiver, or other;
   - whether the receiver type can be established from current covered evidence;
+  - whether the referring class itself declares supertypes, so current
+    `resolveType` would decline cross-unit receiver type evidence before the
+    call target is considered;
   - whether the receiver type names a current top-level class, or instead an
     interface, enum, record, annotation, JDK/dependency type, or unsupported
     construct;
   - whether the receiver class declares supertypes;
   - whether exactly one method of the invoked name is declared in that class;
-  - whether the method access is inside the covered subset;
+  - method access distribution: public, protected, package-private, private, or
+    unavailable;
   - whether the invocation is inside a nested class body; and
   - whether source-root visibility permits the receiver type and method.
+- Compute the go/no-go addressable subset from a conservative public-method
+  lower bound. Later ADR 009 decisions may expand the covered access subset, but
+  they must not retroactively make the Stage 0 go decision depend on Stage 1.
 - Measure the supertype-guard opportunity separately: count references that
-  would need hierarchy/member-type evidence, and estimate how many have a
+  would need hierarchy evidence beyond this plan, and estimate how many have a
   source-available superclass chain with no interfaces or dependency/JDK gaps.
 - State whether the Plan 011 product claim is now supported by an external
   latency observation, still supported only by local work bounds, or contradicted
@@ -416,7 +431,8 @@ Required behavior:
   `new Type(...)` is internal frontend evidence or graph content. If it becomes
   graph content, amend this plan before implementation.
 - Decide how class-shape evidence is established. This plan's proposed answer
-  is provider-source re-reading by the Java projection, not new graph labels.
+  is additive Java extension labels on existing Java definitions, not
+  provider-source re-reading by the Java projection.
 - Decide the covered method-access subset, and state what happens to private,
   protected, package-private, and public methods outside that subset.
 - State that build descriptors, cross-module visibility, inheritance entities,
@@ -426,7 +442,10 @@ Required behavior:
 
 Done when:
 
-- The ADR is accepted or this plan is stopped.
+- The ADR is committed with `status: accepted`, all eight constitution section
+  11 answers are complete, and the executing agent has recorded drift-control
+  checks against the plan's source-of-truth list. If human review rejects or
+  changes the ADR, this plan stops until the ADR and plan agree.
 - Any ADR decision that differs from this plan is reflected in this plan before
   later stages execute.
 
@@ -485,8 +504,8 @@ Required behavior:
 
 Done when:
 
-- The fixture matrix exists and currently records the old unresolved behavior
-  where the implementation has not yet changed.
+- The fixture matrix exists with pre-implementation expectations for every case
+  before behavior changes.
 - Negative cases assert the applicable category and reason family, not just
   "no fact".
 - The progress log contains the stage's risk matrix update and focused command
@@ -509,12 +528,12 @@ Likely files:
 
 Required behavior:
 
-- Build a Java method/class projection from current graph facts and provider
-  source evidence. At minimum, each current top-level Java class candidate
+- Build a Java method/class projection from current graph facts and Java
+  extension labels. At minimum, each current top-level Java class candidate
   carries: package, simple class name, class entity id, provider unit, source
   root, declared-supertypes shape, covered method access, and current declared
   methods grouped by simple method name.
-- Re-read graph facts for entities/methods and re-read provider source for class
+- Re-read graph facts for entities/methods and Java extension labels for class
   shape before answering. Hints may grow and over-invalidate, but they must not
   be authority.
 - Preserve snapshot/query indexes from Plan 011. No relationship query path may
@@ -526,7 +545,7 @@ Required behavior:
 - Extend `Upkeep` so a class-shape change reanalyzes affected readers even when
   the previous relationship had no provider dependency because it was
   unresolved. Class shape for this plan includes method set, covered method
-  access, declared supertypes, and any member-type evidence the projection uses.
+  access, and declared supertypes.
 - Preserve the existing one-round-settles invariant for projection changes:
   method sets and class shape depend only on a unit's own contents. If an
   implementation violates that invariant, stop and redesign the invalidation
@@ -719,13 +738,14 @@ Required behavior:
     exhaustion;
   - memory impact of new projection tables where measured.
 - Compare receiver-call results against the Stage 0 addressable subset. The
-  plan is not complete unless at least the Stage 0 go-threshold count becomes
-  exact `CALLS` facts in the same sample, or the plan is reopened before
-  closure.
+  plan is not complete unless at least the Stage 0 go-threshold count and at
+  least 80% of the measured addressable subset become exact `CALLS` facts in
+  the same sample. If the 80% bar is missed, closure is allowed only when every
+  miss has a recorded out-of-subset reason; otherwise reopen the plan.
 - Update the capability matrix and preview reference with the exact covered Java
   receiver cases and the cases left unresolved, including static target versus
-  dispatch, access subset, receiver declaration-kind limits, and class-shape
-  limits.
+  dispatch, access subset, receiver declaration-kind limits, class-shape labels,
+  and class-shape limits.
 - Update `MEMORY.md` by compression, not by appending a progress log.
 - If a stage commit changes behavior that belongs in `MEMORY.md`, update it in
   that commit or record in the progress log why the current memory entry remains
@@ -736,8 +756,10 @@ Required behavior:
 
 Done when:
 
-- The external remeasurement shows at least the Stage 0 go-threshold count of
-  new exact Java receiver call facts in the covered cases.
+- The external remeasurement shows at least the Stage 0 go-threshold count and
+  at least 80% of the measured addressable subset as new exact Java receiver
+  call facts in the covered cases. If the 80% bar is missed, every miss has a
+  recorded out-of-subset reason; otherwise the plan is reopened before closure.
 - No new approximate assertions are introduced.
 - Plan 011's anchored query work bound still holds.
 - Dependency propagation does not silently leave current stale facts behind; any
@@ -813,7 +835,9 @@ This plan is complete when:
   recorded;
 - ADR 009 is accepted and every later stage follows it;
 - receiver-qualified calls in the covered subset become exact facts at or above
-  the Stage 0 go-threshold count;
+  the Stage 0 go-threshold count, and either at least 80% of the measured
+  addressable subset becomes exact or every miss below the 80% bar has a
+  recorded out-of-subset reason;
 - unsupported, ambiguous, stale, out-of-scope, inaccessible, overloaded, and
   open-hierarchy cases remain unresolved with distinct reason families;
 - provider method and class-shape changes maintain freshness incrementally;
