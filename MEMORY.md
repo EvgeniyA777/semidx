@@ -235,11 +235,9 @@ documents that own history, rationale, and evidence.
   pre-push hook for high-signal documentation and policy changes.
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
-  Java coverage, not its boundary, is what limits it — the supertype guard and
-  unresolved receivers dominate what stays unresolved; the query access paths
-  Plan 011 indexed are proven by a deterministic work bound at 244,559
-  assertions but were never re-measured as latency on the external repository
-  that motivated them; definition renames are identity loss; a file moved and changed in one rescan
+  Java coverage, not its boundary, is what limits it — receiver-qualified and
+  class-name-qualified calls dominate what stays unresolved; definition renames
+  are identity loss; a file moved and changed in one rescan
   loses identity; dependency invalidation is intentionally coarse and
   transitive; a Zig importer of a relative file that did not exist when it was
   analyzed is not reanalyzed when the file appears (unresolved, never false);
@@ -264,24 +262,30 @@ documents that own history, rationale, and evidence.
   cross-module visibility is split into
   [Follow-up 011](docs/followups/011_java_cross_module_visibility.md). The real
   remaining Java blockers are coverage, not the boundary: receiver qualifiers
-  account for 4,624 of 5,662 unresolved calls in the sample, and the supertype
-  guard was the largest in-working-copy unresolved-reference bucket before
-  single-type imports (64 of 103; the post-import denominator is 98 and must be
-  remeasured before more Java widening).
+  account for 4,624 of 5,662 unresolved calls in the sample, of which 1,041 are
+  class-name/static receivers (Plan 012 Stage 0).
 - [Plan 011](docs/plans/011_external_scale_graph_query_indexes.md) is executed
   and Follow-up 012 is closed. Snapshot identity lookups are constant time, and
   anchored relationship queries inspect exactly as many assertions as they
   return, proven by a committed work bound at 244,559 assertions (past Dubbo's
-  230,753). Equivalent latency on apache/dubbo was **not re-measured**; the
-  product claim rests on work bounds, not a new wall clock. Java write-path
-  measurement was left as-is: one-file refresh at 1,200 units is 13 ms, and
-  package-export reanalysis is constant at 41 units across the measured corpora.
+  230,753). Plan 012 Stage 0 re-measured the external latency the plan left
+  unclaimed: on apache/dubbo `semidx_context depth=2` fell from 90.71 s to
+  0.019 s and `semidx_references incoming` from 1.33 s to 0.018 s in the same
+  build mode, so the product claim now rests on observation as well as work
+  bounds. Java write-path measurement was left as-is: one-file refresh at 1,200
+  units is 13 ms, and package-export reanalysis is constant at 41 units.
 - [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
-  is the next Java adoption plan: re-run the post-Plan-011 external Java
-  baseline, then improve exact receiver-qualified calls behind an ADR and Java
-  analyzer projections without build descriptors, shared-core
-  `module`/`IMPORTS`, approximate facts, or query-work regression. The
-  supertype guard is measured for a possible follow-up, not relaxed in Plan 012.
+  is **blocked at its own Stage 0 gate**, and no Java semantic code or ADR 009
+  exists. The external baseline was re-run and recorded in
+  [its progress log](docs/reports/012_java_semantic_quality_without_query_regression_progress.md):
+  the addressable receiver-qualified subset is 63 public-method invocations
+  against a required 100, so the plan stops. The same sample prices the
+  alternatives: exact static `ClassName.method()` calls are worth 135 and need
+  no method-body type environment; generic/array receiver base types 18;
+  admitting target classes with supertypes 211, but none of those hierarchies is
+  closed in indexed source, so it cannot be exact. The supertype guard stays and
+  no follow-up was opened: lifting it converts 38 of 335 guarded references, 13
+  safely. A revised plan direction is the open decision.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients ignore `structuredContent` and read `content`, so the text copy is

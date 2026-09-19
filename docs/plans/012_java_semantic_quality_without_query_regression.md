@@ -2,12 +2,19 @@
 title: "Java semantic quality without query regression"
 doc_type: "plan"
 lifecycle: "active"
-status: "planned"
+status: "blocked"
 agent_action: "reference_for_context"
 updated: "2026-09-19"
 ---
 
 # 012: Java Semantic Quality Without Query Regression
+
+**Execution stopped at the Stage 0 gate.** The addressable receiver subset
+measured 63 public-method invocations against the Start Rule's required 100. Do
+not write ADR 009 or change Java semantics under this plan until a revised
+direction is agreed; the measurement, the alternatives it prices, and the
+verdict are in
+[the progress log](../reports/012_java_semantic_quality_without_query_regression_progress.md).
 
 ## Goal
 
