@@ -258,39 +258,28 @@ documents that own history, rationale, and evidence.
   including [Follow-up 006](docs/followups/006_zig_cross_unit_and_member_calls.md),
   is deprioritized behind that.
 - [Plan 010](docs/plans/010_java_resolution_boundaries.md) is executed. semidx
-  now has its first evidence from a repository it does not own (apache/dubbo at
-  `df9c5e1`, 119 Maven modules, 4,050 units), Java resolution is bounded by
-  ADR 008's source root, single-type imports resolve inside it, and Follow-up 003
-  is closed with its cross-module part split into
-  [Follow-up 011](docs/followups/011_java_cross_module_visibility.md). Read
-  [its report](docs/reports/010_java_resolution_boundaries_progress.md) before
-  choosing the next Java work: the false fact the plan removed occurred zero
-  times on real source, and what actually limits Java is the supertype guard
-  (62% of in-working-copy unresolved references) and unresolved receivers
-  (4,624 of 5,662 unresolved calls in the sample). No shared-core `module` or
-  `IMPORTS` was admitted.
+  has external Java evidence from apache/dubbo at `df9c5e1` (119 Maven modules,
+  4,050 units); Java resolution is bounded by ADR 008's source root,
+  single-type imports resolve inside it, Follow-up 003 is closed, and
+  cross-module visibility is split into
+  [Follow-up 011](docs/followups/011_java_cross_module_visibility.md). The real
+  remaining Java blockers are coverage, not the boundary: the supertype guard
+  accounts for 62% of in-working-copy unresolved references and receiver
+  qualifiers for 4,624 of 5,662 unresolved calls in the sample.
 - [Plan 011](docs/plans/011_external_scale_graph_query_indexes.md) is executed
-  and Follow-up 012 is closed. Per-call latency on that repository —
-  `semidx_context` at `depth=2` 90 s, `semidx_references` 1.3 s, `semidx_health`
-  3.0 s — had two causes, and both are gone: a snapshot recovered identity by
-  scanning, and every relationship query scanned every assertion. Identity
-  lookups are now constant time, and anchored queries inspect exactly as many
-  assertions as they return, proven at 244,559 assertions (past Dubbo's 230,753)
-  by a committed work bound that fails under the old path
-  ([report](docs/reports/011_external_scale_graph_query_indexes_progress.md)).
-- **The equivalent latency on apache/dubbo was not re-measured**, so that
-  product claim rests on the work bound rather than on a new wall clock.
-  Re-running the Plan 010 probe is the cheapest way to close the gap and is the
-  next thing worth doing before widening Java where Plan 010 found the real
-  blockers (supertypes and receivers). SQLite remains a possible future
-  persistence and query-index backend, now behind a proven in-memory projection
-  contract, and only if graph assertions stay the semantic authority.
-- The Java write path was measured and deliberately left alone: on synthetic
-  Java corpora of 600 and 1,200 units, cold index and refresh grow linearly in
-  units, a one-file-edit refresh costs 13 ms at 1,200 units and is indistinct
-  from a refresh that analyzes nothing, and the units reanalyzed when a package's
-  exports change is **constant** at 41 across both sizes — it grows with package
-  size, not repository size.
+  and Follow-up 012 is closed. Snapshot identity lookups are constant time, and
+  anchored relationship queries inspect exactly as many assertions as they
+  return, proven by a committed work bound at 244,559 assertions (past Dubbo's
+  230,753). Equivalent latency on apache/dubbo was **not re-measured**; the
+  product claim rests on work bounds, not a new wall clock. Java write-path
+  measurement was left as-is: one-file refresh at 1,200 units is 13 ms, and
+  package-export reanalysis is constant at 41 units across the measured corpora.
+- [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
+  is the next Java adoption plan: re-run the post-Plan-011 external Java
+  baseline, then improve exact receiver-qualified call and, conditionally,
+  supertype-guard coverage using Java analyzer projections without build
+  descriptors, shared-core `module`/`IMPORTS`, approximate facts, or query-work
+  regression.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients ignore `structuredContent` and read `content`, so the text copy is
