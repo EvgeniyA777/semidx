@@ -24,11 +24,18 @@ and
 ## Current Behavior
 
 Any `method_invocation` with an `object` field is recorded as an unresolved
-`CALLS` assertion whose designator is the full invocation text, with the reason
-"the invocation is qualified by a receiver this frontend does not resolve". That
-is 4,624 of 5,662 unresolved calls in the Plan 012 Stage 0 sample. Plan 012
-resolves the 1,041 of those whose receiver is a class name; the remaining 3,583,
-whose receiver is a value, stay unresolved.
+`CALLS` assertion whose designator is the full invocation text. That is 4,624 of
+5,662 unresolved calls in the Plan 012 Stage 0 sample. Plan 012 resolves the
+1,041 of those whose receiver is a class name; the remaining 3,583, whose
+receiver is a value, stay unresolved.
+
+Those 3,583 no longer share one reason. Plan 012 Stage 4 reads a receiver that
+is a simple name, so a local, parameter, field or pattern that claims the name
+now says "the receiver name `x` is declared here as a binding", while a receiver
+that is not a simple name — `this`, `super`, a literal, a field access, a
+chained call — keeps "the invocation is qualified by a receiver this frontend
+does not resolve". Both are this entry's subset; a re-measurement must count
+both families, and Plan 012 Stage 6 records what moved.
 
 ## Why Deferred
 

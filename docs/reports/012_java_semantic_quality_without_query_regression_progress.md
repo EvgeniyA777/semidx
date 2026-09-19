@@ -28,7 +28,8 @@ the plan now targets static `ClassName.method()` calls at **135** in the same
 sample, which clears the same threshold with less machinery.
 [ADR 009](../adr/009_java_static_calls.md) is accepted, the Stage 2 fixture
 matrix states what it requires, Stage 3 built the projection and the
-invalidation channel it needs, and Stage 4 is next. See
+invalidation channel it needs, Stage 4 reads a receiver name as a class or
+declines with the condition that failed, and Stage 5 is next. See
 [The Decision](#the-decision) and
 [Amendment 1](../plans/012_java_semantic_quality_without_query_regression.md#amendment-1-from-instance-receivers-to-static-calls).
 
@@ -46,7 +47,8 @@ strongly. `semidx_context depth=2` on apache/dubbo fell from **90.71 s to
 | Stage 1: ADR for Java static calls | Completed | [ADR 009](../adr/009_java_static_calls.md) accepted: a class-name receiver resolves only when nothing can obscure it, the target class declares no supertypes, and the target is its one declared `static` method inside the covered access subset (public, plus any access inside the enclosing class). Rejected alternatives recorded: capitalization heuristic, method-only binding checks, admitting target classes with supertypes, widening access ahead of evidence, provider-source re-reading, a shared-core kind. |
 | Stage 2: Java quality fixtures and counters | Completed | 47 cases in five tests state what ADR 009 requires before any behavior changes: the covered and declined static calls, every binding introducer that obscures a receiver name, the provider edit sequence, the value receivers that must stay unresolved, and the work counters. Falsified by flipping the matrix switch: the three behavioral tests fail exactly where Stage 5 must deliver. `zig build test` 238/240, from 233/235. |
 | Stage 3: Java method projection, class shape, and invalidation | Completed | Class shape and method modifiers are carried as MCP-visible extension labels; `java_members` reads them back as candidates; an aspect-grained channel reaches the readers of a changed `Class.method` pair and nothing else in the package. Measured: a one-method edit costs 1 reanalysis where 4 Java units share the scope, a body edit 0, a supertype edit 2 for two readers — with 0 declared dependencies and 0 propagation rounds behind it. No call fact emitted. |
-| Stages 4-7 | Not started | Next: Stage 4, reading a receiver name as a type. |
+| Stage 4: Reading a receiver name as a type | Completed | A qualified invocation's receiver is decided, and no call fact is emitted. A simple name is a class only where no parameter, local, field, `for`, `catch`, resource, lambda or pattern binds it, the enclosing class declares no supertypes, and `resolveType` names one current class inside the ADR 008 boundary; each failure carries its own reason. Locals bind from their declarator to the end of their block, exactly; the other introducers bind method-wide, which declines more and claims nothing. 25 matrix cases moved from pending to checked, and three falsification runs show each half bites. `zig build test` 248/250, unchanged. |
+| Stages 5-7 | Not started | Next: Stage 5, static call facts. |
 
 ## Plan Readiness Gate
 
@@ -800,3 +802,160 @@ accommodate the labels or the channel.
   a Stage 3 regression**: it reproduces at `HEAD` with this stage's changes
   stashed. Stage 7 depends on both lanes, so it is recorded here rather than
   left to be rediscovered.
+
+## Stage 4: Reading A Receiver Name As A Type
+
+The frontend now decides what a qualified invocation's receiver is. It still
+records no call fact, and that is the point of the stage: the receiver decision
+is provable on its own, because every declined call now names the condition that
+declined it instead of sharing one reason with every other receiver.
+
+### The Decision, And Why Its Order Is Not Cosmetic
+
+| Asked | Reason family when it fails |
+| --- | --- |
+| Is the receiver a single identifier? | `qualified by a receiver this frontend does not resolve` |
+| Is the invocation outside a class body declared in the method? | `class body declared in the method` |
+| Is the name free of every binding in scope? | `declared here as a binding` |
+| Does the enclosing class declare no supertypes? | `the enclosing class has supertypes` |
+| Does `resolveType` name exactly one current top-level class? | `resolveType`'s own explanation, carried through |
+
+The order is the order in which an answer stops being available, not a
+preference. A receiver that is not a simple name carries no name to read at all.
+A name a binding claims is a value whatever else exists, so it is asked before
+anything about classes. A class that declares supertypes may inherit a field
+nobody in the working copy can see, so the name cannot be cleared even when
+nothing visible claims it — which is why that guard is asked before
+`resolveType` rather than left to it: `resolveType` answers a name declared in
+the same unit before it reaches its own supertype check, and a receiver must not
+slip through there.
+
+### Two Tiers Of Binding, And Why Only One Is Exact
+
+Java scopes its binding introducers differently, and following every one of them
+exactly would buy nothing this project measured. So the frontend keeps two sets:
+
+| Tier | Holds | Scope it is read with |
+| --- | --- | --- |
+| Method | parameters and spread parameters, the enclosing class's fields, and every name a `for`, `catch`, resource, lambda, type pattern or record pattern binds anywhere in the method | the whole method |
+| Local | local variable declarators | from the declarator to the end of its block, exactly |
+
+The method tier over-declines: a call written before a `catch` parameter of the
+same name is declined although Java would not bind it there. That is a decline
+and never a wrong fact, and it is the side of the error this plan requires.
+
+The local tier is exact because the cheap rule would be wrong in the visible
+direction. `void beforeLocal() { Util.make(); Other Util = null; }` is a class
+name followed by a variable of that name, and a frontend that poisoned the
+method would read the call as a value it cannot resolve — losing a fact Java
+grants. The walk pushes a local's names after the declarator it is written in
+and drops them when its block ends, which is Java's rule rather than an
+approximation of it.
+
+Collection is lazy and once per method: a method with no simple-name receiver
+never walks for bindings, and a method with ten receivers walks once.
+
+### Proving A Receiver Was Read As A Class Before Any Fact Exists
+
+A stage that emits no fact still has to show which receivers it read as classes.
+It shows it in the reason: a receiver read as a class leaves the call unresolved
+for want of the method — "the receiver names class `Util`, and the method it
+names there is not resolved" — and a receiver read as anything else says what it
+was read as instead. So the matrix's covered cases, which assert a fact only
+once Stage 5 lands, now assert that much now:
+
+```zig
+try testing.expect(!call.resolution.isFact());
+try expectExplanation(call, receiver_read_as_a_class);
+```
+
+That is what makes `beforeLocal` a test of the lexical rule rather than a
+placeholder: it is a covered case, so it must report a class where `byLocal`,
+one line away, reports a binding.
+
+### One Node Kind, Not One Rule, Was Added To `resolveType`
+
+A type position writes a simple name as `type_identifier`; a receiver writes the
+same name as `identifier`, because the parser cannot know which it is — that is
+the question ADR 009 makes the frontend answer. `resolveType` now accepts either
+spelling and is otherwise untouched, so type parameters, member types, static
+imports, non-class types, single-type imports, the same-package rule and the
+ADR 008 boundary keep their meanings and their explanations. No existing answer
+can move, because no type position parses as an `identifier`, and the type
+tests pass unchanged.
+
+### What The Matrix Now Checks
+
+Stage 2 wrote 47 cases and checked the 9 that were already settled. Stage 4 adds
+two lambda spellings the ADR names and Stage 2 had not spelled out — inferred
+parameters `(Util, rest) -> …` and a typed lambda parameter — and turns 25 more
+cases from pending into checked.
+
+| Test | Cases | Checked now | Still owed by Stage 5 |
+| --- | ---: | ---: | ---: |
+| The static-call matrix | 18 | 9 | 9 |
+| A receiver name any binding introducer declares | 13 | 13 | 0 |
+| Provider method and class-shape edits | 9 | 3 | 6 |
+| A receiver that is a value | 9 | 9 | 0 |
+
+Every reason family Stage 4 owns is among them: bound name, enclosing class with
+supertypes, no current top-level class of that name, outside the ADR 008 root,
+receiver that is not a simple name, and class body declared in a method.
+
+### Falsified, Not Trusted
+
+Three runs, each reverted:
+
+| Change | What failed |
+| --- | --- |
+| Locals collected method-wide instead of per block | `beforeLocal`: the receiver reported a binding where a class was owed |
+| The binding check skipped entirely | `byParameter`: the receiver reported a class where a binding was owed |
+| The `inferred_parameters` branch removed | `byInferredLambda`: the same, for the one spelling Stage 4 added |
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Zig 0.16.0 matches the semidx target |
+| `zig fmt --check build.zig src tests` | Clean |
+| `zig build test-core` | 97/98 passed, 1 skipped |
+| `zig build test` | 248/250 passed, 2 skipped — unchanged; this stage strengthened existing cases rather than adding tests |
+| `zig build test-mcp` | 30/31 passed, 1 skipped |
+| `zig build dogfood` | Exit 0 |
+| `zig build preview-gate` | Exit 0, 14/14 steps, 6/6 tests, 28 hard passes |
+
+Unresolved explanations are MCP-visible, which is why `test-mcp` and the gate
+are in this stage's lane rather than left to closure.
+
+The gate prints `failed command:` lines for individual test binaries and then
+reports success with exit 0. Stage 3 recorded runs that "failed with no
+assertion text"; what this stage observed is that shape — the lines appear while
+the build's own verdict is success. Read the exit code and the summary, not the
+intermediate lines.
+
+### Residual Risk
+
+- **A provider that leaves the caller's source root leaves the caller's answer
+  stale.** Probed by marking the boundary case in the provider-edit test
+  `settled`: after `renameUnit` moves `Util` out of the root, the caller still
+  says "the receiver names class `Util`", because it declared no dependency and
+  nothing hints it. It is a stale unresolved explanation and never a stale fact.
+  Stage 5 closes it by populating the Stage 3 reader hints from the receiver
+  names read here; the case stays unsettled in the fixture until it does, and
+  the probe was reverted.
+- **The method tier over-declines**, as designed and recorded above. The name
+  key is the same trade Stage 3 accepted on its hints: a pass, never a claim.
+- **A shared constant became a formatted explanation per call.** Every
+  receiver-qualified invocation used to carry one interned sentence; now it
+  carries one naming the condition that failed, and two of those name the
+  receiver. The graph interns by value, so the cost grows with distinct receiver
+  names rather than with calls, but it is new bytes in memory and in every
+  response that shows an unresolved Java call. Stage 7 measures both against its
+  baselines rather than assuming the growth is noise.
+- **Every method with a simple-name receiver is walked once more.** Bounded by
+  the method and paid only where a receiver asks, but it is new work on the
+  index path, and Stage 7 owes the external measurement.
+- **Follow-up 014's marker changed.** Value receivers no longer share one
+  reason: a simple name a binding claims now says so, while `this`, `super`,
+  literals, field accesses and chained calls keep the old wording. The follow-up
+  records both families so a re-measurement counts the whole subset.

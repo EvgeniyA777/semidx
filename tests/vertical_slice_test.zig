@@ -2240,6 +2240,14 @@ test "a class appearing in an imported package reaches the unit that imported it
 /// is what turns the matrix from a specification into a regression test.
 const static_calls_resolved = false;
 
+/// What a covered call says once Stage 4 has read its receiver as a class name
+/// and before Stage 5 selects the method in it.
+///
+/// It is how the receiver half is proved while no call is a fact yet: a
+/// receiver read as a class leaves the call unresolved for want of the method,
+/// and a receiver read as anything else says what it was read as instead.
+const receiver_read_as_a_class = "the receiver names class";
+
 const StaticTarget = struct {
     path: []const u8,
     class: []const u8,
@@ -2291,7 +2299,11 @@ fn expectStaticCall(snapshot: *const semidx.Snapshot, case: StaticCall) !void {
         .fact => |target| {
             if (!static_calls_resolved) {
                 // The case is still declined, and the matrix says what it owes.
+                // What Stage 4 already owes it is the receiver: a covered call
+                // is unresolved for want of the method, never because the
+                // receiver was read as something other than a class.
                 try testing.expect(!call.resolution.isFact());
+                try expectExplanation(call, receiver_read_as_a_class);
                 return;
             }
             const wanted = definitionIn(snapshot, target.path, target.class, target.method) orelse {
@@ -2572,6 +2584,7 @@ test "the static-call matrix pins what each covered and declined case must answe
             .method = "noSuchClass",
             .call = "Absent.make()",
             .expect = .{ .unresolved = "no current top-level class" },
+            .settled = true,
         },
         .{
             .path = "module/src/main/java/lib/Caller.java",
@@ -2579,6 +2592,7 @@ test "the static-call matrix pins what each covered and declined case must answe
             .method = "nested",
             .call = "Util.make()",
             .expect = .{ .unresolved = "class body declared in the method" },
+            .settled = true,
         },
         .{
             .path = "other/src/main/java/lib/Outsider.java",
@@ -2586,6 +2600,7 @@ test "the static-call matrix pins what each covered and declined case must answe
             .method = "declined",
             .call = "Util.make()",
             .expect = .{ .unresolved = "source root this unit can see" },
+            .settled = true,
         },
         .{
             .path = "module/src/main/java/lib/Derived.java",
@@ -2593,6 +2608,7 @@ test "the static-call matrix pins what each covered and declined case must answe
             .method = "declined",
             .call = "Util.make()",
             .expect = .{ .unresolved = "supertypes" },
+            .settled = true,
         },
     };
     for (cases) |case| try expectStaticCall(&snapshot, case);
@@ -2619,6 +2635,7 @@ test "a receiver name any binding introducer declares is not read as a class" {
         \\package lib;
         \\
         \\import java.util.List;
+        \\import java.util.function.BiConsumer;
         \\import java.util.function.Consumer;
         \\
         \\class Shadowed {
@@ -2630,6 +2647,8 @@ test "a receiver name any binding introducer declares is not read as a class" {
         \\    void byCatch() { try { } catch (Failure Util) { Util.make(); } }
         \\    void byResource() { try (Handle Util = null) { Util.make(); } catch (Exception error) { } }
         \\    void byLambda() { Consumer<Other> sink = Util -> Util.make(); }
+        \\    void byInferredLambda() { BiConsumer<Other, Other> sink = (Util, rest) -> Util.make(); }
+        \\    void byTypedLambda() { Consumer<Other> sink = (Other Util) -> Util.make(); }
         \\    void byPattern(Object value) { if (value instanceof Other Util) { Util.make(); } }
         \\    void byRecordPattern(Object value) { if (value instanceof Pair(Other Util, Other rest)) { Util.make(); } }
         \\}
@@ -2669,21 +2688,24 @@ test "a receiver name any binding introducer declares is not read as a class" {
     const shadowed = "module/src/main/java/lib/Shadowed.java";
     const bound = "declared here as a binding";
     const cases = [_]StaticCall{
-        .{ .path = shadowed, .class = "Shadowed", .method = "byParameter", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "bySpread", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byLocal", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byForEach", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byCatch", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byResource", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byLambda", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byPattern", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byRecordPattern", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byParameter", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
+        .{ .path = shadowed, .class = "Shadowed", .method = "bySpread", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byLocal", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byForEach", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byCatch", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byResource", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byLambda", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byInferredLambda", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byTypedLambda", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byPattern", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byRecordPattern", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
         .{
             .path = "module/src/main/java/lib/Fielded.java",
             .class = "Fielded",
             .method = "byField",
             .call = "Util.make()",
             .expect = .{ .unresolved = bound },
+            .settled = true,
         },
         // The scope of a local declaration is the rest of the block, so the
         // name before it is still the class. This is the one case in the

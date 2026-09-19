@@ -367,6 +367,10 @@ const ClassInfo = struct {
     name: []const u8,
     node: ts.Node,
     body: ?ts.Node,
+    /// The names its field declarations bind. A field obscures a type of the
+    /// same name for every method of the class, so a receiver name it claims is
+    /// not read as a class name.
+    fields: []const []const u8,
 };
 
 const MethodInfo = struct {
@@ -480,12 +484,25 @@ pub fn analyze(
         });
 
         const body = node.childByFieldName("body");
-        try classes.append(gpa, .{ .index = index, .name = name, .node = node, .body = body });
+        try classes.append(gpa, .{
+            .index = index,
+            .name = name,
+            .node = node,
+            .body = body,
+            .fields = &.{},
+        });
+        const class_slot = classes.items.len - 1;
+
+        var fields: std.ArrayList([]const u8) = .empty;
+        defer fields.deinit(gpa);
 
         const class_body = body orelse continue;
         var members = class_body.namedChildren();
         while (members.next()) |member| {
             const member_kind = member.kind();
+            if (std.mem.eql(u8, member_kind, "field_declaration")) {
+                try appendDeclaredNames(gpa, &fields, member, source);
+            }
             if (!std.mem.eql(u8, member_kind, "method_declaration")) {
                 try builder.addDiagnostic(.unsupported_construct, try builder.print(
                     "`{s}` inside `{s}` is outside this frontend's coverage",
@@ -541,6 +558,8 @@ pub fn analyze(
                 .node = member,
             });
         }
+
+        classes.items[class_slot].fields = try builder.dupeSlice(fields.items);
     }
 
     if (classes.items.len == 0) {
@@ -604,7 +623,15 @@ pub fn analyze(
         }
 
         const body = method.node.childByFieldName("body") orelse continue;
-        try emitInvocations(builder, source, method, body, methods.items, false, 0);
+        var bindings: Bindings = .{};
+        defer bindings.deinit(gpa);
+        try emitInvocations(builder, source, .{
+            .unit = unit_scope,
+            .class = classByIndex(classes.items, method.class_index),
+            .method = method,
+            .methods = methods.items,
+            .bindings = &bindings,
+        }, body, false, 0);
     }
 }
 
@@ -730,7 +757,7 @@ fn resolveType(
     if (std.mem.eql(u8, kind, "scoped_type_identifier")) {
         return unresolvedType(name, "a qualified type name is not resolved beyond the analyzed source unit");
     }
-    if (!std.mem.eql(u8, kind, "type_identifier")) {
+    if (!isSimpleTypeName(kind)) {
         return unresolvedType(name, "the type is not declared in the analyzed source unit");
     }
     if (unit.package.len == 0) {
@@ -817,6 +844,18 @@ fn resolveType(
             .{ unit.package, count, if (count == 1) "class" else "classes" },
         )),
     };
+}
+
+/// How a simple type name can be written where this frontend reads one.
+///
+/// A type position writes it as `type_identifier`. A receiver that may be a
+/// class name writes the same name as `identifier`, because the parser cannot
+/// know which it is — that is the question ADR 009 makes the frontend answer.
+/// Both spell one name, and the rules that decide what it means are the same,
+/// so `resolveType` accepts either and no existing answer moves: no type
+/// position parses as an `identifier`.
+fn isSimpleTypeName(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "type_identifier") or std.mem.eql(u8, kind, "identifier");
 }
 
 fn unresolvedType(name: []const u8, explanation: []const u8) TypeResolution {
@@ -906,15 +945,62 @@ fn classByIndex(classes: []const ClassInfo, index: u32) ClassInfo {
     unreachable;
 }
 
+/// What deciding one invocation reads: the unit it is written in, the class and
+/// method it is written in, and the names bound around it.
+const CallScope = struct {
+    unit: UnitScope,
+    class: ClassInfo,
+    method: MethodInfo,
+    /// Every method the unit declares, which is what an unqualified invocation
+    /// selects from.
+    methods: []const MethodInfo,
+    bindings: *Bindings,
+};
+
+/// The names bound where an invocation is written.
+///
+/// Java lets a variable obscure a type of the same name, so a receiver that is
+/// a simple name names a class only where nothing else claims that name
+/// ([ADR 009](../../docs/adr/009_java_static_calls.md)). Proving it needs the
+/// set of names bound at the invocation and never their types, which is why
+/// this frontend can answer it without a type environment over method bodies.
+///
+/// Two tiers, because Java scopes them differently and only one difference
+/// changes an answer this project measured:
+///
+/// - `method` holds what is bound for the whole method: its parameters, the
+///   enclosing class's fields, and every construct whose binding reaches past
+///   its own subtree — a `for` variable, a `catch` parameter, a
+///   try-with-resources resource, a lambda parameter, a type or record
+///   pattern. Reading those as bound everywhere in the method declines a call
+///   written before the binding. That is a decline and never a wrong fact.
+/// - `locals` holds local variables, which Java binds from their declarator to
+///   the end of their block. That rule is followed exactly, because the
+///   method-wide approximation would read a class name as a variable that does
+///   not exist yet where the call is written.
+const Bindings = struct {
+    method: std.ArrayList([]const u8) = .empty,
+    /// Whether `method` has been collected. It is collected on the first
+    /// simple-name receiver the method contains, because collecting walks the
+    /// whole method and a method with no such receiver never asks.
+    collected: bool = false,
+    locals: std.ArrayList([]const u8) = .empty,
+
+    fn deinit(self: *Bindings, gpa: std.mem.Allocator) void {
+        self.method.deinit(gpa);
+        self.locals.deinit(gpa);
+    }
+};
+
 /// `nested` is set once the walk enters a type body declared inside the method,
 /// such as an anonymous or local class: there an unqualified name may mean a
-/// method of that type rather than of the enclosing class.
+/// method of that type rather than of the enclosing class, and a declaration of
+/// that body may give a receiver name another meaning.
 fn emitInvocations(
     builder: *contract.BatchBuilder,
     source: []const u8,
-    method: MethodInfo,
+    scope: CallScope,
     node: ts.Node,
-    methods: []const MethodInfo,
     nested: bool,
     depth: u32,
 ) !void {
@@ -927,13 +1013,22 @@ fn emitInvocations(
     }
 
     if (std.mem.eql(u8, node.kind(), "method_invocation")) {
-        try emitInvocation(builder, source, method, node, methods, nested);
+        try emitInvocation(builder, source, scope, node, nested);
     }
 
     const inner = nested or isTypeBody(node.kind());
+    // A local variable is bound from its declarator to the end of the block it
+    // is written in: it claims its name for the siblings that follow it, and
+    // for nothing before them.
+    const mark = scope.bindings.locals.items.len;
+    defer scope.bindings.locals.shrinkRetainingCapacity(mark);
+
     var children = node.namedChildren();
     while (children.next()) |child| {
-        try emitInvocations(builder, source, method, child, methods, inner, depth + 1);
+        try emitInvocations(builder, source, scope, child, inner, depth + 1);
+        if (std.mem.eql(u8, child.kind(), "local_variable_declaration")) {
+            try appendDeclaredNames(builder.gpa, &scope.bindings.locals, child, source);
+        }
     }
 }
 
@@ -948,23 +1043,25 @@ fn isTypeBody(kind: []const u8) bool {
 fn emitInvocation(
     builder: *contract.BatchBuilder,
     source: []const u8,
-    method: MethodInfo,
+    scope: CallScope,
     node: ts.Node,
-    methods: []const MethodInfo,
     nested: bool,
 ) !void {
     const name_node = node.childByFieldName("name") orelse return;
     const name = try builder.dupe(name_node.text(source));
 
-    // A qualified invocation names a receiver this frontend does not analyze,
-    // so its target stays a designator carrying the text that was read.
-    const qualified = node.childByFieldName("object") != null;
-    const designator = if (qualified) try builder.dupe(node.text(source)) else name;
-    const target = try invocationTarget(builder, method, methods, name, qualified, nested);
+    // A qualified invocation keeps the text that was read as its designator,
+    // whatever its receiver turns out to be.
+    const receiver = node.childByFieldName("object");
+    const designator = if (receiver != null) try builder.dupe(node.text(source)) else name;
+    const target = if (receiver) |object|
+        try qualifiedTarget(builder, source, scope, object, nested)
+    else
+        try invocationTarget(builder, scope, name, nested);
 
     try builder.addRelationship(.{
         .kind = .calls,
-        .source = .{ .entity = method.index },
+        .source = .{ .entity = scope.method.index },
         .target = if (target.index) |index| .{ .local = index } else .{ .designator = designator },
         .evidence = evidenceOf(builder, node, designator),
         .resolution = target.resolution,
@@ -987,21 +1084,18 @@ const InvocationTarget = struct {
 /// names a method without establishing which one.
 fn invocationTarget(
     builder: *contract.BatchBuilder,
-    method: MethodInfo,
-    methods: []const MethodInfo,
+    scope: CallScope,
     name: []const u8,
-    qualified: bool,
     nested: bool,
 ) !InvocationTarget {
-    if (qualified) return unresolvedInvocation("the invocation is qualified by a receiver this frontend does not resolve");
     if (nested) return unresolvedInvocation("the invocation is inside a class body declared in the method, " ++
         "where the name may mean a method of that class");
 
     var found: ?u32 = null;
     var count: u32 = 0;
-    for (methods) |candidate| {
+    for (scope.methods) |candidate| {
         work.candidate();
-        if (!std.mem.eql(u8, candidate.class_name, method.class_name)) continue;
+        if (!std.mem.eql(u8, candidate.class_name, scope.method.class_name)) continue;
         if (!std.mem.eql(u8, candidate.name, name)) continue;
         found = candidate.index;
         count += 1;
@@ -1011,7 +1105,7 @@ fn invocationTarget(
         "{d} methods of this name are declared in the enclosing class, and overloads are not resolved",
         .{count},
     ));
-    if (method.class_has_supertypes) return unresolvedInvocation("the enclosing class has supertypes, " ++
+    if (scope.method.class_has_supertypes) return unresolvedInvocation("the enclosing class has supertypes, " ++
         "and a method of this name it may inherit could be the target");
     return .{
         .index = found,
@@ -1019,6 +1113,160 @@ fn invocationTarget(
             .method = "unqualified invocation of the only method of this name in a class without supertypes",
         } },
     };
+}
+
+/// Decides what the receiver of a qualified invocation is, which is as far as
+/// this frontend goes today: which method of that class the invocation names is
+/// not decided here, so no qualified invocation is a fact yet.
+///
+/// The order the conditions are asked in is the order in which an answer stops
+/// being available. A receiver that is not a simple name carries no name to
+/// read; a name a binding claims is a value, whatever else exists; a class that
+/// declares supertypes may inherit a field nobody here can see, so the name
+/// cannot be cleared even when nothing visible claims it. Only then is the name
+/// a candidate for `resolveType`, which decides what a simple name means under
+/// ADR 004 and ADR 008 and keeps its own explanations when it declines.
+fn qualifiedTarget(
+    builder: *contract.BatchBuilder,
+    source: []const u8,
+    scope: CallScope,
+    receiver: ts.Node,
+    nested: bool,
+) !InvocationTarget {
+    if (!std.mem.eql(u8, receiver.kind(), "identifier")) {
+        return unresolvedInvocation("the invocation is qualified by a receiver this frontend does not resolve");
+    }
+    if (nested) return unresolvedInvocation("the invocation is inside a class body declared in the method, " ++
+        "where a declaration of that class body may give the receiver name another meaning");
+
+    const name = receiver.text(source);
+    if (try nameIsBound(builder.gpa, source, scope, name)) {
+        return unresolvedInvocation(try builder.print(
+            "the receiver name `{s}` is declared here as a binding, so it is read as a value and not as a class",
+            .{name},
+        ));
+    }
+    if (scope.class.node.childByFieldName("superclass") != null or
+        scope.class.node.childByFieldName("interfaces") != null)
+    {
+        return unresolvedInvocation("the enclosing class has supertypes, and a field it may inherit " ++
+            "could give the receiver name a value this working copy cannot see");
+    }
+
+    const resolved = try resolveType(builder, source, receiver, try builder.dupe(name), .{
+        .unit = scope.unit,
+        .class = scope.class,
+        .method = scope.method.node,
+    });
+    switch (resolved.resolution) {
+        .fact => return unresolvedInvocation(try builder.print(
+            "the receiver names class `{s}`, and the method it names there is not resolved",
+            .{name},
+        )),
+        .unresolved => |reason| return unresolvedInvocation(try builder.print(
+            "the receiver is not read as a class: {s}",
+            .{reason.explanation},
+        )),
+        .approximate => return unresolvedInvocation(
+            "the receiver is not read as a class, and this frontend records no approximate target",
+        ),
+    }
+}
+
+/// Whether anything in scope binds `name` to a value.
+///
+/// The method's own bindings are collected on demand, once: a method with no
+/// simple-name receiver never pays for the walk, and one with ten receivers
+/// pays for it once rather than ten times.
+fn nameIsBound(
+    gpa: std.mem.Allocator,
+    source: []const u8,
+    scope: CallScope,
+    name: []const u8,
+) !bool {
+    const bindings = scope.bindings;
+    if (!bindings.collected) {
+        bindings.collected = true;
+        try bindings.method.appendSlice(gpa, scope.class.fields);
+        try collectMethodBindings(gpa, &bindings.method, scope.method.node, source, 0);
+    }
+    return containsName(bindings.method.items, name) or containsName(bindings.locals.items, name);
+}
+
+/// Every name this method binds whose scope reaches past the construct that
+/// binds it, so this frontend reads it as bound for the whole method.
+///
+/// Local variables are deliberately absent: `emitInvocations` binds them where
+/// Java does, from their declarator to the end of their block.
+fn collectMethodBindings(
+    gpa: std.mem.Allocator,
+    into: *std.ArrayList([]const u8),
+    node: ts.Node,
+    source: []const u8,
+    depth: u32,
+) !void {
+    if (depth >= max_depth) return;
+
+    const kind = node.kind();
+    if (std.mem.eql(u8, kind, "formal_parameter") or
+        std.mem.eql(u8, kind, "catch_formal_parameter") or
+        std.mem.eql(u8, kind, "enhanced_for_statement") or
+        std.mem.eql(u8, kind, "resource") or
+        // A type pattern, which this grammar writes as a name on the
+        // `instanceof` itself rather than as a node of its own.
+        std.mem.eql(u8, kind, "instanceof_expression"))
+    {
+        if (node.childByFieldName("name")) |name| try into.append(gpa, name.text(source));
+    } else if (std.mem.eql(u8, kind, "spread_parameter")) {
+        try appendDeclaredNames(gpa, into, node, source);
+    } else if (std.mem.eql(u8, kind, "type_pattern") or
+        std.mem.eql(u8, kind, "record_pattern_component"))
+    {
+        // The type is written first and the bound name last, and a component
+        // that binds nothing, such as `_`, has no identifier at all.
+        if (lastIdentifier(node)) |name| try into.append(gpa, name.text(source));
+    } else if (std.mem.eql(u8, kind, "lambda_expression")) {
+        // A single inferred parameter is written as the name itself; the other
+        // two spellings are nodes this walk reaches on its own.
+        if (node.childByFieldName("parameters")) |parameters| {
+            if (std.mem.eql(u8, parameters.kind(), "identifier")) {
+                try into.append(gpa, parameters.text(source));
+            }
+        }
+    } else if (std.mem.eql(u8, kind, "inferred_parameters")) {
+        var names = node.namedChildren();
+        while (names.next()) |child| {
+            if (std.mem.eql(u8, child.kind(), "identifier")) try into.append(gpa, child.text(source));
+        }
+    }
+
+    var children = node.namedChildren();
+    while (children.next()) |child| try collectMethodBindings(gpa, into, child, source, depth + 1);
+}
+
+/// The names a declaration binds through its declarators. A field, a local
+/// variable, and a `...` parameter all write them the same way.
+fn appendDeclaredNames(
+    gpa: std.mem.Allocator,
+    into: *std.ArrayList([]const u8),
+    declaration: ts.Node,
+    source: []const u8,
+) !void {
+    var children = declaration.namedChildren();
+    while (children.next()) |child| {
+        if (!std.mem.eql(u8, child.kind(), "variable_declarator")) continue;
+        const name = child.childByFieldName("name") orelse continue;
+        try into.append(gpa, name.text(source));
+    }
+}
+
+fn lastIdentifier(node: ts.Node) ?ts.Node {
+    var found: ?ts.Node = null;
+    var children = node.namedChildren();
+    while (children.next()) |child| {
+        if (std.mem.eql(u8, child.kind(), "identifier")) found = child;
+    }
+    return found;
 }
 
 fn unresolvedInvocation(explanation: []const u8) InvocationTarget {
