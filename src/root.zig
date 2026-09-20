@@ -178,9 +178,13 @@ pub const Index = struct {
     /// Applies a scan of the source tree to the graph.
     ///
     /// The first scan against an empty index is all additions; every later one
-    /// is reconciled against what the index already holds. Only units whose
-    /// contents changed are reanalyzed — a move is not a change, and an
-    /// untouched file is not re-read.
+    /// is reconciled against what the index already holds. A unit is reanalyzed
+    /// when its contents changed, and when it moved to another directory: since
+    /// [ADR 008](../docs/adr/008_java_visibility_boundaries.md) a unit's place
+    /// is an input to its analysis, so a file that arrives somewhere else
+    /// resolves names differently even though not a byte of it changed. A move
+    /// within one directory changes nothing a frontend reads and is not
+    /// re-read, and neither is an untouched file.
     ///
     /// Order matters. Removals go first so that a unit renamed onto a path a
     /// departing unit still occupies has somewhere to land.
@@ -233,11 +237,21 @@ pub const Index = struct {
                 else => {},
             }
         }
+        // Renames are applied before additions so a unit moving off a path
+        // vacates it first. Which of them the frontends must re-read is decided
+        // here, while the old path is still readable, and acted on after every
+        // other unit in the batch has been analyzed.
+        var moved: std.ArrayList(model.SourceUnitId) = .empty;
+        defer moved.deinit(gpa);
         for (correspondence.decisions) |decision| {
             switch (decision) {
                 .renamed => |match| {
-                    _ = try self.graph.setSourceUnitPath(match.id, found.units[match.scan_index].path);
+                    const destination = found.units[match.scan_index].path;
+                    const origin = if (self.graph.unit(match.id)) |record| record.path else "";
+                    const relocated = !std.mem.eql(u8, directoryOf(origin), directoryOf(destination));
+                    _ = try self.graph.setSourceUnitPath(match.id, destination);
                     outcome.renamed += 1;
+                    if (relocated) try moved.append(gpa, match.id);
                 },
                 else => {},
             }
@@ -274,6 +288,17 @@ pub const Index = struct {
                 },
                 else => {},
             }
+        }
+
+        // Last, because a relocated unit resolves names against whatever the
+        // rest of the batch established, and because what it now exposes has to
+        // reach the units that may see it differently.
+        if (moved.items.len != 0) {
+            for (moved.items) |unit| {
+                _ = try self.analyzer.indexUnit(&self.graph, unit);
+                outcome.analyzed += 1;
+            }
+            try upkeep.recordRenames(moved.items);
         }
 
         try upkeep.finish(&outcome);
@@ -318,17 +343,28 @@ pub const Index = struct {
         }
     }
 
-    /// Moves a unit to a new path. Its contents did not change, so it is not
-    /// reanalyzed and nothing inside it loses its identity. A unit that found
-    /// it by its old path is reanalyzed.
+    /// Moves a unit to a new path. Nothing inside it loses its identity, and a
+    /// unit that found it by its old path is reanalyzed.
+    ///
+    /// The moved unit is reanalyzed too when it lands in another directory. Its
+    /// bytes did not change, but where it sits decides which other units it may
+    /// resolve names to, so its own claims are as out of date as a reader's
+    /// ([ADR 008](../docs/adr/008_java_visibility_boundaries.md),
+    /// [Follow-up 015](../docs/followups/015_unit_path_change_does_not_reanalyze.md)).
     pub fn renameUnit(
         self: *Index,
         unit: model.SourceUnitId,
         path: []const u8,
     ) !void {
+        const origin = if (self.graph.unit(unit)) |record| record.path else "";
+        const relocated = !std.mem.eql(u8, directoryOf(origin), directoryOf(path));
         var upkeep = try Upkeep.begin(self, &.{unit});
         defer upkeep.deinit();
         _ = try self.graph.setSourceUnitPath(unit, path);
+        if (relocated) {
+            _ = try self.analyzer.indexUnit(&self.graph, unit);
+            try upkeep.recordRenames(&.{unit});
+        }
         try upkeep.finish(null);
     }
 
@@ -347,6 +383,18 @@ pub const Index = struct {
         return self.graph.publish();
     }
 };
+
+/// The directory part of a root-relative path, or the empty string when it has
+/// none.
+///
+/// It is what decides whether a move is semantically a move: a Java source root
+/// is the unit's directory with its package directories stripped, and a Zig
+/// local import resolves against the same directory, so two paths sharing one
+/// directory are read identically by every frontend here.
+fn directoryOf(path: []const u8) []const u8 {
+    const cut = std.mem.lastIndexOfScalar(u8, path, '/') orelse return "";
+    return path[0..cut];
+}
 
 /// Keeps cross-unit facts current across one batch of source changes: a single
 /// edit, addition, or removal, or a whole scan.
@@ -467,6 +515,41 @@ const Upkeep = struct {
         self.shape_after.clearRetainingCapacity();
         try frontends.java_members.aspectsOf(&self.index.graph, unit, self.gpa, &self.shape_after);
         try self.markChanges();
+    }
+
+    /// The units that were just reanalyzed after landing in other directories.
+    ///
+    /// A move changes no byte, so the before/after comparison the other steps
+    /// use would find nothing: a class keeps its package, its name, its methods
+    /// and their modifiers wherever the file sits. What it changes is who may
+    /// resolve a name to it, and none of those records that. So everything the
+    /// moved units expose is marked changed outright. It is broader than a
+    /// comparison would be, and a reader that reanalyzes to the same answer
+    /// costs a pass and changes no claim, which is the direction this channel
+    /// is allowed to err in.
+    ///
+    /// They share one step, because they do share one: every path in the batch
+    /// was set before any of them was analyzed, so each of them read the final
+    /// places of all of them. Numbering them in sequence would make each one
+    /// owe the ones analyzed before it a second pass for a change none of them
+    /// can see.
+    fn recordRenames(self: *Upkeep, units: []const model.SourceUnitId) !void {
+        self.step += 1;
+        for (units) |unit| {
+            try self.analyzed_at.put(self.gpa, unit, self.step);
+
+            self.after.clearRetainingCapacity();
+            try frontends.java_packages.exportsOf(&self.index.graph, unit, self.gpa, &self.after);
+            for (self.after.items) |declared| {
+                try self.changed_packages.put(self.gpa, declared.package, self.step);
+            }
+
+            self.shape_after.clearRetainingCapacity();
+            try frontends.java_members.aspectsOf(&self.index.graph, unit, self.gpa, &self.shape_after);
+            for (self.shape_after.items) |aspect| {
+                try self.noteChangedAspect(aspect.class, aspect.method);
+            }
+        }
     }
 
     /// Every package with an export in one of `before` and `after` but not the

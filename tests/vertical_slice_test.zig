@@ -924,9 +924,11 @@ test "moving a file preserves the unit and everything inside it" {
     try testing.expectEqual(@as(usize, 0), outcome.removed);
     try testing.expectEqual(@as(usize, 0), outcome.added);
 
-    // Nothing inside the file moved, so nothing was re-read.
-    try testing.expectEqual(@as(usize, 0), outcome.analyzed);
-    try testing.expectEqual(baseline, tree.invocations());
+    // The file landed in another directory, so it is re-read: where a unit
+    // sits decides which other units it may resolve names to. Exactly one unit
+    // is re-read — the one that moved, and not the one that did not.
+    try testing.expectEqual(@as(usize, 1), outcome.analyzed);
+    try testing.expectEqual(baseline + 1, tree.invocations());
 
     var after = try tree.index.publish();
     defer after.deinit();
@@ -4272,4 +4274,173 @@ fn recordUnlabelledJavaMethod(
     // The package hint is what `indexUnit` would have written, and the reader's
     // context is built from it.
     try index.analyzer.java_packages.note(&index.graph, unit);
+}
+
+test "renaming a file inside its own directory re-reads nothing" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("demo/Greeter.java", greeter_java);
+    _ = try tree.rescan();
+    const baseline = tree.invocations();
+
+    // The directory is what a Java source root and a Zig local import are read
+    // against, so a new file name inside it changes nothing a frontend reads.
+    try tree.move("demo/Greeter.java", "demo/Renamed.java");
+    const outcome = try tree.rescan();
+
+    try testing.expectEqual(@as(usize, 1), outcome.renamed);
+    try testing.expectEqual(@as(usize, 0), outcome.analyzed);
+    try testing.expectEqual(baseline, tree.invocations());
+}
+
+// A unit's place decides which other units it may resolve names to, so a move
+// is a semantic change even though it changes no byte
+// ([Follow-up 015](../docs/followups/015_unit_path_change_does_not_reanalyze.md)).
+
+test "a caller moved out of its provider's source root loses the fact it recorded" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write(
+        "module/src/main/java/lib/Util.java",
+        "package lib;\nclass Util { public static String make() { return null; } }\n",
+    );
+    try tree.write(
+        "module/src/main/java/lib/Caller.java",
+        "package lib;\nclass Caller { void covered() { Util.make(); } }\n",
+    );
+    _ = try tree.rescan();
+
+    {
+        var before = try tree.index.publish();
+        defer before.deinit();
+        try expectStaticCall(&before, .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "covered",
+            .call = "Util.make()",
+            .expect = .{ .fact = .{
+                .path = "module/src/main/java/lib/Util.java",
+                .class = "Util",
+                .method = "make",
+            } },
+        });
+    }
+
+    // Another module is another visibility scope. The caller may no longer
+    // resolve `Util`, so the fact it recorded while it could must go with it.
+    try tree.move(
+        "module/src/main/java/lib/Caller.java",
+        "other/src/main/java/lib/Caller.java",
+    );
+    const outcome = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), outcome.renamed);
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try expectStaticCall(&after, .{
+        .path = "other/src/main/java/lib/Caller.java",
+        .class = "Caller",
+        .method = "covered",
+        .call = "Util.make()",
+        .expect = .{ .unresolved = "source root this unit can see" },
+    });
+}
+
+test "a provider moved into the reader's source root turns its unresolved call into a fact" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write(
+        "module/src/main/java/lib/Caller.java",
+        "package lib;\nclass Caller { void call() { Util.make(); } }\n",
+    );
+    try tree.write(
+        "other/src/main/java/lib/Util.java",
+        "package lib;\nclass Util { public static String make() { return null; } }\n",
+    );
+    _ = try tree.rescan();
+
+    {
+        var before = try tree.index.publish();
+        defer before.deinit();
+        try expectStaticCall(&before, .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "call",
+            .call = "Util.make()",
+            .expect = .{ .unresolved = "source root this unit can see" },
+        });
+    }
+
+    // The caller's call resolved to nothing, so it declared no dependency and
+    // nothing names it. Only the move's own channel can reach it.
+    try tree.move(
+        "other/src/main/java/lib/Util.java",
+        "module/src/main/java/lib/Util.java",
+    );
+    _ = try tree.rescan();
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try expectStaticCall(&after, .{
+        .path = "module/src/main/java/lib/Caller.java",
+        .class = "Caller",
+        .method = "call",
+        .call = "Util.make()",
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Util.java",
+            .class = "Util",
+            .method = "make",
+        } },
+    });
+}
+
+test "moving a directory costs the units in it and the readers they reach" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    // Four providers in one package, one reader of one of them, and a unit in
+    // another package that reads nothing of it.
+    try tree.write(
+        "module/src/main/java/lib/A.java",
+        "package lib;\nclass A { public static String a() { return null; } }\n",
+    );
+    try tree.write(
+        "module/src/main/java/lib/B.java",
+        "package lib;\nclass B { public static String b() { return null; } }\n",
+    );
+    try tree.write(
+        "module/src/main/java/lib/C.java",
+        "package lib;\nclass C { public static String c() { return null; } }\n",
+    );
+    try tree.write(
+        "module/src/main/java/lib/Reader.java",
+        "package lib;\nclass Reader { void call() { A.a(); } }\n",
+    );
+    try tree.write(
+        "module/src/main/java/app/Elsewhere.java",
+        "package app;\nclass Elsewhere { void call() { } }\n",
+    );
+    _ = try tree.rescan();
+    const baseline = tree.invocations();
+
+    try tree.move("module/src/main/java/lib/A.java", "moved/src/main/java/lib/A.java");
+    try tree.move("module/src/main/java/lib/B.java", "moved/src/main/java/lib/B.java");
+    try tree.move("module/src/main/java/lib/C.java", "moved/src/main/java/lib/C.java");
+    const outcome = try tree.rescan();
+
+    try testing.expectEqual(@as(usize, 3), outcome.renamed);
+    // The three that moved, plus the reader whose answer they change. The unit
+    // in another package is not touched: it declares nothing in `lib` and
+    // imports nothing from it.
+    try testing.expectEqual(@as(usize, 4), tree.invocations() - baseline);
+    try testing.expectEqual(@as(usize, 1), outcome.invalidated);
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try expectStaticCall(&after, .{
+        .path = "module/src/main/java/lib/Reader.java",
+        .class = "Reader",
+        .method = "call",
+        .call = "A.a()",
+        .expect = .{ .unresolved = "source root this unit can see" },
+    });
 }

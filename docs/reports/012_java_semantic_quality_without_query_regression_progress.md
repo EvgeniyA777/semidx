@@ -454,7 +454,26 @@ recorded, and the local work-bound lane was run instead.
   itself. Plan 010's mode is unrecorded, so the Debug column is the honest
   comparison and is labelled as such.
 
+### What Was Fixed, And Where
+
+| Finding | Commit | Effect |
+| --- | --- | --- |
+| 2, 3, 4 | `ffb8bf8` | A unit with an on-demand static import resolves no simple-name receiver; `java.static` became a tri-state whose `unknown` declines as unrecorded; the two unreachable declines stay, with their lookup-order assumption pinned by a test |
+| 1 | this commit | A unit that moves to another directory is reanalyzed and marks everything it exposes as changed; a rename inside one directory still re-reads nothing |
+
+Findings 6 and 7 stay with
+[Follow-up 017](../followups/017_plan_012_external_evidence_reproducibility.md),
+which cannot be closed here: explaining the 106-assertion delta needs the
+external clone, and a rebuilt harness produces a new baseline rather than
+confirming the old one.
+
 ### Verification
+
+Re-run after both fixes: `zig build test-core`, `zig build test`,
+`zig build test-mcp`, `zig build dogfood` and `zig build preview-gate` all exit
+0, with 257 tests passing and 2 skipped against 249/2 before the review.
+
+The table below is the review's own pass, against `6a47ba5`.
 
 | Command | Result |
 | --- | --- |
@@ -1432,17 +1451,24 @@ the final diff of Stages 3 to 7; re-ran every committed lane; and probed the
 implementation where a claim could be falsified locally. It did not have the
 external clone, so no number measured against `apache/dubbo` was re-derived.
 
-Nothing here reopens the plan. Three findings are deferred to the register, the
-rest are recorded below with their disposition.
+Nothing here reopens the plan. Three findings went to the register; two of
+those were then fixed, and the rest are recorded below with their disposition.
+
+Finding 2 was the one that changed shape after the review. It was written up as
+contrived and was then checked against `javac` 17, which showed the program
+compiles and calls a different method of a different class than the fact names.
+Fixing it costs recall that this repository cannot measure, and the capability
+matrix records that against the 139 rather than leaving the number standing
+unqualified.
 
 ### Findings
 
 | # | Finding | Disposition |
 | ---: | --- | --- |
-| 1 | A moved unit is never reanalyzed, so a `CALLS` fact survives a move out of its provider's Java source root. Reproduced: `renamed=1 analyzed=0`, and the relationship stays a fact where the matrix asserts unresolved for a unit written at that path | Deferred — [Follow-up 015](../followups/015_unit_path_change_does_not_reanalyze.md) |
-| 2 | `import static a.b.C.*;` poisons no name, because `importedName` returns null on `asterisk`, so an obscuring static-imported field can yield a false fact | Deferred — [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md) |
-| 3 | `is_static` has no `unknown`, so a definition with no `java.static` label is reported as "is not static" — a claim about the source the graph does not hold | Deferred — [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md) |
-| 4 | Two reason families in `externalStaticTarget` are unreachable while `membersFor` and `resolveType` agree on lookup order, and no fixture asserts them | Deferred — [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md) |
+| 1 | A moved unit is never reanalyzed, so a `CALLS` fact survives a move out of its provider's Java source root. Reproduced: `renamed=1 analyzed=0`, and the relationship stays a fact where the matrix asserts unresolved for a unit written at that path | **Fixed** — [Follow-up 015](../followups/015_unit_path_change_does_not_reanalyze.md) |
+| 2 | `import static a.b.C.*;` poisons no name, because `importedName` returns null on `asterisk`, so an obscuring static-imported field can yield a false fact | **Fixed** — [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md) |
+| 3 | `is_static` has no `unknown`, so a definition with no `java.static` label is reported as "is not static" — a claim about the source the graph does not hold | **Fixed** — [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md) |
+| 4 | Two reason families in `externalStaticTarget` are unreachable while `membersFor` and `resolveType` agree on lookup order, and no fixture asserts them | **Fixed** — [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md) |
 | 5 | Stage 7's decomposition names eight rows, but the rule can answer eleven families. Three are neither listed nor declared empty | Accepted, corrected below |
 | 6 | The 106-assertion delta was assigned to Stage 7 by Stage 6 and closed as unexplained, with no owner afterwards | Deferred — [Follow-up 017](../followups/017_plan_012_external_evidence_reproducibility.md) |
 | 7 | The rebuilt sampling and classification harness is again uncommitted, and the log records the seed but not how the seed selects the sample | Deferred — [Follow-up 017](../followups/017_plan_012_external_evidence_reproducibility.md) |

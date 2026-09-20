@@ -237,9 +237,7 @@ documents that own history, rationale, and evidence.
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java coverage, not its boundary, is what limits it — receiver-qualified and
   class-name-qualified calls dominate what stays unresolved; definition renames
-  are identity loss; a file moved and changed in one rescan loses identity; a
-  moved unit is never reanalyzed although its path decides Java visibility
-  ([Follow-up 015](docs/followups/015_unit_path_change_does_not_reanalyze.md));
+  are identity loss; a file moved and changed in one rescan loses identity;
   dependency invalidation is intentionally coarse and
   transitive; a Zig importer of a relative file that did not exist when it was
   analyzed is not reanalyzed when the file appears (unresolved, never false);
@@ -269,8 +267,7 @@ documents that own history, rationale, and evidence.
   return, proven by a committed work bound at 244,559 assertions (past Dubbo's
   230,753). Plan 012 Stage 0 re-measured the external latency the plan left
   unclaimed: `semidx_context depth=2` on apache/dubbo fell from 90.71 s to
-  0.019 s in the same build mode, so the product claim rests on observation as
-  well as work bounds. Plan 012 supersedes its Java write-path figure.
+  0.019 s in the same build mode, so the claim rests on observation too.
 - [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
   is **executed**: `ClassName.method(...)` is a `CALLS` fact when every
   [ADR 009](docs/adr/009_java_static_calls.md) condition holds at once, and
@@ -285,12 +282,15 @@ documents that own history, rationale, and evidence.
   supertype guard with
   [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md); a
   post-closure review deferred
-  [015](docs/followups/015_unit_path_change_does_not_reanalyze.md) and
-  [017](docs/followups/017_plan_012_external_evidence_reproducibility.md), and
-  fixed [016](docs/followups/016_java_static_call_rule_narrow_gaps.md): a unit
-  with an on-demand static import resolves no simple-name receiver, since such
-  an import binds field names semidx cannot enumerate and a field obscures a
-  type of its name. That costs recall, so 139 overstates the rule until 017.
+  [017](docs/followups/017_plan_012_external_evidence_reproducibility.md) and
+  fixed two bugs. [016](docs/followups/016_java_static_call_rule_narrow_gaps.md):
+  a unit with an on-demand static import resolves no simple-name receiver, since
+  such an import binds field names semidx cannot enumerate and a field obscures
+  a type of its name — that costs recall, so 139 overstates the rule until 017.
+  [015](docs/followups/015_unit_path_change_does_not_reanalyze.md): a unit that
+  moves to another directory is reanalyzed and marks what it exposes changed,
+  because its place decides who may resolve names to it; a rename inside a
+  directory still re-reads nothing.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients ignore `structuredContent` and read `content`, so the text copy is
