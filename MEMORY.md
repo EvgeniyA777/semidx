@@ -233,6 +233,11 @@ documents that own history, rationale, and evidence.
   `scripts/constitution.freeze.sha256`.
 - Memory freshness is enforced by `scripts/check-memory-freshness.sh` and the
   pre-push hook for high-signal documentation and policy changes.
+- External Java measurement has a committed harness,
+  `scripts/java-claim-sample.py` — a developer tool no lane refers to, sampling
+  by `sha256(seed + key)` rank and counting any unclassified reason instead of
+  dropping it. Plan 012's numbers predate it and stay unverifiable
+  ([Follow-up 017](docs/followups/017_plan_012_external_evidence_reproducibility.md)).
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java coverage, not its boundary, is what limits it — receiver-qualified and
@@ -240,8 +245,8 @@ documents that own history, rationale, and evidence.
   are identity loss; a file moved and changed in one rescan loses identity;
   dependency invalidation is intentionally coarse and
   transitive; a Zig importer of a relative file that did not exist when it was
-  analyzed is not reanalyzed when the file appears (unresolved, never false);
-  unit ids and interned strings are not reclaimed while the graph lives;
+  analyzed is not reanalyzed when it appears (unresolved, never false); unit ids
+  and interned strings are not reclaimed while the graph lives;
   `Snapshot` string borrowing and default-current query discipline are
   conventions rather than type-enforced boundaries.
 
@@ -280,17 +285,17 @@ documents that own history, rationale, and evidence.
   recorded rather than smoothed. Value receivers stay with
   [Follow-up 014](docs/followups/014_java_instance_receiver_calls.md), the
   supertype guard with
-  [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md); a
-  post-closure review deferred
+  [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md). A
+  post-closure review left
   [017](docs/followups/017_plan_012_external_evidence_reproducibility.md) and
-  fixed two bugs. [016](docs/followups/016_java_static_call_rule_narrow_gaps.md):
-  a unit with an on-demand static import resolves no simple-name receiver, since
-  such an import binds field names semidx cannot enumerate and a field obscures
-  a type of its name — that costs recall, so 139 overstates the rule until 017.
-  [015](docs/followups/015_unit_path_change_does_not_reanalyze.md): a unit that
-  moves to another directory is reanalyzed and marks what it exposes changed,
-  because its place decides who may resolve names to it; a rename inside a
-  directory still re-reads nothing.
+  [018](docs/followups/018_unexplained_assertion_delta.md) open and fixed two
+  bugs: [016](docs/followups/016_java_static_call_rule_narrow_gaps.md) — a unit
+  with an on-demand static import resolves no simple-name receiver, since such
+  an import binds field names semidx cannot enumerate and a field obscures a
+  type of its name, which costs recall, so 139 overstates the rule until 017;
+  and [015](docs/followups/015_unit_path_change_does_not_reanalyze.md) — a unit
+  moved to another directory is reanalyzed and marks what it exposes changed,
+  because its place decides who may resolve names to it.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients ignore `structuredContent` and read `content`, so the text copy is
@@ -309,9 +314,8 @@ documents that own history, rationale, and evidence.
 - Keep frontend coverage tied to stated risk and report it through
   [docs/spec/capability_matrix.md](docs/spec/capability_matrix.md), not through
   broad language-support claims.
-- Remove the inert `scripts/git-hooks/pre-push` block that tries to refresh the
-  removed Clojure `docs/code-context.md` flow once the rebuilt stack has a clear
-  replacement.
+- Remove the inert `scripts/git-hooks/pre-push` block that refreshes the removed
+  Clojure `docs/code-context.md` flow, once the stack has a replacement.
 
 ## Current Evidence Pointers
 
@@ -330,20 +334,16 @@ documents that own history, rationale, and evidence.
   current candidate: [docs/releases/v0.1.0-preview.3.md](docs/releases/v0.1.0-preview.3.md).
 - Plan 006 Zig dogfood coverage:
   [docs/reports/006_zig_dogfood_semantic_coverage_progress.md](docs/reports/006_zig_dogfood_semantic_coverage_progress.md).
-- Plan 007 MCP response budgets and schema ergonomics:
+- Plan 007 response budgets and schema ergonomics:
   [docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md](docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md).
-- Plan 008 habit loop gate and release-candidate evidence:
-  [docs/reports/008_habit_loop_release_gate_progress.md](docs/reports/008_habit_loop_release_gate_progress.md).
-- Plan 009 progressive discovery and response budgets:
-  [docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md](docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md).
-- Plan 010 Java resolution boundaries, and the first external-repository
-  evidence:
+- Plan 008 habit loop gate: [docs/reports/008_habit_loop_release_gate_progress.md](docs/reports/008_habit_loop_release_gate_progress.md).
+- Plan 009 progressive discovery: [docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md](docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md).
+- Plan 010 Java resolution boundaries, and the first external evidence:
   [docs/reports/010_java_resolution_boundaries_progress.md](docs/reports/010_java_resolution_boundaries_progress.md).
-- Plan 011 external-scale graph query indexes, including the query cost model,
-  its measurements, and the Java write-path decision:
+- Plan 011 query indexes, the cost model and its measurements:
   [docs/reports/011_external_scale_graph_query_indexes_progress.md](docs/reports/011_external_scale_graph_query_indexes_progress.md).
-- Active follow-ups:
-  [docs/followups/README.md](docs/followups/README.md).
-- Product direction:
-  [docs/design/001_project_roadmap.md](docs/design/001_project_roadmap.md) and
+- Plan 012 Java static calls, its costs and its post-closure review:
+  [docs/reports/012_java_semantic_quality_without_query_regression_progress.md](docs/reports/012_java_semantic_quality_without_query_regression_progress.md).
+- Active follow-ups: [docs/followups/README.md](docs/followups/README.md).
+- Product direction: [docs/design/001_project_roadmap.md](docs/design/001_project_roadmap.md),
   [docs/design/002_product_adoption_strategy.md](docs/design/002_product_adoption_strategy.md).

@@ -461,11 +461,30 @@ recorded, and the local work-bound lane was run instead.
 | 2, 3, 4 | `ffb8bf8` | A unit with an on-demand static import resolves no simple-name receiver; `java.static` became a tri-state whose `unknown` declines as unrecorded; the two unreachable declines stay, with their lookup-order assumption pinned by a test |
 | 1 | this commit | A unit that moves to another directory is reanalyzed and marks everything it exposes as changed; a rename inside one directory still re-reads nothing |
 
-Findings 6 and 7 stay with
+Finding 7 stays with
 [Follow-up 017](../followups/017_plan_012_external_evidence_reproducibility.md),
-which cannot be closed here: explaining the 106-assertion delta needs the
-external clone, and a rebuilt harness produces a new baseline rather than
-confirming the old one.
+and finding 6 moved to its own entry,
+[Follow-up 018](../followups/018_unexplained_assertion_delta.md), so that it has
+an owner rather than a mention in a closed plan's residual risk.
+
+017 is not closed, and the reason is the point of it. A harness now exists —
+`scripts/java-claim-sample.py`, a developer tool no build lane refers to — whose
+sample is specified well enough to be drawn without it: definitions are ranked
+by `sha256(seed + "\n" + key)` over `path\nline\nrole\nname`, so a
+reimplementation in any language draws the same sample from the same seed. It
+also refuses to lose a reason family: a claim no family matches is counted as
+`unclassified` and its explanation printed, which is the check Stage 7's
+eight-row table did not have.
+
+It was verified on what is here — the Java fixtures, a tree written to reach
+every family (14 of 17 reached; the three that stayed empty are exactly the
+three Follow-up 016 records as unreachable), two runs of one seed byte-identical,
+a different seed drawing a different sample, and a Zig root where all 117
+unresolved calls land in `unclassified` with their explanations printed. None of
+that is a clone of `apache/dubbo`. Stage 0's selection was never recorded and
+cannot be recovered, so this harness produces a **new** baseline rather than
+confirming the old one, and Plan 012's 6,710 / 5,662 / 174 / 313 / 139 stay
+unverifiable by anyone. Closing 017 here would assert a check that did not run.
 
 ### Verification
 
@@ -1470,7 +1489,7 @@ unqualified.
 | 3 | `is_static` has no `unknown`, so a definition with no `java.static` label is reported as "is not static" — a claim about the source the graph does not hold | **Fixed** — [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md) |
 | 4 | Two reason families in `externalStaticTarget` are unreachable while `membersFor` and `resolveType` agree on lookup order, and no fixture asserts them | **Fixed** — [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md) |
 | 5 | Stage 7's decomposition names eight rows, but the rule can answer eleven families. Three are neither listed nor declared empty | Accepted, corrected below |
-| 6 | The 106-assertion delta was assigned to Stage 7 by Stage 6 and closed as unexplained, with no owner afterwards | Deferred — [Follow-up 017](../followups/017_plan_012_external_evidence_reproducibility.md) |
+| 6 | The 106-assertion delta was assigned to Stage 7 by Stage 6 and closed as unexplained, with no owner afterwards | Deferred — [Follow-up 018](../followups/018_unexplained_assertion_delta.md), which now owns it |
 | 7 | The rebuilt sampling and classification harness is again uncommitted, and the log records the seed but not how the seed selects the sample | Deferred — [Follow-up 017](../followups/017_plan_012_external_evidence_reproducibility.md) |
 | 8 | The 80% bar is reported as "139 of 139 measured accepted-access targets", which is 100% by construction | Accepted, clarified below |
 | 9 | [Follow-up 014](../followups/014_java_instance_receiver_calls.md)'s "Current Behavior" still carries Stage 0's 1,041 / 3,583 split, which Stage 7 superseded with 139 and 3,512 | Accepted, to be corrected when that entry is next touched |
