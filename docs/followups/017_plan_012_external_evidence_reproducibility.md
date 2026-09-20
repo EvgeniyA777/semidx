@@ -54,10 +54,26 @@ thresholds get re-measured.
 
 ## What Has Been Done
 
-A harness now exists and is committed: `scripts/java-claim-sample.py`. It is a
-developer measurement tool, not a build lane and not a conformance check; no
-`zig build` step refers to it. It drives the real MCP stdio server over the
-`2026-07-28` protocol and asks only what a consumer could ask.
+A harness now exists and is committed: `src/claim_sample.zig`, run as
+`zig build claim-sample -- --root <dir>`. It is a developer tool, not a lane and
+not a conformance check: `test`, `test-mcp`, `dogfood` and `preview-gate` do not
+build it, no git hook or `.mcp.json` entry names it, and no test asserts against
+its output.
+
+It is written in Zig because the toolchain is already required and nothing else
+is — [tooling.md](../agent-policy/tooling.md#runtime-budget-for-repository-tooling)
+owns that rule. The first version of this harness was written in Python for
+speed, which added an interpreter to a project that needed none and was not
+recorded as a decision; it was replaced before the entry was written up, and the
+rule was written so the next tool does not repeat it.
+
+It reads the published snapshot rather than the MCP preview. The preview is a
+projection of that snapshot, so the claims are the same ones, but a response
+budget can truncate an answer and a measurement should not have to reason about
+where a page ended. One visible consequence: the snapshot reports `defines`
+claims that `semidx_references outgoing` does not, so the claim totals here are
+larger than a run through the preview would report, while `calls` and
+`references` agree claim for claim.
 
 **The sample no longer depends on the script.** Its selection is specified in
 the script's own docstring and repeated here, because a procedure that lives
@@ -80,17 +96,44 @@ eight families and was silent about three; a sum that closes was the only
 evidence those three were zero. This makes that evidence explicit, and makes a
 reworded reason visible instead of silent.
 
+The families, in the order they are tried — the first fragment a claim contains
+wins, so a fragment that is a substring of another comes after it:
+
+| Family | Fragment of the frontend's explanation |
+| --- | --- |
+| `receiver_not_simple_name` | qualified by a receiver this frontend does not resolve |
+| `nested_class_body` | class body declared in the method |
+| `receiver_bound` | is declared here as a binding, so it is read as a value |
+| `on_demand_static_import` | imports static members on demand |
+| `enclosing_supertypes` | a field it may inherit |
+| `receiver_reaches_no_class` | the receiver is not read as a class |
+| `target_supertypes` | declares supertypes, so a method of this name it may inherit |
+| `target_supertypes_unknown` | carries no record of whether it declares supertypes |
+| `target_shape_not_read` | whose current shape this analysis did not read |
+| `target_no_method` | declares no method of this name |
+| `target_overloaded` | methods of this name, and overloads are not resolved |
+| `target_not_static` | is not static, so naming it through the class |
+| `target_static_unrecorded` | carries no record of whether it is `static` |
+| `target_inaccessible` | outside the access this frontend resolves across classes |
+| `unqualified_no_method` | no method of this name is declared in the enclosing class |
+| `unqualified_overloaded` | methods of this name are declared in the enclosing class |
+| `unqualified_supertypes` | a method of this name it may inherit could be the target |
+
+Anything else is `unclassified`. The fragments are the frontend's own words, so
+rewording a reason in `src/frontends/java.zig` moves its claims there rather
+than losing them quietly.
+
 **Verified on the inputs available here**, which do not include the measured
 clone:
 
 | Check | Result |
 | --- | --- |
-| `--root fixtures`, Java | 29 definitions, 36 claims, families sum to the whole, `unclassified` 0 |
+| `--root fixtures`, Java | 29 definitions, 12 call facts and 4 unresolved calls, families sum to the whole, `unclassified` 0 |
 | A tree written to reach every family | 16 unresolved calls split across 14 of the 17 families, `unclassified` 0 |
 | The three families that stayed zero | `target_supertypes_unknown`, `target_shape_not_read`, `target_static_unrecorded` — the three [Follow-up 016](016_java_static_call_rule_narrow_gaps.md) records as unreachable from ordinary source |
 | Two runs of one seed | byte-identical reports |
 | A different seed | a different sample |
-| `--root . --language zig` | 117 unresolved calls, all `unclassified`, each explanation printed — the miss is loud |
+| `--root . --language zig` | 228 unresolved calls, all `unclassified`, five explanations printed — the miss is loud, and no Zig families are written yet |
 
 ## Why It Is Still Open
 
@@ -120,8 +163,9 @@ replaces Plan 012's numbers rather than confirming them.
 This entry asks for reproducibility, not behavior, so its checks are not unit
 tests:
 
-- `scripts/java-claim-sample.py --root <clone of apache/dubbo at df9c5e1>`
-  completes and its families sum to the whole with `unclassified` at zero.
+- `zig build claim-sample -Doptimize=ReleaseFast -- --root <clone of
+  apache/dubbo at df9c5e1>` completes and its families sum to the whole with
+  `unclassified` at zero.
 - The same command, run twice, produces identical reports.
 - A second person, given only the selection rule above and the seed, draws the
   same sample as the script.

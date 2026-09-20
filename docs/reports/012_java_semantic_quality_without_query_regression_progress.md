@@ -468,8 +468,8 @@ and finding 6 moved to its own entry,
 an owner rather than a mention in a closed plan's residual risk.
 
 017 is not closed, and the reason is the point of it. A harness now exists —
-`scripts/java-claim-sample.py`, a developer tool no build lane refers to — whose
-sample is specified well enough to be drawn without it: definitions are ranked
+`zig build claim-sample`, a developer tool no lane depends on — whose sample is
+specified well enough to be drawn without it: definitions are ranked
 by `sha256(seed + "\n" + key)` over `path\nline\nrole\nname`, so a
 reimplementation in any language draws the same sample from the same seed. It
 also refuses to lose a reason family: a claim no family matches is counted as

@@ -114,7 +114,7 @@ Authority and lifecycle ownership are defined in
 | [documentation.md](docs/agent-policy/documentation.md) | document ownership, filenames, frontmatter, lifecycle, ADR procedure, progress logs, Plan Readiness Gate |
 | [git.md](docs/agent-policy/git.md) | branch discipline, concurrent-agent safety, commit and push rules, recovery, hooks, attribution and constitution enforcement |
 | [testing.md](docs/agent-policy/testing.md) | risk-based verification, lanes, local services, isolation and evidence |
-| [tooling.md](docs/agent-policy/tooling.md) | MCP-first retrieval, code reading, editing tools and their required probes |
+| [tooling.md](docs/agent-policy/tooling.md) | MCP-first retrieval, code reading, editing tools and their required probes, runtime budget for repository tooling |
 
 - Apply the Plan Readiness Gate before executing a staged implementation plan. A
   hard fail blocks execution until the plan is corrected; when only cosmetic

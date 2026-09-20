@@ -162,6 +162,30 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the developer-only graph inspection command");
     run_step.dependOn(&run_exe.step);
 
+    // Developer-only measurement command. Like `run` above it is not a lane:
+    // `test`, `test-mcp`, `dogfood` and `preview-gate` do not depend on it, and
+    // no test asserts against its output.
+    const claim_sample = b.addExecutable(.{
+        .name = "semidx-claim-sample",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/claim_sample.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "semidx", .module = semidx },
+                .{ .name = "semidx_core", .module = core },
+            },
+        }),
+    });
+    b.installArtifact(claim_sample);
+
+    const run_claim_sample = b.addRunArtifact(claim_sample);
+    run_claim_sample.step.dependOn(b.getInstallStep());
+    if (b.args) |args| run_claim_sample.addArgs(args);
+    const claim_sample_step = b.step("claim-sample", "Sample definitions and classify their outgoing claims (pass --root <dir>)");
+    claim_sample_step.dependOn(&run_claim_sample.step);
+
     // The local MCP stdio preview. A consumer of published snapshots: it
     // imports the assembled index and nothing below it.
     const version_options = b.addOptions();

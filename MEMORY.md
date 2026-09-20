@@ -233,11 +233,11 @@ documents that own history, rationale, and evidence.
   `scripts/constitution.freeze.sha256`.
 - Memory freshness is enforced by `scripts/check-memory-freshness.sh` and the
   pre-push hook for high-signal documentation and policy changes.
-- External Java measurement has a committed harness,
-  `scripts/java-claim-sample.py` — a developer tool no lane refers to, sampling
-  by `sha256(seed + key)` rank and counting any unclassified reason instead of
-  dropping it. Plan 012's numbers predate it and stay unverifiable
-  ([Follow-up 017](docs/followups/017_plan_012_external_evidence_reproducibility.md)).
+- External Java measurement has a harness: `zig build claim-sample`
+  (`src/claim_sample.zig`), a developer tool no lane depends on. It samples by
+  `sha256(seed + key)` rank and counts any unclassified reason rather than
+  dropping it. Tooling is `sh` or Zig ([tooling.md](docs/agent-policy/tooling.md));
+  Plan 012's numbers predate it ([017](docs/followups/017_plan_012_external_evidence_reproducibility.md)).
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java coverage, not its boundary, is what limits it — receiver-qualified and
