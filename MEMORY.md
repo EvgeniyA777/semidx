@@ -237,8 +237,10 @@ documents that own history, rationale, and evidence.
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java coverage, not its boundary, is what limits it — receiver-qualified and
   class-name-qualified calls dominate what stays unresolved; definition renames
-  are identity loss; a file moved and changed in one rescan
-  loses identity; dependency invalidation is intentionally coarse and
+  are identity loss; a file moved and changed in one rescan loses identity; a
+  moved unit is never reanalyzed although its path decides Java visibility
+  ([Follow-up 015](docs/followups/015_unit_path_change_does_not_reanalyze.md));
+  dependency invalidation is intentionally coarse and
   transitive; a Zig importer of a relative file that did not exist when it was
   analyzed is not reanalyzed when the file appears (unresolved, never false);
   unit ids and interned strings are not reclaimed while the graph lives;
@@ -255,42 +257,40 @@ documents that own history, rationale, and evidence.
   because it improves semidx's view of itself. Dogfood-only coverage work,
   including [Follow-up 006](docs/followups/006_zig_cross_unit_and_member_calls.md),
   is deprioritized behind that.
-- [Plan 010](docs/plans/010_java_resolution_boundaries.md) is executed. semidx
-  has external Java evidence from apache/dubbo at `df9c5e1` (119 Maven modules,
-  4,050 units); Java resolution is bounded by ADR 008's source root,
-  single-type imports resolve inside it, Follow-up 003 is closed, and
-  cross-module visibility is split into
-  [Follow-up 011](docs/followups/011_java_cross_module_visibility.md). The real
+- [Plan 010](docs/plans/010_java_resolution_boundaries.md) is executed: external
+  Java evidence from apache/dubbo at `df9c5e1` (119 Maven modules, 4,050 units),
+  resolution bounded by ADR 008's source root with single-type imports inside
+  it, Follow-up 003 closed and cross-module visibility split into
+  [Follow-up 011](docs/followups/011_java_cross_module_visibility.md). The
   remaining Java blockers are coverage, not the boundary.
 - [Plan 011](docs/plans/011_external_scale_graph_query_indexes.md) is executed
   and Follow-up 012 is closed. Snapshot identity lookups are constant time, and
   anchored relationship queries inspect exactly as many assertions as they
   return, proven by a committed work bound at 244,559 assertions (past Dubbo's
   230,753). Plan 012 Stage 0 re-measured the external latency the plan left
-  unclaimed: on apache/dubbo `semidx_context depth=2` fell from 90.71 s to
-  0.019 s and `semidx_references incoming` from 1.33 s to 0.018 s in the same
-  build mode, so the product claim now rests on observation as well as work
-  bounds. Java write-path measurement was left as-is: one-file refresh at 1,200
-  units is 13 ms.
+  unclaimed: `semidx_context depth=2` on apache/dubbo fell from 90.71 s to
+  0.019 s in the same build mode, so the product claim rests on observation as
+  well as work bounds. Plan 012 supersedes its Java write-path figure.
 - [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
-  is **executed**. `ClassName.method(...)` is a `CALLS` fact when nothing in
-  scope binds the receiver name, neither the enclosing nor the target class
-  declares supertypes, the call is outside a class body declared in a method,
-  and the class declares exactly one method of that name, `static` and either
-  public or inside the enclosing class
-  ([ADR 009](docs/adr/009_java_static_calls.md)); everything else stays
-  unresolved naming the condition that failed. Java definitions carry the shape
-  a caller cannot read from its own source (`java.supertypes`, `java.access`,
-  `java.static`); a resolved call declares a provider dependency, an unresolved
-  one is reached by an aspect-grained reader hint on the pair it wrote.
-  On apache/dubbo at `df9c5e1`, in the plan's own sample: 139 static facts
-  against a floor of 100, `calls` facts 174 → 313, references, memory and
-  habit-loop latency unmoved. The costs are recorded: index time +18%
-  ReleaseFast and +77% Debug, a one-file refresh 0.28 s → up to 1.00 s
-  re-reading up to 363 of 4,050 units, +9% bytes per Java definition item, and
-  `semidx_context depth=2` on a hub method now exhausts the default budget.
-  Value receivers stay with [Follow-up 014](docs/followups/014_java_instance_receiver_calls.md), the supertype guard with
-  [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md), both re-measured and unchanged.
+  is **executed**: `ClassName.method(...)` is a `CALLS` fact when every
+  [ADR 009](docs/adr/009_java_static_calls.md) condition holds at once, and
+  otherwise stays unresolved naming the condition that failed. Java definitions
+  carry `java.supertypes`, `java.access` and `java.static`; a resolved call
+  declares a provider dependency, an unresolved one is reached by an
+  aspect-grained reader hint. On apache/dubbo at `df9c5e1`, in the plan's own
+  sample: 139 static facts against a floor of 100, `calls` facts 174 → 313,
+  references and habit-loop latency unmoved, and the
+  [costs](docs/reports/012_java_semantic_quality_without_query_regression_progress.md#what-it-costs)
+  recorded rather than smoothed. Value receivers stay with
+  [Follow-up 014](docs/followups/014_java_instance_receiver_calls.md), the
+  supertype guard with
+  [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md); a
+  post-closure review deferred a stale fact after a move
+  ([015](docs/followups/015_unit_path_change_does_not_reanalyze.md)), narrow
+  gaps in the static-call rule
+  ([016](docs/followups/016_java_static_call_rule_narrow_gaps.md)) and
+  unreproducible external evidence
+  ([017](docs/followups/017_plan_012_external_evidence_reproducibility.md)).
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients ignore `structuredContent` and read `content`, so the text copy is

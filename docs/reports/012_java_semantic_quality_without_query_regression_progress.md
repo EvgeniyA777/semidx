@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "completed"
 status: "completed"
 agent_action: "historical_reference_only"
-updated: "2026-09-19"
+updated: "2026-09-20"
 ---
 
 # 012: Java Semantic Quality Without Query Regression Progress
@@ -44,6 +44,13 @@ Stage 0 also settled the question Plan 011 deliberately left open: the external
 latency observation now exists, and it supports the Plan 011 product claim
 strongly. `semidx_context depth=2` on apache/dubbo fell from **90.71 s to
 0.019 s** in the same build mode on the same repository and commit.
+
+The plan was reviewed after closure. Nothing reopened it; three findings were
+deferred to Follow-ups [015](../followups/015_unit_path_change_does_not_reanalyze.md),
+[016](../followups/016_java_static_call_rule_narrow_gaps.md) and
+[017](../followups/017_plan_012_external_evidence_reproducibility.md), and the
+rest are recorded in
+[Post-Closure Review](#post-closure-review-2026-09-20).
 
 ## Stage Log
 
@@ -1416,3 +1423,105 @@ consequences the plan asked to be measured:
 - **One repository is one repository.** Every external number here is dubbo's.
   A second sample may move the shares, and the classification harness is
   described well enough in this log to rebuild.
+
+## Post-Closure Review (2026-09-20)
+
+A deep review of the closed plan, run against `6a47ba5` on a clean tree. It read
+`ADR 009`, the plan, this log, the capability matrix, the preview reference and
+the final diff of Stages 3 to 7; re-ran every committed lane; and probed the
+implementation where a claim could be falsified locally. It did not have the
+external clone, so no number measured against `apache/dubbo` was re-derived.
+
+Nothing here reopens the plan. Three findings are deferred to the register, the
+rest are recorded below with their disposition.
+
+### Findings
+
+| # | Finding | Disposition |
+| ---: | --- | --- |
+| 1 | A moved unit is never reanalyzed, so a `CALLS` fact survives a move out of its provider's Java source root. Reproduced: `renamed=1 analyzed=0`, and the relationship stays a fact where the matrix asserts unresolved for a unit written at that path | Deferred — [Follow-up 015](../followups/015_unit_path_change_does_not_reanalyze.md) |
+| 2 | `import static a.b.C.*;` poisons no name, because `importedName` returns null on `asterisk`, so an obscuring static-imported field can yield a false fact | Deferred — [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md) |
+| 3 | `is_static` has no `unknown`, so a definition with no `java.static` label is reported as "is not static" — a claim about the source the graph does not hold | Deferred — [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md) |
+| 4 | Two reason families in `externalStaticTarget` are unreachable while `membersFor` and `resolveType` agree on lookup order, and no fixture asserts them | Deferred — [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md) |
+| 5 | Stage 7's decomposition names eight rows, but the rule can answer eleven families. Three are neither listed nor declared empty | Accepted, corrected below |
+| 6 | The 106-assertion delta was assigned to Stage 7 by Stage 6 and closed as unexplained, with no owner afterwards | Deferred — [Follow-up 017](../followups/017_plan_012_external_evidence_reproducibility.md) |
+| 7 | The rebuilt sampling and classification harness is again uncommitted, and the log records the seed but not how the seed selects the sample | Deferred — [Follow-up 017](../followups/017_plan_012_external_evidence_reproducibility.md) |
+| 8 | The 80% bar is reported as "139 of 139 measured accepted-access targets", which is 100% by construction | Accepted, clarified below |
+| 9 | [Follow-up 014](../followups/014_java_instance_receiver_calls.md)'s "Current Behavior" still carries Stage 0's 1,041 / 3,583 split, which Stage 7 superseded with 139 and 3,512 | Accepted, to be corrected when that entry is next touched |
+
+### Correcting Finding 5
+
+The rule can answer eleven reason families for a receiver-qualified invocation.
+Stage 7's table lists eight and declares two more empty — "no such method" and
+"non-static". The three it does not mention are `inaccessible`, "shape not
+read", and "supertypes unknown". They are **zero**, and the evidence for that is
+the sum rather than a separate count: the eight listed rows plus the 139 facts
+total 4,624 exactly, so nothing was left in an unlisted family. The one worth
+naming explicitly is `inaccessible`: no call in the sample reached a class-name
+receiver whose single declared method of that name was package-private or
+protected.
+
+That is weaker evidence than a count, because it rests on the classifier having
+a pattern for every family. It is enough to say the families are empty and not
+enough to say they were measured.
+
+### Clarifying Finding 8
+
+The plan's bar is "at least 100 and at least 80% of the accepted-access measured
+subset", with the Stage 0 addressable subset of 135 as the denominator to
+recalculate if ADR 009 accepted more than public targets. The Definition of Done
+row leads with "139 of 139", which is circular — the denominator there is the
+set of targets the 139 facts point at. The substantive reading is the one beside
+it: 139 against a recalculated denominator of 135 (the same-class case ADR 009
+added contributes 0 in this repository), so the bar of 108 is met at 129% and
+the floor of 100 at 139%. Both numbers are in the log; only the framing is
+misleading.
+
+### Hypotheses tested and rejected
+
+Recorded because each would have been a serious defect and each is now ruled
+out by evidence rather than by reading:
+
+- *`membersFor` and `resolveType` could resolve one receiver name to different
+  classes, making the fact name the wrong method.* Rejected: both look up a
+  single-type import before the unit's own package, and a name the unit itself
+  declares never reaches `membersFor`.
+- *`changed_shapes` and `changed_packages` borrow class and method names from
+  entities that reconciliation may remove mid-batch, so `finish` could read
+  freed memory.* Rejected: `StringPool` is arena-backed and interns for the
+  life of the graph; nothing is freed per entity.
+- *`staticCallReceivers` returns `found.items` without `toOwnedSlice` and never
+  deinitializes its seen-set, and `membersFor` does the same.* Rejected: both
+  are handed the per-unit scratch arena `Analyzer.analyze` creates and drops.
+
+### What the review could not check
+
+- Every external number — 139 facts, the reason decomposition, index time, RSS,
+  habit-loop latency, bytes per definition item — was taken as reported. No
+  clone and no harness were available, which is Finding 7.
+- Findings 2 and 3 are argued from the code and from JLS 6.4.2 and 7.5.4. No
+  executable fixture reaches either; writing one is part of
+  [Follow-up 016](../followups/016_java_static_call_rule_narrow_gaps.md).
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Zig 0.16.0 matches the semidx target |
+| `zig fmt --check build.zig src tests` | Clean |
+| `zig build test-core` | Exit 0 |
+| `zig build test` | Exit 0 |
+| `zig build test-mcp` | Exit 0 |
+| `zig build dogfood` | Exit 0 |
+| `zig build preview-gate` | Exit 0, every hard pass reported |
+| `./scripts/check-constitution-freeze.sh --commit 6a47ba5` | Exit 0; the seal matches `ARCHITECTURE_CONSTITUTION.md` |
+| `./scripts/check-agent-attribution.sh --range 6a47ba5~5..6a47ba5` | Exit 0 |
+| `./scripts/check-readme-stewardship.sh --all` | Exit 0 |
+| `./scripts/check-memory-freshness.sh --range 6a47ba5~5..6a47ba5` | Exit 0 |
+| Arithmetic re-checked | 2,554+958+555+262+57+45+54+139 = 4,624; 174+139 = 313; 5,662−139 = 5,523 |
+| Finding 1 repro | Temporary test over the `Tree` fixture, run and reverted; the tree was left clean and `zig build test` re-run at exit 0 |
+
+`zig build dogfood` and `zig build preview-gate` print `failed command:` lines
+for their test runners while exiting 0. Why they do is not known here, and it is
+worth resolving separately: a green lane that prints a failure line is a lane
+whose logs cannot be read at a glance.
