@@ -28,7 +28,13 @@ pub const capabilities: contract.Capabilities = .{
         "field types, and invocations inside method bodies, where an unqualified " ++
         "invocation resolves only to the class's one method of that name when " ++
         "the class has no supertypes and the call is not inside a nested class " ++
-        "body; a simple type name " ++
+        "body; an invocation qualified by a simple name resolves only when " ++
+        "nothing in scope binds that name, the enclosing class declares no " ++
+        "supertypes, the name resolves to a current top-level class that " ++
+        "declares no supertypes, and that class declares exactly one method of " ++
+        "the invoked name, `static` and either public or inside the enclosing " ++
+        "class — a receiver that is a value, an inherited or overloaded method, " ++
+        "and dispatch are not resolved; a simple type name " ++
         "not declared in the unit resolves to the one current top-level class " ++
         "another unit declares in the same explicit package, unless a type " ++
         "parameter, member type, supertype, import, or non-class type could " ++
@@ -72,6 +78,51 @@ pub const method_static = struct {
     pub const key = "java.static";
     pub const yes = "true";
     pub const no = "false";
+};
+
+/// The declared access of a method, as its own analysis recorded it.
+///
+/// `unknown` is a real answer, not a default: a definition without the label was
+/// recorded by something other than the current Java frontend, and a static call
+/// must decline rather than assume the permissive case.
+pub const Access = enum {
+    public,
+    protected,
+    package_private,
+    private,
+    unknown,
+
+    pub fn fromLabel(value: []const u8) Access {
+        if (std.mem.eql(u8, value, method_access.public)) return .public;
+        if (std.mem.eql(u8, value, method_access.protected)) return .protected;
+        if (std.mem.eql(u8, value, method_access.package_private)) return .package_private;
+        if (std.mem.eql(u8, value, method_access.private)) return .private;
+        return .unknown;
+    }
+
+    pub fn label(self: Access) []const u8 {
+        return switch (self) {
+            .public => method_access.public,
+            .protected => method_access.protected,
+            .package_private => method_access.package_private,
+            .private => method_access.private,
+            .unknown => "unrecorded",
+        };
+    }
+};
+
+/// Whether a class declares a superclass or an interface. `unknown` is the same
+/// kind of answer as `Access.unknown`, and declines the same way.
+pub const Supertypes = enum {
+    none,
+    declared,
+    unknown,
+
+    pub fn fromLabel(value: []const u8) Supertypes {
+        if (std.mem.eql(u8, value, class_shape.none)) return .none;
+        if (std.mem.eql(u8, value, class_shape.declared)) return .declared;
+        return .unknown;
+    }
 };
 
 const Modifiers = struct {
@@ -153,6 +204,29 @@ pub const TypeBinding = struct {
     binding: Binding,
 };
 
+/// One method a class outside the analyzed unit currently declares, with the
+/// modifiers ADR 009 makes a static call check before it can name one.
+pub const MethodCandidate = struct {
+    name: []const u8,
+    target: contract.ExternalTarget,
+    access: Access,
+    is_static: bool,
+};
+
+/// What a class outside the analyzed unit currently is, for a receiver naming
+/// it.
+///
+/// `methods` holds only the names this unit writes after a `.` on that class,
+/// including every overload of them: the analyzer knows which pairs the unit
+/// asks about, so the candidate table is the size of the question rather than
+/// the size of the provider.
+pub const ClassMembers = struct {
+    /// The simple name the analyzed unit writes.
+    name: []const u8,
+    supertypes: Supertypes,
+    methods: []const MethodCandidate,
+};
+
 /// The repository context the analyzer hands this frontend for one unit.
 ///
 /// It is a projection, not a model: the analyzer rebuilds it from the graph for
@@ -166,6 +240,10 @@ pub const Context = struct {
     /// What each simple name the unit's single-type imports bring in currently
     /// means, read under the same visibility rule as `types`.
     imports: []const TypeBinding = &.{},
+    /// What the classes this unit's receivers name currently declare, for the
+    /// `Name.method(...)` pairs it writes. A name with no entry either resolves
+    /// to a class the unit declares itself, or to no class at all.
+    members: []const ClassMembers = &.{},
 
     pub const empty: Context = .{ .package = "", .types = &.{}, .imports = &.{} };
 
@@ -186,6 +264,21 @@ pub const Context = struct {
         }
         return null;
     }
+
+    /// What the class `name` reaches currently declares, when the analyzer read
+    /// it for this unit.
+    pub fn memberLookup(self: Context, name: []const u8) ?ClassMembers {
+        for (self.members) |entry| {
+            if (std.mem.eql(u8, entry.name, name)) return entry;
+        }
+        return null;
+    }
+};
+
+/// One `Name.method(...)` a source unit writes, as written.
+pub const Receiver = struct {
+    class: []const u8,
+    method: []const u8,
 };
 
 /// The explicit package a Java source unit declares, or null when it declares
@@ -290,6 +383,58 @@ pub fn singleTypeImports(
     return found.toOwnedSlice(allocator);
 }
 
+/// Every distinct `Name.method(...)` the unit writes, as written.
+///
+/// A lexical pre-pass and not a decision: whether `Name` is a class at all is
+/// decided during analysis, by the obscuring rule. The analyzer reads it to
+/// remember that this unit asked about those pairs, and to offer the candidates
+/// an answer needs — so the set it returns is deliberately a superset of the
+/// receivers that turn out to be classes.
+pub fn staticCallReceivers(
+    allocator: std.mem.Allocator,
+    root: ts.Node,
+    source: []const u8,
+) ![]const Receiver {
+    var found: std.ArrayList(Receiver) = .empty;
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    try collectReceivers(allocator, root, source, &found, &seen, 0);
+    return found.items;
+}
+
+fn collectReceivers(
+    allocator: std.mem.Allocator,
+    node: ts.Node,
+    source: []const u8,
+    found: *std.ArrayList(Receiver),
+    seen: *std.StringHashMapUnmanaged(void),
+    depth: u32,
+) !void {
+    if (depth >= max_depth) return;
+    if (std.mem.eql(u8, node.kind(), "method_invocation")) {
+        if (node.childByFieldName("object")) |object| {
+            if (std.mem.eql(u8, object.kind(), "identifier")) {
+                if (node.childByFieldName("name")) |name| {
+                    const receiver: Receiver = .{
+                        .class = object.text(source),
+                        .method = name.text(source),
+                    };
+                    const key = try std.fmt.allocPrint(
+                        allocator,
+                        "{s}.{s}",
+                        .{ receiver.class, receiver.method },
+                    );
+                    const slot = try seen.getOrPut(allocator, key);
+                    if (!slot.found_existing) try found.append(allocator, receiver);
+                }
+            }
+        }
+    }
+    var children = node.namedChildren();
+    while (children.next()) |child| {
+        try collectReceivers(allocator, child, source, found, seen, depth + 1);
+    }
+}
+
 /// Whether an import declaration carries the `static` keyword, which is an
 /// anonymous token and so is invisible to a named-child walk.
 fn importsStatically(node: ts.Node) bool {
@@ -371,6 +516,9 @@ const ClassInfo = struct {
     /// same name for every method of the class, so a receiver name it claims is
     /// not read as a class name.
     fields: []const []const u8,
+    /// Whether it declares a superclass or interfaces, from which a method of
+    /// an invoked name could be inherited.
+    has_supertypes: bool,
 };
 
 const MethodInfo = struct {
@@ -381,6 +529,9 @@ const MethodInfo = struct {
     /// Whether the enclosing class declares a superclass or interfaces, from
     /// which a method of the invoked name could be inherited.
     class_has_supertypes: bool,
+    /// The modifiers it declares, as the labels on its definition record them.
+    access: Access,
+    is_static: bool,
     node: ts.Node,
 };
 
@@ -490,6 +641,7 @@ pub fn analyze(
             .node = node,
             .body = body,
             .fields = &.{},
+            .has_supertypes = has_supertypes,
         });
         const class_slot = classes.items.len - 1;
 
@@ -555,6 +707,8 @@ pub fn analyze(
                 .class_index = index,
                 .class_name = name,
                 .class_has_supertypes = has_supertypes,
+                .access = Access.fromLabel(modifiers.access),
+                .is_static = modifiers.is_static,
                 .node = member,
             });
         }
@@ -726,7 +880,11 @@ fn emitTypeReference(
         .evidence = evidenceOf(builder, type_node, name),
         .resolution = resolved.resolution,
     });
-    if (resolved.provider) |provider| try declareProvider(builder, provider);
+    if (resolved.provider) |provider| try declareProvider(
+        builder,
+        provider,
+        "resolved a simple type name to a top-level class declared in the same Java package",
+    );
 }
 
 /// Resolves a type name the way ADR 004 and ADR 008 permit and no further.
@@ -865,14 +1023,20 @@ fn unresolvedType(name: []const u8, explanation: []const u8) TypeResolution {
     };
 }
 
-fn declareProvider(builder: *contract.BatchBuilder, provider: model.SourceUnitId) !void {
+/// Declares that this unit's analysis read another unit, once per provider.
+///
+/// One declaration per provider is what the write path needs: it invalidates by
+/// unit, so a second reason would add a row and change nothing. The first
+/// reason recorded is the one kept, and it names a real thing this unit read.
+fn declareProvider(
+    builder: *contract.BatchBuilder,
+    provider: model.SourceUnitId,
+    reason: []const u8,
+) !void {
     for (builder.dependencies.items) |declared| {
         if (declared.provider == provider) return;
     }
-    try builder.addDependency(
-        provider,
-        "resolved a simple type name to a top-level class declared in the same Java package",
-    );
+    try builder.addDependency(provider, reason);
 }
 
 fn isTypeDeclaration(kind: []const u8) bool {
@@ -1055,21 +1219,35 @@ fn emitInvocation(
     const receiver = node.childByFieldName("object");
     const designator = if (receiver != null) try builder.dupe(node.text(source)) else name;
     const target = if (receiver) |object|
-        try qualifiedTarget(builder, source, scope, object, nested)
+        try qualifiedTarget(builder, source, scope, object, name, nested)
     else
         try invocationTarget(builder, scope, name, nested);
 
     try builder.addRelationship(.{
         .kind = .calls,
         .source = .{ .entity = scope.method.index },
-        .target = if (target.index) |index| .{ .local = index } else .{ .designator = designator },
+        .target = if (target.index) |index|
+            .{ .local = index }
+        else if (target.external) |external|
+            .{ .external = external }
+        else
+            .{ .designator = designator },
         .evidence = evidenceOf(builder, node, designator),
         .resolution = target.resolution,
     });
+    if (target.external) |external| try declareProvider(
+        builder,
+        external.provider,
+        "resolved a class-qualified invocation to a static method that class declares",
+    );
 }
 
 const InvocationTarget = struct {
-    index: ?u32,
+    /// Set when the target is a definition in the analyzed unit.
+    index: ?u32 = null,
+    /// Set when the target is a definition another unit established, which the
+    /// batch must also declare a dependency on.
+    external: ?contract.ExternalTarget = null,
     resolution: model.Resolution,
 };
 
@@ -1131,6 +1309,7 @@ fn qualifiedTarget(
     source: []const u8,
     scope: CallScope,
     receiver: ts.Node,
+    method: []const u8,
     nested: bool,
 ) !InvocationTarget {
     if (!std.mem.eql(u8, receiver.kind(), "identifier")) {
@@ -1159,10 +1338,7 @@ fn qualifiedTarget(
         .method = scope.method.node,
     });
     switch (resolved.resolution) {
-        .fact => return unresolvedInvocation(try builder.print(
-            "the receiver names class `{s}`, and the method it names there is not resolved",
-            .{name},
-        )),
+        .fact => {},
         .unresolved => |reason| return unresolvedInvocation(try builder.print(
             "the receiver is not read as a class: {s}",
             .{reason.explanation},
@@ -1171,6 +1347,145 @@ fn qualifiedTarget(
             "the receiver is not read as a class, and this frontend records no approximate target",
         ),
     }
+
+    return switch (resolved.target) {
+        .local => |index| localStaticTarget(builder, scope, index, name, method),
+        .external => externalStaticTarget(builder, scope, name, method),
+        // `resolveType` answers a fact with a target it established.
+        .designator => unreachable,
+    };
+}
+
+/// The static method a receiver naming a class of the analyzed unit selects.
+///
+/// Both ends are in one batch, so the modifiers are the ones this analysis just
+/// read rather than labels from the graph, and the access subset is wider: a
+/// class reaches its own private members, which is the one non-public case
+/// [ADR 009](../../docs/adr/009_java_static_calls.md) admits.
+fn localStaticTarget(
+    builder: *contract.BatchBuilder,
+    scope: CallScope,
+    class_index: u32,
+    receiver: []const u8,
+    method: []const u8,
+) !InvocationTarget {
+    const class = classByIndex(scope.unit.classes, class_index);
+    if (class.has_supertypes) return targetHasSupertypes(builder, receiver);
+
+    var found: ?MethodInfo = null;
+    var count: u32 = 0;
+    for (scope.methods) |candidate| {
+        work.candidate();
+        if (!std.mem.eql(u8, candidate.class_name, class.name)) continue;
+        if (!std.mem.eql(u8, candidate.name, method)) continue;
+        if (count == 0) found = candidate;
+        count += 1;
+    }
+    if (count == 0) return noSuchMethod(builder, receiver);
+    if (count > 1) return overloaded(builder, receiver, count);
+
+    const only = found.?;
+    if (!only.is_static) return notStatic(builder, receiver, method);
+    // The enclosing class reaches whatever it declares; another class in the
+    // same unit is as far away as one in another unit.
+    if (only.access != .public and class.index != scope.class.index) {
+        return inaccessible(builder, receiver, method, only.access);
+    }
+    return .{
+        .index = only.index,
+        .resolution = .{ .fact = .{ .method = static_call_method } },
+    };
+}
+
+/// The static method a receiver naming a class another unit declares selects,
+/// read from the candidates the analyzer offered for that name.
+fn externalStaticTarget(
+    builder: *contract.BatchBuilder,
+    scope: CallScope,
+    receiver: []const u8,
+    method: []const u8,
+) !InvocationTarget {
+    const members = scope.unit.context.memberLookup(receiver) orelse
+        return unresolvedInvocation(try builder.print(
+            "the receiver names class `{s}`, whose current shape this analysis did not read",
+            .{receiver},
+        ));
+    switch (members.supertypes) {
+        .none => {},
+        .declared => return targetHasSupertypes(builder, receiver),
+        .unknown => return unresolvedInvocation(try builder.print(
+            "class `{s}` carries no record of whether it declares supertypes, " ++
+                "so a method of this name it may inherit is not ruled out",
+            .{receiver},
+        )),
+    }
+
+    var found: ?MethodCandidate = null;
+    var count: u32 = 0;
+    for (members.methods) |candidate| {
+        work.candidate();
+        if (!std.mem.eql(u8, candidate.name, method)) continue;
+        if (count == 0) found = candidate;
+        count += 1;
+    }
+    if (count == 0) return noSuchMethod(builder, receiver);
+    if (count > 1) return overloaded(builder, receiver, count);
+
+    const only = found.?;
+    if (!only.is_static) return notStatic(builder, receiver, method);
+    if (only.access != .public) return inaccessible(builder, receiver, method, only.access);
+    return .{
+        .external = only.target,
+        .resolution = .{ .fact = .{ .method = static_call_method } },
+    };
+}
+
+const static_call_method = "class-qualified invocation of the one `static` method of this name " ++
+    "declared in a class without supertypes";
+
+fn targetHasSupertypes(builder: *contract.BatchBuilder, receiver: []const u8) !InvocationTarget {
+    return unresolvedInvocation(try builder.print(
+        "class `{s}` declares supertypes, so a method of this name it may inherit, " ++
+            "or hide, could be the target",
+        .{receiver},
+    ));
+}
+
+fn noSuchMethod(builder: *contract.BatchBuilder, receiver: []const u8) !InvocationTarget {
+    return unresolvedInvocation(try builder.print(
+        "class `{s}` declares no method of this name",
+        .{receiver},
+    ));
+}
+
+fn overloaded(builder: *contract.BatchBuilder, receiver: []const u8, count: u32) !InvocationTarget {
+    return unresolvedInvocation(try builder.print(
+        "class `{s}` declares {d} methods of this name, and overloads are not resolved",
+        .{ receiver, count },
+    ));
+}
+
+fn notStatic(
+    builder: *contract.BatchBuilder,
+    receiver: []const u8,
+    method: []const u8,
+) !InvocationTarget {
+    return unresolvedInvocation(try builder.print(
+        "`{s}.{s}` is not static, so naming it through the class is not a call Java compiles",
+        .{ receiver, method },
+    ));
+}
+
+fn inaccessible(
+    builder: *contract.BatchBuilder,
+    receiver: []const u8,
+    method: []const u8,
+    access: Access,
+) !InvocationTarget {
+    return unresolvedInvocation(try builder.print(
+        "`{s}.{s}` is {s}, which is outside the access this frontend resolves across classes",
+        .{ receiver, method, access.label() },
+    ));
 }
 
 /// Whether anything in scope binds `name` to a value.
@@ -1271,7 +1586,6 @@ fn lastIdentifier(node: ts.Node) ?ts.Node {
 
 fn unresolvedInvocation(explanation: []const u8) InvocationTarget {
     return .{
-        .index = null,
         .resolution = .{ .unresolved = .{ .missing = .target_entity, .explanation = explanation } },
     };
 }

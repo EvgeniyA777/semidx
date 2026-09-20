@@ -2229,24 +2229,11 @@ test "a class appearing in an imported package reaches the unit that imported it
 
 // -- Plan 012: Java static calls ---------------------------------------------
 
-/// Whether the frontend resolves static calls yet.
-///
-/// The matrix below is written against
-/// [ADR 009](../docs/adr/009_java_static_calls.md), which Plan 012 Stage 5
-/// implements. Until then every qualified invocation is unresolved for the one
-/// reason the frontend has today, so each case records what it must *become*
-/// rather than the answer it currently gets, and nothing here pins a reason
-/// string Stage 4 and Stage 5 are expected to replace. Flipping this constant
-/// is what turns the matrix from a specification into a regression test.
-const static_calls_resolved = false;
-
-/// What a covered call says once Stage 4 has read its receiver as a class name
-/// and before Stage 5 selects the method in it.
-///
-/// It is how the receiver half is proved while no call is a fact yet: a
-/// receiver read as a class leaves the call unresolved for want of the method,
-/// and a receiver read as anything else says what it was read as instead.
-const receiver_read_as_a_class = "the receiver names class";
+// The matrix below is written against
+// [ADR 009](../docs/adr/009_java_static_calls.md), which Plan 012 Stage 5
+// implements. Stage 2 wrote it as a specification behind a switch, Stage 4
+// answered its receiver half, and Stage 5 removed the switch: every case now
+// asserts the answer the frontend must give, and nothing here is pending.
 
 const StaticTarget = struct {
     path: []const u8,
@@ -2270,10 +2257,6 @@ const StaticCall = struct {
         /// ADR 009 requires this call to stay unresolved, saying this.
         unresolved: []const u8,
     },
-    /// Whether the reason already holds, rather than being one Stage 4 and
-    /// Stage 5 must still produce. A case the frontend already answers for the
-    /// right reason is checked now; the rest are checked once the rule exists.
-    settled: bool = false,
 };
 
 fn staticCallFrom(
@@ -2297,15 +2280,6 @@ fn expectStaticCall(snapshot: *const semidx.Snapshot, case: StaticCall) !void {
     const call = try staticCallFrom(snapshot, caller, case.call);
     switch (case.expect) {
         .fact => |target| {
-            if (!static_calls_resolved) {
-                // The case is still declined, and the matrix says what it owes.
-                // What Stage 4 already owes it is the receiver: a covered call
-                // is unresolved for want of the method, never because the
-                // receiver was read as something other than a class.
-                try testing.expect(!call.resolution.isFact());
-                try expectExplanation(call, receiver_read_as_a_class);
-                return;
-            }
             const wanted = definitionIn(snapshot, target.path, target.class, target.method) orelse {
                 std.debug.print("no target `{s}.{s}`\n", .{ target.class, target.method });
                 return error.TestExpectedDefinition;
@@ -2318,7 +2292,7 @@ fn expectStaticCall(snapshot: *const semidx.Snapshot, case: StaticCall) !void {
             // the text that was read.
             try testing.expect(!call.resolution.isFact());
             try testing.expectEqualStrings(case.call, call.claim.relationship.target.designator);
-            if (static_calls_resolved or case.settled) try expectExplanation(call, fragment);
+            try expectExplanation(call, fragment);
         },
     }
 }
@@ -2584,7 +2558,6 @@ test "the static-call matrix pins what each covered and declined case must answe
             .method = "noSuchClass",
             .call = "Absent.make()",
             .expect = .{ .unresolved = "no current top-level class" },
-            .settled = true,
         },
         .{
             .path = "module/src/main/java/lib/Caller.java",
@@ -2592,7 +2565,6 @@ test "the static-call matrix pins what each covered and declined case must answe
             .method = "nested",
             .call = "Util.make()",
             .expect = .{ .unresolved = "class body declared in the method" },
-            .settled = true,
         },
         .{
             .path = "other/src/main/java/lib/Outsider.java",
@@ -2600,7 +2572,6 @@ test "the static-call matrix pins what each covered and declined case must answe
             .method = "declined",
             .call = "Util.make()",
             .expect = .{ .unresolved = "source root this unit can see" },
-            .settled = true,
         },
         .{
             .path = "module/src/main/java/lib/Derived.java",
@@ -2608,7 +2579,6 @@ test "the static-call matrix pins what each covered and declined case must answe
             .method = "declined",
             .call = "Util.make()",
             .expect = .{ .unresolved = "supertypes" },
-            .settled = true,
         },
     };
     for (cases) |case| try expectStaticCall(&snapshot, case);
@@ -2688,24 +2658,23 @@ test "a receiver name any binding introducer declares is not read as a class" {
     const shadowed = "module/src/main/java/lib/Shadowed.java";
     const bound = "declared here as a binding";
     const cases = [_]StaticCall{
-        .{ .path = shadowed, .class = "Shadowed", .method = "byParameter", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
-        .{ .path = shadowed, .class = "Shadowed", .method = "bySpread", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byLocal", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byForEach", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byCatch", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byResource", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byLambda", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byInferredLambda", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byTypedLambda", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byPattern", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byRecordPattern", .call = "Util.make()", .expect = .{ .unresolved = bound }, .settled = true },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byParameter", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "bySpread", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byLocal", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byForEach", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byCatch", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byResource", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byLambda", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byInferredLambda", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byTypedLambda", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byPattern", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byRecordPattern", .call = "Util.make()", .expect = .{ .unresolved = bound } },
         .{
             .path = "module/src/main/java/lib/Fielded.java",
             .class = "Fielded",
             .method = "byField",
             .call = "Util.make()",
             .expect = .{ .unresolved = bound },
-            .settled = true,
         },
         // The scope of a local declaration is the rest of the block, so the
         // name before it is still the class. This is the one case in the
@@ -2865,15 +2834,15 @@ test "a receiver that is a value stays unresolved, whatever the static rule admi
 
     const values = "module/src/main/java/lib/Values.java";
     const cases = [_]StaticCall{
-        .{ .path = values, .class = "Values", .method = "byLocal", .call = "value.make()", .expect = .{ .unresolved = "receiver" }, .settled = true },
-        .{ .path = values, .class = "Values", .method = "byField", .call = "field.make()", .expect = .{ .unresolved = "receiver" }, .settled = true },
-        .{ .path = values, .class = "Values", .method = "byParameter", .call = "value.make()", .expect = .{ .unresolved = "receiver" }, .settled = true },
-        .{ .path = values, .class = "Values", .method = "byCreation", .call = "new Other().make()", .expect = .{ .unresolved = "receiver" }, .settled = true },
-        .{ .path = values, .class = "Values", .method = "byChain", .call = "self().make()", .expect = .{ .unresolved = "receiver" }, .settled = true },
-        .{ .path = values, .class = "Values", .method = "byLiteral", .call = "\"text\".length()", .expect = .{ .unresolved = "receiver" }, .settled = true },
-        .{ .path = values, .class = "Values", .method = "byClassLiteral", .call = "Other.class.getName()", .expect = .{ .unresolved = "receiver" }, .settled = true },
-        .{ .path = values, .class = "Values", .method = "byThis", .call = "this.self()", .expect = .{ .unresolved = "receiver" }, .settled = true },
-        .{ .path = values, .class = "Values", .method = "bySuper", .call = "super.toString()", .expect = .{ .unresolved = "receiver" }, .settled = true },
+        .{ .path = values, .class = "Values", .method = "byLocal", .call = "value.make()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byField", .call = "field.make()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byParameter", .call = "value.make()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byCreation", .call = "new Other().make()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byChain", .call = "self().make()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byLiteral", .call = "\"text\".length()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byClassLiteral", .call = "Other.class.getName()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byThis", .call = "this.self()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "bySuper", .call = "super.toString()", .expect = .{ .unresolved = "receiver" } },
     };
     for (cases) |case| try expectStaticCall(&snapshot, case);
     try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
@@ -2886,6 +2855,8 @@ const MemberTree = struct {
     index: semidx.Index,
     provider: model.SourceUnitId,
     reader: model.SourceUnitId,
+    /// A unit in the same package that reads nothing of the provider.
+    sibling: model.SourceUnitId,
 
     fn init() !MemberTree {
         var index = try semidx.Index.init(testing.allocator, "tree");
@@ -2908,7 +2879,7 @@ const MemberTree = struct {
         // importer names the class without referring to it, so it is reachable
         // only through the import hint: a dependency of its own would make this
         // a test of the dependency channel instead.
-        _ = try index.addUnit(
+        const sibling = try index.addUnit(
             "src/main/java/demo/Sibling.java",
             .java,
             "package demo;\n\nclass Sibling {\n    void run() {}\n}\n",
@@ -2918,7 +2889,7 @@ const MemberTree = struct {
             .java,
             "package app;\n\nimport demo.Util;\n\nclass Importer {\n    void run() {}\n}\n",
         );
-        return .{ .index = index, .provider = provider, .reader = reader };
+        return .{ .index = index, .provider = provider, .reader = reader, .sibling = sibling };
     }
 
     fn deinit(self: *MemberTree) void {
@@ -2938,13 +2909,19 @@ const MemberTree = struct {
     }
 };
 
-test "a hinted reader is reanalyzed when the method it asked about changes" {
+test "a reader is reanalyzed when the method it asked about changes" {
     var tree = try MemberTree.init();
     defer tree.deinit();
-    try tree.hint(tree.reader, "Util", "make");
 
-    // A body edit changes nothing a caller can see.
-    try testing.expectEqual(@as(usize, 0), try tree.editProvider(
+    // Nothing is seeded here. The reader hinted itself when it read
+    // `Util.make()`, which is what Stage 5 added to the channel Stage 3 built.
+
+    // A body edit changes nothing a caller can see — but this call resolves, so
+    // the reader declares a dependency on the provider *unit*, and a dependency
+    // is per unit rather than per method. It is re-read for a change it cannot
+    // observe, which is the price of a cross-unit fact.
+    try testing.expectEqual(@as(usize, 1), tree.index.graph.dependencies.count());
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
         "package demo;\n\nclass Util {\n    public static String make() { return \"x\"; }\n" ++
             "    public static String keep() { return null; }\n}\n",
     ));
@@ -2955,7 +2932,11 @@ test "a hinted reader is reanalyzed when the method it asked about changes" {
             "    public static String keep() { return null; }\n}\n",
     ));
 
-    // So is losing `static`, gaining an overload, and disappearing entirely.
+    // The answer it got reads nothing, so from here on there is no dependency
+    // in the graph at all: every re-read below is the hint's doing.
+    try testing.expectEqual(@as(usize, 0), tree.index.graph.dependencies.count());
+
+    // Losing `static`, gaining an overload, and disappearing entirely.
     try testing.expectEqual(@as(usize, 1), try tree.editProvider(
         "package demo;\n\nclass Util {\n    String make() { return null; }\n" ++
             "    public static String keep() { return null; }\n}\n",
@@ -2967,6 +2948,7 @@ test "a hinted reader is reanalyzed when the method it asked about changes" {
     try testing.expectEqual(@as(usize, 1), try tree.editProvider(
         "package demo;\n\nclass Util {\n    public static String keep() { return null; }\n}\n",
     ));
+    try testing.expectEqual(@as(usize, 0), tree.index.graph.dependencies.count());
 
     // And a method appearing where the reader found none: the case no
     // dependency can carry, because an unresolved call read nothing.
@@ -2975,12 +2957,12 @@ test "a hinted reader is reanalyzed when the method it asked about changes" {
             "    public static String keep() { return null; }\n}\n",
     ));
 
-    // Measured, not assumed: not one of these readers declares a dependency,
-    // so propagation has nothing to walk and never runs. Every re-read above
-    // was the hint's doing, which is exactly what it exists for.
-    try testing.expectEqual(@as(usize, 0), tree.index.graph.dependencies.count());
+    // Measured, not assumed: that last re-read had nothing to propagate along,
+    // and it is what turned the call back into a fact — which declares the
+    // dependency again.
     try testing.expectEqual(@as(u32, 0), semidx.work.propagation_rounds);
     try testing.expect(!semidx.work.propagation_exhausted);
+    try testing.expectEqual(@as(usize, 1), tree.index.graph.dependencies.count());
 }
 
 test "editing one method does not reanalyze the package's declarers and importers" {
@@ -3036,38 +3018,113 @@ test "a class-shape change reaches every reader of that class, not only of one m
     ));
 }
 
-test "an unhinted reader is not reached, and a stale hint costs a pass and no claim" {
+test "a unit that reads nothing is not reached, and a stale hint costs a pass and no claim" {
     var tree = try MemberTree.init();
     defer tree.deinit();
 
-    // Nothing hinted: the reader's call read nothing, so nothing is owed.
-    try testing.expectEqual(@as(usize, 0), try tree.editProvider(
-        "package demo;\n\nclass Util {\n    protected static String make() { return null; }\n" ++
-            "    public static String keep() { return null; }\n}\n",
-    ));
+    // The sibling declares a class in the same package and reads nothing of the
+    // provider, so it is hinted on a pair it never asks about: a hint that has
+    // gone stale, which the channel is allowed to hold and must survive.
+    try tree.hint(tree.sibling, "Util", "make");
 
-    // A hint the reader has outgrown is a superset, not an error: the unit is
-    // re-read and says exactly what it said before.
-    try tree.hint(tree.reader, "Util", "make");
     var before = try tree.index.publish();
     const before_calls = before.countRelationships(.{ .kind = .calls, .resolution = .fact });
     before.deinit();
 
-    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
-        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n" ++
+    // Two units are re-read for one method's access change: the reader that
+    // asked about the pair, and the stale hint. The importer, which the package
+    // channel would have reached, is not among them.
+    try testing.expectEqual(@as(usize, 2), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    protected static String make() { return null; }\n" ++
             "    public static String keep() { return null; }\n}\n",
     ));
 
     var after = try tree.index.publish();
     defer after.deinit();
-    try testing.expectEqual(before_calls, after.countRelationships(.{ .kind = .calls, .resolution = .fact }));
-    // Stage 3 builds the channel and emits no new call fact through it.
+    const run = definitionIn(&after, "src/main/java/demo/Reader.java", "Reader", "run").?;
+    // The reader's answer changed, because `protected` is outside the covered
+    // access; the stale hint's unit says exactly what it said before, so the
+    // only fact lost is the caller's.
+    try testing.expectEqual(before_calls - 1, after.countRelationships(.{ .kind = .calls, .resolution = .fact }));
     try testing.expectEqual(@as(usize, 0), after.countRelationships(.{
         .kind = .calls,
-        .source = definitionIn(&after, "src/main/java/demo/Reader.java", "Reader", "run").?.id,
+        .source = run.id,
         .resolution = .fact,
     }));
+    try expectExplanation(try staticCallFrom(&after, run, "Util.make()"), "access");
     try testing.expectEqual(@as(usize, 0), after.countApproximateAssertions());
+}
+
+test "deciding a static call costs the invoked name's candidates, not the repository" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit(
+        "src/main/java/demo/Util.java",
+        .java,
+        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    );
+    const caller = try index.addUnit(
+        "src/main/java/demo/Caller.java",
+        .java,
+        "package demo;\n\nclass Caller {\n    void run() { Util.make(); }\n}\n",
+    );
+
+    const Measure = struct {
+        fn candidates(ix: *semidx.Index, unit: model.SourceUnitId, source: []const u8) !usize {
+            semidx.frontends.java.work.reset();
+            _ = try ix.applyEdit(unit, source);
+            return semidx.frontends.java.work.method_candidates;
+        }
+    };
+
+    const alone = try Measure.candidates(
+        &index,
+        caller,
+        "package demo;\n\nclass Caller {\n    void run() { Util.make(); } // once\n}\n",
+    );
+    // One invocation, one candidate: the methods named `make` in the class the
+    // receiver names. Not the class's other methods, and not the package's.
+    try testing.expectEqual(@as(usize, 1), alone);
+
+    // Twenty more classes in the same package and the same source root, each
+    // declaring a method of the same name — every one of them a candidate a
+    // repository-wide lookup would have to touch and reject.
+    var extra: usize = 0;
+    while (extra < 20) : (extra += 1) {
+        const path = try std.fmt.allocPrint(
+            testing.allocator,
+            "src/main/java/demo/Filler{d}.java",
+            .{extra},
+        );
+        defer testing.allocator.free(path);
+        const source = try std.fmt.allocPrint(
+            testing.allocator,
+            "package demo;\n\nclass Filler{d} {{\n    public static String make() {{ return null; }}\n" ++
+                "    public static String keep() {{ return null; }}\n}}\n",
+            .{extra},
+        );
+        defer testing.allocator.free(source);
+        _ = try index.addUnit(path, .java, source);
+    }
+
+    const crowded = try Measure.candidates(
+        &index,
+        caller,
+        "package demo;\n\nclass Caller {\n    void run() { Util.make(); } // twice\n}\n",
+    );
+    try testing.expectEqual(alone, crowded);
+
+    // And the answer did not change either: the crowd is invisible to it.
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .calls,
+        .source = definitionIn(&snapshot, "src/main/java/demo/Caller.java", "Caller", "run").?.id,
+        .target = definitionIn(&snapshot, "src/main/java/demo/Util.java", "Util", "make").?.id,
+        .resolution = .fact,
+    }));
 }
 
 test "the write path and the java frontend report the work they do" {

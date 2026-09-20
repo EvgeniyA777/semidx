@@ -261,8 +261,7 @@ documents that own history, rationale, and evidence.
   single-type imports resolve inside it, Follow-up 003 is closed, and
   cross-module visibility is split into
   [Follow-up 011](docs/followups/011_java_cross_module_visibility.md). The real
-  remaining Java blockers are coverage, not the boundary: receiver qualifiers are
-  4,624 of 5,662 unresolved calls, 1,041 of them class names (Plan 012 Stage 0).
+  remaining Java blockers are coverage, not the boundary (Plan 012 Stage 0).
 - [Plan 011](docs/plans/011_external_scale_graph_query_indexes.md) is executed
   and Follow-up 012 is closed. Snapshot identity lookups are constant time, and
   anchored relationship queries inspect exactly as many assertions as they
@@ -272,24 +271,25 @@ documents that own history, rationale, and evidence.
   0.019 s and `semidx_references incoming` from 1.33 s to 0.018 s in the same
   build mode, so the product claim now rests on observation as well as work
   bounds. Java write-path measurement was left as-is: one-file refresh at 1,200
-  units is 13 ms, package-export reanalysis constant at 41 units.
+  units is 13 ms.
 - [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
-  is in progress at Stage 5 and **amended**: its Stage 0 gate declined instance
-  receivers at 63 addressable public invocations against a required 100, so the
-  plan targets static `ClassName.method()` calls instead, measured at 135 in the
-  same sample and needing no method-body type environment.
-  [ADR 009](docs/adr/009_java_static_calls.md) is accepted; a fixture matrix
-  states what it requires; Java definitions carry class shape
-  (`java.supertypes`, `java.access`, `java.static`) behind an aspect-grained
-  channel reaching the readers of a changed `Class.method` pair and nothing else
-  in the package; and the frontend reads a simple-name receiver as a class or
-  declines with the condition that failed — a binding claims the name (a local
-  only from its declarator onward), the enclosing class has supertypes, no such
-  current class, outside the ADR 008 root, or the receiver is not a simple name.
-  No call fact resolves through any of it yet. Instance receivers stay with
+  is at Stage 6 and **amended**: Stage 0 declined instance receivers at 63
+  addressable invocations against a required 100, so it targets static
+  `ClassName.method()` calls instead, measured at 135 in the same sample.
+  [ADR 009](docs/adr/009_java_static_calls.md) is accepted and implemented:
+  `ClassName.method()` is a `CALLS` **fact** when nothing in scope binds the
+  receiver name, neither the enclosing nor the target class declares supertypes,
+  the call is outside a nested class body, and the class declares exactly one
+  method of that name that is `static` and either public or inside the enclosing
+  class; everything else stays unresolved with its own reason. Java definitions
+  carry class shape (`java.supertypes`, `java.access`, `java.static`); a resolved
+  call declares a provider dependency, and an unresolved one is reached by an
+  aspect-grained hint on the `Class.method` pair it wrote — the case no
+  dependency can carry. Lookup costs the invoked name's candidates: 1 whether the
+  package holds 2 classes or 22. Instance receivers stay with
   [Follow-up 014](docs/followups/014_java_instance_receiver_calls.md), the supertype guard with
-  [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md); both carry their counts.
-  The baseline, the method, and every threshold count are in
+  [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md). The external
+  remeasurement, the capability wording, and every threshold count are in
   [the progress log](docs/reports/012_java_semantic_quality_without_query_regression_progress.md).
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP

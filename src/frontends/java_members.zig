@@ -28,40 +28,11 @@ const java = @import("java.zig");
 const model = core.model;
 const Graph = core.Graph;
 
-/// The declared access of a method, as its own analysis recorded it.
-///
-/// `unknown` is a real answer, not a default: a definition without the label was
-/// recorded by something other than the current Java frontend, and a static call
-/// must decline rather than assume the permissive case.
-pub const Access = enum {
-    public,
-    protected,
-    package_private,
-    private,
-    unknown,
-
-    pub fn fromLabel(value: []const u8) Access {
-        if (std.mem.eql(u8, value, java.method_access.public)) return .public;
-        if (std.mem.eql(u8, value, java.method_access.protected)) return .protected;
-        if (std.mem.eql(u8, value, java.method_access.package_private)) return .package_private;
-        if (std.mem.eql(u8, value, java.method_access.private)) return .private;
-        return .unknown;
-    }
-};
-
-/// Whether a class declares a superclass or an interface. `unknown` is the same
-/// kind of answer as `Access.unknown`, and declines the same way.
-pub const Supertypes = enum {
-    none,
-    declared,
-    unknown,
-
-    pub fn fromLabel(value: []const u8) Supertypes {
-        if (std.mem.eql(u8, value, java.class_shape.none)) return .none;
-        if (std.mem.eql(u8, value, java.class_shape.declared)) return .declared;
-        return .unknown;
-    }
-};
+/// The Java frontend owns this vocabulary: it writes the labels these read, and
+/// it is the one that decides what each value permits. The projection only
+/// carries them back.
+pub const Access = java.Access;
+pub const Supertypes = java.Supertypes;
 
 /// One method a class currently declares. Strings are borrowed from the graph.
 pub const Method = struct {
@@ -180,6 +151,92 @@ pub fn select(methods: []const Method, name: []const u8) Selection {
     if (count == 0) return .missing;
     if (count > 1) return .{ .overloaded = count };
     return .{ .unique = found.? };
+}
+
+/// What the classes a unit's receivers name currently declare, for the pairs it
+/// writes.
+///
+/// The receivers are the question, so they bound the answer: a name is looked up
+/// in the order the frontend would look it up — a single-type import before the
+/// unit's own package — and only the methods of the invoked names are carried,
+/// overloads included. Nothing here decides anything; a class that resolves to
+/// candidates still has to pass every ADR 009 condition inside the frontend.
+///
+/// A name that reaches no unique class gets no entry: the frontend resolves it
+/// against the unit's own classes, or declines with `resolveType`'s reason.
+pub fn membersFor(
+    graph: *Graph,
+    context: java.Context,
+    receivers: []const java.Receiver,
+    allocator: Allocator,
+) Allocator.Error![]const java.ClassMembers {
+    var found: std.ArrayList(java.ClassMembers) = .empty;
+    var methods: std.ArrayList(Method) = .empty;
+    defer methods.deinit(allocator);
+    var carried: std.ArrayList(java.MethodCandidate) = .empty;
+    defer carried.deinit(allocator);
+
+    var at: usize = 0;
+    while (at < receivers.len) : (at += 1) {
+        const class_name = receivers[at].class;
+        // One pass per class, however many of its methods the unit invokes.
+        if (indexOfClass(found.items, class_name) != null) continue;
+
+        const binding = context.importLookup(class_name) orelse
+            context.lookup(context.package, class_name) orelse continue;
+        const class_target = switch (binding) {
+            .unique => |target| target,
+            .ambiguous, .out_of_scope => continue,
+        };
+
+        const class = classShapeOf(graph, class_target.entity) orelse {
+            // The binding named a class the graph no longer answers for. The
+            // frontend is told that rather than told it has no methods.
+            try found.append(allocator, .{
+                .name = class_name,
+                .supertypes = .unknown,
+                .methods = &.{},
+            });
+            continue;
+        };
+
+        methods.clearRetainingCapacity();
+        try methodsOf(graph, class, allocator, &methods);
+
+        carried.clearRetainingCapacity();
+        for (methods.items) |method| {
+            if (!invokedHere(receivers, class_name, method.name)) continue;
+            try carried.append(allocator, .{
+                .name = method.name,
+                .target = .{ .entity = method.entity, .provider = class.unit },
+                .access = method.access,
+                .is_static = method.is_static,
+            });
+        }
+        try found.append(allocator, .{
+            .name = class_name,
+            .supertypes = class.supertypes,
+            .methods = try allocator.dupe(java.MethodCandidate, carried.items),
+        });
+    }
+    return found.items;
+}
+
+fn indexOfClass(entries: []const java.ClassMembers, name: []const u8) ?usize {
+    for (entries, 0..) |entry, at| {
+        if (std.mem.eql(u8, entry.name, name)) return at;
+    }
+    return null;
+}
+
+/// Whether the unit writes `class.method(...)` anywhere, which is what decides
+/// that the method belongs in the candidate table at all.
+fn invokedHere(receivers: []const java.Receiver, class: []const u8, method: []const u8) bool {
+    for (receivers) |receiver| {
+        if (std.mem.eql(u8, receiver.class, class) and
+            std.mem.eql(u8, receiver.method, method)) return true;
+    }
+    return false;
 }
 
 /// One thing a unit exposes that a static call's answer can depend on.

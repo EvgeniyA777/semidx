@@ -29,7 +29,8 @@ sample, which clears the same threshold with less machinery.
 [ADR 009](../adr/009_java_static_calls.md) is accepted, the Stage 2 fixture
 matrix states what it requires, Stage 3 built the projection and the
 invalidation channel it needs, Stage 4 reads a receiver name as a class or
-declines with the condition that failed, and Stage 5 is next. See
+declines with the condition that failed, and Stage 5 turns the covered calls
+into `CALLS` facts. Stage 6 is next. See
 [The Decision](#the-decision) and
 [Amendment 1](../plans/012_java_semantic_quality_without_query_regression.md#amendment-1-from-instance-receivers-to-static-calls).
 
@@ -48,7 +49,8 @@ strongly. `semidx_context depth=2` on apache/dubbo fell from **90.71 s to
 | Stage 2: Java quality fixtures and counters | Completed | 47 cases in five tests state what ADR 009 requires before any behavior changes: the covered and declined static calls, every binding introducer that obscures a receiver name, the provider edit sequence, the value receivers that must stay unresolved, and the work counters. Falsified by flipping the matrix switch: the three behavioral tests fail exactly where Stage 5 must deliver. `zig build test` 238/240, from 233/235. |
 | Stage 3: Java method projection, class shape, and invalidation | Completed | Class shape and method modifiers are carried as MCP-visible extension labels; `java_members` reads them back as candidates; an aspect-grained channel reaches the readers of a changed `Class.method` pair and nothing else in the package. Measured: a one-method edit costs 1 reanalysis where 4 Java units share the scope, a body edit 0, a supertype edit 2 for two readers — with 0 declared dependencies and 0 propagation rounds behind it. No call fact emitted. |
 | Stage 4: Reading a receiver name as a type | Completed | A qualified invocation's receiver is decided, and no call fact is emitted. A simple name is a class only where no parameter, local, field, `for`, `catch`, resource, lambda or pattern binds it, the enclosing class declares no supertypes, and `resolveType` names one current class inside the ADR 008 boundary; each failure carries its own reason. Locals bind from their declarator to the end of their block, exactly; the other introducers bind method-wide, which declines more and claims nothing. 25 matrix cases moved from pending to checked, and three falsification runs show each half bites. `zig build test` 248/250, unchanged. |
-| Stages 5-7 | Not started | Next: Stage 5, static call facts. |
+| Stage 5: Static call facts | Completed | `ClassName.method()` is a `CALLS` fact under every ADR 009 condition at once, and the matrix lost its switch: 49 cases, each asserting its answer. Candidates come from the names the unit writes, so one invocation costs **1** candidate whether the package holds 2 classes or 22. A resolved call declares a provider dependency; an unresolved one is reached by the hint it wrote, with **0** dependencies in the graph and **0** propagation rounds. Two Stage 3 tests were rewritten: their world — nothing populating hints — is what this stage ended. `zig build test` 249/251, from 248/250. |
+| Stages 6-7 | Not started | Next: Stage 6, follow-up discipline. |
 
 ## Plan Readiness Gate
 
@@ -959,3 +961,140 @@ intermediate lines.
   reason: a simple name a binding claims now says so, while `this`, `super`,
   literals, field accesses and chained calls keep the old wording. The follow-up
   records both families so a re-measurement counts the whole subset.
+
+## Stage 5: Static Call Facts
+
+`ClassName.method()` is a `CALLS` fact. The matrix Stage 2 wrote as a
+specification and Stage 4 answered by half is now a regression test with no
+switch left in it: 49 cases, every one asserting the answer rather than what it
+owes.
+
+### What Had To Be True At Once
+
+ADR 009's nine conditions, in the order an answer stops being available:
+
+| Asked about | Fact requires | Otherwise |
+| --- | --- | --- |
+| The receiver | Stage 4's rule: a simple name nothing in scope binds, in a class without supertypes, outside a class body declared in a method, resolving through `resolveType` to one current top-level class inside the ADR 008 root | Stage 4's reason families |
+| The target class | declares no supertypes | `declares supertypes, so a method of this name it may inherit, or hide, could be the target` |
+| The method name | exactly one declared method of it | `declares no method of this name` / `declares {n} methods of this name, and overloads are not resolved` |
+| That method | `static` | `is not static, so naming it through the class is not a call Java compiles` |
+| Its access | public, or any access when the class is the one enclosing the call | `is {access}, which is outside the access this frontend resolves across classes` |
+
+The access rule is where the two halves of "same unit" stop being the same
+thing: a class reaches its own private members, and another top-level class in
+the same file is as far away as one in another module. `Local.own()` is a fact,
+`Companion.secret()` from `Local` is not, and both are written in one unit.
+
+### Where The Candidates Come From, And Why They Are Small
+
+A unit is analyzed from its own source, so the modifiers of a class it does not
+declare reach it as the extension labels Stage 3 put on the graph. The analyzer
+reads them for the names the unit actually writes:
+
+1. `staticCallReceivers` reads every `Name.method(...)` the unit writes — a
+   lexical pre-pass, not a decision, so it is deliberately a superset of the
+   receivers that turn out to be classes.
+2. Each pair is recorded as read, before anything is resolved. The reader that
+   most needs reaching later is the one whose call resolves to nothing today.
+3. `membersFor` resolves each distinct receiver name the way the frontend will —
+   a single-type import before the unit's own package — and carries back only
+   the methods of the invoked names, overloads included.
+
+So the table the frontend selects from is the size of the question, not the size
+of the provider or of the package. Measured as an assertion rather than claimed:
+
+| Repository | Candidates examined for one `Util.make()` |
+| --- | ---: |
+| The provider and the caller | **1** |
+| Plus 20 more classes in the same package, each declaring `make` and `keep` | **1** |
+
+Falsified by carrying the class's whole method list instead of the invoked
+name's: the same assertion fails at 2, and keeps failing as the package grows.
+
+A receiver naming a class of the analyzed unit needs none of this: both ends are
+in one batch, so the modifiers are the ones this analysis just read.
+
+### Two Channels, And Which One Earns Its Keep
+
+A resolved call declares a dependency on the provider unit. An unresolved one
+cannot — it read nothing — so it is reached by the Stage 3 hint on the pair it
+wrote. The measurements say what each buys, over four Java units sharing one
+package scope:
+
+| Change to the provider | Reanalyses | Reached by |
+| --- | ---: | --- |
+| A method body, while the call resolves | 1 | the dependency — which is per unit, not per method |
+| `public` dropped from the invoked method | 1 | dependency, then the fact is gone and so is the dependency |
+| `static` dropped, overload added, method removed | 1 each | the hint alone: 0 dependencies in the graph |
+| The method appears where the reader found none | 1 | the hint alone, then the fact declares the dependency again |
+| Provider moved out of the caller's source root | 1 | the dependency |
+
+The sibling declarer and the importer are never among them. The first row is the
+honest cost of a cross-unit fact: a dependency names a unit, so an edit to any
+part of that unit re-reads its callers. The rows with no dependency at all are
+what the aspect channel exists for, and Stage 3 proved them with seeded hints
+that Stage 5 now makes real.
+
+This also closes Stage 4's residual risk. A provider renamed out of the caller's
+root used to leave the caller's answer stale, because nothing reached it; it now
+declares a dependency, so the rename reanalyzes it and the call goes back to
+`none in a Java source root this unit can see`.
+
+### What The Stage 3 Tests Had To Become
+
+Two of them were written against a world where nothing populated hints, and
+Stage 5 is exactly the change that ends it. They were rewritten rather than
+relaxed:
+
+- *a hinted reader is reanalyzed…* seeded a hint by hand and asserted that no
+  dependency existed. The reader now hints itself, and its resolved call
+  declares a dependency, so the test asserts the split instead: which re-reads
+  the dependency causes, which the hint causes, and the count of declarations at
+  each step.
+- *an unhinted reader is not reached…* can no longer have an unhinted reader.
+  The claim that survives — a hint a unit has outgrown costs a pass and no claim
+  — is now made with the sibling, which reads nothing of the provider and is
+  hinted anyway. It is re-read, says what it said before, and the only claim
+  that moves is the real reader's.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Zig 0.16.0 matches the semidx target |
+| `zig fmt --check build.zig src tests` | Clean |
+| `zig build test-core` | 97/98 passed, 1 skipped |
+| `zig build test` | 249/251 passed, 2 skipped — from 248/250, the new work-bound test |
+| `zig build test-mcp` | 30/31 passed, 1 skipped |
+| `zig build dogfood` | Exit 0 |
+| `zig build preview-gate` | Exit 0, 14/14 steps, 6/6 tests, 28 hard passes |
+| Falsification: carry every method of the class | The work-bound test fails at 2 candidates instead of 1 |
+
+Propagation: the hint-only re-reads spend **0** rounds, because there is nothing
+in the graph to walk; a dependency re-read spends **2** — one to reach the
+dependent, one to find it leads nowhere further. Nothing exhausted its budget in
+any lane.
+
+The frontend's `coverage_note` changed with the behavior, because it is an
+MCP-visible statement of what resolves and it would otherwise be false. The
+capability matrix, `SPEC.md`'s coverage wording, and the external remeasurement
+against the 135 are Stage 7's.
+
+### Residual Risk
+
+- **A dependency is per unit.** Any edit to a provider re-reads every caller
+  that resolved into it, including edits no caller can observe. Narrowing that
+  would mean per-entity dependencies, which is not this plan's to introduce; the
+  first row of the table above is the measurement a future plan would start
+  from.
+- **`membersFor` walks the provider unit once per distinct receiver class.** It
+  is bucketed per unit and so costs what the provider holds, not what the
+  repository holds, but it is new index-path work proportional to distinct
+  receiver classes per unit. Stage 7 measures it externally.
+- **Hints are keyed by the name as written**, so a class of the same name in an
+  unrelated module still over-invalidates — Stage 3's accepted trade, now with
+  real hints behind it rather than seeded ones.
+- **The reason strings are formatted per call.** Stage 4 recorded the growth;
+  Stage 5 adds the target-side families, so the measurement Stage 7 owes now
+  covers both.

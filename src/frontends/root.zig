@@ -227,7 +227,25 @@ pub const Analyzer = struct {
         // Remember where this unit reads from even when nothing resolves, so a
         // class appearing in an imported package later reaches the importer.
         try self.java_packages.noteImports(unit, imports);
-        return self.java_packages.context(graph, package, unit, source_root, imports, allocator);
+        var context = try self.java_packages.context(
+            graph,
+            package,
+            unit,
+            source_root,
+            imports,
+            allocator,
+        );
+
+        // What the unit writes after a `.` is both what it must be able to
+        // answer and what it must be reached for later. The pairs are recorded
+        // as read before anything is resolved, because the reader that most
+        // needs reaching is the one whose call resolves to nothing today.
+        const receivers = try java.staticCallReceivers(allocator, root, bytes);
+        for (receivers) |receiver| {
+            try self.java_members.noteReader(unit, receiver.class, receiver.method);
+        }
+        context.members = try java_members.membersFor(graph, context, receivers, allocator);
+        return context;
     }
 
     /// Reanalyzes one source unit and applies the result to the graph.
