@@ -4039,3 +4039,237 @@ fn writeFixtureInto(tree: *Tree, name: []const u8) !void {
     defer gpa.free(source);
     try tree.write(wire_path, source);
 }
+
+// Three cases ADR 009 requires and the first implementation did not answer.
+// Each is a way for a class-qualified call to claim more than the graph knows,
+// and each is now a decline with its own reason
+// ([Follow-up 016](../docs/followups/016_java_static_call_rule_narrow_gaps.md)).
+
+test "an on-demand static import leaves every simple-name receiver unresolved" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("module/src/main/java/lib/Util.java", .java,
+        \\package lib;
+        \\
+        \\class Util {
+        \\    public static String make() { return null; }
+        \\}
+        \\
+    );
+    // Why the import is not safe to ignore: `import static lib.Holder.*;`
+    // brings `Holder`'s static fields into scope, a field obscures a type of
+    // its name, and this frontend records no fields, so it cannot tell whether
+    // `Util` here is the class or a field named after it.
+    _ = try index.addUnit("module/src/main/java/lib/Holder.java", .java,
+        \\package lib;
+        \\
+        \\class Holder {
+        \\    static String keep() { return null; }
+        \\}
+        \\
+    );
+    _ = try index.addUnit("module/src/main/java/lib/Importer.java", .java,
+        \\package lib;
+        \\
+        \\import static lib.Holder.*;
+        \\
+        \\class Importer {
+        \\    Util field;
+        \\    void declined() { Util.make(); }
+        \\}
+        \\
+    );
+    // The same call in a unit without the import, so the decline above is the
+    // import's doing and not the fixture's.
+    _ = try index.addUnit("module/src/main/java/lib/Plain.java", .java,
+        \\package lib;
+        \\
+        \\class Plain {
+        \\    void covered() { Util.make(); }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Importer.java",
+        .class = "Importer",
+        .method = "declined",
+        .call = "Util.make()",
+        .expect = .{ .unresolved = "imports static members on demand" },
+    });
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Plain.java",
+        .class = "Plain",
+        .method = "covered",
+        .call = "Util.make()",
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Util.java",
+            .class = "Util",
+            .method = "make",
+        } },
+    });
+
+    // A type position is not a place a variable can claim a name, so the field
+    // type in the importing unit still resolves. The guard is about receivers.
+    const importer = definitionIn(&snapshot, "module/src/main/java/lib/Importer.java", null, "Importer").?;
+    const util = definitionIn(&snapshot, "module/src/main/java/lib/Util.java", null, "Util").?;
+    var references = snapshot.relationships(.{ .kind = .references, .source = importer.id });
+    var resolved = false;
+    while (references.next()) |reference| {
+        if (!reference.resolution.isFact()) continue;
+        if (reference.claim.relationship.target.entity == util.id) resolved = true;
+    }
+    try testing.expect(resolved);
+}
+
+test "an on-demand import that is not static leaves the receiver alone" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addStaticCallProviders(&index);
+
+    // `import lib.*;` imports types, never members, so no variable enters
+    // scope and nothing can obscure the receiver name.
+    _ = try index.addUnit("module/src/main/java/app/Wildcard.java", .java,
+        \\package app;
+        \\
+        \\import lib.*;
+        \\import lib.Util;
+        \\
+        \\class Wildcard {
+        \\    void covered() { Util.make(); }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/app/Wildcard.java",
+        .class = "Wildcard",
+        .method = "covered",
+        .call = "Util.make()",
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Util.java",
+            .class = "Util",
+            .method = "make",
+        } },
+    });
+}
+
+test "a target with no static label declines as unrecorded, not as an instance method" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    // A provider as an older producer would have left it: the class shape and
+    // the access are recorded, `java.static` is not. The label's absence is
+    // what the reader has to answer for, and it is not the same answer as the
+    // method being an instance method.
+    const provider = try index.graph.addSourceUnit(
+        "module/src/main/java/lib/Legacy.java",
+        .java,
+        "package lib;\nclass Legacy { public static String make() { return null; } }\n",
+    );
+    try recordUnlabelledJavaMethod(&index, provider, "Legacy", "make");
+
+    _ = try index.addUnit("module/src/main/java/lib/Reader.java", .java,
+        \\package lib;
+        \\
+        \\class Reader {
+        \\    void declined() { Legacy.make(); }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Reader.java",
+        .class = "Reader",
+        .method = "declined",
+        .call = "Legacy.make()",
+        .expect = .{ .unresolved = "carries no record of whether it is `static`" },
+    });
+}
+
+/// Writes one Java class and one of its methods into the graph the way the Java
+/// frontend does, minus the `java.static` label. There is no input that makes
+/// the current frontend omit it, so the case a producer change would create is
+/// built directly rather than left untested.
+fn recordUnlabelledJavaMethod(
+    index: *semidx.Index,
+    unit: model.SourceUnitId,
+    class: []const u8,
+    method: []const u8,
+) !void {
+    var builder = semidx.contract.BatchBuilder.init(
+        testing.allocator,
+        unit,
+        semidx.frontends.capabilitiesFor(.java),
+    );
+    defer builder.deinit();
+
+    const evidence: model.SourceEvidence = .{
+        .unit = unit,
+        .range = .{ .start_byte = 0, .end_byte = 1, .start_row = 0, .start_column = 0, .end_row = 0, .end_column = 1 },
+        .text = class,
+    };
+    const class_index = try builder.addEntity(.{
+        .kind = .definition,
+        .identity = .{
+            .scope = .{ .unit = unit },
+            .language = .java,
+            .role = "class",
+            .name = try builder.dupe(class),
+            .signature = try builder.dupe(class),
+            .container_path = &.{},
+        },
+        .evidence = evidence,
+        .extension = .{ .namespace = "java", .labels = try builder.labels(&.{
+            .{ .key = "java.construct", .value = "class_declaration" },
+            .{ .key = "java.package", .value = "lib" },
+            .{ .key = "java.supertypes", .value = "none" },
+        }) },
+        .resolution = .{ .fact = .{ .method = "class declaration in the analyzed source unit" } },
+    });
+    const method_index = try builder.addEntity(.{
+        .kind = .definition,
+        .identity = .{
+            .scope = .{ .unit = unit },
+            .language = .java,
+            .role = "method",
+            .name = try builder.dupe(method),
+            .signature = try builder.dupe(method),
+            .container_path = try builder.dupeSlice(&.{class}),
+        },
+        .evidence = evidence,
+        .extension = .{ .namespace = "java", .labels = try builder.labels(&.{
+            .{ .key = "java.construct", .value = "method_declaration" },
+            .{ .key = "java.package", .value = "lib" },
+            .{ .key = "java.access", .value = "public" },
+        }) },
+        .resolution = .{ .fact = .{ .method = "method declaration in the analyzed source unit" } },
+    });
+    try builder.addRelationship(.{
+        .kind = .defines,
+        .source = .unit_container,
+        .target = .{ .local = class_index },
+        .evidence = evidence,
+        .resolution = .{ .fact = .{ .method = "declared directly in this source unit" } },
+    });
+    try builder.addRelationship(.{
+        .kind = .defines,
+        .source = .{ .entity = class_index },
+        .target = .{ .local = method_index },
+        .evidence = evidence,
+        .resolution = .{ .fact = .{ .method = "declared directly in this class body" } },
+    });
+
+    _ = try semidx.reconcile.integrate(&index.graph, builder.batch());
+    // The package hint is what `indexUnit` would have written, and the reader's
+    // context is built from it.
+    try index.analyzer.java_packages.note(&index.graph, unit);
+}

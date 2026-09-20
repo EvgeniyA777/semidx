@@ -566,7 +566,11 @@ Notifications, including malformed ones, are never answered.
   and it declares exactly one method of the invoked name that is `static` and
   either public or inside the enclosing class
   ([ADR 009](../adr/009_java_static_calls.md)). So `semidx_references incoming`
-  on a static utility method lists its callers. A receiver that is a value
+  on a static utility method lists its callers. A unit that writes
+  `import static a.b.C.*;` resolves no simple-name receiver at all: such an
+  import brings in static fields semidx cannot enumerate, and in Java a field
+  obscures a type of its name, so every receiver in that unit stays an
+  unresolved designator saying so. A receiver that is a value
   (`local.m()`, `field.m()`, `new T().m()`, `a().b()`, `super.m()`) stays an
   unresolved designator, and so does an overloaded, inherited, non-static, or
   less-accessible target — each saying which condition failed. Nothing here

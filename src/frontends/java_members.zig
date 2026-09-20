@@ -33,13 +33,14 @@ const Graph = core.Graph;
 /// carries them back.
 pub const Access = java.Access;
 pub const Supertypes = java.Supertypes;
+pub const Static = java.Static;
 
 /// One method a class currently declares. Strings are borrowed from the graph.
 pub const Method = struct {
     name: []const u8,
     entity: model.EntityId,
     access: Access,
-    is_static: bool,
+    static: Static,
 };
 
 /// What a class currently is, for a reader deciding a static call.
@@ -122,10 +123,10 @@ pub fn methodsOf(
                 Access.fromLabel(value)
             else
                 .unknown,
-            .is_static = if (entity.extension.get(java.method_static.key)) |value|
-                std.mem.eql(u8, value, java.method_static.yes)
+            .static = if (entity.extension.get(java.method_static.key)) |value|
+                Static.fromLabel(value)
             else
-                false,
+                .unknown,
         });
     }
 }
@@ -210,7 +211,7 @@ pub fn membersFor(
                 .name = method.name,
                 .target = .{ .entity = method.entity, .provider = class.unit },
                 .access = method.access,
-                .is_static = method.is_static,
+                .static = method.static,
             });
         }
         try found.append(allocator, .{
@@ -254,7 +255,7 @@ pub const Aspect = struct {
     /// How many methods of `method` the class declares. Zero for a class aspect.
     count: u32,
     access: Access,
-    is_static: bool,
+    static: Static,
     supertypes: Supertypes,
 
     /// Whether two aspects speak about the same thing.
@@ -267,7 +268,7 @@ pub const Aspect = struct {
         return a.sameKey(b) and
             a.count == b.count and
             a.access == b.access and
-            a.is_static == b.is_static and
+            a.static == b.static and
             a.supertypes == b.supertypes;
     }
 };
@@ -304,7 +305,7 @@ pub fn aspectsOf(
             .method = "",
             .count = 0,
             .access = .unknown,
-            .is_static = false,
+            .static = .unknown,
             .supertypes = class.supertypes,
         });
 
@@ -330,7 +331,7 @@ pub fn aspectsOf(
                     .method = method.name,
                     .count = count,
                     .access = .unknown,
-                    .is_static = false,
+                    .static = .unknown,
                     .supertypes = class.supertypes,
                 },
                 .unique => |only| .{
@@ -338,7 +339,7 @@ pub fn aspectsOf(
                     .method = only.name,
                     .count = 1,
                     .access = only.access,
-                    .is_static = only.is_static,
+                    .static = only.static,
                     .supertypes = class.supertypes,
                 },
             });

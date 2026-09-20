@@ -111,6 +111,25 @@ pub const Access = enum {
     }
 };
 
+/// Whether a method declares `static`, as its own analysis recorded it.
+///
+/// `unknown` is the same kind of answer as `Access.unknown`. A definition
+/// without the label was recorded by something other than the current Java
+/// frontend, and a call must decline saying the modifier is unrecorded rather
+/// than saying the method is an instance method, which is a claim about the
+/// source the graph does not hold.
+pub const Static = enum {
+    yes,
+    no,
+    unknown,
+
+    pub fn fromLabel(value: []const u8) Static {
+        if (std.mem.eql(u8, value, method_static.yes)) return .yes;
+        if (std.mem.eql(u8, value, method_static.no)) return .no;
+        return .unknown;
+    }
+};
+
 /// Whether a class declares a superclass or an interface. `unknown` is the same
 /// kind of answer as `Access.unknown`, and declines the same way.
 pub const Supertypes = enum {
@@ -210,7 +229,7 @@ pub const MethodCandidate = struct {
     name: []const u8,
     target: contract.ExternalTarget,
     access: Access,
-    is_static: bool,
+    static: Static,
 };
 
 /// What a class outside the analyzed unit currently is, for a receiver naming
@@ -446,6 +465,16 @@ fn importsStatically(node: ts.Node) bool {
     return false;
 }
 
+/// Whether an import declaration ends in `.*`, which names a scope rather than
+/// a member and so brings in no name this frontend can enumerate.
+fn importsOnDemand(node: ts.Node) bool {
+    var children = node.namedChildren();
+    while (children.next()) |child| {
+        if (std.mem.eql(u8, child.kind(), "asterisk")) return true;
+    }
+    return false;
+}
+
 /// The Java source root a unit sits in, or null when it has none.
 ///
 /// It is what remains of `path` once the directories the declared package spells
@@ -570,6 +599,7 @@ pub fn analyze(
     defer static_imported.deinit(gpa);
     var other_types: std.ArrayList([]const u8) = .empty;
     defer other_types.deinit(gpa);
+    var static_on_demand = false;
 
     // Pass 1: definitions. A relationship can only be expressed once every
     // definition in the unit has a batch-local index.
@@ -582,6 +612,8 @@ pub fn analyze(
             if (importedName(node, source)) |name| {
                 const into = if (importsStatically(node)) &static_imported else &imported;
                 try into.append(gpa, name);
+            } else if (importsStatically(node) and importsOnDemand(node)) {
+                static_on_demand = true;
             }
         } else if (isTypeDeclaration(kind)) {
             if (node.childByFieldName("name")) |name_node| {
@@ -728,6 +760,7 @@ pub fn analyze(
         .classes = classes.items,
         .imported = imported.items,
         .static_imported = static_imported.items,
+        .static_on_demand = static_on_demand,
         .other_types = other_types.items,
         .context = context,
     };
@@ -842,6 +875,22 @@ const UnitScope = struct {
     /// Simple names brought in by single static imports. A static import names a
     /// member, so it is a reason to decline, never a target.
     static_imported: []const []const u8,
+    /// Whether the unit writes `import static a.b.C.*;`.
+    ///
+    /// Such a declaration brings every accessible static member of `C` into
+    /// scope, including its fields, and a variable obscures a type of the same
+    /// name (JLS 6.4.2) whichever way the type reached the unit — its own
+    /// package or a single-type import. The names it binds cannot be
+    /// enumerated: this frontend does not record fields as definitions, so
+    /// `C`'s static field names are not in the graph even when `C` is indexed,
+    /// and `C` is usually a dependency that is not indexed at all. What cannot
+    /// be enumerated cannot be disproved, so a simple-name receiver in such a
+    /// unit is declined the way an enclosing class with supertypes is declined
+    /// ([ADR 009](../../docs/adr/009_java_static_calls.md), condition 2).
+    ///
+    /// It says nothing about a type position: there no variable competes for
+    /// the name, so `resolveType` is left alone.
+    static_on_demand: bool,
     /// Top-level interfaces, enums, records, and annotation types. This
     /// frontend does not cover them, but they still claim their names.
     other_types: []const []const u8,
@@ -1325,6 +1374,13 @@ fn qualifiedTarget(
             .{name},
         ));
     }
+    if (scope.unit.static_on_demand) {
+        return unresolvedInvocation(try builder.print(
+            "the unit imports static members on demand, which may bind `{s}` to a field that obscures " ++
+                "a class of that name, and the members such an import brings in cannot be enumerated here",
+            .{name},
+        ));
+    }
     if (scope.class.node.childByFieldName("superclass") != null or
         scope.class.node.childByFieldName("interfaces") != null)
     {
@@ -1405,6 +1461,13 @@ fn externalStaticTarget(
     receiver: []const u8,
     method: []const u8,
 ) !InvocationTarget {
+    // Both branches below are guards against the projection and `resolveType`
+    // disagreeing about what a name reaches. While they look a name up in the
+    // same order — a single-type import, then the unit's own package — neither
+    // is reachable, and `java_members` has a test that pins that order. They
+    // stay because the order is two functions' agreement rather than one
+    // function's rule, and an unreachable decline is the right answer if it
+    // ever breaks.
     const members = scope.unit.context.memberLookup(receiver) orelse
         return unresolvedInvocation(try builder.print(
             "the receiver names class `{s}`, whose current shape this analysis did not read",
@@ -1432,7 +1495,11 @@ fn externalStaticTarget(
     if (count > 1) return overloaded(builder, receiver, count);
 
     const only = found.?;
-    if (!only.is_static) return notStatic(builder, receiver, method);
+    switch (only.static) {
+        .yes => {},
+        .no => return notStatic(builder, receiver, method),
+        .unknown => return staticUnrecorded(builder, receiver, method),
+    }
     if (only.access != .public) return inaccessible(builder, receiver, method, only.access);
     return .{
         .external = only.target,
@@ -1472,6 +1539,20 @@ fn notStatic(
 ) !InvocationTarget {
     return unresolvedInvocation(try builder.print(
         "`{s}.{s}` is not static, so naming it through the class is not a call Java compiles",
+        .{ receiver, method },
+    ));
+}
+
+/// The modifier is not recorded, which is not the same answer as `static` being
+/// absent from the declaration. Saying the second when the graph only knows the
+/// first would assert something about the source it never read.
+fn staticUnrecorded(
+    builder: *contract.BatchBuilder,
+    receiver: []const u8,
+    method: []const u8,
+) !InvocationTarget {
+    return unresolvedInvocation(try builder.print(
+        "`{s}.{s}` carries no record of whether it is `static`, so a call through the class name is not established",
         .{ receiver, method },
     ));
 }

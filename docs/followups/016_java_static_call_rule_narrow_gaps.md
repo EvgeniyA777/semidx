@@ -1,9 +1,9 @@
 ---
 title: "Java static call rule: three narrow gaps"
 doc_type: "follow_up"
-lifecycle: "active"
-status: "open"
-agent_action: "use_as_input_for_future_plan_only"
+lifecycle: "completed"
+status: "fixed"
+agent_action: "historical_reference_only"
 updated: "2026-09-20"
 ---
 
@@ -22,10 +22,10 @@ recorded in its
 All three are inside the rule [ADR 009](../adr/009_java_static_calls.md)
 decided and Plan 012 Stages 4 and 5 implemented.
 
-They are grouped because they share a deferral reason and would be fixed in one
+They are grouped because they share a deferral reason and were fixed in one
 change to `src/frontends/java.zig` and `src/frontends/java_members.zig`. None of
-them was observed in the external sample; each is reasoned from the code and the
-language rules.
+them was observed in the external sample; the first was then reproduced against
+a real compiler, and the other two are reasoned from the code.
 
 ## Current Behavior
 
@@ -46,9 +46,25 @@ declares a method of the invoked name, `Name.method()` means the field's method
 and semidx records a `CALLS` fact naming the class's method instead.
 
 This is the one finding in this entry that produces a **fact** Java does not
-agree with, rather than a decline or a misleading explanation. The construction
-is contrived — a field named like a class — but ADR 009 states the standard it
-fails: a binding a future frontend covers "still poisons the name here".
+agree with, rather than a decline or a misleading explanation, and it was
+confirmed against `javac` 17 rather than argued from the specification:
+
+```java
+// demo/Util.java     class Util   { public static String make() ... }
+// demo/Holder.java   class Holder { public static Other Util = new Other(); }
+// demo/Caller.java   import static demo.Holder.*;   ->  Util.make()
+FIELD Holder.Util.make (instance)
+```
+
+The program compiles and calls `Other.make`, while semidx recorded a fact naming
+`Util.make`. So this is not a fact about code Java refuses to compile; it is a
+fact naming the wrong method of the wrong class in a working program.
+
+A second probe settled how wide the guard has to be. Adding an explicit
+`import lib.Util;` to the caller does not rescue the type: the answer is still
+`FIELD Holder.Util.make`. A variable obscures a type however the type reached
+the unit, so the guard cannot be narrowed to names that came from the unit's own
+package.
 
 ### 2. A missing `java.static` label is reported as "is not static"
 
@@ -78,47 +94,65 @@ Dead code that claims to be a distinct answer is a small thing, but the matrix
 is ADR 009's executable form, and a family with no case behind it is exactly
 what Stage 2 said a switch without cases would be.
 
-## Why Deferred
+## Resolution
 
-None of the three changes what the rule answers on real source: the external
-sample shows zero calls in families 2 and 3, and family 1 needs a field named
-like a class. Plan 012 is closed and its evidence stands. They are recorded
-rather than fixed on the spot because the first needs a decision, not just a
-patch: an on-demand static import names a scope, not a member, so semidx cannot
-know which names it binds without reading `a.b.C`, and the honest options are to
-decline every simple-name receiver in a unit that has one, or to read the
-imported class's static field names from the graph the way class shape is
-already read.
+Fixed as a narrowly scoped implementation of [ADR 009](../adr/009_java_static_calls.md),
+whose condition 2 already required it: a binding a future frontend covers "still
+poisons the name here", and condition 4 already named static imports among the
+guards `resolveType` keeps intact. The implementation kept only the single-form
+half of that guard.
 
-The second and third are small and safe, but they belong with the first so the
-matrix is extended once.
+1. **On-demand static import declines the receiver.** A unit that writes
+   `import static a.b.C.*;` resolves no simple-name receiver, with its own
+   reason. The decline is the whole unit because the names such an import binds
+   cannot be enumerated: this frontend records no fields as definitions, so
+   `C`'s static field names are absent from the graph even when `C` is indexed,
+   and `C` is usually a dependency that is not indexed at all. That is the same
+   shape as ADR 009's condition 3, which refuses a whole class because inherited
+   fields are invisible.
 
-## Acceptance Direction
+   The guard is on the receiver, not on `resolveType`: a type position is not a
+   place a variable can claim a name, so field and return types in such a unit
+   resolve exactly as before. A non-static on-demand import (`import a.b.*;`)
+   imports types only and changes nothing.
 
-A plan or a direct implementation task may take this up when it decides:
+2. **`Static` is a tri-state beside `Access` and `Supertypes`.** A definition
+   with no `java.static` label reads back as `unknown` and declines saying the
+   modifier is unrecorded, instead of being read as `false` and reported as an
+   instance method.
 
-- how an on-demand static import is handled. Declining every simple-name
-  receiver in such a unit is exact and cheap and costs recall in a common
-  construct; reading the imported class's static field names as graph facts is
-  exact and needs a fourth thing on the class-shape channel. Measure the recall
-  cost on the Plan 012 sample before choosing.
-- whether `Supertypes` and `Access` gain a peer for `static` — a tri-state whose
-  `unknown` declines with its own reason — or whether the reason text is simply
-  ordered so an unlabelled method is reported as unrecorded rather than as
-  non-static.
-- whether the two unreachable families become fixtured cases or are removed. If
-  they are kept, the matrix must contain input that reaches them; if they are
-  removed, the decline they cover must still exist somewhere.
+3. **The two unreachable families stay, with the agreement they rest on now
+   pinned.** They guard against the projection and `resolveType` disagreeing
+   about what a name reaches; a test asserts that both prefer a single-type
+   import over the unit's own package, which is what makes the families
+   unreachable. The branches carry a comment saying so.
 
-## Required Tests
+### What It Costs
 
-- A unit with `import static a.b.C.*;` where `C` declares a static field named
-  like a class in the unit's package leaves `Name.method()` unresolved, saying
-  which condition failed.
-- The single-static-import case keeps answering as it does today.
-- A method definition carrying no `java.static` label leaves a class-qualified
-  call unresolved with a reason that says the modifier is unrecorded, not that
-  the method is an instance method.
-- Every reason family the rule can answer has at least one case in the
-  static-call matrix, or the family is gone.
+Recall, in an amount this repository cannot measure. `import static
+org.junit.Assert.*` and `import static org.mockito.Mockito.*` are ordinary in
+test sources, and [ADR 008](../adr/008_java_visibility_boundaries.md) lets a test
+root read its module's main root, so some share of Plan 012's 139 measured facts
+came from units this guard now declines. Plan 012 did not split its 139 by source
+root, and re-measuring needs the external harness
+[Follow-up 017](017_plan_012_external_evidence_reproducibility.md) owns.
+
+The capability matrix records the direction of the change against the measured
+number rather than quietly leaving 139 standing. The trade is the one §3 of the
+constitution states: exactness does not mean coverage, and a wrong fact is an
+architectural defect rather than a trade-off.
+
+## Tests
+
+- *an on-demand static import leaves every simple-name receiver unresolved* —
+  with the same call in a neighbouring unit still a fact, so the decline is the
+  import's doing, and with the importing unit's field type still resolving, so
+  the guard is on receivers and not on type positions.
+- *an on-demand import that is not static leaves the receiver alone* —
+  `import lib.*;` imports types, so nothing is obscured.
+- *a target with no static label declines as unrecorded, not as an instance
+  method* — no input makes the current frontend omit the label, so the case a
+  producer change would create is written into the graph directly.
+- *the member projection resolves a receiver name in the same order resolveType
+  does* — a single-type import beats the unit's own package in both.
 - The 49 existing static-call matrix cases pass unchanged.

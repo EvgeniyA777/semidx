@@ -278,19 +278,19 @@ documents that own history, rationale, and evidence.
   carry `java.supertypes`, `java.access` and `java.static`; a resolved call
   declares a provider dependency, an unresolved one is reached by an
   aspect-grained reader hint. On apache/dubbo at `df9c5e1`, in the plan's own
-  sample: 139 static facts against a floor of 100, `calls` facts 174 → 313,
-  references and habit-loop latency unmoved, and the
-  [costs](docs/reports/012_java_semantic_quality_without_query_regression_progress.md#what-it-costs)
+  sample: 139 static facts against a floor of 100, `calls` facts 174 → 313, and
+  the [costs](docs/reports/012_java_semantic_quality_without_query_regression_progress.md#what-it-costs)
   recorded rather than smoothed. Value receivers stay with
   [Follow-up 014](docs/followups/014_java_instance_receiver_calls.md), the
   supertype guard with
   [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md); a
-  post-closure review deferred a stale fact after a move
-  ([015](docs/followups/015_unit_path_change_does_not_reanalyze.md)), narrow
-  gaps in the static-call rule
-  ([016](docs/followups/016_java_static_call_rule_narrow_gaps.md)) and
-  unreproducible external evidence
-  ([017](docs/followups/017_plan_012_external_evidence_reproducibility.md)).
+  post-closure review deferred
+  [015](docs/followups/015_unit_path_change_does_not_reanalyze.md) and
+  [017](docs/followups/017_plan_012_external_evidence_reproducibility.md), and
+  fixed [016](docs/followups/016_java_static_call_rule_narrow_gaps.md): a unit
+  with an on-demand static import resolves no simple-name receiver, since such
+  an import binds field names semidx cannot enumerate and a field obscures a
+  type of its name. That costs recall, so 139 overstates the rule until 017.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients ignore `structuredContent` and read `content`, so the text copy is

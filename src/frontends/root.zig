@@ -1177,7 +1177,7 @@ test "a java class carries the modifiers and supertype shape a static call must 
     // One name, one method: the only selection a static call may act on.
     const make = java_members.select(methods.items, "make").unique;
     try testing.expectEqual(java_members.Access.public, make.access);
-    try testing.expect(make.is_static);
+    try testing.expectEqual(java_members.Static.yes, make.static);
 
     // Overloads are reported as what they are, not resolved to the first.
     try testing.expectEqual(@as(u32, 2), java_members.select(methods.items, "twice").overloaded);
@@ -1197,7 +1197,10 @@ test "a java class carries the modifiers and supertype shape a static call must 
         java_members.Access.private,
         java_members.select(methods.items, "hidden").unique.access,
     );
-    try testing.expect(!java_members.select(methods.items, "instance").unique.is_static);
+    try testing.expectEqual(
+        java_members.Static.no,
+        java_members.select(methods.items, "instance").unique.static,
+    );
 
     // A class that declares a supertype says so, because what it may inherit is
     // what a caller cannot see.
@@ -1342,4 +1345,56 @@ test "reader hints remember the pair and the class, and answer for both" {
         @as(usize, 0),
         (try members.readersOf("Absent", "make", testing.allocator)).len,
     );
+}
+
+test "the member projection resolves a receiver name in the same order resolveType does" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    // Two classes of one name: one in the caller's own package, one reached by
+    // a single-type import. Java prefers the import, and both `resolveType` and
+    // this projection must prefer it too. Their agreement is what makes the two
+    // "shape not read" and "supertypes unknown" declines in the frontend
+    // unreachable, so it is pinned here rather than assumed
+    // ([Follow-up 016](../../docs/followups/016_java_static_call_rule_narrow_gaps.md)).
+    const imported = try addJava(
+        &analyzer,
+        &graph,
+        "module/src/main/java/lib/Util.java",
+        "package lib;\nclass Util { public static String make() { return null; } }\n",
+    );
+    _ = try addJava(
+        &analyzer,
+        &graph,
+        "module/src/main/java/app/Util.java",
+        "package app;\nclass Util { public static String make() { return null; } }\n",
+    );
+    const caller = try addJava(
+        &analyzer,
+        &graph,
+        "module/src/main/java/app/Caller.java",
+        "package app;\n\nimport lib.Util;\n\nclass Caller { void call() { Util.make(); } }\n",
+    );
+
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    const context = try contextFor(&analyzer, &graph, caller, scratch.allocator());
+    const members = context.memberLookup("Util").?;
+    try testing.expectEqual(@as(usize, 1), members.methods.len);
+    try testing.expectEqualStrings("make", members.methods[0].name);
+    try testing.expectEqual(imported, members.methods[0].target.provider);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    const make = snapshot.findDefinition("module/src/main/java/lib/Util.java", "make").?;
+    const call_site = snapshot.findDefinition("module/src/main/java/app/Caller.java", "call").?;
+    var calls = snapshot.relationships(.{ .kind = .calls, .source = call_site.id });
+    var named: ?model.EntityId = null;
+    while (calls.next()) |call| {
+        if (!call.resolution.isFact()) continue;
+        named = call.claim.relationship.target.entity;
+    }
+    try testing.expectEqual(make.id, named.?);
 }
