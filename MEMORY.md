@@ -261,7 +261,7 @@ documents that own history, rationale, and evidence.
   single-type imports resolve inside it, Follow-up 003 is closed, and
   cross-module visibility is split into
   [Follow-up 011](docs/followups/011_java_cross_module_visibility.md). The real
-  remaining Java blockers are coverage, not the boundary (Plan 012 Stage 0).
+  remaining Java blockers are coverage, not the boundary.
 - [Plan 011](docs/plans/011_external_scale_graph_query_indexes.md) is executed
   and Follow-up 012 is closed. Snapshot identity lookups are constant time, and
   anchored relationship queries inspect exactly as many assertions as they
@@ -273,24 +273,24 @@ documents that own history, rationale, and evidence.
   bounds. Java write-path measurement was left as-is: one-file refresh at 1,200
   units is 13 ms.
 - [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
-  is at Stage 7, **amended** by Stage 0 to target static `ClassName.method()`
-  calls rather than instance receivers.
-  [ADR 009](docs/adr/009_java_static_calls.md) is accepted and implemented:
-  `ClassName.method()` is a `CALLS` **fact** when nothing in scope binds the
-  receiver name, neither the enclosing nor the target class declares supertypes,
-  the call is outside a nested class body, and the class declares exactly one
-  method of that name, `static` and either public or inside the enclosing class;
-  everything else stays unresolved with its reason. Java definitions carry
-  class shape (`java.supertypes`, `java.access`, `java.static`); a resolved call
-  declares a provider dependency, an unresolved one an aspect-grained hint on the
-  pair it wrote — the case no dependency can carry. Lookup costs the invoked
-  name's candidates: 1 whether the package holds 2 classes or 22; on apache/dubbo
-  2,214 calls became facts, every other unresolved family unchanged. Instance
-  receivers stay with
-  [Follow-up 014](docs/followups/014_java_instance_receiver_calls.md), the supertype guard with
-  [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md); the sampled
-  remeasurement and the capability wording are Stage 7's, and every count is in the
-  [progress log](docs/reports/012_java_semantic_quality_without_query_regression_progress.md).
+  is **executed**. `ClassName.method(...)` is a `CALLS` fact when nothing in
+  scope binds the receiver name, neither the enclosing nor the target class
+  declares supertypes, the call is outside a class body declared in a method,
+  and the class declares exactly one method of that name, `static` and either
+  public or inside the enclosing class
+  ([ADR 009](docs/adr/009_java_static_calls.md)); everything else stays
+  unresolved naming the condition that failed. Java definitions carry the shape
+  a caller cannot read from its own source (`java.supertypes`, `java.access`,
+  `java.static`); a resolved call declares a provider dependency, an unresolved
+  one is reached by an aspect-grained reader hint on the pair it wrote.
+  On apache/dubbo at `df9c5e1`, in the plan's own sample: 139 static facts
+  against a floor of 100, `calls` facts 174 → 313, references, memory and
+  habit-loop latency unmoved. The costs are recorded: index time +18%
+  ReleaseFast and +77% Debug, a one-file refresh 0.28 s → up to 1.00 s
+  re-reading up to 363 of 4,050 units, +9% bytes per Java definition item, and
+  `semidx_context depth=2` on a hub method now exhausts the default budget.
+  Value receivers stay with [Follow-up 014](docs/followups/014_java_instance_receiver_calls.md), the supertype guard with
+  [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md), both re-measured and unchanged.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients ignore `structuredContent` and read `content`, so the text copy is

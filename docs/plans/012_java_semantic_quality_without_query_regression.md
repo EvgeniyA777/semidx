@@ -1,13 +1,20 @@
 ---
 title: "Java semantic quality without query regression"
 doc_type: "plan"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-19"
 ---
 
 # 012: Java Semantic Quality Without Query Regression
+
+**Completed 2026-09-19.** Every stage is executed and the Definition of Done is
+met: in the Stage 0 sample, 139 receiver-qualified unresolved calls became exact
+`CALLS` facts against a floor of 100 and this plan's own prediction of 135, with
+no query regression and no approximate assertion. The evidence, the costs, and
+the residual risk are in
+[the progress log](../reports/012_java_semantic_quality_without_query_regression_progress.md#stage-7-external-remeasurement-documentation-and-closure).
 
 **Amended after Stage 0.** This plan originally widened Java toward
 receiver-qualified instance calls. Its own Stage 0 gate measured that subset at

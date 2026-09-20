@@ -195,6 +195,14 @@ directory or file matters. Ask for `detail: "full"` only for the one entity
 whose resolution methods, unresolved explanations, producer versions, or byte
 offsets you need, for example to review a claim or plan an impact analysis.
 
+A neighbourhood is as large as the graph makes it. On one external Java
+repository, `semidx_context depth=2` incoming on a widely used static utility
+method exhausts the default 32000-byte budget, where the same call on the same
+repository did not before Java static calls resolved — the answer grew because
+the edges now exist. `semidx_context` has no cursor, so raise
+`max_response_bytes`, lower `depth`, or lower `relationship_limit` when
+`budget_exhausted` is true.
+
 ### Protocol Versions
 
 One process serves both of these, decided per request:
@@ -550,6 +558,21 @@ Notifications, including malformed ones, are never answered.
   is: a name declared out of reach reads differently from a name nothing
   declares. On-demand imports (`import a.b.*;`) and static imports never
   resolve.
+- A Java invocation written `ClassName.method(...)` is a `calls` fact only when
+  nothing in scope binds that name — no parameter, local, field, `for`
+  variable, `catch` parameter, resource, lambda parameter, or pattern — the
+  enclosing class declares no supertypes, the name reaches one current
+  top-level class inside the boundary above, that class declares no supertypes,
+  and it declares exactly one method of the invoked name that is `static` and
+  either public or inside the enclosing class
+  ([ADR 009](../adr/009_java_static_calls.md)). So `semidx_references incoming`
+  on a static utility method lists its callers. A receiver that is a value
+  (`local.m()`, `field.m()`, `new T().m()`, `a().b()`, `super.m()`) stays an
+  unresolved designator, and so does an overloaded, inherited, non-static, or
+  less-accessible target — each saying which condition failed. Nothing here
+  records dispatch, hiding, or overload selection. Java definitions carry the
+  shape a caller has to check as extension labels: `java.supertypes` on a
+  class, `java.access` and `java.static` on a method.
 - A reference to a type with no source under `--root` — every JDK type, and
   anything from a dependency not checked out here — is an unresolved designator.
   semidx reads no `.jar`, no class file, and no build descriptor, so no

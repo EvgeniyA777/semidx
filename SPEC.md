@@ -142,6 +142,22 @@ implementation guidance for one Java rule, not a Java coverage claim: it admits
 no `module` or `IMPORTS`, publishes no contract or capability matrix, and treats
 the indexed repository as a single Java classpath.
 
+A second Java cross-unit producer is implemented
+([ADR 009](docs/adr/009_java_static_calls.md),
+[plan](docs/plans/012_java_semantic_quality_without_query_regression.md),
+[evidence](docs/reports/012_java_semantic_quality_without_query_regression_progress.md)).
+An invocation whose receiver is a simple name can be a `CALLS` fact naming the
+one `static` method the receiver's class declares, when nothing in scope binds
+the name, neither the enclosing nor the target class declares supertypes, the
+call is outside a class body declared in a method, and the target's access is
+public or the target class is the one enclosing the call. The evidence a reader
+cannot get from its own source travels as Java extension labels on the
+definitions themselves — `java.supertypes`, `java.access`, `java.static` — and
+the dependent declares a dependency on the unit it read. Dispatch, hiding,
+overload selection by argument type, static imports used as bare names, and
+scoped receivers stay unresolved, and no shared-core kind is admitted for any of
+it.
+
 A Zig frontend and a local MCP preview exist
 ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md),
 [plan](docs/plans/004_zig_frontend_and_mcp_preview.md),

@@ -1,9 +1,9 @@
 ---
 title: "Java semantic quality without query regression progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-19"
 ---
 
@@ -14,28 +14,33 @@ Companion log for
 
 ## Current Status
 
-**Stage 0 is complete. Its verdict on the plan's original subject was no-go, and
-the plan was amended rather than abandoned.** The Start Rule requires two things
-before any ADR or code work; the first held and the second did not.
+**The plan is complete.** Java invocations written `ClassName.method(...)`
+resolve to the one `static` method that class declares, under every
+[ADR 009](../adr/009_java_static_calls.md) condition at once, and everything
+else stays unresolved saying which condition failed.
 
-- The local Plan 011 work-bound lane still passes, so anchored relationship work
-  still scales with anchored candidates.
-- The external Java sample contains **63** public-method addressable
-  receiver-qualified invocations against a required threshold of **100**.
+Measured on the external sample this plan has used throughout — apache/dubbo at
+`df9c5e1`, the same 1,200 definitions, the same 6,710 outgoing claims:
 
-No Java semantic code changed. The same measurement priced the alternatives, and
-the plan now targets static `ClassName.method()` calls at **135** in the same
-sample, which clears the same threshold with less machinery.
-[ADR 009](../adr/009_java_static_calls.md) is accepted, the Stage 2 fixture
-matrix states what it requires, Stage 3 built the projection and the
-invalidation channel it needs, Stage 4 reads a receiver name as a class or
-declines with the condition that failed, and Stage 5 turns the covered calls
-into `CALLS` facts, and Stage 6 re-measured both deferred subsets against the
-implementation: neither moved. Stage 7 is next. See
-[The Decision](#the-decision) and
-[Amendment 1](../plans/012_java_semantic_quality_without_query_regression.md#amendment-1-from-instance-receivers-to-static-calls).
+| | Stage 0 | Now |
+| --- | ---: | ---: |
+| `calls` facts | 174 | **313** |
+| Of those, static-call facts | 0 | **139** |
+| `calls` unresolved | 5,662 | 5,523 |
+| `references` facts / unresolved | 70 / 804 | 70 / 804 |
+| Peak RSS, ReleaseFast | 186 MB | 185 MB |
+| `semidx_context depth=2` | 0.019 s | 0.005 s |
 
-Stage 0 also settles the question Plan 011 deliberately left open: the external
+139 against a required floor of 100 and a Stage 0 prediction of 135. The one
+Stage 0 reason for 4,624 receiver-qualified calls decomposes exactly into seven
+named families plus those 139 facts.
+
+The plan was **amended once**, after its own Stage 0 gate declined the original
+subject at 63 addressable invocations against a required 100. See
+[Amendment 1](../plans/012_java_semantic_quality_without_query_regression.md#amendment-1-from-instance-receivers-to-static-calls)
+and [The Decision](#the-decision).
+
+Stage 0 also settled the question Plan 011 deliberately left open: the external
 latency observation now exists, and it supports the Plan 011 product claim
 strongly. `semidx_context depth=2` on apache/dubbo fell from **90.71 s to
 0.019 s** in the same build mode on the same repository and commit.
@@ -52,7 +57,7 @@ strongly. `semidx_context depth=2` on apache/dubbo fell from **90.71 s to
 | Stage 4: Reading a receiver name as a type | Completed | A qualified invocation's receiver is decided, and no call fact is emitted. A simple name is a class only where no parameter, local, field, `for`, `catch`, resource, lambda or pattern binds it, the enclosing class declares no supertypes, and `resolveType` names one current class inside the ADR 008 boundary; each failure carries its own reason. Locals bind from their declarator to the end of their block, exactly; the other introducers bind method-wide, which declines more and claims nothing. 25 matrix cases moved from pending to checked, and three falsification runs show each half bites. `zig build test` 248/250, unchanged. |
 | Stage 5: Static call facts | Completed | `ClassName.method()` is a `CALLS` fact under every ADR 009 condition at once, and the matrix lost its switch: 49 cases, each asserting its answer. Candidates come from the names the unit writes, so one invocation costs **1** candidate whether the package holds 2 classes or 22. A resolved call declares a provider dependency; an unresolved one is reached by the hint it wrote, with **0** dependencies in the graph and **0** propagation rounds. Two Stage 3 tests were rewritten: their world — nothing populating hints — is what this stage ended. `zig build test` 249/251, from 248/250. |
 | Stage 6: Follow-up discipline | Completed | Both deferred subsets re-measured whole-graph on the same clone, with the Stage 4 and Stage 5 binaries over the same input. Every unresolved family is identical to the unit except one: 3,930 calls whose receiver names a class became 2,214 facts and 1,716 target-side declines. Follow-up 014's value receivers (55,127 + 21,132) and Follow-up 013's guard (8,083 references, 6,206 receivers) are unchanged, and the Stage 4 run reproduced Stage 0's baseline exactly. One delta is recorded unexplained: +106 assertion records that are not conversions. |
-| Stage 7 | Not started | Next: external remeasurement against the sampled 135, documentation, and closure. |
+| Stage 7: External remeasurement, documentation and closure | Completed | The Stage 0 sample was rebuilt and reproduces its table to the unit, so the comparison is like-for-like: **139** static-call facts against a floor of 100 and a prediction of 135, every one of them a public `static` target. The 4,624-call reason decomposes exactly into seven families plus those facts; references did not move. Memory unchanged (186 → 185 MB), habit-loop latency unchanged, index time +18% ReleaseFast and +77% Debug, one-file refresh 0.28 s → up to 1.00 s re-reading up to 363 of 4,050 units. Capability matrix, preview reference, `SPEC.md` and `MEMORY.md` updated; `GLOSSARY.md` checked and unchanged. |
 
 ## Plan Readiness Gate
 
@@ -1222,3 +1227,192 @@ external clone.
   rule that external measurements are evidence rather than conformance. What it
   does is a count of explanation fragments, and the fragments are named in this
   log, so it is rebuildable from what is written here.
+
+## Stage 7: External Remeasurement, Documentation, And Closure
+
+The plan's own bar is met: **139** of the sample's receiver-qualified unresolved
+calls became exact `CALLS` facts, against a required floor of 100 and a Stage 0
+prediction of 135.
+
+### The Sample Is The Same Sample
+
+Stage 0's harness was not kept, which Stage 6 had to work around. Stage 7
+rebuilt it and got the sample back: 1,200 of the 26,509 Java definitions drawn
+with seed `20260918`, then `semidx_references outgoing` for each. Run against
+the pre-Plan-012 code it reproduces Stage 0's table to the unit.
+
+| Sampled claim | Stage 0 | Stage 7 baseline run | Stage 7 current |
+| --- | ---: | ---: | ---: |
+| Outgoing claims | 6,710 | 6,710 | 6,710 |
+| `calls` unresolved | 5,662 | 5,662 | **5,523** |
+| `calls` fact | 174 | 174 | **313** |
+| `references` unresolved | 804 | 804 | 804 |
+| `references` fact | 70 | 70 | 70 |
+
+So the comparison below is like-for-like and not a re-derivation: same
+repository (`apache/dubbo` at `df9c5e1`), same commit, same 1,200 definitions,
+same protocol, one process per run.
+
+### The One Reason That Became Seven And A Fact
+
+Stage 0's single explanation for 4,624 sampled calls — "qualified by a receiver
+this frontend does not resolve" — now decomposes exactly:
+
+| What the sample says now | Count |
+| --- | ---: |
+| **Resolved: `CALLS` fact naming a declared `static` method** | **139** |
+| Receiver is a simple name a binding introducer declares | 2,554 |
+| Receiver is not a simple name | 958 |
+| Receiver name reaches no current class in scope | 555 |
+| Enclosing class has supertypes, so an inherited field could obscure the name | 262 |
+| Target class declares supertypes | 45 |
+| Target method is overloaded | 57 |
+| Invocation inside a class body declared in the method | 54 |
+| **Total** | **4,624** |
+
+The parts sum to the whole, which is the check that the decomposition is a
+decomposition and not an estimate. Every other reason family is unchanged:
+unqualified no-method 698, unqualified supertypes 231, unqualified overloads
+104, nested 5 — each identical to Stage 0. References did not move at all.
+
+Two families that exist in the rule are **empty in real source**: no call
+declined for a missing method and none for a non-static method. Through a class
+name, both are code Java would not compile.
+
+### The Accepted-Access Denominator
+
+ADR 009 accepts public targets plus any access when the target class is the one
+enclosing the invocation. Both counts were measured rather than assumed: every
+one of the 139 facts was followed to its target and its labels read.
+
+| Measurement | Count |
+| --- | ---: |
+| Static-call facts in the sample | 139 |
+| Of those, target is `public` and `static` | **139** |
+| Of those, target is in the same unit as the caller | 0 |
+| Distinct target methods | 56 |
+
+So the public lower bound and the accepted-access count are the same number
+here, and the plan's 80% bar is met at 103% of the Stage 0 prediction of 135.
+The same-class case contributes nothing in this repository, which is a fact
+about dubbo rather than about the rule.
+
+### What It Costs
+
+Both build modes, same machine, same clone, cold index measured from process
+start to the first answered call:
+
+| Measurement | Baseline | Current | Change |
+| --- | ---: | ---: | --- |
+| Cold index, ReleaseFast | 4.87 s | 5.75 s | +18% |
+| Cold index, Debug | 41.48 s | 73.27 s | +77% |
+| Peak RSS, ReleaseFast | 186.1 MB | 184.7 MB | −0.8% |
+| Peak RSS, Debug | 285.9 MB | 281.5 MB | −1.5% |
+
+Memory did not move: the class-shape labels and the member projection cost
+nothing measurable against the Stage 0 baseline of 186 MB, which this run
+reproduces exactly. Index time did move, and Debug moved most — the receiver
+pre-pass, the member projection, and the reanalyses the new channels cause are
+all on the index path.
+
+Refresh, one file edited in a 4,050-unit repository:
+
+| Edit to `StringUtils.java` | Baseline units analyzed | Current | Baseline | Current |
+| --- | ---: | ---: | ---: | ---: |
+| No-op refresh | 0 | 0 | 0.52 s | 0.54 s |
+| A body edit no caller can see | 1 | **73** | 0.30 s | 0.46 s |
+| One method loses `public` | 1 | **189** | 0.28 s | 0.73 s |
+| The class gains a declared supertype | 1 | **363** | 0.28 s | 1.00 s |
+
+This is the price of cross-unit facts, and it is the shape the plan asked for:
+bounded by readers, not by the repository — 363 of 4,050 units at the widest.
+The body-edit row is the honest part: a dependency names a *unit*, so an edit
+that changes nothing a caller can see still re-reads its 72 callers. Propagation
+never exhausted its budget in any run: `analysis_unavailable` is 0 in health
+before and after.
+
+### What Consumers See
+
+| Habit-loop call | Baseline | Current |
+| --- | --- | --- |
+| `semidx_health` | 8 ms | 10 ms |
+| `semidx_outline` (root) | 2.5 ms | 2.3 ms |
+| `semidx_repo_map` (one package) | 27 ms | 21 ms |
+| `semidx_find_definitions` | 3.7 ms | 3.5 ms |
+| `semidx_references incoming` on `StringUtils.isNotEmpty` | 3.5 ms, **8** relationships | 2.9 ms, **49** relationships |
+| `semidx_context depth=2` incoming on the same | 4.7 ms, 40,775 bytes | 4.8 ms, 69,967 bytes |
+
+Latency did not regress anywhere; Plan 011's indexed access model still holds.
+What changed is the size of the answers, because the edges now exist. Two
+consequences the plan asked to be measured:
+
+- **Bytes per Java definition item** rose from 1,829 to 1,996 (+9.1%), the cost
+  of `java.access`, `java.static` and `java.supertypes` on every Java
+  definition.
+- **`semidx_context depth=2` now exhausts the default 32,000-byte budget** on a
+  widely called static utility method, where the same call on the same
+  repository did not before. Budget semantics did not change; what a budget fits
+  did. `semidx_context` has no cursor, so the answer is to raise
+  `max_response_bytes` or lower `depth`/`relationship_limit`, and the preview
+  reference now says so.
+
+### Documentation
+
+| Document | What changed |
+| --- | --- |
+| [capability matrix](../spec/capability_matrix.md) | The Java definition-label row names the three class-shape labels and what `unknown` means; the relationship row states every ADR 009 condition; the unresolved row names each new reason family; "Not recorded" adds hiding, dispatch, overload selection, static imports and scoped receivers; the false-negative row is now about value receivers with their measured sizes; the evidence row carries this stage's numbers |
+| [local preview](../mcp/local_preview.md) | A static-call paragraph with the exact covered case, the value receivers that stay unresolved, and the labels a definition carries; a budget note for the `semidx_context` exhaustion above |
+| [SPEC.md](../../SPEC.md) | Names the second Java cross-unit producer, the labels that carry its evidence, and what it does not admit. The invalidation row already named the class-shape producer from Stage 3 |
+| [GLOSSARY.md](../../GLOSSARY.md) | Unchanged and checked: `class shape` and `reader hint` already exist as project-wide concepts, and ADR 009's Java vocabulary — obscuring proof, binding introducer, covered access subset, static target — stays owned by the ADR and is not restated |
+| [MEMORY.md](../../MEMORY.md) | Compressed to the current rule, its cost, and the two follow-ups |
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Zig 0.16.0 matches the semidx target |
+| `zig fmt --check build.zig src tests` | Clean |
+| `zig build test-core` | 97/98 passed, 1 skipped |
+| `zig build test` | 249/251 passed, 2 skipped |
+| `zig build test-mcp` | 30/31 passed, 1 skipped |
+| `zig build dogfood` | Exit 0 |
+| `zig build preview-gate` | Exit 0, 14/14 steps, 6/6 tests, 28 hard passes |
+| External probe, 4 runs over 2 binaries and 2 build modes | Recorded above |
+
+### Definition Of Done
+
+| Requirement | State |
+| --- | --- |
+| External baseline and addressable subsets recorded | Stage 0 |
+| ADR 009 accepted and followed by every later stage | Stage 1, and the fixture matrix is its executable form |
+| At or above 100 exact facts in the Stage 0 sample | **139** |
+| At least 80% of the accepted-access subset exact | 139 of 139 measured accepted-access targets; 103% of the Stage 0 prediction |
+| A simple-name receiver is never read as a type where anything could obscure it | Stage 4, 13 binding-introducer cases plus the inherited-field and before-declaration cases |
+| Unsupported, ambiguous, stale, out-of-scope, inaccessible, non-static, overloaded, obscured and open-hierarchy cases stay unresolved with distinct reasons | 49 fixture cases, and the external decomposition above |
+| Instance receivers remain unresolved and tracked | [Follow-up 014](../followups/014_java_instance_receiver_calls.md), re-measured in Stage 6 |
+| Provider method and class-shape changes maintain freshness incrementally | Stage 3 and Stage 5 edit tests; externally 73/189/363 units re-read per edit class |
+| No query, write-path or propagation regression from Plan 011 | Latency table above; propagation never exhausted; per-invocation lookup is 1 candidate whether the package holds 2 classes or 22 |
+| The supertype guard unchanged and owned by Follow-up 013 | Stage 6: 8,083 references and 6,206 receivers, unchanged to the unit |
+| Capability docs and `MEMORY.md` describe the boundary honestly | This stage |
+| Every stage's verification, skipped checks and residual risk recorded | This log |
+
+**The plan is complete.**
+
+### Residual Risk
+
+- **A one-file refresh costs more than it did.** 0.28 s to 1.00 s at 4,050
+  units, and up to 363 units re-read for a class-shape edit. Bounded by readers
+  and measured, but a repository with a hub utility class and a much larger
+  reader set will feel it. The narrowing available — per-entity dependencies
+  instead of per-unit — is not this plan's to introduce.
+- **Debug index time rose 77%.** ReleaseFast, which the preview reference tells
+  a user to run, rose 18%. Nothing in the habit loop got slower.
+- **`semidx_context depth=2` exhausts the default budget** on a hub method, as
+  recorded. It is an honest truncation with `budget_exhausted: true`, not a
+  silent one.
+- **Stage 6's 106-assertion delta is still unexplained.** It did not change
+  here: the health totals are the same ones. It remains 0.05% of the graph, with
+  no unresolved claim missing because of it.
+- **One repository is one repository.** Every external number here is dubbo's.
+  A second sample may move the shares, and the classification harness is
+  described well enough in this log to rebuild.
