@@ -30,7 +30,8 @@ sample, which clears the same threshold with less machinery.
 matrix states what it requires, Stage 3 built the projection and the
 invalidation channel it needs, Stage 4 reads a receiver name as a class or
 declines with the condition that failed, and Stage 5 turns the covered calls
-into `CALLS` facts. Stage 6 is next. See
+into `CALLS` facts, and Stage 6 re-measured both deferred subsets against the
+implementation: neither moved. Stage 7 is next. See
 [The Decision](#the-decision) and
 [Amendment 1](../plans/012_java_semantic_quality_without_query_regression.md#amendment-1-from-instance-receivers-to-static-calls).
 
@@ -50,7 +51,8 @@ strongly. `semidx_context depth=2` on apache/dubbo fell from **90.71 s to
 | Stage 3: Java method projection, class shape, and invalidation | Completed | Class shape and method modifiers are carried as MCP-visible extension labels; `java_members` reads them back as candidates; an aspect-grained channel reaches the readers of a changed `Class.method` pair and nothing else in the package. Measured: a one-method edit costs 1 reanalysis where 4 Java units share the scope, a body edit 0, a supertype edit 2 for two readers — with 0 declared dependencies and 0 propagation rounds behind it. No call fact emitted. |
 | Stage 4: Reading a receiver name as a type | Completed | A qualified invocation's receiver is decided, and no call fact is emitted. A simple name is a class only where no parameter, local, field, `for`, `catch`, resource, lambda or pattern binds it, the enclosing class declares no supertypes, and `resolveType` names one current class inside the ADR 008 boundary; each failure carries its own reason. Locals bind from their declarator to the end of their block, exactly; the other introducers bind method-wide, which declines more and claims nothing. 25 matrix cases moved from pending to checked, and three falsification runs show each half bites. `zig build test` 248/250, unchanged. |
 | Stage 5: Static call facts | Completed | `ClassName.method()` is a `CALLS` fact under every ADR 009 condition at once, and the matrix lost its switch: 49 cases, each asserting its answer. Candidates come from the names the unit writes, so one invocation costs **1** candidate whether the package holds 2 classes or 22. A resolved call declares a provider dependency; an unresolved one is reached by the hint it wrote, with **0** dependencies in the graph and **0** propagation rounds. Two Stage 3 tests were rewritten: their world — nothing populating hints — is what this stage ended. `zig build test` 249/251, from 248/250. |
-| Stages 6-7 | Not started | Next: Stage 6, follow-up discipline. |
+| Stage 6: Follow-up discipline | Completed | Both deferred subsets re-measured whole-graph on the same clone, with the Stage 4 and Stage 5 binaries over the same input. Every unresolved family is identical to the unit except one: 3,930 calls whose receiver names a class became 2,214 facts and 1,716 target-side declines. Follow-up 014's value receivers (55,127 + 21,132) and Follow-up 013's guard (8,083 references, 6,206 receivers) are unchanged, and the Stage 4 run reproduced Stage 0's baseline exactly. One delta is recorded unexplained: +106 assertion records that are not conversions. |
+| Stage 7 | Not started | Next: external remeasurement against the sampled 135, documentation, and closure. |
 
 ## Plan Readiness Gate
 
@@ -1098,3 +1100,125 @@ against the 135 are Stage 7's.
 - **The reason strings are formatted per call.** Stage 4 recorded the growth;
   Stage 5 adds the target-side families, so the measurement Stage 7 owes now
   covers both.
+
+## Stage 6: Follow-Up Discipline
+
+Both deferred subsets were re-measured against the implementation rather than
+argued about. Neither moved.
+
+### Method
+
+Stage 0 classified its sample offline, by modelling the frontend's rules over
+parsed source. Stage 5 made the model unnecessary: the behavior exists, so this
+stage measures it directly, and measures the whole graph rather than a sample.
+
+- Repository: the same clone, `apache/dubbo` at `df9c5e1`, 4,050 Java units,
+  cached outside this repository. No network was used.
+- Two binaries over the same input, both `ReleaseFast`: the Stage 4 commit
+  `384507e` (before static call facts) and the Stage 5 commit `8a1f083` (after).
+  The Stage 4 tree was extracted with `git archive` into a scratch directory, so
+  no branch, worktree, or checkout in this repository was touched.
+- Both runs used `zig build run -- <clone>`, the developer inspection command,
+  which prints graph totals and every unresolved target with its explanation.
+  Unresolved targets were counted by reason family with a script kept in the
+  scratch directory; the families are the explanation fragments the frontend
+  emits, so the classification is the frontend's own vocabulary rather than a
+  second model of it.
+- Both runs are deterministic: repeating the after-run reproduced its totals
+  exactly.
+
+The Stage 4 run reproduces Stage 0's whole-graph numbers to the unit —
+definitions 26,509, assertions 230,753, facts 90,439, unresolved 140,314,
+approximate 0 — so the baseline this stage compares against is the recorded one
+and not a new one.
+
+### What Moved
+
+| Unresolved call family | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| Receiver is a simple name a binding introducer declares | 55,127 | 55,127 | 0 |
+| Receiver is not a simple name | 21,132 | 21,132 | 0 |
+| Receiver name does not resolve to a class | 14,171 | 14,171 | 0 |
+| Unqualified: no method of this name in the enclosing class | 13,707 | 13,707 | 0 |
+| Receiver name blocked by the enclosing class's supertypes | 6,206 | 6,206 | 0 |
+| Unqualified: enclosing class has supertypes | 4,049 | 4,049 | 0 |
+| **Receiver names a class, target undecided** | **3,930** | **0** | **−3,930** |
+| Unqualified: overloaded | 1,417 | 1,417 | 0 |
+| Receiver inside a class body declared in the method | 629 | 629 | 0 |
+| Unqualified: inside a class body declared in the method | 195 | 195 | 0 |
+| **Target: overloaded** | 0 | 887 | +887 |
+| **Target: class declares supertypes** | 0 | 777 | +777 |
+| **Target: outside the covered access** | 0 | 52 | +52 |
+| Total unresolved calls | 120,563 | 118,349 | −2,214 |
+| Total unresolved references | 19,751 | 19,751 | 0 |
+
+Every reference bucket is identical too, each one of the twelve, to the unit.
+
+So the whole of the change is one row: of the 3,930 calls whose receiver names a
+class the graph can answer for, **2,214 became `CALLS` facts** (56.3%) and 1,716
+stayed unresolved for a target-side reason. Nothing else in the graph moved.
+
+Two target-side families are **empty**, which is the useful kind of zero: a
+missing method and a non-static method reached through a class name are calls
+Java would not compile, so real source does not contain them. The rule's
+declines are all cases the language does permit and this frontend does not
+resolve.
+
+### What The Follow-Ups Now Carry
+
+- [Follow-up 014](../followups/014_java_instance_receiver_calls.md) owns value
+  receivers: 55,127 bound simple names plus 21,132 receivers that are not simple
+  names, unchanged to the unit. The static rule cannot reach them — a bound name
+  is declined by the obscuring rule and a non-simple name before it — so the
+  subset is unchanged rather than merely no larger. Its sampled addressable
+  figure of 63 stands.
+- [Follow-up 013](../followups/013_java_supertype_guard_relaxation.md) owns the
+  supertype guard: 8,083 references and 6,206 call receivers blocked by it,
+  unchanged to the unit. Its sampled convertibility figures — 38 convertible, 13
+  safely — stand, because no reference rule moved.
+
+Neither follow-up was implemented, and neither grew.
+
+### One Delta This Stage Did Not Explain
+
+Current facts rose by **2,320** while current unresolved fell by **2,214**, and
+recorded assertions rose by **106**. The 2,214 is fully accounted for by the
+table above. The remaining 106 facts are assertion records that did not exist
+before rather than conversions of records that did.
+
+What is ruled out by measurement: it is not nondeterminism (the run repeats
+exactly), not diagnostics (59,022 in both), not entity churn (26,509 definitions
+in both), not references (every bucket identical), and not stale assertions
+(zero in both). It does not appear at module scale: `dubbo-common` alone gives
++1,402 facts, −1,402 unresolved and **no** change in recorded assertions, so it
+is tied to reanalysis across the whole batch rather than to the rule itself.
+
+What it is, this stage does not know, and it is recorded rather than explained
+away. It is 0.05% of the graph and no unresolved claim is missing because of it,
+but Stage 7 owns the full external probe and should account for it there.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build run -Doptimize=ReleaseFast -- <clone>` at `384507e` | 26,509 definitions, 230,753 assertions, 90,439 facts, 140,314 unresolved — Stage 0's baseline reproduced exactly |
+| The same at `8a1f083` | 26,509 definitions, 230,859 assertions, 92,759 facts, 138,100 unresolved |
+| The same, repeated | Identical totals |
+| The same over `dubbo-common` only, both binaries | +1,402 facts, −1,402 unresolved, assertions unchanged |
+
+No local lane changed in this stage, and no committed test depends on the
+external clone.
+
+### Residual Risk
+
+- **The comparison is whole-graph, and Stage 7's bar is sampled.** This stage
+  answers its own question — did either follow-up's subset move — which the
+  whole graph answers better than a sample. The plan's 135-invocation threshold
+  is stated against Stage 0's 1,200-definition sample, and Stage 7 must
+  re-derive that sample to answer it. The whole-graph conversion of 2,214 is
+  evidence that the bar is reachable, not evidence that it is met.
+- **The 106-assertion delta is unexplained**, as recorded above.
+- **The classification script is not committed**, in keeping with this plan's
+  rule that external measurements are evidence rather than conformance. What it
+  does is a count of explanation fragments, and the fragments are named in this
+  log, so it is rebuildable from what is written here.

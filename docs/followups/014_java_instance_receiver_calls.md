@@ -61,6 +61,26 @@ Measured on apache/dubbo at `df9c5e1`, over a sample of 1,200 definitions:
 Plan 012's gate required 100. At 63 the type-environment machinery was not paid
 for, especially beside the 135 static calls that need none of it.
 
+**Re-measured after Plan 012 Stage 5**, on the same clone at the same commit,
+whole-graph rather than sampled, with the implementation rather than a model of
+it. Every value-receiver family is identical before and after
+([method](../reports/012_java_semantic_quality_without_query_regression_progress.md#stage-6-follow-up-discipline)):
+
+| Whole-graph unresolved calls | Before Stage 5 | After Stage 5 |
+| --- | ---: | ---: |
+| Receiver is a simple name a binding introducer declares | 55,127 | 55,127 |
+| Receiver is not a simple name (`this`, `super`, chained, field access, literal) | 21,132 | 21,132 |
+| Receiver name does not resolve to a class | 14,171 | 14,171 |
+| Receiver name blocked by the enclosing class's supertypes | 6,206 | 6,206 |
+| Receiver names a class, target undecided | 3,930 | 0 |
+
+Only the last row moved, and it is the row this entry does not own: 2,214 of it
+became `CALLS` facts and 1,716 stayed unresolved for a target-side reason. The
+static rule cannot touch a value receiver — a bound simple name is declined by
+the obscuring rule, and anything that is not a simple name is declined before
+that — so this entry's subset is unchanged rather than merely not smaller. The
+sampled figure of 63 addressable instance receivers still stands.
+
 Two adjacent relaxations were priced at the same time. Admitting generic and
 array base types into the covered bindings adds 18. Admitting target classes
 that declare supertypes when the name is declared once in the class itself would

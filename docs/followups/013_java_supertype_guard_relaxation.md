@@ -57,6 +57,23 @@ of 1,200 definitions and 6,710 outgoing claims:
 Static calls tell the same story from the call side: 247 class-name receivers in
 that sample resolve to nothing only because the referring class has supertypes.
 
+**Re-measured after Plan 012 Stage 5**, on the same clone at the same commit,
+whole-graph this time rather than sampled, and with the implementation that
+resolves static calls rather than a model of it. Every count below is identical
+before and after the change
+([method](../reports/012_java_semantic_quality_without_query_regression_progress.md#stage-6-follow-up-discipline)):
+
+| Whole-graph measurement | Before Stage 5 | After Stage 5 |
+| --- | ---: | ---: |
+| Unresolved references declined by the guard | 8,083 | 8,083 |
+| Unresolved calls whose receiver name the guard blocks | 6,206 | 6,206 |
+
+Nothing this guard blocks moved, and nothing new entered its subset: the static
+rule declines inside a class with supertypes before it asks anything else, so it
+can neither convert these nor add to them. The sampled convertibility figures
+above therefore still stand as the acceptance input, and a future plan does not
+need to re-derive them.
+
 Plan 012's own follow-up threshold was 50 references in the sample or 1% of
 sampled outgoing claims, whichever is smaller. Both the convertible count (38)
 and the safely convertible count (13) fall below it, so this is recorded as a
