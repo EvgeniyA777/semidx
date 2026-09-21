@@ -49,8 +49,11 @@ You must not infer:
 - that no caller exists because `semidx_references` lists none. Coverage is
   narrow (see [Limits](#limits)); unsupported constructs and unresolved calls
   are reported through diagnostics and resolution, not as absence;
-- that an unresolved designator such as `std.debug.print` refers to a definition
-  with that name. It is text the producer could not resolve;
+- that an unresolved designator such as `print` refers to a definition with
+  that name. It is the name a producer read and could not resolve, and the same
+  is true of an `unresolved_mentions` item: a mention is a name match over
+  claims that resolved to nothing, never a relationship to the definition you
+  asked about;
 - that a list is complete when its `…_truncated` flag or `budget_exhausted` is
   true, or that items a limit or budget left out matter less than the ones
   returned. A narrowing hint is usage guidance, not a claim about the graph;
@@ -74,7 +77,7 @@ From the root of a semidx checkout:
 ./scripts/setup-tree-sitter-grammars.sh   # once; clones pinned grammar sources into .tree-sitter-grammars/
 ./scripts/check-zig-version.sh             # fails unless `zig version` is 0.16.0
 zig build                                  # installs zig-out/bin/semidx-mcp
-zig-out/bin/semidx-mcp --version           # semidx-mcp 0.1.0-preview.3
+zig-out/bin/semidx-mcp --version           # semidx-mcp 0.1.0-preview.4
 zig build test-mcp                         # optional: unit tests and the stdio smoke test
 zig build dogfood                          # optional: habit loop and refresh recovery on a copy of this repository
 zig build preview-gate                     # optional: the habit loop gate, dogfood plus a small fixture profile
@@ -157,8 +160,11 @@ Read this before registering semidx with a client that uses a hosted model.
 - By default no source text is returned: no file contents, no function bodies,
   no snippets.
 - Results always contain values derived from your source: file paths, entity
-  names, unresolved designators (callee names as written), ranges, entity ids,
-  and diagnostic messages. Registering semidx with a hosted client means those
+  names, unresolved designators (the name a producer could not resolve, with
+  the scope the source wrote in front of it where the producer knows there is
+  one), ranges, entity ids, and diagnostic messages. Text the source wrote
+  around a name — a receiver expression, an argument list — is not among them;
+  it is evidence text, under `--allow-evidence-text`. Registering semidx with a hosted client means those
   values may leave your machine through that client.
 - `--allow-evidence-text` additionally returns the text each producer recorded
   as evidence for a claim, at most 400 bytes per claim. It does not return file
@@ -194,6 +200,14 @@ continues over three cursor pages). Use `semidx_repo_map` once you know which
 directory or file matters. Ask for `detail: "full"` only for the one entity
 whose resolution methods, unresolved explanations, producer versions, or byte
 offsets you need, for example to review a claim or plan an impact analysis.
+
+A neighbourhood is as large as the graph makes it. On one external Java
+repository, `semidx_context depth=2` incoming on a widely used static utility
+method exhausts the default 32000-byte budget, where the same call on the same
+repository did not before Java static calls resolved — the answer grew because
+the edges now exist. `semidx_context` has no cursor, so raise
+`max_response_bytes`, lower `depth`, or lower `relationship_limit` when
+`budget_exhausted` is true.
 
 ### Protocol Versions
 
@@ -236,7 +250,7 @@ defaults, and maxima the server validates.
 | `semidx_outline` | `path_prefix` (a directory; omitted for the root), `language`, `limit` (100, max 1000 entries), `max_response_bytes`, `cursor` | The directories and files directly under `path_prefix`, sorted by name, with counts and no definitions. See [Outline](#outline). |
 | `semidx_repo_map` | `path_prefix`, `language`, `limit` (100, max 1000 files), `definitions_per_file` (50, max 500), `detail` (`compact`), `max_response_bytes`, `cursor` | Units sorted by path, each with its analysis state, diagnostic counts, and top-level definitions (definitions with an empty container path), plus the number of nested definitions. `path_prefix` is a plain string prefix of unit paths. `compact` gives each unit's `id`, `path`, `language`, and `analysis`, and each definition's `id`, `role`, `name`, `freshness`, and `range` lines; `full` gives the unit's revisions and entity id and each definition as an entity with its `evidence`. |
 | `semidx_find_definitions` | `name`, `path`, `language`, `role`, `freshness` (`current`), `resolution` (`any`), `limit` (50, max 500), `max_response_bytes`, `cursor` | Definitions matching every given filter, each with its existence claim's resolution, producer, and freshness. |
-| `semidx_references` | `entity_id`, or `name` with optional `path`/`language`; `direction` (`incoming`), `freshness` (`current`), `resolution` (`any`), `limit` (100, max 1000), `detail` (`compact`), `max_response_bytes`, `cursor` | The target definitions (at most 50, on every page) and the `REFERENCES`/`CALLS` relationships into them (`incoming`) or out of them (`outgoing`). A call is one occurrence and is listed once. `compact` renders each target once, with its existence claim, and names a relationship end that is a target by `id` alone; `full` renders both ends of every relationship. |
+| `semidx_references` | `entity_id`, or `name` with optional `path`/`language`; `direction` (`incoming`), `freshness` (`current`), `resolution` (`any`), `limit` (100, max 1000), `mention_limit` (50, max 500), `detail` (`compact`), `max_response_bytes`, `cursor` | The target definitions (at most 50, on every page), the `REFERENCES`/`CALLS` relationships into them (`incoming`) or out of them (`outgoing`), and `unresolved_mentions` (see below). A call is one occurrence and is listed once. `compact` renders each target once, with its existence claim, and names a relationship end that is a target by `id` alone; `full` renders both ends of every relationship. |
 | `semidx_context` | `entity_id`, `name` (with optional `path`/`language`), or `path` alone for a source unit; `freshness` (`current`), `direction` (`both`), `depth` (1, max 3), `relationship_limit` (50, max 500, per direction), `diagnostic_limit` (50, max 500), `detail` (`compact`), `max_response_bytes` | Up to 10 focus entities, each with its unit's analysis state, incoming and outgoing relationships of every kind (only those `direction` includes), the unit's diagnostics, and the entity's last identity event. `compact` names the focus end of each relationship by `id` alone and renders the other end, resolutions, producers, evidence, and diagnostics without their full fields; `full` renders them all. `depth` 2 or 3 adds a [traversal](#traversal). |
 | `semidx_refresh` | none | The new and previous snapshot revisions, `entity_ids_preserved` (false when this refresh published an index rebuilt after a failure), the scan outcome (unchanged, changed, renamed, added, removed, analyzed, ambiguous renames, invalidated), unit counts, and diagnostic counts. |
 
@@ -257,7 +271,7 @@ Every structured result carries:
 | `snapshot.revision` | The graph revision every value in this result was read from. |
 | `semantic_contract_version` | Always `null`: no semantic contract is published. |
 
-The product version (`0.1.0-preview.3`) is reported by `--version`, in
+The product version (`0.1.0-preview.4`) is reported by `--version`, in
 `serverInfo.version`, and as `product_version` in `semidx_health`. It versions
 the binary and its behavior; it is not a semantic contract version.
 
@@ -278,7 +292,14 @@ is not guaranteed to name the same entity after a restart.
 A **relationship** carries `assertion_id`, `kind` (`contains`, `defines`,
 `references`, `calls`), `source` (an entity), `target`, `resolution`,
 `producer`, `freshness`, `revision`, and `evidence`. `target` is either
-`{"entity": …}` or `{"designator": "…"}`; a designator is never an entity. In
+`{"entity": …}` or `{"designator": {"name": …, "qualifier": …}}`; a designator
+is never an entity. A **designator** is the name a producer read and could not
+resolve: `name` is that identifier, and `qualifier` is present only where the
+producer knows the prefix the source wrote names a scope — an import alias, a
+namespace, a class — and absent where that prefix is a value
+([ADR 010](../adr/010_designator_is_a_structured_name.md)). `std.debug.print()`
+records `print` qualified by `std.debug`; `self.bucket()` records `bucket` with
+no qualifier. In
 `semidx_references` and traversal edges, `direction` says whether the
 relationship enters or leaves the entity it was found from; a traversal edge
 also carries `distance` and `from`. An entity rendered as `{"id": …}` alone is
@@ -349,7 +370,7 @@ resolution or producer. The evidence-text opt-in applies at both levels.
 | `semidx_outline` | `limit`, `max_response_bytes` |
 | `semidx_repo_map` | `detail`, `limit`, `definitions_per_file`, `max_response_bytes` |
 | `semidx_find_definitions` | `limit`, `max_response_bytes` |
-| `semidx_references` | `detail`, `limit`, `target_limit` (50), `max_response_bytes` |
+| `semidx_references` | `detail`, `limit`, `mention_limit`, `target_limit` (50), `max_response_bytes` |
 | `semidx_context` | `detail`, `direction`, `depth`, `relationship_limit`, `diagnostic_limit`, `focus_limit` (10), `max_response_bytes` |
 
 Budgets select whole items before rendering. A result is never cut in the
@@ -403,7 +424,8 @@ response on the wire is about twice the budget.
 Every budgeted result reports `budget_exhausted`. When it is true it also
 reports `omitted_by_budget`: for each list, how many items were selected within
 that list's own limit but not returned (`entries`; `files`; `definitions`;
-`relationships`; or `focus`, `relationships`, `diagnostics`, and `edges`).
+`relationships` and `unresolved_mentions`; or `focus`, `relationships`,
+`diagnostics`, and `edges`).
 Omitted items are not less relevant or less certain than returned ones; they
 come later in the list's order.
 
@@ -427,6 +449,49 @@ or `resolution` that still selects everything) and limits already at their
 maximum. Hints are derived from which list was cut and which arguments were
 given, never from entity names, paths, or counts, and they are not graph
 claims: a hint says nothing about the items it did not return.
+
+### Unresolved Mentions
+
+`semidx_references` answers a second question beside "what points at this
+definition": **which recorded claims wrote this definition's name and resolved
+to nothing.** They come back in `unresolved_mentions`, with
+`unresolved_mentions_total` and `unresolved_mentions_truncated`.
+
+**A mention is not a relationship to the definition you asked about.** It is an
+assertion already in the graph, rendered where you can find it: it keeps its own
+`resolution` category, `missing` part, explanation, `producer`, `freshness` and
+`evidence`, and it names no target, because its producer could not establish
+one. Two claims writing one name may mean two different things, or nothing that
+exists here at all. Nothing in this section says otherwise, and nothing in it
+establishes a relationship
+([ADR 003](../adr/003_reject_name_match_assertions.md),
+[ADR 010](../adr/010_designator_is_a_structured_name.md)).
+
+What admits a claim, and nothing else does:
+
+- its designator's `name` equals the definition's name **byte for byte** — no
+  case folding, no substring, no ranking, no similarity;
+- the entity that made the claim has the definition's **language**, so one
+  language's name never answers for another's;
+- the call's own `resolution` argument admits it, so `resolution=fact` returns
+  an empty section.
+
+Each item carries `assertion_id`, `kind`, `source` (the entity whose analysis
+made the claim), `designator`, `resolution`, `producer`, `freshness` and
+`evidence`. Unlike a relationship, a mention carries its `explanation` at
+`compact` too: the reason a claim did not resolve is what keeps it from reading
+as a call to the definition beside it.
+
+Bounds are its own. `mention_limit` (50, max 500) cuts the list; the section is
+not paged by `cursor` and is repeated on every page, like the targets; it takes
+its share of `max_response_bytes` and reports it under
+`omitted_by_budget.unresolved_mentions`; and a cut list gets a narrowing hint
+named `unresolved_mentions`. Mentions are never merged into `relationships` and
+are never counted in `relationships_total`.
+
+An empty section is a result. A definition nothing names returns
+`unresolved_mentions: []` with a total of 0, which says the graph holds no such
+claim — not that the server does not support the question.
 
 ### Cursors
 
@@ -550,6 +615,26 @@ Notifications, including malformed ones, are never answered.
   is: a name declared out of reach reads differently from a name nothing
   declares. On-demand imports (`import a.b.*;`) and static imports never
   resolve.
+- A Java invocation written `ClassName.method(...)` is a `calls` fact only when
+  nothing in scope binds that name, no on-demand static import may bind it to a
+  field, the receiver resolves to one current top-level class or interface
+  inside the boundary above, any relevant supertype chain is closed and does
+  not claim the name being ruled out, and the target declares exactly one
+  accessible `static` method
+  ([ADR 009](../adr/009_java_static_calls.md),
+  [ADR 011](../adr/011_java_hierarchy_from_indexed_source.md)). So
+  `semidx_references incoming` on a static utility method lists its callers.
+  A call through `this` or a covered value receiver (`local.m()`, `field.m()`,
+  or a parameter) is also a fact when the receiver's declared simple type
+  resolves to one current covered top-level type, the target declares exactly
+  one accessible method, and a closed target chain declares no method of that
+  name ([ADR 012](../adr/012_java_value_receiver_calls.md)). `super.m()`,
+  `new T().m()`, chained or field-access receivers, inherited targets,
+  overloads, generic/array/inferred receiver types, dispatch, hiding, and
+  overload selection stay unresolved with distinct reasons. Java definitions
+  carry the shape a caller has to check as extension labels: `java.supertypes`,
+  `java.supertype_names`, member and field name lists on a covered type, and
+  `java.access` and `java.static` on a method.
 - A reference to a type with no source under `--root` — every JDK type, and
   anything from a dependency not checked out here — is an unresolved designator.
   semidx reads no `.jar`, no class file, and no build descriptor, so no
@@ -577,8 +662,11 @@ Notifications, including malformed ones, are never answered.
   name or path.
 - The product version is a preview version: tool names, arguments, and result
   fields may change between previews. The current release-candidate notes are
-  [v0.1.0-preview.3](../releases/v0.1.0-preview.3.md), which publish
-  Plan 009 progressive MCP discovery and response-budget behavior. The
+  [v0.1.0-preview.4](../releases/v0.1.0-preview.4.md), which publish
+  Java visibility, query-scale, designator, unresolved-mention, and receiver
+  coverage work after Plan 009. The
+  [v0.1.0-preview.3](../releases/v0.1.0-preview.3.md) notes describe the
+  Plan 009 progressive MCP discovery and response-budget behavior, the
   [v0.1.0-preview.2](../releases/v0.1.0-preview.2.md) notes describe the
   Plan 006 Zig coverage, and the earlier
   [v0.1.0-preview.1](../releases/v0.1.0-preview.1.md) notes describe the tree

@@ -253,7 +253,7 @@ pub fn build(gpa: Allocator, spec: Spec) !Synthetic {
                 .{
                     .kind = .references,
                     .source = definitions[index * per_unit],
-                    .target = .{ .designator = designator },
+                    .target = .{ .designator = .{ .name = designator } },
                 },
                 producer,
                 .{ .unit = units[index], .range = range(0, 1), .text = designator },
@@ -324,6 +324,10 @@ fn countAnchoredOutgoing(snapshot: *const Snapshot, focus: EntityId) !usize {
 
 fn countAnchoredIncoming(snapshot: *const Snapshot, focus: EntityId) !usize {
     return snapshot.countRelationships(.{ .target = focus });
+}
+
+fn countDesignated(snapshot: *const Snapshot, name: []const u8) !usize {
+    return snapshot.countRelationships(.{ .designator = name });
 }
 
 /// The depth-2 shape `semidx_context` walks: expand the frontier one anchored
@@ -567,7 +571,7 @@ fn oracle(
         }
         if (filter.designator) |designator| {
             switch (relationship.target) {
-                .designator => |value| if (!std.mem.eql(u8, value, designator)) continue,
+                .designator => |value| if (!std.mem.eql(u8, value.name, designator)) continue,
                 .entity => continue,
             }
         }
@@ -791,7 +795,7 @@ fn expectedIndexBytes(snapshot: *const Snapshot) usize {
             },
             .designator => |value| {
                 designator_targets += 1;
-                designators.put(testing.allocator, value, {}) catch unreachable;
+                designators.put(testing.allocator, value.name, {}) catch unreachable;
             },
         }
     }
@@ -829,6 +833,21 @@ fn expectWorkFollowsTheNeighbourhood(synthetic: *const Synthetic, snapshot: *con
     try testing.expectEqual(@as(usize, fan_in), incoming.answers);
     try testing.expectEqual(incoming.answers, incoming.candidates);
 
+    // The designator anchor, which Plan 013 gives a consumer. Its walk is its
+    // own bucket and nothing else: the answers may be fewer than the positions
+    // examined, because freshness and resolution stay post-filters, but the
+    // positions examined are exactly what the index holds under that name.
+    const shared_bucket = snapshot.relationship_index.designator.bucket(shared_designator).len;
+    const designated = try measure(countDesignated, .{ snapshot, shared_designator });
+    try testing.expect(designated.answers > 1);
+    try testing.expectEqual(shared_bucket, designated.candidates);
+    try testing.expect(designated.answers <= designated.candidates);
+
+    // A name one unit recorded costs one position at either size, which is the
+    // part that must not grow with the repository.
+    const unique = try measure(countDesignated, .{ snapshot, "synthetic.U24" });
+    try testing.expectEqual(@as(usize, 1), unique.candidates);
+
     const traversal = try measure(traverseDepth2, .{ snapshot, synthetic.focus, testing.allocator });
     try testing.expectEqual(synthetic.depth2Reach(), traversal.answers);
     try testing.expectEqual(traversal.answers, traversal.candidates);
@@ -848,6 +867,11 @@ fn expectWorkFollowsTheNeighbourhood(synthetic: *const Synthetic, snapshot: *con
     try testing.expectEqual(outgoing.answers, scanned.answers);
     try testing.expectEqual(snapshot.assertions.len, scanned.candidates);
     try testing.expect(scanned.candidates > scanned.answers);
+
+    const scanned_designated = try measure(countDesignated, .{ snapshot, shared_designator });
+    try testing.expectEqual(designated.answers, scanned_designated.answers);
+    try testing.expectEqual(snapshot.assertions.len, scanned_designated.candidates);
+    try testing.expect(scanned_designated.candidates > designated.candidates);
 
     const scanned_traversal = try measure(traverseDepth2, .{ snapshot, synthetic.focus, testing.allocator });
     try testing.expectEqual(traversal.answers, scanned_traversal.answers);

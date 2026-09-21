@@ -142,6 +142,22 @@ implementation guidance for one Java rule, not a Java coverage claim: it admits
 no `module` or `IMPORTS`, publishes no contract or capability matrix, and treats
 the indexed repository as a single Java classpath.
 
+A second Java cross-unit producer is implemented
+([ADR 009](docs/adr/009_java_static_calls.md),
+[plan](docs/plans/012_java_semantic_quality_without_query_regression.md),
+[evidence](docs/reports/012_java_semantic_quality_without_query_regression_progress.md)).
+An invocation whose receiver is a simple name can be a `CALLS` fact naming the
+one `static` method the receiver's class declares, when nothing in scope binds
+the name, neither the enclosing nor the target class declares supertypes, the
+call is outside a class body declared in a method, and the target's access is
+public or the target class is the one enclosing the call. The evidence a reader
+cannot get from its own source travels as Java extension labels on the
+definitions themselves — `java.supertypes`, `java.access`, `java.static` — and
+the dependent declares a dependency on the unit it read. Dispatch, hiding,
+overload selection by argument type, static imports used as bare names, and
+scoped receivers stay unresolved, and no shared-core kind is admitted for any of
+it.
+
 A Zig frontend and a local MCP preview exist
 ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md),
 [plan](docs/plans/004_zig_frontend_and_mcp_preview.md),
@@ -171,7 +187,7 @@ is excluded unless the server is started with an explicit evidence-text opt-in.
 | Source identity | Discovered roots, source-unit identity, path-as-property, tombstones, and exact move correspondence are implemented for the in-memory slice. Still to specify: generated or virtual source origins, multi-root identity, and stronger evidence for move-plus-edit refactors |
 | Storage and snapshots | Representation, atomic publication, persistence, and contract-version encoding |
 | Public contracts | Schemas, resolution encoding, errors, ordering, pagination, and transport parity. The MCP preview's tool shapes are experimental consumer choices, not answers to these |
-| Invalidation | Unit-to-unit dependency propagation and Java package-export invalidation exist, with Java same-package type resolution as the first producer. Still to specify: further language-correct producers, name-grained or aspect-grained invalidation, and build-module or classpath boundaries for package scope |
+| Invalidation | Unit-to-unit dependency propagation and Java package-export invalidation exist, with Java same-package type resolution as the first producer. Java class shape is the second, and the first aspect-grained one: a change to a class's method set, a method's access or `static` modifier, or its declared supertypes reaches the units hinted as readers of that `Class.method` pair, and nothing else in the package ([ADR 009](docs/adr/009_java_static_calls.md), [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)). A unit that moves to another directory is reanalyzed with the batch and marks everything it exposes as changed, because since [ADR 008](docs/adr/008_java_visibility_boundaries.md) its place decides which units may resolve names to it and no before/after comparison of its contents can see that ([Follow-up 015](docs/followups/015_unit_path_change_does_not_reanalyze.md)). Still to specify: further language-correct producers, whether a hint should narrow to a resolved provider rather than a simple name, and build-module or classpath boundaries for package scope |
 | Local budgets | Discovery has initial file-size, unit-count, and depth budgets with diagnostics; repository-scale tests guard affected-region work. Still to specify: benchmark repositories, memory/startup budgets, and publish/query cost budgets |
 | Optional outbound data | Destination/data consent settings and verification for projections and diagnostics |
 

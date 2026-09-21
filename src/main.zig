@@ -111,9 +111,11 @@ fn printSummary(out: *std.Io.Writer, snapshot: *const semidx.Snapshot) !void {
     while (unresolved.next()) |assertion| {
         const relationship = assertion.claim.relationship;
         switch (relationship.target) {
-            .designator => |name| try out.print("  {s} -> {s} ({s})\n", .{
+            .designator => |designator| try out.print("  {s} -> {s}{s}{s} ({s})\n", .{
                 @tagName(relationship.kind),
-                name,
+                designator.qualifier orelse "",
+                if (designator.qualifier != null) "/" else "",
+                designator.name,
                 assertion.resolution.unresolved.explanation,
             }),
             .entity => {},

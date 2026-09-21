@@ -924,9 +924,11 @@ test "moving a file preserves the unit and everything inside it" {
     try testing.expectEqual(@as(usize, 0), outcome.removed);
     try testing.expectEqual(@as(usize, 0), outcome.added);
 
-    // Nothing inside the file moved, so nothing was re-read.
-    try testing.expectEqual(@as(usize, 0), outcome.analyzed);
-    try testing.expectEqual(baseline, tree.invocations());
+    // The file landed in another directory, so it is re-read: where a unit
+    // sits decides which other units it may resolve names to. Exactly one unit
+    // is re-read — the one that moved, and not the one that did not.
+    try testing.expectEqual(@as(usize, 1), outcome.analyzed);
+    try testing.expectEqual(baseline + 1, tree.invocations());
 
     var after = try tree.index.publish();
     defer after.deinit();
@@ -1351,7 +1353,7 @@ test "a java invocation is a fact only when the class leaves one method to selec
 
     // An overload is not selected by name.
     const overloaded = try callFrom(&snapshot, run.id, 9);
-    try testing.expectEqualStrings("twice", overloaded.claim.relationship.target.designator);
+    try testing.expectEqualStrings("twice", overloaded.claim.relationship.target.designator.name);
     try expectExplanation(overloaded, "overloads are not resolved");
 
     // Inside an anonymous or local class the name may mean that class's method.
@@ -1359,20 +1361,40 @@ test "a java invocation is a fact only when the class leaves one method to selec
         try expectExplanation(try callFrom(&snapshot, run.id, line), "class body declared in the method");
     }
 
-    // A superclass or an interface may contribute a method of the same name.
+    // A superclass or an interface may contribute a method of the same name —
+    // unless the chain above the class is closed in indexed source and nothing
+    // it reaches declares that name.
+    //
+    // `Child extends Plain` is that case since Plan 014 Stage 3: `Plain` is
+    // declared in this very unit, it declares no supertype of its own, and it
+    // declares no `own`. The chain rules the name out, so the call names the
+    // one method `Child` itself declares.
     var classes = snapshot.entitiesMatching(.{ .kind = .definition, .name = "run" });
-    var checked: usize = 0;
+    var converted: usize = 0;
+    var declined: usize = 0;
     while (classes.next()) |candidate| {
         const container = candidate.identity.container_path[0];
         if (std.mem.eql(u8, container, "Plain")) continue;
         var calls = snapshot.relationships(.{ .kind = .calls, .source = candidate.id });
         const call = calls.next().?;
-        try expectExplanation(call, "supertypes");
-        checked += 1;
+        if (std.mem.eql(u8, container, "Child")) {
+            try testing.expectEqual(model.ResolutionCategory.fact, call.resolution.category());
+            const own = definitionIn(&snapshot, "demo/Calls.java", "Child", "own").?;
+            try testing.expectEqual(own.id, call.claim.relationship.target.entity);
+            converted += 1;
+            continue;
+        }
+        // `Worker implements Runnable`, and nothing indexed declares
+        // `Runnable`. The chain cannot be closed, so the answer does not move,
+        // and it now names which condition failed rather than only that
+        // supertypes exist.
+        try expectExplanation(call, "one of them is not resolved");
+        declined += 1;
     }
-    try testing.expectEqual(@as(usize, 2), checked);
+    try testing.expectEqual(@as(usize, 1), converted);
+    try testing.expectEqual(@as(usize, 1), declined);
 
-    try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+    try testing.expectEqual(@as(usize, 3), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
     try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
 }
 
@@ -1550,6 +1572,8 @@ test "java type names outside the same-package rule stay unresolved and say why"
         \\
         \\interface Shape {}
         \\
+        \\enum Kind {}
+        \\
         \\class Greeter<T> {
         \\    Helper helper;
         \\    other.Elsewhere qualified;
@@ -1560,6 +1584,7 @@ test "java type names outside the same-package rule stay unresolved and say why"
         \\    Inner inner;
         \\    Imported imported;
         \\    Shape shape;
+        \\    Kind kind;
         \\    Loose loose;
         \\
         \\    class Inner {}
@@ -1595,7 +1620,17 @@ test "java type names outside the same-package rule stay unresolved and say why"
     try expectExplanation(try referenceFrom(&snapshot, class.id, "T"), "type parameter of the enclosing class");
     try expectExplanation(try referenceFrom(&snapshot, class.id, "Inner"), "member type");
     try expectExplanation(try referenceFrom(&snapshot, class.id, "Imported"), "import");
-    try expectExplanation(try referenceFrom(&snapshot, class.id, "Shape"), "non-class type");
+    // The move ADR 011 makes, pinned: `Shape` used to decline as a non-class
+    // type this frontend does not cover, and is now a declaration the unit
+    // holds, so the name resolves to it as a local fact. `Kind` is the half
+    // that did not move — an enum still claims its name and still declines.
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = class.id,
+        .target = snapshot.findDefinition("demo/Greeter.java", "Shape").?.id,
+        .resolution = .fact,
+    }));
+    try expectExplanation(try referenceFrom(&snapshot, class.id, "Kind"), "non-class type");
     try expectExplanation(try referenceFrom(&snapshot, shadowed.id, "Helper"), "type parameter of the enclosing method");
     try expectExplanation(try referenceFrom(&snapshot, default_user.id, "Loose"), "package declaration");
     try expectExplanation(try referenceFrom(&snapshot, child.id, "Helper"), "supertypes");
@@ -1667,7 +1702,7 @@ fn expectGreeterUnresolved(tree: *Tree, fragment: []const u8) !void {
     var snapshot = try tree.index.publish();
     defer snapshot.deinit();
     const reference = try greeterReference(&snapshot);
-    try testing.expectEqualStrings("Helper", reference.relationship().?.target.designator);
+    try testing.expectEqualStrings("Helper", reference.relationship().?.target.designator.name);
     try expectExplanation(reference, fragment);
 }
 
@@ -2227,6 +2262,978 @@ test "a class appearing in an imported package reaches the unit that imported it
     }));
 }
 
+// -- Plan 012: Java static calls ---------------------------------------------
+
+// The matrix below is written against
+// [ADR 009](../docs/adr/009_java_static_calls.md), which Plan 012 Stage 5
+// implements. Stage 2 wrote it as a specification behind a switch, Stage 4
+// answered its receiver half, and Stage 5 removed the switch: every case now
+// asserts the answer the frontend must give, and nothing here is pending.
+
+const StaticTarget = struct {
+    path: []const u8,
+    class: []const u8,
+    method: []const u8,
+};
+
+/// One invocation the matrix speaks about, named by where it is written rather
+/// than by a line number, so inserting a case does not renumber the others.
+const StaticCall = struct {
+    /// The unit, class, and method the invocation is written in.
+    path: []const u8,
+    class: []const u8,
+    method: []const u8,
+    /// The invocation exactly as written. It is the evidence text either way,
+    /// and since [ADR 010](../docs/adr/010_designator_is_a_structured_name.md)
+    /// it is no longer the designator: a designator is the name the invocation
+    /// names, with the class in front of it where this frontend established
+    /// one.
+    call: []const u8,
+    /// What the frontend must have recorded as the designator. Absent where the
+    /// case speaks about resolution rather than about the name it recorded.
+    designator: ?model.Designator = null,
+    expect: union(enum) {
+        /// ADR 009 requires this call to name this method.
+        fact: StaticTarget,
+        /// ADR 009 requires this call to stay unresolved, saying this.
+        unresolved: []const u8,
+    },
+};
+
+fn staticCallFrom(
+    snapshot: *const semidx.Snapshot,
+    caller: model.Entity,
+    text: []const u8,
+) !model.Assertion {
+    var calls = snapshot.relationships(.{ .kind = .calls, .source = caller.id });
+    while (calls.next()) |call| {
+        if (std.mem.eql(u8, call.evidence.?.text, text)) return call;
+    }
+    std.debug.print("no call `{s}` from `{s}`\n", .{ text, caller.identity.name.? });
+    return error.TestExpectedCall;
+}
+
+fn expectStaticCall(snapshot: *const semidx.Snapshot, case: StaticCall) !void {
+    const caller = definitionIn(snapshot, case.path, case.class, case.method) orelse {
+        std.debug.print("no method `{s}.{s}` in `{s}`\n", .{ case.class, case.method, case.path });
+        return error.TestExpectedDefinition;
+    };
+    const call = try staticCallFrom(snapshot, caller, case.call);
+    switch (case.expect) {
+        .fact => |target| {
+            const wanted = definitionIn(snapshot, target.path, target.class, target.method) orelse {
+                std.debug.print("no target `{s}.{s}`\n", .{ target.class, target.method });
+                return error.TestExpectedDefinition;
+            };
+            try testing.expectEqual(model.ResolutionCategory.fact, call.resolution.category());
+            try testing.expectEqual(wanted.id, call.claim.relationship.target.entity);
+        },
+        .unresolved => |fragment| {
+            // Whatever the reason, the answer is never a fact and never loses
+            // the text that was read.
+            try testing.expect(!call.resolution.isFact());
+            if (case.designator) |expected| {
+                try testing.expect(expected.eql(call.claim.relationship.target.designator));
+            }
+            try expectExplanation(call, fragment);
+        },
+    }
+}
+
+/// The classes every static-call fixture resolves against, and the reason a
+/// wrongly read receiver is detectable: `Util.make` is static and `Other.make`
+/// is not, so a frontend that reads a variable as a class names the wrong
+/// method rather than the same one by another route.
+fn addStaticCallProviders(index: *semidx.Index) !void {
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Util.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Util {
+        \\    public static String make() { return null; }
+        \\    public static String twice() { return null; }
+        \\    public static String twice(String name) { return null; }
+        \\    static String packaged() { return null; }
+        \\    protected static String guarded() { return null; }
+        \\    private static String hidden() { return null; }
+        \\    public String instance() { return null; }
+        \\}
+        \\
+        ,
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Other.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Other {
+        \\    public String make() { return null; }
+        \\}
+        \\
+        ,
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Shaped.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Shaped extends Absent {
+        \\    public static String make() { return null; }
+        \\}
+        \\
+        ,
+    );
+}
+
+test "the static-call matrix pins what each covered and declined case must answer" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addStaticCallProviders(&index);
+
+    // A caller in the same package and source root as the provider.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Caller.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Caller {
+        \\    void covered() { Util.make(); }
+        \\    void overloaded() { Util.twice(); }
+        \\    void notStatic() { Util.instance(); }
+        \\    void privateElsewhere() { Util.hidden(); }
+        \\    void protectedElsewhere() { Util.guarded(); }
+        \\    void packagedElsewhere() { Util.packaged(); }
+        \\    void missingMethod() { Util.absent(); }
+        \\    void targetHasSupertypes() { Shaped.make(); }
+        \\    void noSuchClass() { Absent.make(); }
+        \\    void nested() { Runnable task = new Runnable() { public void run() { Util.make(); } }; }
+        \\}
+        \\
+        ,
+    );
+    // Two top-level classes in one unit: the enclosing class reaches its own
+    // private members, and no other class's.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Local.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Local {
+        \\    private static String own() { return null; }
+        \\    void covered() { Local.own(); }
+        \\    void sameUnit() { Companion.make(); }
+        \\    void privateInAnotherClass() { Companion.secret(); }
+        \\}
+        \\
+        \\class Companion {
+        \\    public static String make() { return null; }
+        \\    private static String secret() { return null; }
+        \\}
+        \\
+        ,
+    );
+    // The standard-layout test root reads its module's main root.
+    _ = try index.addUnit(
+        "module/src/test/java/lib/CallerTest.java",
+        .java,
+        \\package lib;
+        \\
+        \\class CallerTest {
+        \\    void covered() { Util.make(); }
+        \\}
+        \\
+        ,
+    );
+    // Another package in the same root, reaching the class by single-type import.
+    _ = try index.addUnit(
+        "module/src/main/java/app/Importer.java",
+        .java,
+        \\package app;
+        \\
+        \\import lib.Util;
+        \\
+        \\class Importer {
+        \\    void covered() { Util.make(); }
+        \\}
+        \\
+        ,
+    );
+    // The same package name in another source root is another scope.
+    _ = try index.addUnit(
+        "other/src/main/java/lib/Outsider.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Outsider {
+        \\    void declined() { Util.make(); }
+        \\}
+        \\
+        ,
+    );
+    // An enclosing class with supertypes may inherit a field of the receiver's
+    // name, and the working copy cannot see that it does not.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Derived.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Derived extends Absent {
+        \\    void declined() { Util.make(); }
+        \\}
+        \\
+        ,
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const util: StaticTarget = .{
+        .path = "module/src/main/java/lib/Util.java",
+        .class = "Util",
+        .method = "make",
+    };
+    const cases = [_]StaticCall{
+        // Covered: one declared static method, reached inside the boundary.
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "covered",
+            .call = "Util.make()",
+            .expect = .{ .fact = util },
+        },
+        .{
+            .path = "module/src/test/java/lib/CallerTest.java",
+            .class = "CallerTest",
+            .method = "covered",
+            .call = "Util.make()",
+            .expect = .{ .fact = util },
+        },
+        .{
+            .path = "module/src/main/java/app/Importer.java",
+            .class = "Importer",
+            .method = "covered",
+            .call = "Util.make()",
+            .expect = .{ .fact = util },
+        },
+        .{
+            .path = "module/src/main/java/lib/Local.java",
+            .class = "Local",
+            .method = "covered",
+            .call = "Local.own()",
+            .expect = .{ .fact = .{
+                .path = "module/src/main/java/lib/Local.java",
+                .class = "Local",
+                .method = "own",
+            } },
+        },
+        .{
+            .path = "module/src/main/java/lib/Local.java",
+            .class = "Local",
+            .method = "sameUnit",
+            .call = "Companion.make()",
+            .expect = .{ .fact = .{
+                .path = "module/src/main/java/lib/Local.java",
+                .class = "Companion",
+                .method = "make",
+            } },
+        },
+        // Declined, each for its own reason.
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "overloaded",
+            .call = "Util.twice()",
+            // The receiver was established as a class and only the method
+            // choice failed, so the class is the qualifier.
+            .designator = .{ .name = "twice", .qualifier = "Util" },
+            .expect = .{ .unresolved = "overloads are not resolved" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "notStatic",
+            .call = "Util.instance()",
+            .designator = .{ .name = "instance", .qualifier = "Util" },
+            .expect = .{ .unresolved = "is not static" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "privateElsewhere",
+            .call = "Util.hidden()",
+            .expect = .{ .unresolved = "access" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "protectedElsewhere",
+            .call = "Util.guarded()",
+            .expect = .{ .unresolved = "access" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "packagedElsewhere",
+            .call = "Util.packaged()",
+            .expect = .{ .unresolved = "access" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Local.java",
+            .class = "Local",
+            .method = "privateInAnotherClass",
+            .call = "Companion.secret()",
+            .expect = .{ .unresolved = "access" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "missingMethod",
+            .call = "Util.absent()",
+            .expect = .{ .unresolved = "no method of this name" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "targetHasSupertypes",
+            .call = "Shaped.make()",
+            .expect = .{ .unresolved = "supertypes" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "noSuchClass",
+            .call = "Absent.make()",
+            .expect = .{ .unresolved = "no current top-level class" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "nested",
+            .call = "Util.make()",
+            .expect = .{ .unresolved = "class body declared in the method" },
+        },
+        .{
+            .path = "other/src/main/java/lib/Outsider.java",
+            .class = "Outsider",
+            .method = "declined",
+            .call = "Util.make()",
+            .expect = .{ .unresolved = "source root this unit can see" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Derived.java",
+            .class = "Derived",
+            .method = "declined",
+            .call = "Util.make()",
+            .expect = .{ .unresolved = "supertypes" },
+        },
+    };
+    for (cases) |case| try expectStaticCall(&snapshot, case);
+
+    // Whatever else moves, no Java answer is ever a confidence.
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "a receiver name any binding introducer declares is not read as a class" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addStaticCallProviders(&index);
+
+    // Each method isolates one binding introducer, and every receiver is a
+    // value of a type whose `make` is not the static one: a frontend that read
+    // the name as a class would name the wrong method, not the same one.
+    //
+    // `bySpread` is the one snippet that is parsed rather than compilable —
+    // varargs bind an array, and no valid call through one reaches this rule —
+    // but what it pins is the binding, which is the same rule.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Shadowed.java",
+        .java,
+        \\package lib;
+        \\
+        \\import java.util.List;
+        \\import java.util.function.BiConsumer;
+        \\import java.util.function.Consumer;
+        \\
+        \\class Shadowed {
+        \\    void byParameter(Other Util) { Util.make(); }
+        \\    void bySpread(Other... Util) { Util.make(); }
+        \\    void byLocal() { Other Util = null; Util.make(); }
+        \\    void beforeLocal() { Util.make(); Other Util = null; }
+        \\    void byForEach(List<Other> items) { for (Other Util : items) { Util.make(); } }
+        \\    void byCatch() { try { } catch (Failure Util) { Util.make(); } }
+        \\    void byResource() { try (Handle Util = null) { Util.make(); } catch (Exception error) { } }
+        \\    void byLambda() { Consumer<Other> sink = Util -> Util.make(); }
+        \\    void byInferredLambda() { BiConsumer<Other, Other> sink = (Util, rest) -> Util.make(); }
+        \\    void byTypedLambda() { Consumer<Other> sink = (Other Util) -> Util.make(); }
+        \\    void byPattern(Object value) { if (value instanceof Other Util) { Util.make(); } }
+        \\    void byRecordPattern(Object value) { if (value instanceof Pair(Other Util, Other rest)) { Util.make(); } }
+        \\}
+        \\
+        \\class Failure extends RuntimeException {
+        \\    public String make() { return null; }
+        \\}
+        \\
+        \\class Handle implements AutoCloseable {
+        \\    public void close() {}
+        \\    public String make() { return null; }
+        \\}
+        \\
+        \\record Pair(Other first, Other second) {}
+        \\
+        ,
+    );
+    // A field of the class binds the name for every method that declares
+    // nothing of its own.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Fielded.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Fielded {
+        \\    Other Util;
+        \\
+        \\    void byField() { Util.make(); }
+        \\}
+        \\
+        ,
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const shadowed = "module/src/main/java/lib/Shadowed.java";
+    // Since Plan 014 Stage 5 the answer splits by introducer. A covered one —
+    // a field, a formal parameter, a local declarator — gives the name a type,
+    // and the call names that type's method: `Other.make`, the instance one,
+    // and never `Util.make`, the static one a frontend reading the name as a
+    // class would have picked. Everything else still poisons the name.
+    const poisoned = "bound here by a construct this frontend reads no type from";
+    const other_make: StaticTarget = .{
+        .path = "module/src/main/java/lib/Other.java",
+        .class = "Other",
+        .method = "make",
+    };
+    const cases = [_]StaticCall{
+        .{ .path = shadowed, .class = "Shadowed", .method = "byParameter", .call = "Util.make()", .expect = .{ .fact = other_make } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byLocal", .call = "Util.make()", .expect = .{ .fact = other_make } },
+        .{
+            .path = "module/src/main/java/lib/Fielded.java",
+            .class = "Fielded",
+            .method = "byField",
+            .call = "Util.make()",
+            .expect = .{ .fact = other_make },
+        },
+        // Varargs bind an array, and every construct below binds inside its own
+        // subtree while this frontend reads bindings for the whole method. A
+        // type read from one of them could give a name a meaning outside it,
+        // which would be a wrong fact rather than a decline.
+        .{ .path = shadowed, .class = "Shadowed", .method = "bySpread", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byForEach", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byCatch", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byResource", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byLambda", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byInferredLambda", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byTypedLambda", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byPattern", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byRecordPattern", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        // The scope of a local declaration is the rest of the block, so the
+        // name before it is still the class. This is the one case in the
+        // matrix that distinguishes a lexical rule from poisoning the method.
+        .{
+            .path = shadowed,
+            .class = "Shadowed",
+            .method = "beforeLocal",
+            .call = "Util.make()",
+            .expect = .{ .fact = .{
+                .path = "module/src/main/java/lib/Util.java",
+                .class = "Util",
+                .method = "make",
+            } },
+        },
+    };
+    for (cases) |case| try expectStaticCall(&snapshot, case);
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "provider method and class-shape edits decide what a static call may claim" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    const provider = try index.addUnit(
+        "module/src/main/java/lib/Util.java",
+        .java,
+        "package lib;\n\nclass Util {\n    public static String make() { return null; }\n}\n",
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Caller.java",
+        .java,
+        "package lib;\n\nclass Caller {\n    void run() { Util.make(); }\n}\n",
+    );
+
+    const caller_path = "module/src/main/java/lib/Caller.java";
+    const target: StaticTarget = .{
+        .path = "module/src/main/java/lib/Util.java",
+        .class = "Util",
+        .method = "make",
+    };
+
+    // Each edit replaces the provider and decides the same call again. The
+    // shape of the provider is the whole input: the caller is never touched.
+    const Step = struct {
+        what: []const u8,
+        source: []const u8,
+        expect: @FieldType(StaticCall, "expect"),
+    };
+    const steps = [_]Step{
+        .{
+            .what = "the method is there to begin with",
+            .source = "package lib;\n\nclass Util {\n    public static String make() { return null; }\n}\n",
+            .expect = .{ .fact = target },
+        },
+        .{
+            .what = "the method is removed",
+            .source = "package lib;\n\nclass Util {\n}\n",
+            .expect = .{ .unresolved = "no method of this name" },
+        },
+        .{
+            .what = "the method comes back",
+            .source = "package lib;\n\nclass Util {\n    public static String make() { return null; }\n}\n",
+            .expect = .{ .fact = target },
+        },
+        .{
+            .what = "the method is overloaded",
+            .source = "package lib;\n\nclass Util {\n    public static String make() { return null; }\n" ++
+                "    public static String make(String name) { return null; }\n}\n",
+            .expect = .{ .unresolved = "overloads are not resolved" },
+        },
+        .{
+            .what = "the method stops being static",
+            .source = "package lib;\n\nclass Util {\n    public String make() { return null; }\n}\n",
+            .expect = .{ .unresolved = "is not static" },
+        },
+        .{
+            .what = "the method leaves the covered access",
+            .source = "package lib;\n\nclass Util {\n    static String make() { return null; }\n}\n",
+            .expect = .{ .unresolved = "access" },
+        },
+        .{
+            .what = "the class declares a supertype",
+            .source = "package lib;\n\nclass Util extends Absent {\n    public static String make() { return null; }\n}\n",
+            .expect = .{ .unresolved = "supertypes" },
+        },
+        .{
+            .what = "the supertype is removed again",
+            .source = "package lib;\n\nclass Util {\n    public static String make() { return null; }\n}\n",
+            .expect = .{ .fact = target },
+        },
+    };
+
+    for (steps) |step| {
+        _ = try index.applyEdit(provider, step.source);
+        var snapshot = try index.publish();
+        defer snapshot.deinit();
+        expectStaticCall(&snapshot, .{
+            .path = caller_path,
+            .class = "Caller",
+            .method = "run",
+            .call = "Util.make()",
+            .expect = step.expect,
+        }) catch |failure| {
+            std.debug.print("after {s}\n", .{step.what});
+            return failure;
+        };
+    }
+
+    // The receiver class leaves the caller's scope entirely.
+    try index.renameUnit(provider, "other/src/main/java/lib/Util.java");
+    var moved = try index.publish();
+    defer moved.deinit();
+    try expectStaticCall(&moved, .{
+        .path = caller_path,
+        .class = "Caller",
+        .method = "run",
+        .call = "Util.make()",
+        .expect = .{ .unresolved = "source root this unit can see" },
+    });
+    try testing.expectEqual(@as(usize, 0), moved.countApproximateAssertions());
+}
+
+test "a receiver that is a value stays unresolved, whatever the static rule admits" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addStaticCallProviders(&index);
+
+    // Every receiver here is a value, and none of them is what ADR 009 admits.
+    // The static rule is allowed to make class names resolve; it is not allowed
+    // to make these resolve on the way past.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Values.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Values extends Absent {
+        \\    Other field;
+        \\
+        \\    Other self() { return null; }
+        \\    void byLocal() { Other value = null; value.make(); }
+        \\    void byField() { field.make(); }
+        \\    void byParameter(Other value) { value.make(); }
+        \\    void byCreation() { new Other().make(); }
+        \\    void byChain() { self().make(); }
+        \\    void byLiteral() { "text".length(); }
+        \\    void byClassLiteral() { Other.class.getName(); }
+        \\    void byThis() { this.self(); }
+        \\    void bySuper() { super.toString(); }
+        \\}
+        \\
+        ,
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const values = "module/src/main/java/lib/Values.java";
+    const cases = [_]StaticCall{
+        // A receiver read as a value names no scope, so the name stands alone.
+        .{ .path = values, .class = "Values", .method = "byLocal", .call = "value.make()", .designator = .{ .name = "make" }, .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byField", .call = "field.make()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byParameter", .call = "value.make()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byCreation", .call = "new Other().make()", .designator = .{ .name = "make" }, .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byChain", .call = "self().make()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byLiteral", .call = "\"text\".length()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byClassLiteral", .call = "Other.class.getName()", .expect = .{ .unresolved = "receiver" } },
+        // `this` names the enclosing type exactly, so it is admitted in
+        // principle. Here the enclosing type's own chain is open, so the
+        // question of what it may inherit cannot be answered and the answer
+        // says which condition stopped it.
+        .{ .path = values, .class = "Values", .method = "byThis", .call = "this.self()", .expect = .{ .unresolved = "a method of this name it may inherit is not ruled out" } },
+        .{ .path = values, .class = "Values", .method = "bySuper", .call = "super.toString()", .expect = .{ .unresolved = "receiver" } },
+    };
+    for (cases) |case| try expectStaticCall(&snapshot, case);
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+/// A provider, a reader of one of its methods, another class in the same
+/// package, and a unit importing from it. Only the reader is ever hinted, so
+/// what a change costs is visible as a count.
+const MemberTree = struct {
+    index: semidx.Index,
+    provider: model.SourceUnitId,
+    reader: model.SourceUnitId,
+    /// A unit in the same package that reads nothing of the provider.
+    sibling: model.SourceUnitId,
+
+    fn init() !MemberTree {
+        var index = try semidx.Index.init(testing.allocator, "tree");
+        errdefer index.deinit();
+
+        const provider = try index.addUnit(
+            "src/main/java/demo/Util.java",
+            .java,
+            "package demo;\n\nclass Util {\n    public static String make() { return null; }\n" ++
+                "    public static String keep() { return null; }\n}\n",
+        );
+        const reader = try index.addUnit(
+            "src/main/java/demo/Reader.java",
+            .java,
+            "package demo;\n\nclass Reader {\n    void run() { Util.make(); }\n}\n",
+        );
+        // A second declarer in the package, and a unit that imports from it.
+        // Both are reanalyzed when the package's exports change, and neither
+        // has any business being reanalyzed when one method's shape does. The
+        // importer names the class without referring to it, so it is reachable
+        // only through the import hint: a dependency of its own would make this
+        // a test of the dependency channel instead.
+        const sibling = try index.addUnit(
+            "src/main/java/demo/Sibling.java",
+            .java,
+            "package demo;\n\nclass Sibling {\n    void run() {}\n}\n",
+        );
+        _ = try index.addUnit(
+            "src/main/java/app/Importer.java",
+            .java,
+            "package app;\n\nimport demo.Util;\n\nclass Importer {\n    void run() {}\n}\n",
+        );
+        return .{ .index = index, .provider = provider, .reader = reader, .sibling = sibling };
+    }
+
+    fn deinit(self: *MemberTree) void {
+        self.index.deinit();
+        self.* = undefined;
+    }
+
+    fn hint(self: *MemberTree, unit: model.SourceUnitId, class: []const u8, method: []const u8) !void {
+        try self.index.analyzer.java_members.noteReader(unit, class, method);
+    }
+
+    /// Replaces the provider and reports what keeping the graph current cost.
+    fn editProvider(self: *MemberTree, source: []const u8) !usize {
+        semidx.work.reset();
+        _ = try self.index.applyEdit(self.provider, source);
+        return semidx.work.upkeep_reanalyses;
+    }
+};
+
+test "a reader is reanalyzed when the method it asked about changes" {
+    var tree = try MemberTree.init();
+    defer tree.deinit();
+
+    // Nothing is seeded here. The reader hinted itself when it read
+    // `Util.make()`, which is what Stage 5 added to the channel Stage 3 built.
+
+    // A body edit changes nothing a caller can see — but this call resolves, so
+    // the reader declares a dependency on the provider *unit*, and a dependency
+    // is per unit rather than per method. It is re-read for a change it cannot
+    // observe, which is the price of a cross-unit fact.
+    try testing.expectEqual(@as(usize, 1), tree.index.graph.dependencies.count());
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    public static String make() { return \"x\"; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    // Losing `public` is a different answer for that one name.
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    // The answer it got reads nothing, so from here on there is no dependency
+    // in the graph at all: every re-read below is the hint's doing.
+    try testing.expectEqual(@as(usize, 0), tree.index.graph.dependencies.count());
+
+    // Losing `static`, gaining an overload, and disappearing entirely.
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    String make() { return null; }\n" ++
+            "    String make(String name) { return null; }\n    public static String keep() { return null; }\n}\n",
+    ));
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    public static String keep() { return null; }\n}\n",
+    ));
+    try testing.expectEqual(@as(usize, 0), tree.index.graph.dependencies.count());
+
+    // And a method appearing where the reader found none: the case no
+    // dependency can carry, because an unresolved call read nothing.
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    // Measured, not assumed: that last re-read had nothing to propagate along,
+    // and it is what turned the call back into a fact — which declares the
+    // dependency again.
+    try testing.expectEqual(@as(u32, 0), semidx.work.propagation_rounds);
+    try testing.expect(!semidx.work.propagation_exhausted);
+    try testing.expectEqual(@as(usize, 1), tree.index.graph.dependencies.count());
+}
+
+test "editing one method does not reanalyze the package's declarers and importers" {
+    var tree = try MemberTree.init();
+    defer tree.deinit();
+    try tree.hint(tree.reader, "Util", "make");
+
+    // Four Java units share this package's scope, and one method changed. If
+    // the class shape travelled on the package export channel, the sibling
+    // declarer and the importer would both be re-read for a change neither can
+    // see; the count is how that stays a claim rather than a hope.
+    try testing.expectEqual(@as(usize, 1), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    protected static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    // The package channel still does its own job: a class appearing in the
+    // package is what the declarers and the importer are owed.
+    semidx.work.reset();
+    _ = try tree.index.addUnit(
+        "src/main/java/demo/Extra.java",
+        .java,
+        "package demo;\n\nclass Extra {}\n",
+    );
+    try testing.expect(semidx.work.upkeep_reanalyses > 1);
+}
+
+test "a class-shape change reaches every reader of that class, not only of one method" {
+    var tree = try MemberTree.init();
+    defer tree.deinit();
+
+    // Two readers, each hinted on a different method of the same class.
+    const second = try tree.index.addUnit(
+        "src/main/java/demo/Second.java",
+        .java,
+        "package demo;\n\nclass Second {\n    void run() { Util.keep(); }\n}\n",
+    );
+    try tree.hint(tree.reader, "Util", "make");
+    try tree.hint(second, "Util", "keep");
+
+    // A declared supertype can hide a static method of any name, so every
+    // reader of the class is owed a re-read, not only the ones whose own
+    // method aspect moved.
+    try testing.expectEqual(@as(usize, 2), try tree.editProvider(
+        "package demo;\n\nclass Util extends Absent {\n    public static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    // And removing it again makes both eligible once more.
+    try testing.expectEqual(@as(usize, 2), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+}
+
+test "a unit that reads nothing is not reached, and a stale hint costs a pass and no claim" {
+    var tree = try MemberTree.init();
+    defer tree.deinit();
+
+    // The sibling declares a class in the same package and reads nothing of the
+    // provider, so it is hinted on a pair it never asks about: a hint that has
+    // gone stale, which the channel is allowed to hold and must survive.
+    try tree.hint(tree.sibling, "Util", "make");
+
+    var before = try tree.index.publish();
+    const before_calls = before.countRelationships(.{ .kind = .calls, .resolution = .fact });
+    before.deinit();
+
+    // Two units are re-read for one method's access change: the reader that
+    // asked about the pair, and the stale hint. The importer, which the package
+    // channel would have reached, is not among them.
+    try testing.expectEqual(@as(usize, 2), try tree.editProvider(
+        "package demo;\n\nclass Util {\n    protected static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    ));
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    const run = definitionIn(&after, "src/main/java/demo/Reader.java", "Reader", "run").?;
+    // The reader's answer changed, because `protected` is outside the covered
+    // access; the stale hint's unit says exactly what it said before, so the
+    // only fact lost is the caller's.
+    try testing.expectEqual(before_calls - 1, after.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+    try testing.expectEqual(@as(usize, 0), after.countRelationships(.{
+        .kind = .calls,
+        .source = run.id,
+        .resolution = .fact,
+    }));
+    try expectExplanation(try staticCallFrom(&after, run, "Util.make()"), "access");
+    try testing.expectEqual(@as(usize, 0), after.countApproximateAssertions());
+}
+
+test "deciding a static call costs the invoked name's candidates, not the repository" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit(
+        "src/main/java/demo/Util.java",
+        .java,
+        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n" ++
+            "    public static String keep() { return null; }\n}\n",
+    );
+    const caller = try index.addUnit(
+        "src/main/java/demo/Caller.java",
+        .java,
+        "package demo;\n\nclass Caller {\n    void run() { Util.make(); }\n}\n",
+    );
+
+    const Measure = struct {
+        fn candidates(ix: *semidx.Index, unit: model.SourceUnitId, source: []const u8) !usize {
+            semidx.frontends.java.work.reset();
+            _ = try ix.applyEdit(unit, source);
+            return semidx.frontends.java.work.method_candidates;
+        }
+    };
+
+    const alone = try Measure.candidates(
+        &index,
+        caller,
+        "package demo;\n\nclass Caller {\n    void run() { Util.make(); } // once\n}\n",
+    );
+    // One invocation, one candidate: the methods named `make` in the class the
+    // receiver names. Not the class's other methods, and not the package's.
+    try testing.expectEqual(@as(usize, 1), alone);
+
+    // Twenty more classes in the same package and the same source root, each
+    // declaring a method of the same name — every one of them a candidate a
+    // repository-wide lookup would have to touch and reject.
+    var extra: usize = 0;
+    while (extra < 20) : (extra += 1) {
+        const path = try std.fmt.allocPrint(
+            testing.allocator,
+            "src/main/java/demo/Filler{d}.java",
+            .{extra},
+        );
+        defer testing.allocator.free(path);
+        const source = try std.fmt.allocPrint(
+            testing.allocator,
+            "package demo;\n\nclass Filler{d} {{\n    public static String make() {{ return null; }}\n" ++
+                "    public static String keep() {{ return null; }}\n}}\n",
+            .{extra},
+        );
+        defer testing.allocator.free(source);
+        _ = try index.addUnit(path, .java, source);
+    }
+
+    const crowded = try Measure.candidates(
+        &index,
+        caller,
+        "package demo;\n\nclass Caller {\n    void run() { Util.make(); } // twice\n}\n",
+    );
+    try testing.expectEqual(alone, crowded);
+
+    // And the answer did not change either: the crowd is invisible to it.
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .calls,
+        .source = definitionIn(&snapshot, "src/main/java/demo/Caller.java", "Caller", "run").?.id,
+        .target = definitionIn(&snapshot, "src/main/java/demo/Util.java", "Util", "make").?.id,
+        .resolution = .fact,
+    }));
+}
+
+test "the write path and the java frontend report the work they do" {
+    semidx.work.reset();
+    semidx.frontends.java.work.reset();
+
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    const provider = try index.addUnit(
+        "demo/Helper.java",
+        .java,
+        "package demo;\n\nclass Helper {\n    public static String make() { return null; }\n}\n",
+    );
+    _ = try index.addUnit(
+        "demo/Caller.java",
+        .java,
+        "package demo;\n\nclass Caller {\n    Helper helper;\n    void run() { Helper.make(); local(); }\n" ++
+            "    void local() {}\n}\n",
+    );
+
+    // Deciding an invocation examines the candidates the frontend has, and
+    // today they are the analyzed unit's own methods. The bound is the claim;
+    // the exact number is Stage 3 and Stage 5's to tighten.
+    const candidates = semidx.frontends.java.work.method_candidates;
+    try testing.expect(candidates > 0);
+    try testing.expect(candidates <= 4);
+
+    // The field type is read across units, so the caller says what it read.
+    try testing.expectEqual(@as(usize, 1), index.graph.dependencies.count());
+
+    // Editing the provider reaches the caller through that declaration, one
+    // round along the chain, and nothing runs out of budget.
+    semidx.work.reset();
+    _ = try index.applyEdit(
+        provider,
+        "package demo;\n\nclass Helper {\n    public static String make() { return null; }\n    void extra() {}\n}\n",
+    );
+    try testing.expectEqual(@as(usize, 1), semidx.work.upkeep_reanalyses);
+    try testing.expectEqual(@as(u32, 2), semidx.work.propagation_rounds);
+    try testing.expect(!semidx.work.propagation_exhausted);
+}
+
 // -- Plan 004: Zig fixture coverage -----------------------------------------
 
 const zig_path = "zig/greeter.zig";
@@ -2564,7 +3571,7 @@ test "same-unit zig calls are current facts and every other callee stays unresol
 
     // `greeter.greet()` names the container member, not the top-level `greet`,
     // and nothing here resolves members, so it is not retargeted to either.
-    for ([_][]const u8{ "std.debug.print", "greeter.greet", "report" }) |designator| {
+    for ([_][]const u8{ "print", "greet", "report" }) |designator| {
         try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
             .kind = .calls,
             .source = announce.id,
@@ -2912,16 +3919,29 @@ fn callFacts(snapshot: *const semidx.Snapshot, from: model.Entity, to: model.Ent
     return snapshot.countRelationships(.{ .kind = .calls, .source = from.id, .target = to.id, .resolution = .fact });
 }
 
-fn expectUnresolvedCall(snapshot: *const semidx.Snapshot, from: model.Entity, designator: []const u8, fragment: []const u8) !void {
-    var calls = snapshot.relationships(.{ .kind = .calls, .source = from.id, .designator = designator });
-    const call = calls.next() orelse {
-        std.debug.print("no current call `{s}` from `{s}`\n", .{ designator, from.identity.name.? });
+/// `designator` is what the frontend must have recorded: the name the callee
+/// names, and the scope in front of it where the frontend established one. The
+/// query is anchored on the name, because that is what the index is keyed on,
+/// and the qualifier is then checked against what the claim carries.
+fn expectUnresolvedCall(snapshot: *const semidx.Snapshot, from: model.Entity, designator: model.Designator, fragment: []const u8) !void {
+    // One name can be written through several scopes in one function, so the
+    // bucket is walked for the claim that carries this qualifier rather than
+    // taking the first claim of that name.
+    var calls = snapshot.relationships(.{ .kind = .calls, .source = from.id, .designator = designator.name });
+    const call = while (calls.next()) |candidate| {
+        if (designator.eql(candidate.claim.relationship.target.designator)) break candidate;
+    } else {
+        std.debug.print("no current call `{s}/{s}` from `{s}`\n", .{
+            designator.qualifier orelse "-",
+            designator.name,
+            from.identity.name.?,
+        });
         return error.TestExpectedCall;
     };
     try testing.expect(!call.resolution.isFact());
     const explanation = call.resolution.unresolved.explanation;
     if (std.mem.indexOf(u8, explanation, fragment) == null) {
-        std.debug.print("call `{s}`: expected \"{s}\" in \"{s}\"\n", .{ designator, fragment, explanation });
+        std.debug.print("call `{s}`: expected \"{s}\" in \"{s}\"\n", .{ designator.name, fragment, explanation });
         return error.TestUnexpectedExplanation;
     }
 }
@@ -2966,19 +3986,19 @@ test "exact local-import calls are cross-unit facts and every other qualified ca
     try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .target = write_string.id, .reference_query = true }));
     try testing.expect(dependsOn(&tree.index, session_path, wire_path));
 
-    try expectUnresolvedCall(&snapshot, send, "self.flush", "qualifier is a parameter or local binding");
-    try expectUnresolvedCall(&snapshot, flush, "reset", "enclosing container declares a member");
-    try expectUnresolvedCall(&snapshot, run, "wire.hidden", "no current top-level `pub fn`");
-    try expectUnresolvedCall(&snapshot, run, "wire.twice", "no current top-level `pub fn`");
-    try expectUnresolvedCall(&snapshot, run, "wire.flushAll", "no current top-level `pub fn`");
-    try expectUnresolvedCall(&snapshot, run, "wire.Frame.encode", "not a bare name or a name qualified by a local import alias");
-    try expectUnresolvedCall(&snapshot, run, "std.debug.print", "not a bare name or a name qualified by a local import alias");
-    try expectUnresolvedCall(&snapshot, run, "outside.run", "the path escapes the indexed root");
-    try expectUnresolvedCall(&snapshot, run, "upper.run", "no indexed Zig source unit has the path `zig/imports/Wire.zig`");
-    try expectUnresolvedCall(&snapshot, run, "absent.run", "no indexed Zig source unit has the path `zig/imports/absent.zig`");
-    try expectUnresolvedCall(&snapshot, run, "twin.run", "declares this name more than once");
-    try expectUnresolvedCall(&snapshot, run, "copy.writeString", "not a top-level `@import` alias");
-    try expectUnresolvedCall(&snapshot, shadowed, "wire.writeString", "qualifier is a parameter or local binding");
+    try expectUnresolvedCall(&snapshot, send, .{ .name = "flush" }, "qualifier is a parameter or local binding");
+    try expectUnresolvedCall(&snapshot, flush, .{ .name = "reset" }, "enclosing container declares a member");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "hidden", .qualifier = "wire" }, "no current top-level `pub fn`");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "twice", .qualifier = "wire" }, "no current top-level `pub fn`");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "flushAll", .qualifier = "wire" }, "no current top-level `pub fn`");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "encode", .qualifier = "wire.Frame" }, "not a bare name or a name qualified by a local import alias");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "print", .qualifier = "std.debug" }, "not a bare name or a name qualified by a local import alias");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "run", .qualifier = "outside" }, "the path escapes the indexed root");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "run", .qualifier = "upper" }, "no indexed Zig source unit has the path `zig/imports/Wire.zig`");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "run", .qualifier = "absent" }, "no indexed Zig source unit has the path `zig/imports/absent.zig`");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "run", .qualifier = "twin" }, "declares this name more than once");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "writeString" }, "not a top-level `@import` alias");
+    try expectUnresolvedCall(&snapshot, shadowed, .{ .name = "writeString" }, "qualifier is a parameter or local binding");
 
     // Calls in the nested container's member are not recorded, and the
     // nested container is reported instead.
@@ -3036,8 +4056,8 @@ test "provider edits update local-import calls without editing the importer" {
         defer after.deinit();
         try testing.expect(after.entityById(write_string.id) == null);
         try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .target = write_string.id }));
-        try expectUnresolvedCall(&after, run, "wire.writeString", "no current top-level `pub fn`");
-        try expectUnresolvedCall(&after, send, "wire.writeString", "no current top-level `pub fn`");
+        try expectUnresolvedCall(&after, run, .{ .name = "writeString", .qualifier = "wire" }, "no current top-level `pub fn`");
+        try expectUnresolvedCall(&after, send, .{ .name = "writeString", .qualifier = "wire" }, "no current top-level `pub fn`");
     }
 
     // No longer `pub`: not exported, so not a target.
@@ -3049,7 +4069,7 @@ test "provider edits update local-import calls without editing the importer" {
         const private = definitionIn(&after, wire_path, null, "writeString").?;
         try testing.expect(private.extension.get("zig.export") == null);
         try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .kind = .calls, .target = private.id }));
-        try expectUnresolvedCall(&after, run, "wire.writeString", "no current top-level `pub fn`");
+        try expectUnresolvedCall(&after, run, .{ .name = "writeString", .qualifier = "wire" }, "no current top-level `pub fn`");
     }
 
     // Back to the original, then broken: a provider whose analysis is not
@@ -3071,7 +4091,7 @@ test "provider edits update local-import calls without editing the importer" {
         var after = try tree.index.publish();
         defer after.deinit();
         try testing.expectEqual(semidx.core.graph.UnitAnalysis.stale, after.unitByPath(wire_path).?.analysis());
-        try expectUnresolvedCall(&after, run, "wire.writeString", "analysis is not current");
+        try expectUnresolvedCall(&after, run, .{ .name = "writeString", .qualifier = "wire" }, "analysis is not current");
         try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .kind = .calls, .target = restored.id }));
         // The call into the other provider is untouched.
         try testing.expectEqual(@as(usize, 1), callFacts(&after, run, definitionIn(&after, util_path, null, "clean").?));
@@ -3084,7 +4104,7 @@ test "provider edits update local-import calls without editing the importer" {
     {
         var after = try tree.index.publish();
         defer after.deinit();
-        try expectUnresolvedCall(&after, run, "wire.writeString", "no indexed Zig source unit has the path `zig/imports/wire.zig`");
+        try expectUnresolvedCall(&after, run, .{ .name = "writeString", .qualifier = "wire" }, "no indexed Zig source unit has the path `zig/imports/wire.zig`");
         try testing.expectEqual(@as(usize, 1), callFacts(&after, run, definitionIn(&after, util_path, null, "clean").?));
     }
 }
@@ -3097,4 +4117,1846 @@ fn writeFixtureInto(tree: *Tree, name: []const u8) !void {
     const source = try loadFixture(gpa, fixture);
     defer gpa.free(source);
     try tree.write(wire_path, source);
+}
+
+// Three cases ADR 009 requires and the first implementation did not answer.
+// Each is a way for a class-qualified call to claim more than the graph knows,
+// and each is now a decline with its own reason
+// ([Follow-up 016](../docs/followups/016_java_static_call_rule_narrow_gaps.md)).
+
+test "an on-demand static import leaves every simple-name receiver unresolved" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("module/src/main/java/lib/Util.java", .java,
+        \\package lib;
+        \\
+        \\class Util {
+        \\    public static String make() { return null; }
+        \\}
+        \\
+    );
+    // Why the import is not safe to ignore: `import static lib.Holder.*;`
+    // brings `Holder`'s static fields into scope, a field obscures a type of
+    // its name, and this frontend records no fields, so it cannot tell whether
+    // `Util` here is the class or a field named after it.
+    _ = try index.addUnit("module/src/main/java/lib/Holder.java", .java,
+        \\package lib;
+        \\
+        \\class Holder {
+        \\    static String keep() { return null; }
+        \\}
+        \\
+    );
+    _ = try index.addUnit("module/src/main/java/lib/Importer.java", .java,
+        \\package lib;
+        \\
+        \\import static lib.Holder.*;
+        \\
+        \\class Importer {
+        \\    Util field;
+        \\    void declined() { Util.make(); }
+        \\}
+        \\
+    );
+    // The same call in a unit without the import, so the decline above is the
+    // import's doing and not the fixture's.
+    _ = try index.addUnit("module/src/main/java/lib/Plain.java", .java,
+        \\package lib;
+        \\
+        \\class Plain {
+        \\    void covered() { Util.make(); }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Importer.java",
+        .class = "Importer",
+        .method = "declined",
+        .call = "Util.make()",
+        .expect = .{ .unresolved = "imports static members on demand" },
+    });
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Plain.java",
+        .class = "Plain",
+        .method = "covered",
+        .call = "Util.make()",
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Util.java",
+            .class = "Util",
+            .method = "make",
+        } },
+    });
+
+    // A type position is not a place a variable can claim a name, so the field
+    // type in the importing unit still resolves. The guard is about receivers.
+    const importer = definitionIn(&snapshot, "module/src/main/java/lib/Importer.java", null, "Importer").?;
+    const util = definitionIn(&snapshot, "module/src/main/java/lib/Util.java", null, "Util").?;
+    var references = snapshot.relationships(.{ .kind = .references, .source = importer.id });
+    var resolved = false;
+    while (references.next()) |reference| {
+        if (!reference.resolution.isFact()) continue;
+        if (reference.claim.relationship.target.entity == util.id) resolved = true;
+    }
+    try testing.expect(resolved);
+}
+
+test "an on-demand import that is not static leaves the receiver alone" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addStaticCallProviders(&index);
+
+    // `import lib.*;` imports types, never members, so no variable enters
+    // scope and nothing can obscure the receiver name.
+    _ = try index.addUnit("module/src/main/java/app/Wildcard.java", .java,
+        \\package app;
+        \\
+        \\import lib.*;
+        \\import lib.Util;
+        \\
+        \\class Wildcard {
+        \\    void covered() { Util.make(); }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/app/Wildcard.java",
+        .class = "Wildcard",
+        .method = "covered",
+        .call = "Util.make()",
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Util.java",
+            .class = "Util",
+            .method = "make",
+        } },
+    });
+}
+
+test "a batch converges: a reader that read a provider's older state is read again" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    // A provider as an older producer would have left it: the class shape and
+    // the access are recorded, `java.static` is not. The label's absence is
+    // what the reader has to answer for, and it is not the same answer as the
+    // method being an instance method.
+    const provider = try index.graph.addSourceUnit(
+        "module/src/main/java/lib/Legacy.java",
+        .java,
+        "package lib;\nclass Legacy { public static String make() { return null; } }\n",
+    );
+    try recordUnlabelledJavaMethod(&index, provider, "Legacy", "make");
+
+    _ = try index.addUnit("module/src/main/java/lib/Reader.java", .java,
+        \\package lib;
+        \\
+        \\class Reader {
+        \\    void declined() { Legacy.make(); }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    // The provider is reanalyzed inside this batch, after the reader had
+    // already read its unlabelled state. Before Plan 014 Stage 3 the batch
+    // stopped there and the reader kept an explanation that was false about
+    // the graph's own contents: it said `Legacy.make` carried no record of
+    // whether it is `static` while the graph held that record. Upkeep now
+    // reanalyzes what a previous round changed, so an incrementally built
+    // graph answers what a graph built from scratch answers.
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Reader.java",
+        .class = "Reader",
+        .method = "declined",
+        .call = "Legacy.make()",
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Legacy.java",
+            .class = "Legacy",
+            .method = "make",
+        } },
+    });
+    const make = definitionIn(&snapshot, "module/src/main/java/lib/Legacy.java", "Legacy", "make").?;
+    try testing.expectEqualStrings("true", make.extension.get("java.static").?);
+
+    // The decline the unlabelled state produces is still the one this frontend
+    // gives, and it is still not the same answer as the method being an
+    // instance method. Nothing in ordinary source reaches it
+    // ([Follow-up 016](../docs/followups/016_java_static_call_rule_narrow_gaps.md)),
+    // so it is pinned where it is decided rather than through a provider a
+    // converging batch repairs.
+    try testing.expectEqual(semidx.frontends.java.Static.unknown, semidx.frontends.java.Static.fromLabel(""));
+    try testing.expectEqual(semidx.frontends.java.Static.no, semidx.frontends.java.Static.fromLabel("false"));
+    try testing.expectEqual(semidx.frontends.java.Access.unknown, semidx.frontends.java.Access.fromLabel(""));
+}
+
+/// Writes one Java class and one of its methods into the graph the way the Java
+/// frontend does, minus the `java.static` label. There is no input that makes
+/// the current frontend omit it, so the case a producer change would create is
+/// built directly rather than left untested.
+fn recordUnlabelledJavaMethod(
+    index: *semidx.Index,
+    unit: model.SourceUnitId,
+    class: []const u8,
+    method: []const u8,
+) !void {
+    var builder = semidx.contract.BatchBuilder.init(
+        testing.allocator,
+        unit,
+        semidx.frontends.capabilitiesFor(.java),
+    );
+    defer builder.deinit();
+
+    const evidence: model.SourceEvidence = .{
+        .unit = unit,
+        .range = .{ .start_byte = 0, .end_byte = 1, .start_row = 0, .start_column = 0, .end_row = 0, .end_column = 1 },
+        .text = class,
+    };
+    const class_index = try builder.addEntity(.{
+        .kind = .definition,
+        .identity = .{
+            .scope = .{ .unit = unit },
+            .language = .java,
+            .role = "class",
+            .name = try builder.dupe(class),
+            .signature = try builder.dupe(class),
+            .container_path = &.{},
+        },
+        .evidence = evidence,
+        .extension = .{ .namespace = "java", .labels = try builder.labels(&.{
+            .{ .key = "java.construct", .value = "class_declaration" },
+            .{ .key = "java.package", .value = "lib" },
+            .{ .key = "java.supertypes", .value = "none" },
+        }) },
+        .resolution = .{ .fact = .{ .method = "class declaration in the analyzed source unit" } },
+    });
+    const method_index = try builder.addEntity(.{
+        .kind = .definition,
+        .identity = .{
+            .scope = .{ .unit = unit },
+            .language = .java,
+            .role = "method",
+            .name = try builder.dupe(method),
+            .signature = try builder.dupe(method),
+            .container_path = try builder.dupeSlice(&.{class}),
+        },
+        .evidence = evidence,
+        .extension = .{ .namespace = "java", .labels = try builder.labels(&.{
+            .{ .key = "java.construct", .value = "method_declaration" },
+            .{ .key = "java.package", .value = "lib" },
+            .{ .key = "java.access", .value = "public" },
+        }) },
+        .resolution = .{ .fact = .{ .method = "method declaration in the analyzed source unit" } },
+    });
+    try builder.addRelationship(.{
+        .kind = .defines,
+        .source = .unit_container,
+        .target = .{ .local = class_index },
+        .evidence = evidence,
+        .resolution = .{ .fact = .{ .method = "declared directly in this source unit" } },
+    });
+    try builder.addRelationship(.{
+        .kind = .defines,
+        .source = .{ .entity = class_index },
+        .target = .{ .local = method_index },
+        .evidence = evidence,
+        .resolution = .{ .fact = .{ .method = "declared directly in this class body" } },
+    });
+
+    _ = try semidx.reconcile.integrate(&index.graph, builder.batch());
+    // The package hint is what `indexUnit` would have written, and the reader's
+    // context is built from it.
+    try index.analyzer.java_packages.note(&index.graph, unit);
+}
+
+test "renaming a file inside its own directory re-reads nothing" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("demo/Greeter.java", greeter_java);
+    _ = try tree.rescan();
+    const baseline = tree.invocations();
+
+    // The directory is what a Java source root and a Zig local import are read
+    // against, so a new file name inside it changes nothing a frontend reads.
+    try tree.move("demo/Greeter.java", "demo/Renamed.java");
+    const outcome = try tree.rescan();
+
+    try testing.expectEqual(@as(usize, 1), outcome.renamed);
+    try testing.expectEqual(@as(usize, 0), outcome.analyzed);
+    try testing.expectEqual(baseline, tree.invocations());
+}
+
+// A unit's place decides which other units it may resolve names to, so a move
+// is a semantic change even though it changes no byte
+// ([Follow-up 015](../docs/followups/015_unit_path_change_does_not_reanalyze.md)).
+
+test "a caller moved out of its provider's source root loses the fact it recorded" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write(
+        "module/src/main/java/lib/Util.java",
+        "package lib;\nclass Util { public static String make() { return null; } }\n",
+    );
+    try tree.write(
+        "module/src/main/java/lib/Caller.java",
+        "package lib;\nclass Caller { void covered() { Util.make(); } }\n",
+    );
+    _ = try tree.rescan();
+
+    {
+        var before = try tree.index.publish();
+        defer before.deinit();
+        try expectStaticCall(&before, .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "covered",
+            .call = "Util.make()",
+            .expect = .{ .fact = .{
+                .path = "module/src/main/java/lib/Util.java",
+                .class = "Util",
+                .method = "make",
+            } },
+        });
+    }
+
+    // Another module is another visibility scope. The caller may no longer
+    // resolve `Util`, so the fact it recorded while it could must go with it.
+    try tree.move(
+        "module/src/main/java/lib/Caller.java",
+        "other/src/main/java/lib/Caller.java",
+    );
+    const outcome = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), outcome.renamed);
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try expectStaticCall(&after, .{
+        .path = "other/src/main/java/lib/Caller.java",
+        .class = "Caller",
+        .method = "covered",
+        .call = "Util.make()",
+        .expect = .{ .unresolved = "source root this unit can see" },
+    });
+}
+
+test "a provider moved into the reader's source root turns its unresolved call into a fact" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write(
+        "module/src/main/java/lib/Caller.java",
+        "package lib;\nclass Caller { void call() { Util.make(); } }\n",
+    );
+    try tree.write(
+        "other/src/main/java/lib/Util.java",
+        "package lib;\nclass Util { public static String make() { return null; } }\n",
+    );
+    _ = try tree.rescan();
+
+    {
+        var before = try tree.index.publish();
+        defer before.deinit();
+        try expectStaticCall(&before, .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "call",
+            .call = "Util.make()",
+            .expect = .{ .unresolved = "source root this unit can see" },
+        });
+    }
+
+    // The caller's call resolved to nothing, so it declared no dependency and
+    // nothing names it. Only the move's own channel can reach it.
+    try tree.move(
+        "other/src/main/java/lib/Util.java",
+        "module/src/main/java/lib/Util.java",
+    );
+    _ = try tree.rescan();
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try expectStaticCall(&after, .{
+        .path = "module/src/main/java/lib/Caller.java",
+        .class = "Caller",
+        .method = "call",
+        .call = "Util.make()",
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Util.java",
+            .class = "Util",
+            .method = "make",
+        } },
+    });
+}
+
+test "moving a directory costs the units in it and the readers they reach" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    // Four providers in one package, one reader of one of them, and a unit in
+    // another package that reads nothing of it.
+    try tree.write(
+        "module/src/main/java/lib/A.java",
+        "package lib;\nclass A { public static String a() { return null; } }\n",
+    );
+    try tree.write(
+        "module/src/main/java/lib/B.java",
+        "package lib;\nclass B { public static String b() { return null; } }\n",
+    );
+    try tree.write(
+        "module/src/main/java/lib/C.java",
+        "package lib;\nclass C { public static String c() { return null; } }\n",
+    );
+    try tree.write(
+        "module/src/main/java/lib/Reader.java",
+        "package lib;\nclass Reader { void call() { A.a(); } }\n",
+    );
+    try tree.write(
+        "module/src/main/java/app/Elsewhere.java",
+        "package app;\nclass Elsewhere { void call() { } }\n",
+    );
+    _ = try tree.rescan();
+    const baseline = tree.invocations();
+
+    try tree.move("module/src/main/java/lib/A.java", "moved/src/main/java/lib/A.java");
+    try tree.move("module/src/main/java/lib/B.java", "moved/src/main/java/lib/B.java");
+    try tree.move("module/src/main/java/lib/C.java", "moved/src/main/java/lib/C.java");
+    const outcome = try tree.rescan();
+
+    try testing.expectEqual(@as(usize, 3), outcome.renamed);
+    // The three that moved, plus the reader whose answer they change. The unit
+    // in another package is not touched: it declares nothing in `lib` and
+    // imports nothing from it.
+    try testing.expectEqual(@as(usize, 4), tree.invocations() - baseline);
+    try testing.expectEqual(@as(usize, 1), outcome.invalidated);
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try expectStaticCall(&after, .{
+        .path = "module/src/main/java/lib/Reader.java",
+        .class = "Reader",
+        .method = "call",
+        .call = "A.a()",
+        .expect = .{ .unresolved = "source root this unit can see" },
+    });
+}
+
+// -- Plan 014 Stage 1: interfaces are declarations the graph holds ------------
+
+// Written against [ADR 011](../docs/adr/011_java_hierarchy_from_indexed_source.md).
+// Two questions run through every case below: an interface is a declaration on
+// the same terms as a class, and nothing else became one.
+
+/// The unit every interface case resolves against: one interface with the three
+/// member shapes whose recorded modifiers differ, and one that extends it.
+fn addInterfaceProviders(index: *semidx.Index) !void {
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Shape.java",
+        .java,
+        \\package lib;
+        \\
+        \\interface Shape {
+        \\    String NAME = "shape";
+        \\
+        \\    String describe();
+        \\
+        \\    default String label() { return describe(); }
+        \\
+        \\    static Shape none() { return null; }
+        \\}
+        \\
+        ,
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Drawable.java",
+        .java,
+        \\package lib;
+        \\
+        \\interface Drawable extends Shape {
+        \\    static String make() { return null; }
+        \\}
+        \\
+        ,
+    );
+}
+
+test "a top-level interface is a definition with the labels a class carries" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addInterfaceProviders(&index);
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const shape = snapshot.findDefinition("module/src/main/java/lib/Shape.java", "Shape").?;
+    try testing.expectEqualStrings("interface", shape.identity.role);
+    try testing.expectEqual(@as(usize, 0), shape.identity.container_path.len);
+    try testing.expectEqualStrings("interface_declaration", shape.extension.get("java.construct").?);
+    try testing.expectEqualStrings("lib", shape.extension.get("java.package").?);
+    // An interface with no `extends` declares no supertypes, exactly as a class
+    // with no `extends` does; one that extends another declares them.
+    try testing.expectEqualStrings("none", shape.extension.get("java.supertypes").?);
+    const drawable = snapshot.findDefinition("module/src/main/java/lib/Drawable.java", "Drawable").?;
+    try testing.expectEqualStrings("declared", drawable.extension.get("java.supertypes").?);
+
+    // The interface introduces its methods, and only its methods: the constant
+    // is outside this coverage and is reported rather than left looking absent.
+    try testing.expectEqual(@as(usize, 3), snapshot.countRelationships(.{
+        .kind = .defines,
+        .source = shape.id,
+    }));
+
+    const describe = definitionIn(&snapshot, "module/src/main/java/lib/Shape.java", "Shape", "describe").?;
+    try testing.expectEqualStrings("method", describe.identity.role);
+    try testing.expectEqualStrings("Shape", describe.identity.container_path[0]);
+    try testing.expectEqualStrings("describe()", describe.identity.signature.?);
+    try testing.expectEqualStrings("String", describe.extension.get("java.return_type").?);
+
+    // The modifiers Java defines rather than the modifiers the source writes.
+    // A method with no access keyword is public here and package-private in a
+    // class, `default` changes neither answer, and only `static` is static.
+    const label = definitionIn(&snapshot, "module/src/main/java/lib/Shape.java", "Shape", "label").?;
+    const none = definitionIn(&snapshot, "module/src/main/java/lib/Shape.java", "Shape", "none").?;
+    try testing.expectEqualStrings("public", describe.extension.get("java.access").?);
+    try testing.expectEqualStrings("false", describe.extension.get("java.static").?);
+    try testing.expectEqualStrings("public", label.extension.get("java.access").?);
+    try testing.expectEqualStrings("false", label.extension.get("java.static").?);
+    try testing.expectEqualStrings("public", none.extension.get("java.access").?);
+    try testing.expectEqualStrings("true", none.extension.get("java.static").?);
+
+    // A method body inside an interface is read exactly as one inside a class:
+    // `label` calls the only `describe` its own type declares.
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .calls,
+        .source = label.id,
+        .target = describe.id,
+        .resolution = .fact,
+    }));
+    // And the return type of a method of this unit's own interface resolves to
+    // it, which is the same local answer a class would get.
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = none.id,
+        .target = shape.id,
+        .resolution = .fact,
+    }));
+}
+
+test "a top-level interface reports no unsupported construct and the other type declarations still do" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Kinds.java",
+        .java,
+        \\package lib;
+        \\
+        \\interface Admitted {}
+        \\
+        \\enum Colour { RED }
+        \\
+        \\record Point(int x, int y) {}
+        \\
+        \\@interface Marker {}
+        \\
+        ,
+    );
+    // A member interface is not a top-level declaration. It keeps the treatment
+    // every other member type has: reported unsupported, and still claiming its
+    // name against the enclosing class.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Outer.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Outer {
+        \\    Nested nested;
+        \\
+        \\    interface Nested {}
+        \\}
+        \\
+        ,
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    try testing.expect(snapshot.findDefinition("module/src/main/java/lib/Kinds.java", "Admitted") != null);
+    try testing.expect(snapshot.findDefinition("module/src/main/java/lib/Kinds.java", "Colour") == null);
+    try testing.expect(snapshot.findDefinition("module/src/main/java/lib/Kinds.java", "Point") == null);
+    try testing.expect(snapshot.findDefinition("module/src/main/java/lib/Kinds.java", "Marker") == null);
+    try testing.expect(snapshot.findDefinition("module/src/main/java/lib/Outer.java", "Nested") == null);
+
+    var seen_interface = false;
+    var seen = [_]bool{ false, false, false };
+    const remaining = [_][]const u8{ "enum_declaration", "record_declaration", "annotation_type_declaration" };
+    for (snapshot.diagnostics) |diagnostic| {
+        if (diagnostic.kind != .unsupported_construct) continue;
+        if (std.mem.indexOf(u8, diagnostic.message, "`interface_declaration` at the top level") != null) {
+            seen_interface = true;
+        }
+        for (remaining, 0..) |kind, at| {
+            if (std.mem.indexOf(u8, diagnostic.message, kind) != null) seen[at] = true;
+        }
+    }
+    try testing.expect(!seen_interface);
+    for (seen) |reported| try testing.expect(reported);
+
+    // The member interface still gives its name another meaning, so the field
+    // type stays unresolved rather than reaching a declaration.
+    const outer = snapshot.findDefinition("module/src/main/java/lib/Outer.java", "Outer").?;
+    try expectExplanation(try referenceFrom(&snapshot, outer.id, "Nested"), "member type");
+}
+
+test "a static call to an interface is decided by the conditions a class is decided by" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addInterfaceProviders(&index);
+
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Caller.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Caller {
+        \\    void covered() { Shape.none(); }
+        \\    void notStatic() { Shape.describe(); }
+        \\    void missingMethod() { Shape.absent(); }
+        \\    void targetHasSupertypes() { Drawable.make(); }
+        \\}
+        \\
+        ,
+    );
+    // Another package reaching the interface by single-type import, which is
+    // the same route a class is reached by.
+    _ = try index.addUnit(
+        "module/src/main/java/app/Importer.java",
+        .java,
+        \\package app;
+        \\
+        \\import lib.Shape;
+        \\
+        \\class Importer {
+        \\    void covered() { Shape.none(); }
+        \\}
+        \\
+        ,
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const none: StaticTarget = .{
+        .path = "module/src/main/java/lib/Shape.java",
+        .class = "Shape",
+        .method = "none",
+    };
+    const cases = [_]StaticCall{
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "covered",
+            .call = "Shape.none()",
+            .expect = .{ .fact = none },
+        },
+        .{
+            .path = "module/src/main/java/app/Importer.java",
+            .class = "Importer",
+            .method = "covered",
+            .call = "Shape.none()",
+            .expect = .{ .fact = none },
+        },
+        // An interface method is public, so access never declines it; what
+        // declines it is the modifier the source did not write.
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "notStatic",
+            .call = "Shape.describe()",
+            .designator = .{ .name = "describe", .qualifier = "Shape" },
+            .expect = .{ .unresolved = "is not static" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "missingMethod",
+            .call = "Shape.absent()",
+            .expect = .{ .unresolved = "no method of this name" },
+        },
+        // An interface that extends another may inherit a method of the name,
+        // and the guard reads that from the same label a class carries.
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "targetHasSupertypes",
+            .call = "Drawable.make()",
+            .expect = .{ .unresolved = "supertypes" },
+        },
+    };
+    for (cases) |case| try expectStaticCall(&snapshot, case);
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "a simple name reaches an interface another unit declares in the same package" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addInterfaceProviders(&index);
+
+    const user = try index.addUnit("module/src/main/java/lib/User.java", .java,
+        \\package lib;
+        \\
+        \\class User {
+        \\    Shape shape;
+        \\}
+        \\
+    );
+    // The same name in another source root is another scope, for an interface
+    // exactly as for a class.
+    _ = try index.addUnit("other/src/main/java/lib/Outsider.java", .java,
+        \\package lib;
+        \\
+        \\class Outsider {
+        \\    Shape shape;
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const shape = snapshot.findDefinition("module/src/main/java/lib/Shape.java", "Shape").?;
+    const class = snapshot.findDefinition("module/src/main/java/lib/User.java", "User").?;
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = class.id,
+        .target = shape.id,
+        .resolution = .fact,
+    }));
+    // Reading it declares the dependency that keeps the fact current, the same
+    // declaration a resolved class name makes.
+    try testing.expect(index.graph.dependencies.count() > 0);
+    var declared = false;
+    for (index.graph.dependencies.declarations.items) |declaration| {
+        if (declaration.dependent == user) declared = true;
+    }
+    try testing.expect(declared);
+
+    const outsider = snapshot.findDefinition("other/src/main/java/lib/Outsider.java", "Outsider").?;
+    try expectExplanation(
+        try referenceFrom(&snapshot, outsider.id, "Shape"),
+        "source root this unit can see",
+    );
+}
+
+test "an interface constant obscures a receiver name exactly as a class field does" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addStaticCallProviders(&index);
+
+    // `Util` is a class declaring a static `make`. Inside an interface that
+    // binds `Util` to a constant, the receiver is a value and not that class.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Holder.java",
+        .java,
+        \\package lib;
+        \\
+        \\interface Holder {
+        \\    String Util = "shadow";
+        \\
+        \\    default String call() { return Util.make(); }
+        \\}
+        \\
+        ,
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    // The constant gives the name a type, and that type is `String`, which no
+    // indexed unit declares — so the call is still not `Util.make`, and it says
+    // which of the two reasons it is.
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Holder.java",
+        .class = "Holder",
+        .method = "call",
+        .call = "Util.make()",
+        .expect = .{ .unresolved = "the receiver's declared type `String` is not read as a type" },
+    });
+}
+
+// -- Plan 014 Stage 2: a declared supertype is a recorded claim ---------------
+
+const hierarchy = semidx.frontends.java_hierarchy;
+
+/// A chain of `links` classes, each extending the next, the last extending
+/// nothing. `D0` is the deepest reader.
+fn addChain(index: *semidx.Index, links: u32) !void {
+    var buffer: [128]u8 = undefined;
+    var body: [128]u8 = undefined;
+    var at: u32 = 0;
+    while (at <= links) : (at += 1) {
+        const path = try std.fmt.bufPrint(&buffer, "module/src/main/java/lib/D{d}.java", .{at});
+        const source = if (at == links)
+            try std.fmt.bufPrint(&body, "package lib;\n\nclass D{d} {{}}\n", .{at})
+        else
+            try std.fmt.bufPrint(&body, "package lib;\n\nclass D{d} extends D{d} {{}}\n", .{ at, at + 1 });
+        _ = try index.addUnit(path, .java, source);
+    }
+}
+
+fn supertypeReferences(
+    snapshot: *const semidx.Snapshot,
+    source: model.EntityId,
+    gpa: std.mem.Allocator,
+) !std.ArrayList(model.Assertion) {
+    var found: std.ArrayList(model.Assertion) = .empty;
+    errdefer found.deinit(gpa);
+    var claims = snapshot.relationships(.{ .kind = .references, .source = source });
+    while (claims.next()) |claim| {
+        const words = switch (claim.resolution) {
+            .fact => |established| established.method,
+            .unresolved => |declined| declined.explanation,
+            .approximate => |guess| guess.basis,
+        };
+        if (!std.mem.startsWith(u8, words, "declared supertype: ")) continue;
+        try found.append(gpa, claim);
+    }
+    return found;
+}
+
+test "a declared supertype is a reference resolved in the declaring unit's scope" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("module/src/main/java/lib/Base.java", .java, "package lib;\n\nclass Base {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/Marker.java", .java, "package lib;\n\ninterface Marker {}\n");
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Mid.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Mid extends Base implements Marker {
+        \\    Base field;
+        \\}
+        \\
+        ,
+    );
+    // An interface writes its supertypes in a position a field lookup cannot
+    // reach, so this is the case a `superclass`-only reader would miss.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Drawable.java",
+        .java,
+        "package lib;\n\ninterface Drawable extends Marker {}\n",
+    );
+    _ = try index.addUnit("module/src/main/java/lib/Orphan.java", .java, "package lib;\n\nclass Orphan extends Absent {}\n");
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const base = snapshot.findDefinition("module/src/main/java/lib/Base.java", "Base").?;
+    const marker = snapshot.findDefinition("module/src/main/java/lib/Marker.java", "Marker").?;
+    const mid = snapshot.findDefinition("module/src/main/java/lib/Mid.java", "Mid").?;
+
+    var claims = try supertypeReferences(&snapshot, mid.id, testing.allocator);
+    defer claims.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 2), claims.items.len);
+
+    // Both are facts naming the type the declaring unit's own scope reaches,
+    // and each carries the range of the name it was read from — the header
+    // line, not the field on the line below it.
+    var reached_base = false;
+    var reached_marker = false;
+    for (claims.items) |claim| {
+        try testing.expect(claim.resolution.isFact());
+        try testing.expectEqual(@as(u32, 2), claim.evidence.?.range.start_row);
+        const target = claim.claim.relationship.target.entity;
+        if (target == base.id) reached_base = true;
+        if (target == marker.id) reached_marker = true;
+    }
+    try testing.expect(reached_base);
+    try testing.expect(reached_marker);
+
+    // The field type on the next line is a claim of its own. Since Stage 3 the
+    // guard above it lifts where the chain rules the name out, and here it
+    // does: `Base` and `Marker` are both closed and neither declares a member
+    // type called `Base`. The two claims are still separate claims, with
+    // separate ranges.
+    try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = mid.id,
+        .target = base.id,
+        .resolution = .fact,
+    }));
+
+    const drawable = snapshot.findDefinition("module/src/main/java/lib/Drawable.java", "Drawable").?;
+    var extends = try supertypeReferences(&snapshot, drawable.id, testing.allocator);
+    defer extends.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), extends.items.len);
+    try testing.expect(extends.items[0].resolution.isFact());
+    try testing.expectEqual(marker.id, extends.items[0].claim.relationship.target.entity);
+
+    // A supertype that resolves to nothing stays unresolved and keeps
+    // `resolveType`'s own words behind the prefix, which is what makes an open
+    // chain visible as a name rather than as an absence.
+    const orphan = snapshot.findDefinition("module/src/main/java/lib/Orphan.java", "Orphan").?;
+    var missing = try supertypeReferences(&snapshot, orphan.id, testing.allocator);
+    defer missing.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), missing.items.len);
+    try testing.expect(!missing.items[0].resolution.isFact());
+    try testing.expectEqualStrings("Absent", missing.items[0].claim.relationship.target.designator.name);
+    try expectExplanation(missing.items[0], "no current top-level class of this name is declared in package `lib`");
+}
+
+test "the hierarchy projection reports a closed chain, an open one, a cycle and a depth cap" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("module/src/main/java/lib/Base.java", .java, "package lib;\n\nclass Base {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/Marker.java", .java, "package lib;\n\ninterface Marker {}\n");
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Mid.java",
+        .java,
+        "package lib;\n\nclass Mid extends Base implements Marker {}\n",
+    );
+    _ = try index.addUnit("module/src/main/java/lib/Leaf.java", .java, "package lib;\n\nclass Leaf extends Mid {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/Orphan.java", .java, "package lib;\n\nclass Orphan extends Absent {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/CycleA.java", .java, "package lib;\n\nclass CycleA extends CycleB {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/CycleB.java", .java, "package lib;\n\nclass CycleB extends CycleA {}\n");
+    // One link more than the cap admits.
+    try addChain(&index, hierarchy.max_depth + 1);
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    const graph = &index.graph;
+
+    var visited: std.ArrayList(model.EntityId) = .empty;
+    defer visited.deinit(testing.allocator);
+
+    // Closed: every link is a current fact naming a current top-level type, and
+    // the walk reports what it visited so a caller can depend on all of it.
+    const leaf = snapshot.findDefinition("module/src/main/java/lib/Leaf.java", "Leaf").?;
+    try testing.expect((try hierarchy.closureOf(graph, leaf.id, testing.allocator, &visited)).isClosed());
+    try testing.expectEqual(@as(usize, 4), visited.items.len);
+    try testing.expectEqual(leaf.id, visited.items[0]);
+    for ([_][2][]const u8{
+        .{ "module/src/main/java/lib/Mid.java", "Mid" },
+        .{ "module/src/main/java/lib/Base.java", "Base" },
+        .{ "module/src/main/java/lib/Marker.java", "Marker" },
+    }) |wanted| {
+        const id = snapshot.findDefinition(wanted[0], wanted[1]).?.id;
+        try testing.expect(std.mem.indexOfScalar(model.EntityId, visited.items, id) != null);
+    }
+
+    // A type that declares nothing is closed with itself alone.
+    visited.clearRetainingCapacity();
+    const base = snapshot.findDefinition("module/src/main/java/lib/Base.java", "Base").?;
+    try testing.expect((try hierarchy.closureOf(graph, base.id, testing.allocator, &visited)).isClosed());
+    try testing.expectEqual(@as(usize, 1), visited.items.len);
+
+    const cases = [_]struct {
+        path: []const u8,
+        name: []const u8,
+        reason: hierarchy.OpenReason,
+    }{
+        .{ .path = "module/src/main/java/lib/Orphan.java", .name = "Orphan", .reason = .supertype_unresolved },
+        .{ .path = "module/src/main/java/lib/CycleA.java", .name = "CycleA", .reason = .cycle },
+        .{ .path = "module/src/main/java/lib/D0.java", .name = "D0", .reason = .depth_cap },
+    };
+    for (cases) |case| {
+        visited.clearRetainingCapacity();
+        const start = snapshot.findDefinition(case.path, case.name).?;
+        const outcome = try hierarchy.closureOf(graph, start.id, testing.allocator, &visited);
+        switch (outcome) {
+            .closed => {
+                std.debug.print("{s} was closed, expected {s}\n", .{ case.name, case.reason.tag() });
+                return error.TestExpectedOpenChain;
+            },
+            .open => |reason| try testing.expectEqual(case.reason, reason),
+        }
+    }
+
+    // A chain exactly at the cap is closed; the one link past it is not.
+    visited.clearRetainingCapacity();
+    const first_under = snapshot.findDefinition("module/src/main/java/lib/D2.java", "D2").?;
+    try testing.expect((try hierarchy.closureOf(graph, first_under.id, testing.allocator, &visited)).isClosed());
+}
+
+test "an edit that breaks a link closes and opens the chain that reads it" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+
+    try tree.write("src/main/java/lib/Base.java", "package lib;\n\nclass Base {}\n");
+    try tree.write("src/main/java/lib/Mid.java", "package lib;\n\nclass Mid extends Base {}\n");
+    try tree.write("src/main/java/lib/Leaf.java", "package lib;\n\nclass Leaf extends Mid {}\n");
+    _ = try tree.rescan();
+
+    var visited: std.ArrayList(model.EntityId) = .empty;
+    defer visited.deinit(testing.allocator);
+
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        const leaf = snapshot.findDefinition("src/main/java/lib/Leaf.java", "Leaf").?;
+        try testing.expect((try hierarchy.closureOf(&tree.index.graph, leaf.id, testing.allocator, &visited)).isClosed());
+    }
+
+    // Break the middle of the chain. Nothing about `Leaf` changed, and the
+    // projection is re-read from the graph, so the chain it reports opens.
+    try tree.write("src/main/java/lib/Mid.java", "package lib;\n\nclass Mid extends Gone {}\n");
+    _ = try tree.rescan();
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    const leaf = after.findDefinition("src/main/java/lib/Leaf.java", "Leaf").?;
+    visited.clearRetainingCapacity();
+    const outcome = try hierarchy.closureOf(&tree.index.graph, leaf.id, testing.allocator, &visited);
+    switch (outcome) {
+        .closed => return error.TestExpectedOpenChain,
+        .open => |reason| try testing.expectEqual(hierarchy.OpenReason.supertype_unresolved, reason),
+    }
+}
+
+// -- Plan 014 Stage 3: the guard lifts only on a closed chain -----------------
+
+// The cases [Follow-up 013](../docs/followups/013_java_supertype_guard_relaxation.md)
+// named as required before the guard could be relaxed at all.
+
+/// A unit of `lib` whose class extends `Base` and reads `Helper` as a field
+/// type, a receiver, and an unqualified call.
+fn chainReader(name: []const u8, extends: []const u8, gpa: std.mem.Allocator) ![]u8 {
+    return std.fmt.allocPrint(gpa,
+        \\package lib;
+        \\
+        \\class {s} extends {s} {{
+        \\    Helper field;
+        \\    void read() {{ Helper.make(); }}
+        \\    void own() {{}}
+        \\    void call() {{ own(); }}
+        \\}}
+        \\
+    , .{ name, extends });
+}
+
+test "a chain closed in indexed source lifts the guard on all three of its sides" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Helper.java",
+        .java,
+        "package lib;\n\nclass Helper {\n    public static String make() { return null; }\n}\n",
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Root.java",
+        .java,
+        "package lib;\n\nclass Root {\n    public String only() { return null; }\n}\n",
+    );
+    _ = try index.addUnit("module/src/main/java/lib/Base.java", .java, "package lib;\n\nclass Base extends Root {}\n");
+
+    const reader = try chainReader("Reader", "Base", testing.allocator);
+    defer testing.allocator.free(reader);
+    _ = try index.addUnit("module/src/main/java/lib/Reader.java", .java, reader);
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const helper = snapshot.findDefinition("module/src/main/java/lib/Helper.java", "Helper").?;
+    const class = snapshot.findDefinition("module/src/main/java/lib/Reader.java", "Reader").?;
+
+    // The reference side: the field type resolves, because nothing `Reader`
+    // reaches declares a member type called `Helper`.
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = class.id,
+        .target = helper.id,
+        .resolution = .fact,
+    }));
+    // The receiver side: the static call resolves, because nothing it reaches
+    // declares a field called `Helper`.
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Reader.java",
+        .class = "Reader",
+        .method = "read",
+        .call = "Helper.make()",
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Helper.java",
+            .class = "Helper",
+            .method = "make",
+        } },
+    });
+    // The unqualified side: the call resolves, because nothing it reaches
+    // declares a method called `own`.
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Reader.java",
+        .class = "Reader",
+        .method = "call",
+        .call = "own()",
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Reader.java",
+            .class = "Reader",
+            .method = "own",
+        } },
+    });
+
+    // Reading the chain is a dependency on every unit in it, not only on the
+    // one the name was written for.
+    var providers: usize = 0;
+    const reader_unit = snapshot.unitByPath("module/src/main/java/lib/Reader.java").?.id;
+    for (index.graph.dependencies.declarations.items) |declaration| {
+        if (declaration.dependent == reader_unit) providers += 1;
+    }
+    try testing.expect(providers >= 3);
+}
+
+test "every condition that leaves a chain open keeps the guard and names itself" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Helper.java",
+        .java,
+        "package lib;\n\nclass Helper {\n    public static String make() { return null; }\n}\n",
+    );
+    // A supertype nothing indexed declares — the case of an interface with no
+    // source in the working copy.
+    _ = try index.addUnit("module/src/main/java/lib/Absent.java", .java, "package lib;\n\nclass Absent {}\n");
+    _ = try index.addUnit(
+        "module/src/main/java/lib/OpenAbove.java",
+        .java,
+        "package lib;\n\nclass OpenAbove extends Gone {}\n",
+    );
+    // A member type of the referenced name anywhere in the chain.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Shadowing.java",
+        .java,
+        "package lib;\n\nclass Shadowing {\n    class Helper {}\n}\n",
+    );
+    // A field of the receiver's name anywhere in the chain.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Binding.java",
+        .java,
+        "package lib;\n\nclass Binding {\n    String Helper;\n}\n",
+    );
+    // A method of the invoked name anywhere in the chain.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Owning.java",
+        .java,
+        "package lib;\n\nclass Owning {\n    void own() {}\n}\n",
+    );
+    _ = try index.addUnit("module/src/main/java/lib/CycleA.java", .java, "package lib;\n\nclass CycleA extends CycleB {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/CycleB.java", .java, "package lib;\n\nclass CycleB extends CycleA {}\n");
+
+    const readers = [_][2][]const u8{
+        .{ "Unindexed", "Missing" },
+        .{ "AboveOpen", "OpenAbove" },
+        .{ "Shadowed", "Shadowing" },
+        .{ "Bound", "Binding" },
+        .{ "Owner", "Owning" },
+        .{ "Cyclic", "CycleA" },
+    };
+    for (readers) |reader| {
+        const source = try chainReader(reader[0], reader[1], testing.allocator);
+        defer testing.allocator.free(source);
+        const path = try std.fmt.allocPrint(
+            testing.allocator,
+            "module/src/main/java/lib/{s}.java",
+            .{reader[0]},
+        );
+        defer testing.allocator.free(path);
+        _ = try index.addUnit(path, .java, source);
+    }
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    // What each side asks about is different, so a type in the chain that
+    // claims the name for one of them leaves the other two alone. That is the
+    // property a single collapsed reason would hide.
+    const Side = union(enum) { fact, declines: []const u8 };
+    const cases = [_]struct {
+        class: []const u8,
+        reference: Side,
+        receiver: Side,
+        unqualified: Side,
+    }{
+        // Nothing indexed declares `Missing`, so the chain does not start.
+        .{
+            .class = "Unindexed",
+            .reference = .{ .declines = "one of them is not resolved" },
+            .receiver = .{ .declines = "one of them is not resolved" },
+            .unqualified = .{ .declines = "one of them is not resolved" },
+        },
+        // `OpenAbove` is indexed and its own chain is not closed.
+        .{
+            .class = "AboveOpen",
+            .reference = .{ .declines = "a supertype somewhere in its chain is not resolved" },
+            .receiver = .{ .declines = "a supertype somewhere in its chain is not resolved" },
+            .unqualified = .{ .declines = "a supertype somewhere in its chain is not resolved" },
+        },
+        // A member type of the name: only the reference side asks about one,
+        // and the receiver inherits its answer through `resolveType`.
+        .{
+            .class = "Shadowed",
+            .reference = .{ .declines = "supertype chain declares a member type of this name" },
+            .receiver = .{ .declines = "supertype chain declares a member type of this name" },
+            .unqualified = .fact,
+        },
+        // A field of the receiver's name: only the receiver side asks.
+        .{
+            .class = "Bound",
+            .reference = .fact,
+            .receiver = .{ .declines = "supertype chain declares a field of this name" },
+            .unqualified = .fact,
+        },
+        // A method of the invoked name: only the unqualified side asks.
+        .{
+            .class = "Owner",
+            .reference = .fact,
+            .receiver = .fact,
+            .unqualified = .{ .declines = "supertype chain declares a method of this name" },
+        },
+        .{
+            .class = "Cyclic",
+            .reference = .{ .declines = "its declared chain contains a cycle" },
+            .receiver = .{ .declines = "its declared chain contains a cycle" },
+            .unqualified = .{ .declines = "its declared chain contains a cycle" },
+        },
+    };
+
+    const helper = snapshot.findDefinition("module/src/main/java/lib/Helper.java", "Helper").?;
+    for (cases) |case| {
+        const path = try std.fmt.allocPrint(
+            testing.allocator,
+            "module/src/main/java/lib/{s}.java",
+            .{case.class},
+        );
+        defer testing.allocator.free(path);
+        const class = snapshot.findDefinition(path, case.class).?;
+
+        switch (case.reference) {
+            .fact => try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+                .kind = .references,
+                .source = class.id,
+                .target = helper.id,
+                .resolution = .fact,
+            })),
+            .declines => |fragment| try expectExplanation(
+                try referenceFrom(&snapshot, class.id, "Helper"),
+                fragment,
+            ),
+        }
+        try expectStaticCall(&snapshot, .{
+            .path = path,
+            .class = case.class,
+            .method = "read",
+            .call = "Helper.make()",
+            .expect = switch (case.receiver) {
+                .fact => .{ .fact = .{
+                    .path = "module/src/main/java/lib/Helper.java",
+                    .class = "Helper",
+                    .method = "make",
+                } },
+                .declines => |fragment| .{ .unresolved = fragment },
+            },
+        });
+        try expectStaticCall(&snapshot, .{
+            .path = path,
+            .class = case.class,
+            .method = "call",
+            .call = "own()",
+            .expect = switch (case.unqualified) {
+                .fact => .{ .fact = .{ .path = path, .class = case.class, .method = "own" } },
+                .declines => |fragment| .{ .unresolved = fragment },
+            },
+        });
+    }
+
+    // Whatever else moves, no Java answer is ever a confidence, and the cycle
+    // above returned rather than hung.
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "adding and removing a supertype anywhere in a chain reanalyzes the reader" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+
+    try tree.write(
+        "src/main/java/lib/Helper.java",
+        "package lib;\n\nclass Helper {\n    public static String make() { return null; }\n}\n",
+    );
+    try tree.write("src/main/java/lib/Root.java", "package lib;\n\nclass Root {}\n");
+    try tree.write("src/main/java/lib/Base.java", "package lib;\n\nclass Base extends Root {}\n");
+    const reader = try chainReader("Reader", "Base", testing.allocator);
+    defer testing.allocator.free(reader);
+    try tree.write("src/main/java/lib/Reader.java", reader);
+    _ = try tree.rescan();
+
+    const reader_path = "src/main/java/lib/Reader.java";
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        const class = snapshot.findDefinition(reader_path, "Reader").?;
+        const helper = snapshot.findDefinition("src/main/java/lib/Helper.java", "Helper").?;
+        try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+            .kind = .references,
+            .source = class.id,
+            .target = helper.id,
+            .resolution = .fact,
+        }));
+    }
+
+    // `Root` is two links above the reader and the reader never names it. Give
+    // it a supertype nothing declares: the chain opens, and the fact the reader
+    // recorded must stop being one.
+    try tree.write("src/main/java/lib/Root.java", "package lib;\n\nclass Root extends Gone {}\n");
+    _ = try tree.rescan();
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        const class = snapshot.findDefinition(reader_path, "Reader").?;
+        try expectExplanation(
+            try referenceFrom(&snapshot, class.id, "Helper"),
+            "a supertype somewhere in its chain is not resolved",
+        );
+    }
+
+    // Close it again by declaring what it names. Nothing about the reader or
+    // about `Root` changed this time; only a unit two links above appeared.
+    try tree.write("src/main/java/lib/Gone.java", "package lib;\n\nclass Gone {}\n");
+    _ = try tree.rescan();
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        const class = snapshot.findDefinition(reader_path, "Reader").?;
+        const helper = snapshot.findDefinition("src/main/java/lib/Helper.java", "Helper").?;
+        try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+            .kind = .references,
+            .source = class.id,
+            .target = helper.id,
+            .resolution = .fact,
+        }));
+    }
+
+    // And a member type appearing two links above takes it away again, which is
+    // the case a chain is walked to rule out.
+    try tree.write(
+        "src/main/java/lib/Root.java",
+        "package lib;\n\nclass Root extends Gone {\n    class Helper {}\n}\n",
+    );
+    _ = try tree.rescan();
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        const class = snapshot.findDefinition(reader_path, "Reader").?;
+        try expectExplanation(
+            try referenceFrom(&snapshot, class.id, "Helper"),
+            "supertype chain declares a member type of this name",
+        );
+    }
+}
+
+// -- Plan 014 Stage 5: a value receiver with a declared type ------------------
+
+// The cases [Follow-up 014](../docs/followups/014_java_instance_receiver_calls.md)
+// named as required, written against
+// [ADR 012](../docs/adr/012_java_value_receiver_calls.md).
+
+fn addValueReceiverProviders(index: *semidx.Index) !void {
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Other.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Other {
+        \\    public String make() { return null; }
+        \\    public String twice() { return null; }
+        \\    public String twice(String name) { return null; }
+        \\    String packaged() { return null; }
+        \\}
+        \\
+        ,
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Root.java",
+        .java,
+        "package lib;\n\nclass Root {\n    public String only() { return null; }\n}\n",
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Derived.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Derived extends Root {
+        \\    public String make() { return null; }
+        \\}
+        \\
+        ,
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Shady.java",
+        .java,
+        "package lib;\n\nclass Shady extends Absent {\n    public String make() { return null; }\n}\n",
+    );
+    // `only` is declared here and overridden from `Root`, so the chain closes
+    // and still rules nothing out: which of the two a call reaches is dispatch,
+    // and dispatch is not resolved.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Inheriting.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Inheriting extends Root {
+        \\    public String only() { return null; }
+        \\}
+        \\
+        ,
+    );
+}
+
+test "a receiver that is a value of a declared type names the method that type declares" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addValueReceiverProviders(&index);
+
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Caller.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Caller {
+        \\    Other asField;
+        \\    Caller self;
+        \\
+        \\    String own() { return null; }
+        \\
+        \\    void byField() { asField.make(); }
+        \\    void byParameter(Other value) { value.make(); }
+        \\    void byLocal() { Other value = null; value.make(); }
+        \\    void byThis() { this.own(); }
+        \\    void sameUnit() { self.own(); }
+        \\    void byCreation() { new Other().make(); }
+        \\    void byChain() { asField.make().trim(); }
+        \\    void bySuper() { super.toString(); }
+        \\    void overloaded(Other value) { value.twice(); }
+        \\    void inaccessible(Other value) { value.packaged(); }
+        \\    void missing(Other value) { value.absent(); }
+        \\    void unknownType(Absent value) { value.make(); }
+        \\    void targetChainClosed(Derived value) { value.make(); }
+        \\    void targetChainOpen(Shady value) { value.make(); }
+        \\    void targetInherits(Inheriting value) { value.only(); }
+        \\    void duplicated() {
+        \\        { Other value = null; value.make(); }
+        \\        { Caller value = null; value.own(); }
+        \\    }
+        \\    void nested() { Runnable task = new Runnable() { public void run() { Other value = null; value.make(); } }; }
+        \\}
+        \\
+        ,
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const other_make: StaticTarget = .{
+        .path = "module/src/main/java/lib/Other.java",
+        .class = "Other",
+        .method = "make",
+    };
+    const own: StaticTarget = .{
+        .path = "module/src/main/java/lib/Caller.java",
+        .class = "Caller",
+        .method = "own",
+    };
+    const caller = "module/src/main/java/lib/Caller.java";
+    const cases = [_]StaticCall{
+        // Every covered introducer, and a type in another unit.
+        .{ .path = caller, .class = "Caller", .method = "byField", .call = "asField.make()", .expect = .{ .fact = other_make } },
+        .{ .path = caller, .class = "Caller", .method = "byParameter", .call = "value.make()", .expect = .{ .fact = other_make } },
+        .{ .path = caller, .class = "Caller", .method = "byLocal", .call = "value.make()", .expect = .{ .fact = other_make } },
+        // `this` names the enclosing type exactly.
+        .{ .path = caller, .class = "Caller", .method = "byThis", .call = "this.own()", .expect = .{ .fact = own } },
+        // A type this unit declares itself, reached through a field of it.
+        .{ .path = caller, .class = "Caller", .method = "sameUnit", .call = "self.own()", .expect = .{ .fact = own } },
+        // The target declares supertypes, and the chain rules the name out.
+        .{
+            .path = caller,
+            .class = "Caller",
+            .method = "targetChainClosed",
+            .call = "value.make()",
+            .expect = .{ .fact = .{
+                .path = "module/src/main/java/lib/Derived.java",
+                .class = "Derived",
+                .method = "make",
+            } },
+        },
+
+        // A receiver that is not a simple name carries no name to read, so
+        // creation, chaining and `super` are all declined before any binding is
+        // consulted. `super.m()` selects an inherited member, which is what the
+        // chain is never walked to do.
+        .{ .path = caller, .class = "Caller", .method = "byCreation", .call = "new Other().make()", .expect = .{ .unresolved = "a receiver this frontend does not resolve" } },
+        .{ .path = caller, .class = "Caller", .method = "byChain", .call = "asField.make().trim()", .expect = .{ .unresolved = "a receiver this frontend does not resolve" } },
+        .{ .path = caller, .class = "Caller", .method = "bySuper", .call = "super.toString()", .expect = .{ .unresolved = "a receiver this frontend does not resolve" } },
+
+        // Each remaining condition, with its own reason.
+        .{ .path = caller, .class = "Caller", .method = "overloaded", .call = "value.twice()", .expect = .{ .unresolved = "are declared by the receiver's declared type" } },
+        .{ .path = caller, .class = "Caller", .method = "inaccessible", .call = "value.packaged()", .expect = .{ .unresolved = "outside the access this frontend resolves through a value receiver" } },
+        .{ .path = caller, .class = "Caller", .method = "missing", .call = "value.absent()", .expect = .{ .unresolved = "is declared by the receiver's declared type" } },
+        .{ .path = caller, .class = "Caller", .method = "unknownType", .call = "value.make()", .expect = .{ .unresolved = "is not read as a type" } },
+        .{ .path = caller, .class = "Caller", .method = "targetChainOpen", .call = "value.make()", .expect = .{ .unresolved = "declares supertypes and" } },
+        .{ .path = caller, .class = "Caller", .method = "targetInherits", .call = "value.only()", .expect = .{ .unresolved = "supertype chain declares a method of this name" } },
+        .{ .path = caller, .class = "Caller", .method = "nested", .call = "value.make()", .expect = .{ .unresolved = "class body declared in the method" } },
+    };
+    for (cases) |case| try expectStaticCall(&snapshot, case);
+
+    // Two locals of one name in two blocks are two bindings, each reaching its
+    // own type. A rule that poisoned the name on the duplicate would decline
+    // both; a rule that took the first would name the wrong method.
+    const duplicated = definitionIn(&snapshot, caller, "Caller", "duplicated").?;
+    var seen_other = false;
+    var seen_own = false;
+    var calls = snapshot.relationships(.{ .kind = .calls, .source = duplicated.id });
+    while (calls.next()) |call| {
+        try testing.expectEqual(model.ResolutionCategory.fact, call.resolution.category());
+        const target = call.claim.relationship.target.entity;
+        if (target == definitionIn(&snapshot, "module/src/main/java/lib/Other.java", "Other", "make").?.id) seen_other = true;
+        if (target == definitionIn(&snapshot, caller, "Caller", "own").?.id) seen_own = true;
+    }
+    try testing.expect(seen_other and seen_own);
+
+    // A value receiver names no scope, so nothing it declines carries a
+    // qualifier: the source wrote a variable, not a type.
+    var declines = snapshot.relationships(.{ .kind = .calls, .resolution = .unresolved });
+    while (declines.next()) |call| {
+        const explanation = call.resolution.unresolved.explanation;
+        if (std.mem.indexOf(u8, explanation, "receiver's declared type") == null) continue;
+        try testing.expect(call.claim.relationship.target.designator.qualifier == null);
+    }
+
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "a provider edit decides what a value-receiver call may claim" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+
+    try tree.write(
+        "src/main/java/lib/Other.java",
+        "package lib;\n\nclass Other {\n    public String make() { return null; }\n}\n",
+    );
+    try tree.write(
+        "src/main/java/lib/Caller.java",
+        "package lib;\n\nclass Caller {\n    void run(Other value) { value.make(); }\n}\n",
+    );
+    _ = try tree.rescan();
+
+    const caller_path = "src/main/java/lib/Caller.java";
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        try expectStaticCall(&snapshot, .{
+            .path = caller_path,
+            .class = "Caller",
+            .method = "run",
+            .call = "value.make()",
+            .expect = .{ .fact = .{
+                .path = "src/main/java/lib/Other.java",
+                .class = "Other",
+                .method = "make",
+            } },
+        });
+    }
+
+    // An overload appears in the provider. Nothing about the caller changed,
+    // and its fact must stop being one.
+    try tree.write(
+        "src/main/java/lib/Other.java",
+        "package lib;\n\nclass Other {\n    public String make() { return null; }\n" ++
+            "    public String make(String name) { return null; }\n}\n",
+    );
+    _ = try tree.rescan();
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        try expectStaticCall(&snapshot, .{
+            .path = caller_path,
+            .class = "Caller",
+            .method = "run",
+            .call = "value.make()",
+            .expect = .{ .unresolved = "are declared by the receiver's declared type" },
+        });
+    }
+
+    // The provider gains a supertype instead. The class shape changed, not the
+    // method, and the caller has to hear about that too.
+    try tree.write(
+        "src/main/java/lib/Other.java",
+        "package lib;\n\nclass Other extends Gone {\n    public String make() { return null; }\n}\n",
+    );
+    _ = try tree.rescan();
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        try expectStaticCall(&snapshot, .{
+            .path = caller_path,
+            .class = "Caller",
+            .method = "run",
+            .call = "value.make()",
+            .expect = .{ .unresolved = "declares supertypes and" },
+        });
+    }
+}
+
+// -- Plan 013 Stage 1: a designator is a structured name ---------------------
+
+/// The claim of `kind` from `source` whose designator holds `name`, or an error
+/// naming what was looked for. It anchors on the name, because that is the key
+/// the designator index holds.
+fn designatedClaim(
+    snapshot: *const semidx.Snapshot,
+    source: model.EntityId,
+    kind: model.RelationshipKind,
+    name: []const u8,
+) !model.Assertion {
+    var found = snapshot.relationships(.{ .kind = kind, .source = source, .designator = name });
+    return found.next() orelse {
+        std.debug.print("no {t} designating `{s}`\n", .{ kind, name });
+        return error.TestExpectedRelationship;
+    };
+}
+
+fn expectDesignator(
+    assertion: model.Assertion,
+    expected: model.Designator,
+    evidence_text: []const u8,
+) !void {
+    const recorded = assertion.claim.relationship.target.designator;
+    try testing.expectEqualStrings(expected.name, recorded.name);
+    if (expected.qualifier) |qualifier| {
+        try testing.expectEqualStrings(qualifier, recorded.qualifier orelse {
+            std.debug.print("`{s}` recorded no qualifier, expected `{s}`\n", .{ recorded.name, qualifier });
+            return error.TestExpectedQualifier;
+        });
+    } else if (recorded.qualifier) |unwanted| {
+        std.debug.print("`{s}` recorded qualifier `{s}`, expected none\n", .{ recorded.name, unwanted });
+        return error.TestUnexpectedQualifier;
+    }
+    // The written form is the evidence, with the range that locates it. Where
+    // the source wrote more than a bare name the two are different strings, and
+    // that difference is what [ADR 010](../docs/adr/010_designator_is_a_structured_name.md)
+    // is: a name in the graph, the text in the evidence.
+    try testing.expectEqualStrings(evidence_text, assertion.evidence.?.text);
+}
+
+test "a java designator is the invoked name, and the receiver expression stays in the evidence" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/Caller.java", .java,
+        \\package demo;
+        \\
+        \\class Caller {
+        \\    Helper helper;
+        \\    void run() {
+        \\        helper.describe(1, 2);
+        \\        missing(1, 2);
+        \\    }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const caller = snapshot.findDefinition("demo/Caller.java", "Caller").?;
+    const run = snapshot.findDefinition("demo/Caller.java", "run").?;
+
+    // A receiver this frontend reads as a value names no scope, so the claim
+    // carries the method name alone.
+    const through_value = try designatedClaim(&snapshot, run.id, .calls, "describe");
+    try expectDesignator(through_value, .{ .name = "describe" }, "helper.describe(1, 2)");
+    try testing.expect(!through_value.resolution.isFact());
+
+    // An unqualified invocation was already a name, and its evidence is now the
+    // invocation rather than a copy of that name.
+    const unqualified = try designatedClaim(&snapshot, run.id, .calls, "missing");
+    try expectDesignator(unqualified, .{ .name = "missing" }, "missing(1, 2)");
+
+    // A type reference is outside this rewrite and keeps the name as written.
+    const field_type = try designatedClaim(&snapshot, caller.id, .references, "Helper");
+    try expectDesignator(field_type, .{ .name = "Helper" }, "Helper");
+}
+
+test "a java designator carries the class where the receiver was established as one" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/Util.java", .java,
+        \\package demo;
+        \\
+        \\public class Util {
+        \\    public static void twice() {}
+        \\    public static void twice(String name) {}
+        \\}
+        \\
+    );
+    _ = try index.addUnit("demo/Caller.java", .java,
+        \\package demo;
+        \\
+        \\class Caller {
+        \\    void run() {
+        \\        Util.twice();
+        \\    }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const run = snapshot.findDefinition("demo/Caller.java", "run").?;
+    const overloaded = try designatedClaim(&snapshot, run.id, .calls, "twice");
+    // The class was established; only the method choice failed. The class is a
+    // name the source wrote, so it is recorded as one.
+    try expectDesignator(overloaded, .{ .name = "twice", .qualifier = "Util" }, "Util.twice()");
+    try expectExplanation(overloaded, "overloads are not resolved");
+}
+
+test "a zig designator is the member name, qualified only by an import path" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/calls.zig", .zig,
+        \\const std = @import("std");
+        \\
+        \\pub fn run(self: *@This()) void {
+        \\    std.debug.print("x", .{});
+        \\    self.bucket();
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const run = snapshot.findDefinition("demo/calls.zig", "run").?;
+
+    const through_import = try designatedClaim(&snapshot, run.id, .calls, "print");
+    try expectDesignator(through_import, .{ .name = "print", .qualifier = "std.debug" }, "std.debug.print");
+
+    // `self` is a parameter, so the path is rooted in a value and names no
+    // scope this frontend may claim the source wrote.
+    const through_value = try designatedClaim(&snapshot, run.id, .calls, "bucket");
+    try expectDesignator(through_value, .{ .name = "bucket" }, "self.bucket");
+}
+
+test "a clojure designator is the symbol's name, qualified by its namespace" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/join.clj", .clojure,
+        \\(ns demo.join)
+        \\(defn run [xs]
+        \\  (str/join "," xs))
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const run = snapshot.findDefinition("demo/join.clj", "run").?;
+    const qualified = try designatedClaim(&snapshot, run.id, .calls, "join");
+    try expectDesignator(qualified, .{ .name = "join", .qualifier = "str" }, "str/join");
+}
+
+test "two call sites naming one method share one designator key" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/Twin.java", .java,
+        \\package demo;
+        \\
+        \\class Twin {
+        \\    Helper one;
+        \\    Helper two;
+        \\    void first() {
+        \\        one.describe(1);
+        \\    }
+        \\    void second() {
+        \\        two.describe(2, 3);
+        \\    }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    // Two invocations, two receivers, two spans of source text — and one name,
+    // which is what a definition of that name can be asked by. Before ADR 010
+    // these were two keys and this count was 1.
+    try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{
+        .kind = .calls,
+        .designator = "describe",
+        .resolution = .unresolved,
+    }));
+}
+
+test "the fixture corpus records the same facts it did before designators became names" {
+    var index = try semidx.Index.init(testing.allocator, build_options.fixtures_dir);
+    defer index.deinit();
+
+    var root = try std.Io.Dir.cwd().openDir(testing.io, build_options.fixtures_dir, .{ .iterate = true, .follow_symlinks = false });
+    defer root.close(testing.io);
+    var found = try semidx.source.discovery.scanDir(testing.allocator, testing.io, root, build_options.fixtures_dir, .{});
+    defer found.deinit();
+    _ = try index.applyScan(found);
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    // ADR 010 required these to be identical before and after it: that stage
+    // changed what a claim says its target is called, and nothing about what is
+    // a fact.
+    //
+    // [ADR 011](../docs/adr/011_java_hierarchy_from_indexed_source.md) moved
+    // them, and only by adding `java/Shape.java` to the corpus. Admitting
+    // interfaces moved nothing that was already here: with the frontend changed
+    // and the fixture absent the totals were still 134, 465, 396, 69, 0 and 54.
+    // With the fixture the delta is exactly what one interface declaring three
+    // methods contributes — 5 existence claims (the file and four definitions),
+    // 1 `contains`, 4 `defines`, 3 `references` (two `String` return types
+    // unresolved, `none`'s own `Shape` a local fact), 1 `calls` (`label` calls
+    // `describe`), and 4 identity correspondences for `Greeter.java`, which is
+    // reanalyzed because package `demo` gained an export.
+    //
+    // Diagnostics do not move, and that is the point of the fixture: a
+    // top-level interface no longer reports an unsupported construct.
+    //
+    // Stage 2 moved them again, and again only by adding a fixture. With
+    // supertype claims emitted and `java/Circle.java` absent the totals were
+    // still 138, 483, 412, 71, 0 and 54 — every existing answer byte-identical,
+    // which is what that stage had to prove. `Circle.java` then adds one class
+    // implementing an interface its own unit declares: 5 existence claims,
+    // 1 `contains`, 4 `defines`, 3 `references` (the supertype a local fact,
+    // two `String` return types unresolved), and 4 identity correspondences.
+    try testing.expectEqual(@as(usize, 142), snapshot.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 500), snapshot.assertions.len);
+    try testing.expectEqual(@as(usize, 427), snapshot.countAssertions(.{ .resolution = .fact }));
+    try testing.expectEqual(@as(usize, 73), snapshot.countUnresolvedAssertions());
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+    try testing.expectEqual(@as(usize, 54), snapshot.diagnostics.len);
+
+    // The corpus now carries a closed hierarchy, so the projection is exercised
+    // by whatever indexes the fixtures rather than only by a written tree.
+    const circle = snapshot.findDefinition("java/Circle.java", "Circle").?;
+    var visited: std.ArrayList(model.EntityId) = .empty;
+    defer visited.deinit(testing.allocator);
+    try testing.expect((try hierarchy.closureOf(&index.graph, circle.id, testing.allocator, &visited)).isClosed());
+    try testing.expectEqual(@as(usize, 2), visited.items.len);
+    try testing.expectEqual(snapshot.findDefinition("java/Circle.java", "Drawable").?.id, visited.items[1]);
 }

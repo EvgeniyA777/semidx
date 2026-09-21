@@ -13,6 +13,8 @@ const ts = @import("semidx_tree_sitter");
 
 pub const java = @import("java.zig");
 pub const java_packages = @import("java_packages.zig");
+pub const java_members = @import("java_members.zig");
+pub const java_hierarchy = @import("java_hierarchy.zig");
 pub const clojure = @import("clojure.zig");
 pub const zig = @import("zig.zig");
 
@@ -52,6 +54,10 @@ pub const Analyzer = struct {
     /// unit's context is built from its own package rather than from the whole
     /// repository. Meaningful for the one graph this analyzer indexes into.
     java_packages: java_packages.Packages,
+    /// Which units have read which `Class.method` pair, so a provider edit
+    /// reaches the callers it can change without reanalyzing a package.
+    /// Populated by the Java frontend's readers; a superset, never an answer.
+    java_members: java_members.Members,
 
     pub const default_budget: ts.Budget = .{ .max_bytes = 8 << 20 };
 
@@ -62,6 +68,7 @@ pub const Analyzer = struct {
             .budget = budget,
             .invocations = 0,
             .java_packages = java_packages.Packages.init(gpa),
+            .java_members = java_members.Members.init(gpa),
         };
     }
 
@@ -71,6 +78,7 @@ pub const Analyzer = struct {
             slot.* = null;
         }
         self.java_packages.deinit();
+        self.java_members.deinit();
         self.* = undefined;
     }
 
@@ -220,7 +228,57 @@ pub const Analyzer = struct {
         // Remember where this unit reads from even when nothing resolves, so a
         // class appearing in an imported package later reaches the importer.
         try self.java_packages.noteImports(unit, imports);
-        return self.java_packages.context(graph, package, unit, source_root, imports, allocator);
+        var context = try self.java_packages.context(
+            graph,
+            package,
+            unit,
+            source_root,
+            imports,
+            allocator,
+        );
+
+        // What the unit writes after a `.` is both what it must be able to
+        // answer and what it must be reached for later. The pairs are recorded
+        // as read before anything is resolved, because the reader that most
+        // needs reaching is the one whose call resolves to nothing today.
+        // What the unit writes after a `.`, from both sides: the name itself
+        // where it may be a type, and the declared type of the binding where it
+        // is a value. Both are recorded as read before anything is resolved,
+        // because the reader that most needs reaching is the one whose call
+        // resolves to nothing today.
+        const named = try java.staticCallReceivers(allocator, root, bytes);
+        const valued = try java.valueReceiverPairs(allocator, root, bytes);
+        const receivers = try std.mem.concat(allocator, java.Receiver, &.{ named, valued });
+        for (receivers) |receiver| {
+            try self.java_members.noteReader(unit, receiver.class, receiver.method);
+        }
+        context.members = try java_members.membersFor(graph, context, receivers, allocator);
+
+        // The same shape, for the types this unit names as supertypes: the
+        // names are recorded as read before anything is resolved, so a unit
+        // whose chain is open today is reached when the type that closes it
+        // appears ([ADR 011](../../docs/adr/011_java_hierarchy_from_indexed_source.md), D7).
+        // A receiver's declared type needs its own chain answered too, so the
+        // names asked about are the supertypes this unit writes and the types
+        // its value receivers are declared with.
+        var asked: std.ArrayList([]const u8) = .empty;
+        try asked.appendSlice(allocator, try java.supertypeNames(allocator, root, bytes));
+        for (valued) |pair| {
+            if (std.mem.indexOfScalar(u8, pair.class, 0) != null) continue;
+            var seen = false;
+            for (asked.items) |name| {
+                if (std.mem.eql(u8, name, pair.class)) seen = true;
+            }
+            if (!seen) try asked.append(allocator, pair.class);
+        }
+        for (asked.items) |name| try self.java_members.noteTypeReader(unit, name);
+        context.hierarchies = try java_hierarchy.hierarchiesFor(graph, context, asked.items, allocator);
+        // A reader depends on every type its walk can reach, not only on the
+        // one it named, so the whole closure is hinted too.
+        for (context.hierarchies) |reached| {
+            for (reached.types) |type_name| try self.java_members.noteTypeReader(unit, type_name);
+        }
+        return context;
     }
 
     /// Reanalyzes one source unit and applies the result to the graph.
@@ -640,8 +698,8 @@ test "a bare zig call resolves only to the unit's one top-level function of that
     }
     try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
 
-    try expectZigCallUnresolved(&snapshot, "main", "std.debug.print", "not a bare name");
-    try expectZigCallUnresolved(&snapshot, "main", "Shape.make", "not a top-level `@import` alias");
+    try expectZigCallUnresolved(&snapshot, "main", "print", "not a bare name");
+    try expectZigCallUnresolved(&snapshot, "main", "make", "not a top-level `@import` alias");
     try expectZigCallUnresolved(&snapshot, "main", "param", "local binding");
     try expectZigCallUnresolved(&snapshot, "main", "local", "local binding");
     try expectZigCallUnresolved(&snapshot, "main", "capture", "local binding");
@@ -1076,9 +1134,9 @@ test "calls in a zig member body follow the same narrow rules, with the containe
     try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{ .kind = .calls, .source = run.id, .target = helper.id, .resolution = .fact }));
     try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{ .kind = .calls, .source = run.id, .target = send.id, .resolution = .fact }));
     try expectZigCallUnresolved(&snapshot, "run", "size", "enclosing container declares a member");
-    try expectZigCallUnresolved(&snapshot, "run", "self.stop", "qualifier is a parameter or local binding");
-    try expectZigCallUnresolved(&snapshot, "run", "local.send", "qualifier is a parameter or local binding");
-    try expectZigCallUnresolved(&snapshot, "stop", "wire.send", "qualifier is a parameter or local binding");
+    try expectZigCallUnresolved(&snapshot, "run", "stop", "qualifier is a parameter or local binding");
+    try expectZigCallUnresolved(&snapshot, "run", "send", "qualifier is a parameter or local binding");
+    try expectZigCallUnresolved(&snapshot, "stop", "send", "qualifier is a parameter or local binding");
 
     // The two `go` members are told apart by their container.
     var goes = snapshot.entitiesMatching(.{ .kind = .definition, .path = "probe.zig", .name = "go" });
@@ -1094,4 +1152,282 @@ test "calls in a zig member body follow the same narrow rules, with the containe
     }
     try testing.expectEqual(@as(usize, 2), checked);
     try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+}
+
+// -- Plan 012: the Java member projection -------------------------------------
+
+/// The shape of the one class named `name` in `unit`, as the graph holds it.
+fn shapeOf(
+    graph: *core.Graph,
+    unit: model.SourceUnitId,
+    name: []const u8,
+    gpa: Allocator,
+) !?java_members.ClassShape {
+    var definitions: std.ArrayList(model.EntityId) = .empty;
+    defer definitions.deinit(gpa);
+    try graph.definitionsInUnit(unit, &definitions, gpa);
+    for (definitions.items) |id| {
+        const shape = java_members.classShapeOf(graph, id) orelse continue;
+        if (std.mem.eql(u8, shape.name, name)) return shape;
+    }
+    return null;
+}
+
+test "a java class carries the modifiers and supertype shape a static call must check" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const unit = try addJava(&analyzer, &graph, "demo/Util.java",
+        \\package demo;
+        \\
+        \\class Util {
+        \\    public static String make() { return null; }
+        \\    public static String twice() { return null; }
+        \\    public static String twice(String name) { return null; }
+        \\    protected static String guarded() { return null; }
+        \\    static String packaged() { return null; }
+        \\    private static String hidden() { return null; }
+        \\    public String instance() { return null; }
+        \\}
+        \\
+        \\class Shaped extends Absent {
+        \\    public static String make() { return null; }
+        \\}
+        \\
+    );
+
+    const util = (try shapeOf(&graph, unit, "Util", testing.allocator)).?;
+    try testing.expectEqual(java_members.Supertypes.none, util.supertypes);
+    try testing.expectEqualStrings("demo", util.package);
+
+    var methods: std.ArrayList(java_members.Method) = .empty;
+    defer methods.deinit(testing.allocator);
+    try java_members.methodsOf(&graph, util, testing.allocator, &methods);
+    try testing.expectEqual(@as(usize, 7), methods.items.len);
+
+    // One name, one method: the only selection a static call may act on.
+    const make = java_members.select(methods.items, "make").unique;
+    try testing.expectEqual(java_members.Access.public, make.access);
+    try testing.expectEqual(java_members.Static.yes, make.static);
+
+    // Overloads are reported as what they are, not resolved to the first.
+    try testing.expectEqual(@as(u32, 2), java_members.select(methods.items, "twice").overloaded);
+    try testing.expectEqual(java_members.Selection.missing, java_members.select(methods.items, "absent"));
+
+    // Every access the frontend distinguishes, including the one Java gives a
+    // member that names none.
+    try testing.expectEqual(
+        java_members.Access.protected,
+        java_members.select(methods.items, "guarded").unique.access,
+    );
+    try testing.expectEqual(
+        java_members.Access.package_private,
+        java_members.select(methods.items, "packaged").unique.access,
+    );
+    try testing.expectEqual(
+        java_members.Access.private,
+        java_members.select(methods.items, "hidden").unique.access,
+    );
+    try testing.expectEqual(
+        java_members.Static.no,
+        java_members.select(methods.items, "instance").unique.static,
+    );
+
+    // A class that declares a supertype says so, because what it may inherit is
+    // what a caller cannot see.
+    const shaped = (try shapeOf(&graph, unit, "Shaped", testing.allocator)).?;
+    try testing.expectEqual(java_members.Supertypes.declared, shaped.supertypes);
+}
+
+test "a provider whose analysis failed exposes no class shape at all" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const unit = try addJava(
+        &analyzer,
+        &graph,
+        "demo/Util.java",
+        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n}\n",
+    );
+    try testing.expect((try shapeOf(&graph, unit, "Util", testing.allocator)) != null);
+
+    // The unit no longer parses, so nothing it once declared is current, and a
+    // call must not select against what the working copy may not contain.
+    _ = try graph.setSourceUnitBytes(unit, "package demo;\n\nclass Util {\n");
+    _ = try analyzer.indexUnit(&graph, unit);
+    try testing.expect((try shapeOf(&graph, unit, "Util", testing.allocator)) == null);
+
+    var aspects: std.ArrayList(java_members.Aspect) = .empty;
+    defer aspects.deinit(testing.allocator);
+    try java_members.aspectsOf(&graph, unit, testing.allocator, &aspects);
+    try testing.expectEqual(@as(usize, 0), aspects.items.len);
+}
+
+test "one method edit changes one aspect, and leaves the class's others alone" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const unit = try addJava(&analyzer, &graph, "demo/Util.java",
+        \\package demo;
+        \\
+        \\class Util {
+        \\    public static String make() { return null; }
+        \\    public static String keep() { return null; }
+        \\}
+        \\
+    );
+
+    var before: std.ArrayList(java_members.Aspect) = .empty;
+    defer before.deinit(testing.allocator);
+    try java_members.aspectsOf(&graph, unit, testing.allocator, &before);
+    // The class itself, and one aspect per method name.
+    try testing.expectEqual(@as(usize, 3), before.items.len);
+
+    _ = try graph.setSourceUnitBytes(unit,
+        \\package demo;
+        \\
+        \\class Util {
+        \\    static String make() { return null; }
+        \\    public static String keep() { return null; }
+        \\}
+        \\
+    );
+    _ = try analyzer.indexUnit(&graph, unit);
+
+    var after: std.ArrayList(java_members.Aspect) = .empty;
+    defer after.deinit(testing.allocator);
+    try java_members.aspectsOf(&graph, unit, testing.allocator, &after);
+
+    var changed: usize = 0;
+    for (before.items) |candidate| {
+        var same = false;
+        for (after.items) |other| {
+            if (candidate.eql(other)) same = true;
+        }
+        if (!same) changed += 1;
+    }
+    // Only `make` moved: losing `public` is a different answer for that name
+    // and the same answer for every other.
+    try testing.expectEqual(@as(usize, 1), changed);
+    for (after.items) |aspect| {
+        if (!std.mem.eql(u8, aspect.method, "make")) continue;
+        try testing.expectEqual(java_members.Access.package_private, aspect.access);
+    }
+}
+
+test "a class outside the visibility boundary is never a candidate to select a member from" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    _ = try addJava(
+        &analyzer,
+        &graph,
+        "moduleA/src/main/java/demo/Util.java",
+        "package demo;\n\nclass Util {\n    public static String make() { return null; }\n}\n",
+    );
+    const reader = try addJava(
+        &analyzer,
+        &graph,
+        "moduleB/src/main/java/demo/Caller.java",
+        "package demo;\n\nclass Caller {\n    void run() { Util.make(); }\n}\n",
+    );
+
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    const context = try contextFor(&analyzer, &graph, reader, scratch.allocator());
+
+    // The member projection is only ever reached through a class the type rule
+    // already selected, and across source roots there is none to hand it.
+    const binding = context.lookup("demo", "Util").?;
+    try testing.expectEqual(@as(u32, 1), binding.out_of_scope);
+}
+
+test "reader hints remember the pair and the class, and answer for both" {
+    var members = java_members.Members.init(testing.allocator);
+    defer members.deinit();
+
+    const caller: model.SourceUnitId = @enumFromInt(1);
+    const other: model.SourceUnitId = @enumFromInt(2);
+    try members.noteReader(caller, "Util", "make");
+    try members.noteReader(other, "Util", "keep");
+    // Noting the same pair twice does not make two readers of one unit.
+    try members.noteReader(caller, "Util", "make");
+
+    const make_readers = try members.readersOf("Util", "make", testing.allocator);
+    try testing.expectEqual(@as(usize, 1), make_readers.len);
+    try testing.expectEqual(caller, make_readers[0]);
+
+    // A class-level change reaches every reader of any of its methods.
+    const class_readers = try members.readersOf("Util", "", testing.allocator);
+    try testing.expectEqual(@as(usize, 2), class_readers.len);
+
+    // A pair nobody read has no readers, rather than falling back to the class.
+    try testing.expectEqual(
+        @as(usize, 0),
+        (try members.readersOf("Util", "absent", testing.allocator)).len,
+    );
+    try testing.expectEqual(
+        @as(usize, 0),
+        (try members.readersOf("Absent", "make", testing.allocator)).len,
+    );
+}
+
+test "the member projection resolves a receiver name in the same order resolveType does" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    // Two classes of one name: one in the caller's own package, one reached by
+    // a single-type import. Java prefers the import, and both `resolveType` and
+    // this projection must prefer it too. Their agreement is what makes the two
+    // "shape not read" and "supertypes unknown" declines in the frontend
+    // unreachable, so it is pinned here rather than assumed
+    // ([Follow-up 016](../../docs/followups/016_java_static_call_rule_narrow_gaps.md)).
+    const imported = try addJava(
+        &analyzer,
+        &graph,
+        "module/src/main/java/lib/Util.java",
+        "package lib;\nclass Util { public static String make() { return null; } }\n",
+    );
+    _ = try addJava(
+        &analyzer,
+        &graph,
+        "module/src/main/java/app/Util.java",
+        "package app;\nclass Util { public static String make() { return null; } }\n",
+    );
+    const caller = try addJava(
+        &analyzer,
+        &graph,
+        "module/src/main/java/app/Caller.java",
+        "package app;\n\nimport lib.Util;\n\nclass Caller { void call() { Util.make(); } }\n",
+    );
+
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    const context = try contextFor(&analyzer, &graph, caller, scratch.allocator());
+    const members = context.memberLookup("Util").?;
+    try testing.expectEqual(@as(usize, 1), members.methods.len);
+    try testing.expectEqualStrings("make", members.methods[0].name);
+    try testing.expectEqual(imported, members.methods[0].target.provider);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    const make = snapshot.findDefinition("module/src/main/java/lib/Util.java", "make").?;
+    const call_site = snapshot.findDefinition("module/src/main/java/app/Caller.java", "call").?;
+    var calls = snapshot.relationships(.{ .kind = .calls, .source = call_site.id });
+    var named: ?model.EntityId = null;
+    while (calls.next()) |call| {
+        if (!call.resolution.isFact()) continue;
+        named = call.claim.relationship.target.entity;
+    }
+    try testing.expectEqual(make.id, named.?);
 }

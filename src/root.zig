@@ -6,6 +6,7 @@
 //! they are never the source of an answer.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 pub const core = @import("semidx_core");
@@ -25,6 +26,45 @@ pub const Analyzer = frontends.Analyzer;
 ///
 /// One table, owned by `source/languages`. A second one here would drift.
 pub const languageForPath = source.languageForPath;
+
+/// Test-only counters for what keeping the graph current costs.
+///
+/// A dependent that is never reanalyzed is stale, and a dependent reanalyzed on
+/// every edit is a scan wearing the word incremental. Both are correct-looking
+/// from the outside, so the write path needs numbers the way the query path does
+/// (`core.graph.work`). Rounds and reanalyses are kept apart because they are
+/// two different costs: rounds measure how far along the dependency chain one
+/// change reached, reanalyses how much work that reach turned into.
+///
+/// Counts accumulate until `reset`, except `propagation_rounds`, which keeps the
+/// deepest chain any single batch walked in that window.
+///
+/// Outside a test build every call here compiles away.
+pub const work = struct {
+    /// Units reanalyzed by upkeep because something they read changed.
+    pub var upkeep_reanalyses: usize = 0;
+    /// The most propagation rounds one batch spent.
+    pub var propagation_rounds: u32 = 0;
+    /// Whether any batch stopped at `dependencies.max_propagation_rounds`.
+    pub var propagation_exhausted: bool = false;
+
+    pub fn reset() void {
+        upkeep_reanalyses = 0;
+        propagation_rounds = 0;
+        propagation_exhausted = false;
+    }
+
+    inline fn reanalysis() void {
+        if (!builtin.is_test) return;
+        upkeep_reanalyses += 1;
+    }
+
+    inline fn propagation(rounds: u32, exhausted: bool) void {
+        if (!builtin.is_test) return;
+        if (rounds > propagation_rounds) propagation_rounds = rounds;
+        if (exhausted) propagation_exhausted = true;
+    }
+};
 
 pub const Index = struct {
     graph: Graph,
@@ -138,9 +178,13 @@ pub const Index = struct {
     /// Applies a scan of the source tree to the graph.
     ///
     /// The first scan against an empty index is all additions; every later one
-    /// is reconciled against what the index already holds. Only units whose
-    /// contents changed are reanalyzed — a move is not a change, and an
-    /// untouched file is not re-read.
+    /// is reconciled against what the index already holds. A unit is reanalyzed
+    /// when its contents changed, and when it moved to another directory: since
+    /// [ADR 008](../docs/adr/008_java_visibility_boundaries.md) a unit's place
+    /// is an input to its analysis, so a file that arrives somewhere else
+    /// resolves names differently even though not a byte of it changed. A move
+    /// within one directory changes nothing a frontend reads and is not
+    /// re-read, and neither is an untouched file.
     ///
     /// Order matters. Removals go first so that a unit renamed onto a path a
     /// departing unit still occupies has somewhere to land.
@@ -193,11 +237,21 @@ pub const Index = struct {
                 else => {},
             }
         }
+        // Renames are applied before additions so a unit moving off a path
+        // vacates it first. Which of them the frontends must re-read is decided
+        // here, while the old path is still readable, and acted on after every
+        // other unit in the batch has been analyzed.
+        var moved: std.ArrayList(model.SourceUnitId) = .empty;
+        defer moved.deinit(gpa);
         for (correspondence.decisions) |decision| {
             switch (decision) {
                 .renamed => |match| {
-                    _ = try self.graph.setSourceUnitPath(match.id, found.units[match.scan_index].path);
+                    const destination = found.units[match.scan_index].path;
+                    const origin = if (self.graph.unit(match.id)) |record| record.path else "";
+                    const relocated = !std.mem.eql(u8, directoryOf(origin), directoryOf(destination));
+                    _ = try self.graph.setSourceUnitPath(match.id, destination);
                     outcome.renamed += 1;
+                    if (relocated) try moved.append(gpa, match.id);
                 },
                 else => {},
             }
@@ -234,6 +288,17 @@ pub const Index = struct {
                 },
                 else => {},
             }
+        }
+
+        // Last, because a relocated unit resolves names against whatever the
+        // rest of the batch established, and because what it now exposes has to
+        // reach the units that may see it differently.
+        if (moved.items.len != 0) {
+            for (moved.items) |unit| {
+                _ = try self.analyzer.indexUnit(&self.graph, unit);
+                outcome.analyzed += 1;
+            }
+            try upkeep.recordRenames(moved.items);
         }
 
         try upkeep.finish(&outcome);
@@ -278,17 +343,28 @@ pub const Index = struct {
         }
     }
 
-    /// Moves a unit to a new path. Its contents did not change, so it is not
-    /// reanalyzed and nothing inside it loses its identity. A unit that found
-    /// it by its old path is reanalyzed.
+    /// Moves a unit to a new path. Nothing inside it loses its identity, and a
+    /// unit that found it by its old path is reanalyzed.
+    ///
+    /// The moved unit is reanalyzed too when it lands in another directory. Its
+    /// bytes did not change, but where it sits decides which other units it may
+    /// resolve names to, so its own claims are as out of date as a reader's
+    /// ([ADR 008](../docs/adr/008_java_visibility_boundaries.md),
+    /// [Follow-up 015](../docs/followups/015_unit_path_change_does_not_reanalyze.md)).
     pub fn renameUnit(
         self: *Index,
         unit: model.SourceUnitId,
         path: []const u8,
     ) !void {
+        const origin = if (self.graph.unit(unit)) |record| record.path else "";
+        const relocated = !std.mem.eql(u8, directoryOf(origin), directoryOf(path));
         var upkeep = try Upkeep.begin(self, &.{unit});
         defer upkeep.deinit();
         _ = try self.graph.setSourceUnitPath(unit, path);
+        if (relocated) {
+            _ = try self.analyzer.indexUnit(&self.graph, unit);
+            try upkeep.recordRenames(&.{unit});
+        }
         try upkeep.finish(null);
     }
 
@@ -307,6 +383,18 @@ pub const Index = struct {
         return self.graph.publish();
     }
 };
+
+/// The directory part of a root-relative path, or the empty string when it has
+/// none.
+///
+/// It is what decides whether a move is semantically a move: a Java source root
+/// is the unit's directory with its package directories stripped, and a Zig
+/// local import resolves against the same directory, so two paths sharing one
+/// directory are read identically by every frontend here.
+fn directoryOf(path: []const u8) []const u8 {
+    const cut = std.mem.lastIndexOfScalar(u8, path, '/') orelse return "";
+    return path[0..cut];
+}
 
 /// Keeps cross-unit facts current across one batch of source changes: a single
 /// edit, addition, or removal, or a whole scan.
@@ -329,6 +417,22 @@ pub const Index = struct {
 /// unit analyzed after the last change already saw the final ones and is not.
 /// Reanalysis cannot change exports — they depend only on a unit's own
 /// contents — so one round settles the batch.
+/// How many times one batch will reanalyze what a previous round changed.
+///
+/// A supertype chain makes reanalysis able to change what a later reader sees,
+/// so a batch no longer settles in one round. The bound is small because the
+/// chains it follows are: a walk is capped at 16 links, and a repository whose
+/// hierarchies need more rounds than this is reported rather than chased.
+const max_upkeep_rounds: u32 = 8;
+
+/// A `Class.method` aspect that changed, and the step it changed at. The
+/// class-level aspect has an empty method name.
+const ChangedAspect = struct {
+    class: []const u8,
+    method: []const u8,
+    step: u64,
+};
+
 const Upkeep = struct {
     index: *Index,
     gpa: Allocator,
@@ -342,6 +446,16 @@ const Upkeep = struct {
     /// The unit being changed, before and after the step.
     before: std.ArrayList(frontends.java_packages.Export),
     after: std.ArrayList(frontends.java_packages.Export),
+    /// The Java class shape the same unit exposed, before and after that step.
+    /// Kept apart from the package export above because they answer different
+    /// questions: a package export changes what a *name* can mean, a class
+    /// shape changes what a *call* on a named class can select. Folding a
+    /// method edit into the package channel would reanalyze every declarer and
+    /// importer of the package for a change none of them can see.
+    shape_before: std.ArrayList(frontends.java_members.Aspect),
+    shape_after: std.ArrayList(frontends.java_members.Aspect),
+    /// `Class.method` aspects whose answer may have changed, and when.
+    changed_shapes: std.ArrayList(ChangedAspect),
     /// Units owed reanalysis because a unit they read is changing.
     dependents: []const model.SourceUnitId,
     exhausted: bool,
@@ -354,6 +468,7 @@ const Upkeep = struct {
             const propagation = try index.graph.dependencies.propagate(gpa, seeds);
             dependents = propagation.affected;
             exhausted = propagation.exhausted;
+            work.propagation(propagation.rounds, propagation.exhausted);
         }
         return .{
             .index = index,
@@ -363,6 +478,9 @@ const Upkeep = struct {
             .changed_packages = .empty,
             .before = .empty,
             .after = .empty,
+            .shape_before = .empty,
+            .shape_after = .empty,
+            .changed_shapes = .empty,
             .dependents = dependents,
             .exhausted = exhausted,
         };
@@ -373,20 +491,27 @@ const Upkeep = struct {
         self.changed_packages.deinit(self.gpa);
         self.before.deinit(self.gpa);
         self.after.deinit(self.gpa);
+        self.shape_before.deinit(self.gpa);
+        self.shape_after.deinit(self.gpa);
+        self.changed_shapes.deinit(self.gpa);
         self.gpa.free(self.dependents);
         self.* = undefined;
     }
 
-    /// Reads what `unit` exports before it is changed.
+    /// Reads what `unit` exports, and what shape it exposes, before it changes.
     fn captureBefore(self: *Upkeep, unit: model.SourceUnitId) !void {
         self.before.clearRetainingCapacity();
         try frontends.java_packages.exportsOf(&self.index.graph, unit, self.gpa, &self.before);
+        self.shape_before.clearRetainingCapacity();
+        try frontends.java_members.aspectsOf(&self.index.graph, unit, self.gpa, &self.shape_before);
+        try frontends.java_hierarchy.annotateChains(&self.index.graph, self.shape_before.items, self.gpa);
     }
 
     /// The captured unit left the index and exports nothing now.
     fn recordRemoval(self: *Upkeep) !void {
         self.step += 1;
         self.after.clearRetainingCapacity();
+        self.shape_after.clearRetainingCapacity();
         try self.markChanges();
     }
 
@@ -396,7 +521,46 @@ const Upkeep = struct {
         try self.analyzed_at.put(self.gpa, unit, self.step);
         self.after.clearRetainingCapacity();
         try frontends.java_packages.exportsOf(&self.index.graph, unit, self.gpa, &self.after);
+        self.shape_after.clearRetainingCapacity();
+        try frontends.java_members.aspectsOf(&self.index.graph, unit, self.gpa, &self.shape_after);
+        try frontends.java_hierarchy.annotateChains(&self.index.graph, self.shape_after.items, self.gpa);
         try self.markChanges();
+    }
+
+    /// The units that were just reanalyzed after landing in other directories.
+    ///
+    /// A move changes no byte, so the before/after comparison the other steps
+    /// use would find nothing: a class keeps its package, its name, its methods
+    /// and their modifiers wherever the file sits. What it changes is who may
+    /// resolve a name to it, and none of those records that. So everything the
+    /// moved units expose is marked changed outright. It is broader than a
+    /// comparison would be, and a reader that reanalyzes to the same answer
+    /// costs a pass and changes no claim, which is the direction this channel
+    /// is allowed to err in.
+    ///
+    /// They share one step, because they do share one: every path in the batch
+    /// was set before any of them was analyzed, so each of them read the final
+    /// places of all of them. Numbering them in sequence would make each one
+    /// owe the ones analyzed before it a second pass for a change none of them
+    /// can see.
+    fn recordRenames(self: *Upkeep, units: []const model.SourceUnitId) !void {
+        self.step += 1;
+        for (units) |unit| {
+            try self.analyzed_at.put(self.gpa, unit, self.step);
+
+            self.after.clearRetainingCapacity();
+            try frontends.java_packages.exportsOf(&self.index.graph, unit, self.gpa, &self.after);
+            for (self.after.items) |declared| {
+                try self.changed_packages.put(self.gpa, declared.package, self.step);
+            }
+
+            self.shape_after.clearRetainingCapacity();
+            try frontends.java_members.aspectsOf(&self.index.graph, unit, self.gpa, &self.shape_after);
+            try frontends.java_hierarchy.annotateChains(&self.index.graph, self.shape_after.items, self.gpa);
+            for (self.shape_after.items) |aspect| {
+                try self.noteChangedAspect(aspect.class, aspect.method);
+            }
+        }
     }
 
     /// Every package with an export in one of `before` and `after` but not the
@@ -404,6 +568,38 @@ const Upkeep = struct {
     fn markChanges(self: *Upkeep) !void {
         try self.markMissing(self.before.items, self.after.items);
         try self.markMissing(self.after.items, self.before.items);
+        try self.markShapeMissing(self.shape_before.items, self.shape_after.items);
+        try self.markShapeMissing(self.shape_after.items, self.shape_before.items);
+    }
+
+    /// Every aspect present on one side and not answered identically on the
+    /// other changed at this step. The comparison is over one unit's own
+    /// classes and methods, which is work the edit already pays to analyze.
+    fn markShapeMissing(
+        self: *Upkeep,
+        from: []const frontends.java_members.Aspect,
+        against: []const frontends.java_members.Aspect,
+    ) !void {
+        outer: for (from) |candidate| {
+            for (against) |other| {
+                if (candidate.eql(other)) continue :outer;
+            }
+            try self.noteChangedAspect(candidate.class, candidate.method);
+        }
+    }
+
+    fn noteChangedAspect(self: *Upkeep, class: []const u8, method: []const u8) !void {
+        for (self.changed_shapes.items) |*existing| {
+            if (!std.mem.eql(u8, existing.class, class)) continue;
+            if (!std.mem.eql(u8, existing.method, method)) continue;
+            existing.step = self.step;
+            return;
+        }
+        try self.changed_shapes.append(self.gpa, .{
+            .class = class,
+            .method = method,
+            .step = self.step,
+        });
     }
 
     fn markMissing(
@@ -468,13 +664,68 @@ const Upkeep = struct {
             }
         }
 
-        // Independent of hash-map iteration order.
-        std.mem.sort(model.SourceUnitId, owed.items, {}, lessUnit);
-        for (owed.items) |unit| {
-            _ = try self.index.analyzer.indexUnit(graph, unit);
-            if (outcome) |counts| {
-                counts.invalidated += 1;
-                counts.analyzed += 1;
+        // A reader of a changed `Class.method` pair has no dependency to be
+        // found by: its call resolved to nothing, so it read nothing. Only the
+        // hint reaches it, and only the readers of what actually changed are
+        // owed anything — not the package's declarers, not its importers.
+        for (self.changed_shapes.items) |changed| {
+            const readers = try self.index.analyzer.java_members.readersOf(
+                changed.class,
+                changed.method,
+                self.gpa,
+            );
+            for (readers) |unit| {
+                if ((self.analyzed_at.get(unit) orelse 0) >= changed.step) continue;
+                try appendOwed(self.gpa, &owed, graph, unit);
+            }
+        }
+
+        // Reanalysis used to settle a batch in one round, because the only
+        // thing it could change was a claim, and a claim reaches its readers
+        // through declarations made before the batch. A supertype chain broke
+        // that: reanalyzing a unit can change the *chain verdict* of a type it
+        // declares, and a reader further down owes itself another pass — even
+        // though nothing that unit exports changed.
+        //
+        // So the reanalysis is a loop: each round records what the units it
+        // reanalyzed now expose, and the next round is whoever reads something
+        // that moved. It terminates because a verdict that stops changing stops
+        // producing readers, and it is bounded anyway.
+        var round: u32 = 0;
+        while (owed.items.len != 0) : (round += 1) {
+            if (round >= max_upkeep_rounds) {
+                self.exhausted = true;
+                break;
+            }
+            // Independent of hash-map iteration order.
+            std.mem.sort(model.SourceUnitId, owed.items, {}, lessUnit);
+            // An aspect already noted in an earlier round has its step moved
+            // rather than a second entry appended, so the round is bounded by
+            // the step counter and not by a slice.
+            const round_start = self.step;
+            for (owed.items) |unit| {
+                try self.captureBefore(unit);
+                _ = try self.index.analyzer.indexUnit(graph, unit);
+                try self.recordAnalysis(unit);
+                work.reanalysis();
+                if (outcome) |counts| {
+                    counts.invalidated += 1;
+                    counts.analyzed += 1;
+                }
+            }
+
+            owed.clearRetainingCapacity();
+            for (self.changed_shapes.items) |changed| {
+                if (changed.step <= round_start) continue;
+                const readers = try self.index.analyzer.java_members.readersOf(
+                    changed.class,
+                    changed.method,
+                    self.gpa,
+                );
+                for (readers) |unit| {
+                    if ((self.analyzed_at.get(unit) orelse 0) >= changed.step) continue;
+                    try appendOwed(self.gpa, &owed, graph, unit);
+                }
             }
         }
 

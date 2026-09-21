@@ -35,7 +35,7 @@ honest semantic context that is local, queryable, and explicit about its limits.
 
 ## Current Preview
 
-**Status: first vertical slice, `0.1.0-preview.3`.** semidx currently ships as a
+**Status: first vertical slice, `0.1.0-preview.4`.** semidx currently ships as a
 source-built local MCP stdio preview called `semidx-mcp`. It indexes Java,
 Clojure, and Zig source narrowly enough to support the agent habit loop, while
 keeping unsupported and unresolved cases visible.
@@ -46,7 +46,7 @@ source-text output by default.
 
 See the [preview capability matrix](docs/spec/capability_matrix.md) for exact
 coverage and limitations, and the
-[v0.1.0-preview.3 release notes](docs/releases/v0.1.0-preview.3.md) for what
+[v0.1.0-preview.4 release notes](docs/releases/v0.1.0-preview.4.md) for what
 changed in the current preview.
 
 ## Quick Start

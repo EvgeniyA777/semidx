@@ -32,8 +32,8 @@ test "semidx-mcp --version prints the product version to stdout and exits" {
     try testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     // The release this tree prepares. The version itself is defined once, in
     // build.zig.zon; this pins what the gate expects of it.
-    try testing.expectEqualStrings("0.1.0-preview.3", build_options.product_version);
-    try testing.expectEqualStrings("semidx-mcp 0.1.0-preview.3\n", result.stdout);
+    try testing.expectEqualStrings("0.1.0-preview.4", build_options.product_version);
+    try testing.expectEqualStrings("semidx-mcp 0.1.0-preview.4\n", result.stdout);
     try testing.expectEqualStrings("", result.stderr);
 }
 

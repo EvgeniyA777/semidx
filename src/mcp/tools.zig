@@ -10,7 +10,11 @@
 //! Source text is never rendered unless the server was started with the
 //! evidence-text opt-in. `SourceEvidence.text` is the only source-text field a
 //! snapshot carries, and `writeEvidence` is the only place that reads it; the
-//! server never reads a unit's contents at all.
+//! server never reads a unit's contents at all. Since
+//! [ADR 010](../../docs/adr/010_designator_is_a_structured_name.md) that claim
+//! holds as written: a designator, which renders unconditionally, is a name and
+//! an optional qualifier, so the expression a source wrote around a name leaves
+//! only through the opt-in.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -185,7 +189,10 @@ pub const definitions = [_]Definition{
     }),
     define(.semidx_references, "References and calls", "Return the REFERENCES and CALLS relationships recorded for a definition, identified by " ++
         "entity_id or by exact name. A call is one occurrence and is listed once. Incoming relationships target the " ++
-        "definition; outgoing ones start from it and may be unresolved designators.", &.{
+        "definition; outgoing ones start from it and may be unresolved designators. The separate unresolved_mentions " ++
+        "list holds recorded claims whose own producer could not resolve them and which name this definition's exact " ++
+        "name in its language: each keeps its unresolved category and reason and names no target, so a mention is a " ++
+        "name match over unresolved claims and never a relationship to this definition.", &.{
         shared_params.entity_id,
         shared_params.name,
         shared_params.path,
@@ -194,6 +201,8 @@ pub const definitions = [_]Definition{
         shared_params.freshness,
         shared_params.resolution,
         countParam("limit", 100, 1000, null),
+        countParam("mention_limit", 50, 500, "Maximum unresolved mentions: recorded claims that name this definition's name and " ++
+            "resolved to nothing. They are not relationships to it and are not paged by cursor."),
         shared_params.detail,
         shared_params.max_response_bytes,
         shared_params.cursor,
@@ -827,12 +836,21 @@ fn writeProducer(s: *Stringify, producer: model.Producer, detail: DetailArg) Err
 /// The category always; compact keeps what is missing from an unresolved
 /// claim and an approximate claim's confidence, and drops the prose.
 fn writeResolution(s: *Stringify, resolution: model.Resolution, detail: DetailArg) Error!void {
+    return writeResolutionExplained(s, resolution, detail == .full);
+}
+
+/// `explain` adds the producer's own words for how it resolved the claim or why
+/// it could not. Compact leaves them out everywhere but one place: an
+/// unresolved mention carries them at every detail level, because a mention is
+/// rendered beside a definition of the same name and its reason is what keeps
+/// it from reading as a relationship to that definition.
+fn writeResolutionExplained(s: *Stringify, resolution: model.Resolution, explain: bool) Error!void {
     try s.beginObject();
     try s.objectField("category");
     try s.write(@tagName(resolution.category()));
     switch (resolution) {
         .fact => |fact| {
-            if (detail == .full) {
+            if (explain) {
                 try s.objectField("method");
                 try protocol.writeString(s, fact.method);
             }
@@ -840,13 +858,13 @@ fn writeResolution(s: *Stringify, resolution: model.Resolution, detail: DetailAr
         .unresolved => |unresolved| {
             try s.objectField("missing");
             try s.write(@tagName(unresolved.missing));
-            if (detail == .full) {
+            if (explain) {
                 try s.objectField("explanation");
                 try protocol.writeString(s, unresolved.explanation);
             }
         },
         .approximate => |approximate| {
-            if (detail == .full) {
+            if (explain) {
                 try s.objectField("basis");
                 try protocol.writeString(s, approximate.basis);
             }
@@ -1034,6 +1052,53 @@ const Step = struct { distance: u32, from: model.EntityId };
 /// entity. In a traversal every end is rendered in full once in the response
 /// and named by id afterwards. Every detail level keeps the claim's resolution
 /// category, producer name, and freshness.
+/// The name a producer could not resolve, in the parts it recorded.
+///
+/// Absent is the normal case for a qualifier and is rendered by leaving the
+/// field out: a qualifier the producer did not record is not a null it did.
+fn writeDesignator(s: *Stringify, designator: model.Designator) Error!void {
+    try s.objectField("designator");
+    try s.beginObject();
+    try s.objectField("name");
+    try protocol.writeString(s, designator.name);
+    if (designator.qualifier) |qualifier| {
+        try s.objectField("qualifier");
+        try protocol.writeString(s, qualifier);
+    }
+    try s.endObject();
+}
+
+/// One recorded claim that names an anchor's name and resolved to nothing.
+///
+/// It is rendered, never asserted. The item is an assertion already in the
+/// snapshot: it keeps its own resolution category, missing part, explanation,
+/// producer, freshness and evidence, and it names no target entity, because it
+/// has none. Nothing here says the claim calls or references the anchor.
+fn writeMention(ctx: *Context, s: *Stringify, assertion: model.Assertion, detail: DetailArg) Error!void {
+    const relationship = assertion.relationship().?;
+    try s.beginObject();
+    try s.objectField("assertion_id");
+    try s.write(@intFromEnum(assertion.id));
+    try s.objectField("kind");
+    try s.write(@tagName(relationship.kind));
+    try s.objectField("source");
+    try writeEntityRef(ctx, s, relationship.source, if (detail == .full) .brief else .compact);
+    try writeDesignator(s, relationship.target.designator);
+    try s.objectField("resolution");
+    try writeResolutionExplained(s, assertion.resolution, true);
+    try s.objectField("producer");
+    try writeProducer(s, assertion.producer, detail);
+    try s.objectField("freshness");
+    try s.write(@tagName(ctx.snapshot.assertionFreshness(assertion)));
+    if (detail == .full) {
+        try s.objectField("revision");
+        try s.write(assertion.revision);
+    }
+    try s.objectField("evidence");
+    try writeEvidence(ctx, s, assertion.evidence, detail);
+    try s.endObject();
+}
+
 fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, direction: ?[]const u8, detail: DetailArg, in_view: []const model.EntityId, step: ?Step) Error!void {
     const relationship = assertion.relationship().?;
     const end = struct {
@@ -1070,10 +1135,7 @@ fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, d
             try s.objectField("entity");
             try end.write(ctx, s, detail, in_view, id);
         },
-        .designator => |designator| {
-            try s.objectField("designator");
-            try protocol.writeString(s, designator);
-        },
+        .designator => |designator| try writeDesignator(s, designator),
     }
     try s.endObject();
     try s.objectField("resolution");
@@ -1620,6 +1682,7 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
     const freshness = freshnessFilter(try args.choice(FreshnessArg, "freshness"));
     const resolution = try args.choice(ResolutionArg, "resolution");
     const limit = try args.count("limit");
+    const mention_limit = try args.count("mention_limit");
     const detail = try args.choice(DetailArg, "detail");
     const max_bytes = try args.count("max_response_bytes");
     ctx.max_response_bytes = max_bytes;
@@ -1675,7 +1738,54 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
     try s.write(total);
     try s.objectField("truncated");
     try s.write(returned < total);
-    try writeBudgetOutcome(ctx, s, .{ .relationships = omitted });
+
+    // The third pass, anchored on the name rather than on the entity: claims
+    // whose own producer could not resolve them and which wrote this exact
+    // name. Its own list, its own totals, its own limit, and its own `seen`
+    // set — an assertion has one target, so no claim can be in both lists, and
+    // sharing the set would make one silently swallow the other's items.
+    var mention_seen: std.AutoHashMapUnmanaged(model.AssertionId, void) = .empty;
+    var mention_total: usize = 0;
+    var mention_returned: usize = 0;
+    var mention_omitted: usize = 0;
+    try s.objectField("unresolved_mentions");
+    try s.beginArray();
+    for (shown_targets) |target| {
+        const anchor = target.identity.name orelse continue;
+        const language = target.identity.language orelse continue;
+        var found = ctx.snapshot.relationships(.{
+            .designator = anchor,
+            .reference_query = true,
+            .freshness = freshness,
+        });
+        while (found.next()) |assertion| {
+            if (!resolutionMatches(resolution, assertion.resolution)) continue;
+            const relationship = assertion.relationship().?;
+            const designator = switch (relationship.target) {
+                .designator => |value| value,
+                .entity => continue,
+            };
+            // Byte equality, asked here as well as by the index, because it is
+            // the whole rule and not an implementation detail of the anchor.
+            if (!std.mem.eql(u8, designator.name, anchor)) continue;
+            // And the claim's own language, so one language's name never
+            // answers for another's.
+            const writer_entity = ctx.snapshot.entityById(relationship.source) orelse continue;
+            const writer_language = writer_entity.identity.language orelse continue;
+            if (writer_language != language) continue;
+            if ((try mention_seen.getOrPut(ctx.arena, assertion.id)).found_existing) continue;
+            mention_total += 1;
+            if (mention_total > mention_limit) continue;
+            if (try ctx.append(s, writeMention, .{ assertion, detail })) mention_returned += 1 else mention_omitted += 1;
+        }
+    }
+    try s.endArray();
+    try s.objectField("unresolved_mentions_total");
+    try s.write(mention_total);
+    try s.objectField("unresolved_mentions_truncated");
+    try s.write(mention_returned < mention_total);
+
+    try writeBudgetOutcome(ctx, s, .{ .relationships = omitted, .unresolved_mentions = mention_omitted });
     var hints: Hints = .{};
     try writePage(ctx, s, .semidx_references, args, &hints, if (ctx.budget_exhausted) "response" else "relationships", position, returned, total);
     // `path` and `language` qualify a name; with `entity_id` they are refused.
@@ -1692,13 +1802,19 @@ pub fn references(ctx: *Context, s: *Stringify, arguments: ?ObjectMap) Error!voi
         try hints.add(ctx.arena, "relationships", .narrow, narrow.items);
         try hints.add(ctx.arena, "relationships", .raise, raisable(.semidx_references, "limit", limit));
     }
+    // Mentions are not paged: they are bounded by their own limit and repeated
+    // on every page, like the targets. A cut says so and says what raises it.
+    if (mention_returned < mention_total) {
+        try hints.add(ctx.arena, "unresolved_mentions", .narrow, narrow.items);
+        try hints.add(ctx.arena, "unresolved_mentions", .raise, raisable(.semidx_references, "mention_limit", mention_limit));
+    }
     if (ctx.budget_exhausted) {
         try hints.add(ctx.arena, "response", .narrow, narrow.items);
         try hints.add(ctx.arena, "response", .raise, raisable(.semidx_references, "max_response_bytes", max_bytes));
     }
     try hints.write(s);
     try s.objectField("budget");
-    try s.write(.{ .detail = detail, .limit = limit, .target_limit = max_targets, .max_response_bytes = max_bytes });
+    try s.write(.{ .detail = detail, .limit = limit, .mention_limit = mention_limit, .target_limit = max_targets, .max_response_bytes = max_bytes });
     try s.endObject();
 }
 

@@ -131,13 +131,44 @@ pub const RelationshipKind = enum {
     }
 };
 
+/// A name read from source that the producer could not resolve to an entity.
+///
+/// It is a name in parts, not a run of source text
+/// ([ADR 010](../../docs/adr/010_designator_is_a_structured_name.md)). Only a
+/// frontend can say which part of what the source wrote is the name and which
+/// is a scope in front of it, so both parts are recorded where they are read
+/// and neither is derived later by splitting a string.
+///
+/// What the source wrote around the name — a receiver expression, an argument
+/// list — is not here. It is `SourceEvidence.text`, with the range that locates
+/// it.
+pub const Designator = struct {
+    /// The identifier that names the thing. Empty when the producer could read
+    /// no identifier at all, such as a computed callee: the claim is still
+    /// recorded with its evidence, and nothing can find it by name, which is
+    /// the honest answer rather than a synthesized one.
+    name: []const u8,
+    /// The name the source wrote in front of `name`, recorded only where the
+    /// producer knows that prefix names a scope — an import alias, a namespace,
+    /// a type — and never where it is a value expression. Absent is the normal
+    /// case and is absent, never an empty string.
+    qualifier: ?[]const u8 = null,
+
+    pub fn eql(a: Designator, b: Designator) bool {
+        if (!std.mem.eql(u8, a.name, b.name)) return false;
+        const left = a.qualifier orelse return b.qualifier == null;
+        const right = b.qualifier orelse return false;
+        return std.mem.eql(u8, left, right);
+    }
+};
+
 /// A relationship endpoint.
 ///
-/// `designator` is a name read from source that the producer could not resolve
-/// to an entity. It stays a string: an unresolved target never becomes a node.
+/// `designator` is a name the producer could not resolve to an entity. It stays
+/// a name: an unresolved target never becomes a node.
 pub const Target = union(enum) {
     entity: EntityId,
-    designator: []const u8,
+    designator: Designator,
 };
 
 pub const RelationshipClaim = struct {
@@ -515,19 +546,19 @@ test "a resolution without its explanation is rejected" {
         .{ .fact = .{ .method = "" } },
     ));
     try testing.expectError(error.MissingResolutionExplanation, validateAssertion(
-        relationshipTo(.{ .designator = "println" }),
+        relationshipTo(.{ .designator = .{ .name = "println" } }),
         test_producer,
         test_evidence,
         .{ .unresolved = .{ .missing = .target_entity, .explanation = "" } },
     ));
     try testing.expectError(error.MissingApproximateBasis, validateAssertion(
-        relationshipTo(.{ .designator = "println" }),
+        relationshipTo(.{ .designator = .{ .name = "println" } }),
         test_producer,
         test_evidence,
         .{ .approximate = .{ .basis = "", .confidence = 0.5 } },
     ));
     try testing.expectError(error.ConfidenceOutOfRange, validateAssertion(
-        relationshipTo(.{ .designator = "println" }),
+        relationshipTo(.{ .designator = .{ .name = "println" } }),
         test_producer,
         test_evidence,
         .{ .approximate = .{ .basis = "name similarity", .confidence = 1.5 } },
@@ -536,7 +567,7 @@ test "a resolution without its explanation is rejected" {
 
 test "an unresolved target cannot be presented as a fact" {
     try testing.expectError(error.UnresolvedTargetPresentedAsFact, validateAssertion(
-        relationshipTo(.{ .designator = "System.out.println" }),
+        relationshipTo(.{ .designator = .{ .name = "println", .qualifier = "System.out" } }),
         test_producer,
         test_evidence,
         .{ .fact = .{ .method = "same-container name match" } },
@@ -555,7 +586,7 @@ test "a resolved target cannot claim its target is missing" {
 test "an approximate assertion is neither a fact nor unresolved" {
     const resolution: Resolution = .{ .approximate = .{ .basis = "name similarity", .confidence = 0.4 } };
     try validateAssertion(
-        relationshipTo(.{ .designator = "println" }),
+        relationshipTo(.{ .designator = .{ .name = "println" } }),
         test_producer,
         test_evidence,
         resolution,
@@ -659,7 +690,7 @@ test "identity evidence must name a role" {
 
 test "a relationship without source evidence is rejected" {
     try testing.expectError(error.MissingRelationshipEvidence, validateAssertion(
-        relationshipTo(.{ .designator = "println" }),
+        relationshipTo(.{ .designator = .{ .name = "println" } }),
         test_producer,
         null,
         .{ .unresolved = .{ .missing = .target_entity, .explanation = "not in fixture scope" } },

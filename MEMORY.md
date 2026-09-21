@@ -102,10 +102,26 @@ documents that own history, rationale, and evidence.
 - `Graph` is mutable; `Snapshot` is the immutable published state observed by
   consumers. `publish` still walks the graph and is acceptable for edit batches,
   not for per-query publication.
+- A designator — the target of every unresolved relationship — is a **structured
+  name**: `name` is the identifier a producer read, and `qualifier` is present
+  only where the frontend knows the prefix the source wrote names a scope (an
+  `@import` alias path, a Clojure namespace, a Java class established as one),
+  absent where it is a value ([ADR 010](docs/adr/010_designator_is_a_structured_name.md)).
+  The written form is `SourceEvidence.text`, so default MCP output carries names
+  and qualifiers only and expression text needs `--allow-evidence-text`. A
+  producer that read no identifier records an empty name, which is not bucketed.
+- `semidx_references` answers with relationships **and** `unresolved_mentions`:
+  recorded claims whose producer could not resolve them and whose designator
+  name equals the target's name byte for byte in the target's language. A
+  mention keeps its own resolution, reason, producer, freshness and evidence,
+  names no target, has its own `mention_limit` (50, max 500), totals, truncation
+  flag, budget share and hint, and is never merged into `relationships`. It
+  establishes nothing, so [ADR 003](docs/adr/003_reject_name_match_assertions.md)
+  stands.
 - A published snapshot carries its own read indexes, derived in `publish` and
   nowhere else: dense id-to-position tables behind `Snapshot.unit` and
   `Snapshot.entityById`, and compressed-sparse-row adjacency by source entity,
-  by target entity, and by designator behind `Snapshot.relationships`. They are
+  by target entity, and by `designator.name` behind `Snapshot.relationships`. They are
   projections of that snapshot's own assertions, rebuildable from them with
   nothing lost, and no answer exists only in an index. An anchor the index does
   not hold returns empty rather than falling back to a scan; `kind`,
@@ -175,12 +191,13 @@ documents that own history, rationale, and evidence.
 - `scripts/semidx-mcp.sh` is the stable local launcher for agents. The older
   `scripts/start-mcp-server.sh` and `scripts/mcp-stdio.sh` remain compatibility
   aliases.
-- The product version is `0.1.0-preview.3` (`build.zig.zon`): the preview.2
-  surface plus Plan 009 progressive MCP discovery and response-budget behavior
-  ([release notes](docs/releases/v0.1.0-preview.3.md)). Annotated tags pushed
+- The product version is `0.1.0-preview.4` (`build.zig.zon`): the preview.3
+  surface plus Java visibility, query-scale, designator, unresolved-mention, and
+  receiver coverage work
+  ([release notes](docs/releases/v0.1.0-preview.4.md)). Annotated tags pushed
   to `origin`: `v0.1.0-preview.1` at `e36693a`, `v0.1.0-preview.2` at
-  `8818bb6`, and `v0.1.0-preview.3` at `58af737`; no GitHub release was
-  created.
+  `8818bb6`, `v0.1.0-preview.3` at `58af737`, and `v0.1.0-preview.4` at
+  `e095d95`; no GitHub release was created.
 
 ## What Does Not Exist
 
@@ -193,10 +210,10 @@ documents that own history, rationale, and evidence.
 - No admitted shared-core `module` or `IMPORTS`.
 - No complete language support. Java, Clojure, and Zig fixtures prove current
   slice behavior; they are not a supported-language roster.
-- No Java on-demand or static import resolution, qualified names, nested
-  classes, inheritance, classpath symbols, interface/enum/record targets, or
-  reading of any build descriptor: cross-module visibility a build tool would
-  permit stays unresolved
+- No Java on-demand or static import resolution, qualified names, nested classes,
+  inherited target selection, classpath symbols, enum/record/annotation targets,
+  interface constants, or build descriptors: cross-module visibility a build
+  tool would permit stays unresolved
   ([Follow-up 011](docs/followups/011_java_cross_module_visibility.md)).
 - No Clojure namespace or lexical-scope model beyond the current conservative
   same-unit rules.
@@ -233,108 +250,99 @@ documents that own history, rationale, and evidence.
   `scripts/constitution.freeze.sha256`.
 - Memory freshness is enforced by `scripts/check-memory-freshness.sh` and the
   pre-push hook for high-signal documentation and policy changes.
+- External Java measurement has two harnesses, both developer tools no lane
+  depends on: `zig build claim-sample` (`src/claim_sample.zig`), which samples by
+  `sha256(seed + key)` rank and counts any unclassified reason rather than
+  dropping it, and `zig build designator-shape` (`src/designator_shape.zig`),
+  which reports what unresolved designators hold and how `DesignatorAdjacency`
+  buckets them. Tooling is `sh` or Zig ([tooling.md](docs/agent-policy/tooling.md));
+  Plan 012's numbers predate them ([017](docs/followups/017_plan_012_external_evidence_reproducibility.md)).
+  Current external baseline, apache/dubbo at `df9c5e1`: 92,637 facts, 138,222
+  unresolved, 118,471 unresolved calls, and 83.6% of their designators are
+  expression text rather than names
+  ([Plan 013 Stage 0](docs/reports/013_unresolved_mentions_from_the_callee_anchor_progress.md)).
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
-  Java coverage, not its boundary, is what limits it — the supertype guard and
-  unresolved receivers dominate what stays unresolved; the query access paths
-  Plan 011 indexed are proven by a deterministic work bound at 244,559
-  assertions but were never re-measured as latency on the external repository
-  that motivated them; definition renames are identity loss; a file moved and changed in one rescan
-  loses identity; dependency invalidation is intentionally coarse and
+  Java coverage, not its boundary, is what limits it — receiver-qualified and
+  class-name-qualified calls dominate what stays unresolved; definition renames
+  are identity loss; a file moved and changed in one rescan loses identity;
+  dependency invalidation is intentionally coarse and
   transitive; a Zig importer of a relative file that did not exist when it was
-  analyzed is not reanalyzed when the file appears (unresolved, never false);
-  unit ids and interned strings are not reclaimed while the graph lives;
+  analyzed is not reanalyzed when it appears (unresolved, never false); unit ids
+  and interned strings are not reclaimed while the graph lives;
   `Snapshot` string borrowing and default-current query discipline are
   conventions rather than type-enforced boundaries.
 
 ## Near-Term Priorities
 
-- Plan 009 is complete and published as `0.1.0-preview.3` with
-  `zig build preview-gate` in its release gate.
-- The project has entered the adoption track: work is now chosen because it
-  moves semidx toward the audience named in
+- Plan 009 is published in `0.1.0-preview.3`; preview.4 is the current release candidate.
+- The project is on the adoption track: work is chosen because it moves semidx
+  toward the audience named in
   [the adoption strategy](docs/design/002_product_adoption_strategy.md), not
-  because it improves semidx's view of itself. Dogfood-only coverage work,
-  including [Follow-up 006](docs/followups/006_zig_cross_unit_and_member_calls.md),
-  is deprioritized behind that.
-- [Plan 010](docs/plans/010_java_resolution_boundaries.md) is executed. semidx
-  has external Java evidence from apache/dubbo at `df9c5e1` (119 Maven modules,
-  4,050 units); Java resolution is bounded by ADR 008's source root,
-  single-type imports resolve inside it, Follow-up 003 is closed, and
-  cross-module visibility is split into
-  [Follow-up 011](docs/followups/011_java_cross_module_visibility.md). The real
-  remaining Java blockers are coverage, not the boundary: receiver qualifiers
-  account for 4,624 of 5,662 unresolved calls in the sample, and the supertype
-  guard was the largest in-working-copy unresolved-reference bucket before
-  single-type imports (64 of 103; the post-import denominator is 98 and must be
-  remeasured before more Java widening).
+  because it improves semidx's view of itself. Dogfood-only coverage such as
+  [006](docs/followups/006_zig_cross_unit_and_member_calls.md) sits behind that.
+- [Plan 010](docs/plans/010_java_resolution_boundaries.md) is executed:
+  resolution is bounded by ADR 008's source root with single-type imports inside
+  it, Follow-up 003 is closed and cross-module visibility split into
+  [011](docs/followups/011_java_cross_module_visibility.md). The remaining Java
+  blockers are coverage, not the boundary.
 - [Plan 011](docs/plans/011_external_scale_graph_query_indexes.md) is executed
-  and Follow-up 012 is closed. Snapshot identity lookups are constant time, and
-  anchored relationship queries inspect exactly as many assertions as they
-  return, proven by a committed work bound at 244,559 assertions (past Dubbo's
-  230,753). Equivalent latency on apache/dubbo was **not re-measured**; the
-  product claim rests on work bounds, not a new wall clock. Java write-path
-  measurement was left as-is: one-file refresh at 1,200 units is 13 ms, and
-  package-export reanalysis is constant at 41 units across the measured corpora.
+  and Follow-up 012 is closed: identity lookups are constant time, anchored
+  queries inspect exactly what they return under a committed work bound past
+  Dubbo's assertion count, and `semidx_context depth=2` there fell from 90.71 s
+  to 0.019 s.
 - [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
-  is the next Java adoption plan: re-run the post-Plan-011 external Java
-  baseline, then improve exact receiver-qualified calls behind an ADR and Java
-  analyzer projections without build descriptors, shared-core
-  `module`/`IMPORTS`, approximate facts, or query-work regression. The
-  supertype guard is measured for a possible follow-up, not relaxed in Plan 012.
+  is **executed**: `ClassName.method(...)` is a `CALLS` fact when every
+  [ADR 009](docs/adr/009_java_static_calls.md) condition holds at once, and
+  otherwise stays unresolved naming the condition that failed. Java definitions
+  carry `java.supertypes`, `java.access` and `java.static`; a resolved call
+  declares a provider dependency, an unresolved one is reached by an
+  aspect-grained reader hint. Its post-closure review left
+  [017](docs/followups/017_plan_012_external_evidence_reproducibility.md) and
+  [018](docs/followups/018_unexplained_assertion_delta.md) open and fixed
+  [015](docs/followups/015_unit_path_change_does_not_reanalyze.md) and
+  [016](docs/followups/016_java_static_call_rule_narrow_gaps.md).
+- [Plan 013](docs/plans/013_unresolved_mentions_from_the_callee_anchor.md) is
+  **executed**: structured designators and `unresolved_mentions`, closing
+  [019](docs/followups/019_designator_may_carry_source_expression.md) and
+  narrowing [017](docs/followups/017_plan_012_external_evidence_reproducibility.md).
+  It converted no claim and moved no fact; on apache/dubbo at `df9c5e1` it took
+  unresolved calls reachable from the definition they name from 10,141 to
+  91,087 of 118,471.
+- [Plan 014](docs/plans/014_java_receiver_coverage.md) is **executed**: Java interfaces, declared-supertypes references, closed-chain guard relaxation, `this`, and covered simple value receivers under [ADR 012](docs/adr/012_java_value_receiver_calls.md) are shipped; follow-ups [013](docs/followups/013_java_supertype_guard_relaxation.md) and [014](docs/followups/014_java_instance_receiver_calls.md) are fixed.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
-  clients ignore `structuredContent` and read `content`, so the text copy is
-  load-bearing rather than legacy, and MCP SEP-2200 — the same change semidx was
-  considering — was declined upstream on 2026-05-25. Only a
-  `--text-fallback=full|none` diagnostic probe is added; `none` identifies
-  whether a client reads structured content and is never a production value. The
-  ADR owns the reasoning, including why `summary` is rejected, and
+  clients read `content`, not `structuredContent`, so the copy is load-bearing.
+  Only the `--text-fallback=full|none` diagnostic probe is added, `none` never a
+  production value, and
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
   closes against it.
-- Source identity needs stronger evidence for move-plus-edit refactors. Prefer
-  explicit VCS/IDE move events or language-aware refactoring evidence over
-  similarity presented as fact.
-- Storage and snapshot representation remain SPEC-owned unresolved areas. Any
-  persistence or long-running process design changes the current snapshot story.
-- Keep frontend coverage tied to stated risk and report it through
-  [docs/spec/capability_matrix.md](docs/spec/capability_matrix.md), not through
-  broad language-support claims.
-- Remove the inert `scripts/git-hooks/pre-push` block that tries to refresh the
-  removed Clojure `docs/code-context.md` flow once the rebuilt stack has a clear
-  replacement.
+- Source identity needs stronger evidence for move-plus-edit refactors: prefer
+  VCS or IDE move events over similarity presented as fact.
+- Storage and snapshot representation remain SPEC-owned unresolved areas: any
+  persistence design changes the current snapshot story.
+- Keep frontend coverage tied to stated risk and report it through the
+  [capability matrix](docs/spec/capability_matrix.md), never as broad
+  language-support claims.
+- Remove the inert `scripts/git-hooks/pre-push` block for the removed Clojure
+  `docs/code-context.md` flow once the stack has a replacement.
 
 ## Current Evidence Pointers
 
-- Plan 001 history:
-  [docs/reports/001_zig_vertical_slice_progress.md](docs/reports/001_zig_vertical_slice_progress.md).
-- Plan 002 and consolidated repository-scale ingestion history:
-  [docs/reports/002_consolidated_progress.md](docs/reports/002_consolidated_progress.md).
-- Plan 003 Java same-package resolution:
-  [docs/reports/003_java_package_type_resolution_progress.md](docs/reports/003_java_package_type_resolution_progress.md).
-- Plan 004 Zig frontend and MCP preview:
-  [docs/reports/004_zig_frontend_and_mcp_preview_progress.md](docs/reports/004_zig_frontend_and_mcp_preview_progress.md).
-- Plan 005 release readiness:
-  [docs/reports/005_mcp_preview_release_readiness_progress.md](docs/reports/005_mcp_preview_release_readiness_progress.md)
-  [docs/releases/v0.1.0-preview.1.md](docs/releases/v0.1.0-preview.1.md), and
-  [docs/releases/v0.1.0-preview.2.md](docs/releases/v0.1.0-preview.2.md);
-  current candidate: [docs/releases/v0.1.0-preview.3.md](docs/releases/v0.1.0-preview.3.md).
-- Plan 006 Zig dogfood coverage:
-  [docs/reports/006_zig_dogfood_semantic_coverage_progress.md](docs/reports/006_zig_dogfood_semantic_coverage_progress.md).
-- Plan 007 MCP response budgets and schema ergonomics:
-  [docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md](docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md).
-- Plan 008 habit loop gate and release-candidate evidence:
-  [docs/reports/008_habit_loop_release_gate_progress.md](docs/reports/008_habit_loop_release_gate_progress.md).
-- Plan 009 progressive discovery and response budgets:
-  [docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md](docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md).
-- Plan 010 Java resolution boundaries, and the first external-repository
-  evidence:
+- Plans 001-009 history — vertical slice, repository-scale ingestion, Java
+  same-package resolution, Zig frontend and MCP preview, release readiness,
+  dogfood coverage, response budgets, habit-loop gate, progressive discovery —
+  is one progress log per plan in [docs/reports/](docs/reports/), with the
+  preview notes in [docs/releases/](docs/releases/); current release candidate
+  [v0.1.0-preview.4](docs/releases/v0.1.0-preview.4.md).
+- Plan 010 Java resolution boundaries, and the first external evidence:
   [docs/reports/010_java_resolution_boundaries_progress.md](docs/reports/010_java_resolution_boundaries_progress.md).
-- Plan 011 external-scale graph query indexes, including the query cost model,
-  its measurements, and the Java write-path decision:
+- Plan 011 query indexes, the cost model and its measurements:
   [docs/reports/011_external_scale_graph_query_indexes_progress.md](docs/reports/011_external_scale_graph_query_indexes_progress.md).
-- Active follow-ups:
-  [docs/followups/README.md](docs/followups/README.md).
-- Product direction:
-  [docs/design/001_project_roadmap.md](docs/design/001_project_roadmap.md) and
+- Plan 012 Java static calls, its costs and its post-closure review:
+  [docs/reports/012_java_semantic_quality_without_query_regression_progress.md](docs/reports/012_java_semantic_quality_without_query_regression_progress.md).
+- Plan 013 designators and mentions, with the external before/after:
+  [docs/reports/013_unresolved_mentions_from_the_callee_anchor_progress.md](docs/reports/013_unresolved_mentions_from_the_callee_anchor_progress.md).
+- Active follow-ups: [docs/followups/README.md](docs/followups/README.md).
+- Product direction: [docs/design/001_project_roadmap.md](docs/design/001_project_roadmap.md),
   [docs/design/002_product_adoption_strategy.md](docs/design/002_product_adoption_strategy.md).

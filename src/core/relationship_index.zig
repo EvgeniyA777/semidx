@@ -49,19 +49,24 @@ pub const Adjacency = struct {
 /// Where one designator's candidates sit in the shared position array.
 const Span = struct { start: u32, len: u32 };
 
-/// Positions grouped by designator.
+/// Positions grouped by the name a designator holds.
 ///
-/// A hash map rather than a dense table, because designators are strings and
-/// strings have no dense key space. The keys are the snapshot's own interned
-/// designators, borrowed exactly like every other string a snapshot holds.
+/// A hash map rather than a dense table, because names are strings and strings
+/// have no dense key space. The keys are the snapshot's own interned designator
+/// names, borrowed exactly like every other string a snapshot holds.
+///
+/// The key is `designator.name` as the frontend recorded it. This index never
+/// splits, folds, or normalizes anything: a qualifier is a separate field a
+/// producer supplied, and grouping is over the name alone because that is what
+/// a definition of that name can be asked by.
 pub const DesignatorAdjacency = struct {
     spans: std.StringHashMapUnmanaged(Span),
     positions: []u32,
 
     pub const empty: DesignatorAdjacency = .{ .spans = .empty, .positions = &.{} };
 
-    pub fn bucket(self: DesignatorAdjacency, designator: []const u8) []const u32 {
-        const span = self.spans.get(designator) orelse return &.{};
+    pub fn bucket(self: DesignatorAdjacency, name: []const u8) []const u32 {
+        const span = self.spans.get(name) orelse return &.{};
         return self.positions[span.start .. span.start + span.len];
     }
 
@@ -205,12 +210,8 @@ fn buildDesignators(
     errdefer self.deinit(gpa);
 
     for (assertions) |assertion| {
-        const relationship = assertion.relationship() orelse continue;
-        const designator = switch (relationship.target) {
-            .designator => |value| value,
-            .entity => continue,
-        };
-        const found = try self.spans.getOrPut(gpa, designator);
+        const key = designatorKey(assertion) orelse continue;
+        const found = try self.spans.getOrPut(gpa, key);
         if (!found.found_existing) found.value_ptr.* = .{ .start = 0, .len = 0 };
         found.value_ptr.len += 1;
     }
@@ -225,14 +226,27 @@ fn buildDesignators(
 
     self.positions = try gpa.alloc(u32, total);
     for (assertions, 0..) |assertion, position| {
-        const relationship = assertion.relationship() orelse continue;
-        const designator = switch (relationship.target) {
-            .designator => |value| value,
-            .entity => continue,
-        };
-        const span = self.spans.getPtr(designator).?;
+        const key = designatorKey(assertion) orelse continue;
+        const span = self.spans.getPtr(key).?;
         self.positions[span.start + span.len] = @intCast(position);
         span.len += 1;
     }
     return self;
+}
+
+/// What one assertion is findable by in the designator index: the name its
+/// designator holds, and nothing derived from it.
+///
+/// A claim whose producer could read no name carries an empty one, and an empty
+/// key is not bucketed. Nothing is lost by that — the claim is in the assertion
+/// array with its evidence like every other — and it keeps one key from
+/// standing for every claim that named nothing.
+fn designatorKey(assertion: model.Assertion) ?[]const u8 {
+    const relationship = assertion.relationship() orelse return null;
+    const designator = switch (relationship.target) {
+        .designator => |value| value,
+        .entity => return null,
+    };
+    if (designator.name.len == 0) return null;
+    return designator.name;
 }

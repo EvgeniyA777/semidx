@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-17"
+updated: "2026-09-20"
 ---
 
 # Tooling Policy
@@ -145,6 +145,41 @@ edit carries a required safety step. The safety step is not optional.
   will work.
 - The Zig addendum below names the probe commands for the implementation
   language. Add a comparable addendum when another language enters the build.
+
+## Runtime Budget For Repository Tooling
+
+Building, indexing, and querying require Zig 0.16.0 and a local tree-sitter, and
+nothing else. A tool that quietly widens what a contributor must install has
+changed the project's terms, not just its tooling.
+
+| Class | What it is | What it may require |
+| --- | --- | --- |
+| Guards and launchers | Run by git hooks, by build lanes, or in the daily loop — `check-*.sh`, `semidx-mcp.sh`, `install-git-hooks.sh` | POSIX `sh`. A hook that cannot start is a hook that is not there |
+| Environment setup | Run once to prepare a machine — `setup-*.sh` | External tools and the network, named in the script and failing loudly when absent |
+| Developer tools | Inspection and measurement commands — `semidx-dev`, `semidx-claim-sample`, `semidx-designator-shape`, `semidx-java-coverage` | Zig, built by `zig build` as its own step that no lane depends on |
+
+**A developer tool is written in Zig.** The toolchain is already required, the
+formatter and compiler check it like any other source, and it can read the graph
+directly instead of re-deriving what the project already knows. Another language
+buys speed of writing and charges everyone who runs it; that is not a trade this
+project makes for its own tools.
+
+Introducing a language or runtime beyond `sh` and Zig is a decision, and it is
+recorded where policy requires decisions to be recorded. "It was faster to
+write" is a reason, not a decision, and it does not survive the next person
+asking why the file is in that language.
+
+Two rules hold whatever the language:
+
+- **Nothing that gates work may depend on a developer tool.** No build lane, git
+  hook, `.mcp.json` entry, or build prerequisite names it. Verify that rather
+  than assume it.
+- **A tool is never the only copy of its procedure.** What it does is written
+  out in the document that owns the measurement, in enough detail to be
+  reimplemented without reading the source. A procedure that lives only in one
+  implementation is lost when that implementation is not kept — which is what
+  [Follow-up 017](../followups/017_plan_012_external_evidence_reproducibility.md)
+  records happening twice.
 
 ## Zig Addendum
 
