@@ -499,17 +499,24 @@ const Harness = struct {
     server: Server,
     out: Writer.Allocating,
 
+    const Unit = struct { path: []const u8, data: []const u8 };
+
     fn init(self: *Harness, evidence_text: bool, extra: []const u8) !void {
-        return self.initNamed(evidence_text, "extra.zig", extra);
+        if (extra.len == 0) return self.initUnits(evidence_text, &.{});
+        return self.initUnits(evidence_text, &.{.{ .path = "extra.zig", .data = extra }});
     }
 
-    /// The same root with the extra unit under a name of the caller's choosing,
-    /// so a test can put a unit of another language in it.
     fn initNamed(self: *Harness, evidence_text: bool, extra_path: []const u8, extra: []const u8) !void {
+        return self.initUnits(evidence_text, &.{.{ .path = extra_path, .data = extra }});
+    }
+
+    /// The same root with any extra units the caller names, so a test can put
+    /// units of several languages in it.
+    fn initUnits(self: *Harness, evidence_text: bool, extras: []const Unit) !void {
         self.tmp = testing.tmpDir(.{});
         errdefer self.tmp.cleanup();
         try self.tmp.dir.writeFile(test_io, .{ .sub_path = "greeter.zig", .data = greeter_source });
-        if (extra.len != 0) try self.tmp.dir.writeFile(test_io, .{ .sub_path = extra_path, .data = extra });
+        for (extras) |unit| try self.tmp.dir.writeFile(test_io, .{ .sub_path = unit.path, .data = unit.data });
         self.root = try self.tmp.dir.realPathFileAlloc(test_io, ".", testing.allocator);
         errdefer testing.allocator.free(self.root);
         self.log = .init(testing.allocator);
@@ -1790,6 +1797,201 @@ test "a designator renders as a name, and the expression around it only with the
     defer on.deinit();
     _ = try on.callTool(arena, "semidx_references", "{\"name\":\"run\",\"direction\":\"outgoing\"}");
     try testing.expect(std.mem.indexOf(u8, on.out.written(), expression) != null);
+}
+
+// -- Plan 013 Stage 3: unresolved mentions ----------------------------------
+
+/// Two Java classes in one unit: `Util` declares the name twice so a
+/// class-qualified call is established as a class and then declines on the
+/// overload, and `Caller` calls the same name through a field, which is a value
+/// and names no scope.
+const mention_java =
+    \\package demo;
+    \\
+    \\class Util {
+    \\    static String greeting() { return "a"; }
+    \\    static String greeting(String name) { return name; }
+    \\}
+    \\
+    \\class Caller {
+    \\    Util helper;
+    \\    void run() {
+    \\        helper.greeting(secret, 42);
+    \\        Util.greeting();
+    \\    }
+    \\}
+    \\
+;
+
+/// A Zig claim writing the same name, so the language scoping has something to
+/// exclude.
+const mention_zig =
+    \\pub fn probe(self: *@This()) void {
+    \\    self.greeting();
+    \\}
+    \\
+;
+
+const mention_units = [_]Harness.Unit{
+    .{ .path = "Caller.java", .data = mention_java },
+    .{ .path = "probe.zig", .data = mention_zig },
+};
+
+fn mentionsOf(structured: std.json.ObjectMap) []const std.json.Value {
+    return structured.get("unresolved_mentions").?.array.items;
+}
+
+test "an unresolved mention is a recorded claim beside the anchor, never a relationship to it" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.initUnits(false, &mention_units);
+    defer h.deinit();
+
+    const result = try h.callTool(arena, "semidx_references", "{\"name\":\"greeting\",\"language\":\"java\",\"direction\":\"incoming\"}");
+    const structured = result.object.get("structuredContent").?.object;
+
+    // The anchor is two definitions of that name and nothing points at either.
+    try testing.expectEqual(@as(i64, 2), structured.get("targets_total").?.integer);
+    try testing.expectEqual(@as(i64, 0), structured.get("relationships_total").?.integer);
+    try testing.expectEqual(@as(usize, 0), structured.get("relationships").?.array.items.len);
+
+    // Two claims wrote that name, and both are here with their own reasons.
+    try testing.expectEqual(@as(i64, 2), structured.get("unresolved_mentions_total").?.integer);
+    try testing.expect(!structured.get("unresolved_mentions_truncated").?.bool);
+    const mentions = mentionsOf(structured);
+    try testing.expectEqual(@as(usize, 2), mentions.len);
+
+    var qualified_seen = false;
+    var bare_seen = false;
+    for (mentions) |item| {
+        const mention = item.object;
+        // It names no target: a mention has none, and rendering one would be
+        // the name match becoming a relationship.
+        try testing.expect(mention.get("target") == null);
+        try testing.expectEqualStrings("calls", mention.get("kind").?.string);
+        const designator = mention.get("designator").?.object;
+        try testing.expectEqualStrings("greeting", designator.get("name").?.string);
+        // Its own category and reason, at compact detail, which is what keeps
+        // it from reading as a call to the anchor.
+        const resolution = mention.get("resolution").?.object;
+        try testing.expectEqualStrings("unresolved", resolution.get("category").?.string);
+        try testing.expectEqualStrings("target_entity", resolution.get("missing").?.string);
+        try testing.expect(resolution.get("explanation").?.string.len != 0);
+        try testing.expectEqualStrings("frontend.java", mention.get("producer").?.object.get("name").?.string);
+        try testing.expectEqualStrings("current", mention.get("freshness").?.string);
+        // The caller, by id, with where it is written.
+        const source = mention.get("source").?.object;
+        try testing.expectEqualStrings("run", source.get("name").?.string);
+        try testing.expectEqualStrings("Caller.java", source.get("evidence").?.object.get("unit").?.object.get("path").?.string);
+        if (designator.get("qualifier")) |qualifier| {
+            try testing.expectEqualStrings("Util", qualifier.string);
+            qualified_seen = true;
+        } else bare_seen = true;
+    }
+    // The class-qualified call kept the class; the call through a field kept
+    // nothing, because a field is a value.
+    try testing.expect(qualified_seen and bare_seen);
+
+    // Default output carries names and qualifiers, and no text the source
+    // wrote around them.
+    try testing.expect(std.mem.indexOf(u8, h.out.written(), "helper.greeting") == null);
+    try testing.expect(std.mem.indexOf(u8, h.out.written(), "secret") == null);
+    try testing.expect(std.mem.indexOf(u8, h.out.written(), "\"source_text\":{") == null);
+    // And the Zig claim of the same name is not in a Java answer.
+    try testing.expect(std.mem.indexOf(u8, h.out.written(), "probe.zig") == null);
+}
+
+test "a mention section is exact, language-scoped, and present when it is empty" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.initUnits(false, &mention_units);
+    defer h.deinit();
+
+    // Asking for facts asks for something a mention never is.
+    const facts = (try h.callTool(arena, "semidx_references", "{\"name\":\"greeting\",\"language\":\"java\",\"resolution\":\"fact\"}"))
+        .object.get("structuredContent").?.object;
+    try testing.expectEqual(@as(usize, 0), mentionsOf(facts).len);
+    try testing.expectEqual(@as(i64, 0), facts.get("unresolved_mentions_total").?.integer);
+    // Present and empty: an absent section would read as "not supported".
+    try testing.expect(facts.get("unresolved_mentions") != null);
+
+    // The same name in the other language answers with that language's claim
+    // and no other.
+    const zig = (try h.callTool(arena, "semidx_references", "{\"name\":\"greeting\",\"language\":\"zig\"}"))
+        .object.get("structuredContent").?.object;
+    const mentions = mentionsOf(zig);
+    try testing.expectEqual(@as(usize, 1), mentions.len);
+    const source = mentions[0].object.get("source").?.object;
+    try testing.expectEqualStrings("probe", source.get("name").?.string);
+    try testing.expectEqualStrings("probe.zig", source.get("evidence").?.object.get("unit").?.object.get("path").?.string);
+    try testing.expect(std.mem.indexOf(u8, h.out.written(), "Caller.java") == null);
+
+    // A name nothing wrote is an empty section, not a missing one.
+    const absent = (try h.callTool(arena, "semidx_references", "{\"name\":\"greet\",\"language\":\"zig\"}"))
+        .object.get("structuredContent").?.object;
+    try testing.expect(absent.get("unresolved_mentions") != null);
+    try testing.expectEqual(@as(i64, 0), absent.get("unresolved_mentions_total").?.integer);
+}
+
+test "the mention section has its own limit, truncation, hint, and budget share" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.initUnits(false, &mention_units);
+    defer h.deinit();
+
+    const cut = (try h.callTool(arena, "semidx_references", "{\"name\":\"greeting\",\"language\":\"java\",\"mention_limit\":1}"))
+        .object.get("structuredContent").?.object;
+    try testing.expectEqual(@as(usize, 1), mentionsOf(cut).len);
+    try testing.expectEqual(@as(i64, 2), cut.get("unresolved_mentions_total").?.integer);
+    try testing.expect(cut.get("unresolved_mentions_truncated").?.bool);
+    // Its own list name in the hints, and the argument that raises it.
+    try expectHint(cut, "unresolved_mentions", "raise", &.{"mention_limit"});
+    // The relationships list is complete, so it is not hinted about.
+    try testing.expect(hintArguments(cut, "relationships", "raise") == null);
+    try testing.expect(!cut.get("budget_exhausted").?.bool);
+    // The declared limit is part of what the answer says about itself.
+    try testing.expectEqual(@as(i64, 1), cut.get("budget").?.object.get("mention_limit").?.integer);
+
+    // Mentions are not merged into the relationships list and are not counted
+    // in its total.
+    try testing.expectEqual(@as(i64, 0), cut.get("relationships_total").?.integer);
+
+    const whole = (try h.callTool(arena, "semidx_references", "{\"name\":\"greeting\",\"language\":\"java\"}"))
+        .object.get("structuredContent").?.object;
+    try testing.expect(!whole.get("unresolved_mentions_truncated").?.bool);
+    try testing.expect(hintArguments(whole, "unresolved_mentions", "raise") == null);
+
+    // Under a byte budget the section is cut like every other list, says so,
+    // and reports what it selected but did not return.
+    const bounded = (try h.callTool(arena, "semidx_references", "{\"name\":\"greeting\",\"language\":\"java\",\"max_response_bytes\":900}"))
+        .object.get("structuredContent").?.object;
+    try testing.expect(bounded.get("budget_exhausted").?.bool);
+    try testing.expect(bounded.get("unresolved_mentions_truncated").?.bool);
+    const omitted = bounded.get("omitted_by_budget").?.object;
+    try testing.expect(omitted.get("unresolved_mentions").?.integer > 0);
+    try testing.expect(omitted.get("relationships") != null);
+    try expectHint(bounded, "response", "raise", &.{"max_response_bytes"});
+}
+
+test "a mention carries the text around the name only under the evidence opt-in" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var on: Harness = undefined;
+    try on.initUnits(true, &mention_units);
+    defer on.deinit();
+
+    _ = try on.callTool(arena, "semidx_references", "{\"name\":\"greeting\",\"language\":\"java\"}");
+    // The same claim, with the opt-in, carries what the source wrote as
+    // evidence text — and that is the only place it appears.
+    try testing.expect(std.mem.indexOf(u8, on.out.written(), "helper.greeting(secret, 42)") != null);
+    try testing.expect(std.mem.indexOf(u8, on.out.written(), "\"source_text\":{") != null);
 }
 
 test "refresh publishes a new snapshot that observes edited and added units" {

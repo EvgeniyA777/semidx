@@ -14,12 +14,15 @@ Companion log for
 
 ## Current Status
 
-**Stages 0, 1 and 2 are complete.** A designator is now a name and, where the
+**Stages 0 to 3 are complete.** A designator is now a name and, where the
 source wrote a scope in front of it that the frontend knows to be one, that
 scope as its own field. Nothing resolved, nothing became a fact, and the fixture
 corpus records the same 396 facts it did before, pinned by a test. The
 designator-anchored query is proven to walk its own bucket and nothing else, at
-three graph sizes.
+three graph sizes, and `semidx_references` now answers from the callee anchor:
+on this repository `name=bucket direction=incoming` returns **zero
+relationships and five unresolved mentions**, each with its caller, its
+location, and the reason its own producer recorded.
 
 The baseline every later claim is compared against is recorded below, taken
 from a named clone at a named commit with named commands. Stage 0 itself changed
@@ -40,7 +43,7 @@ keys**. The stage order stands and Stage 1 may proceed.
 | Stage 0: Reproducible baseline | Completed | Baseline recorded from `apache/dubbo` at `df9c5e1`: 230,859 assertions, 92,637 facts, 138,222 unresolved, of which 118,471 unresolved calls and 19,751 unresolved references. 83.6% of unresolved call designators are expressions, not names. Five named definitions return 0, 93, 23, 8 and 0 incoming relationships against designator buckets of 1,091, 324, 293, 245 and 221. |
 | Stage 1: A designator is a structured name | Completed | `model.Designator` carries `name` and an optional `qualifier`; all three frontends record it and hand the written form to the evidence; the index keys on `name`. Fixture corpus: 134 definitions, 465 assertions, 396 facts, 69 unresolved, 54 diagnostics — identical before and after. Distinct designator keys over that corpus: 20 → 16. [ADR 010](../adr/010_designator_is_a_structured_name.md). |
 | Stage 2: The bucket is the whole walk | Completed | A designator query's inspected positions equal its bucket exactly, at 64, 256 and 12,500 units; a name one unit recorded costs one position at every size; the same query without the index costs the whole assertion array. On the clone the index fell from 57,068 keys and 3.65 MiB to **9,091 keys and 0.92 MiB**. |
-| Stage 3: `unresolved_mentions` in `semidx_references` | Not started | — |
+| Stage 3: `unresolved_mentions` in `semidx_references` | Completed | A third pass anchored on the target's name, admitted by byte equality and the anchor's language, rendered with its own reason and no target entity. Own limit (`mention_limit`, 50/500), own totals, own truncation, own hint, own budget share. The plan's demonstration passes. |
 | Stage 4: External re-measure | Not started | — |
 | Stage 5: Documentation and closure | Not started | — |
 
@@ -237,6 +240,106 @@ costs in coverage and buys in honesty.
 - Bucket sizes grew because names group. That is the point of the change, and it
   is also what makes Stage 3's limit and budget load-bearing rather than
   decorative.
+
+## Stage 3: `unresolved_mentions` In `semidx_references`
+
+### The Demonstration
+
+The plan's own falsifiable check, run against this repository:
+
+```
+semidx_references name=bucket direction=incoming
+  targets_total             2
+  relationships_total       0
+  unresolved_mentions_total 5
+```
+
+| Where the claim is written | Caller | Resolution |
+| --- | --- | --- |
+| `src/core/graph.zig:1491` | `candidatesFor` | unresolved / `target_entity` |
+| `src/core/graph.zig:1495` | `candidatesFor` | unresolved / `target_entity` |
+| `src/core/graph.zig:1506` | `candidatesFor` | unresolved / `target_entity` |
+| `src/core/scale_test.zig:840` | `expectWorkFollowsTheNeighbourhood` | unresolved / `target_entity` |
+| `src/designator_shape.zig:285` | `main` | unresolved / `target_entity` |
+
+Each carries the frontend's own words — "the callee is not a bare name or a name
+qualified by a local import alias; field, method, namespace, and computed
+callees are not resolved" — and none names a target entity.
+
+**Five, where the plan said three.** The three `candidatesFor` call sites the
+plan named are all here. The other two are call sites Stages 1 and 2 of this
+plan added to this repository, in the work-bound test and the measurement
+command. The check is what the plan asked for; the repository grew between
+writing it and running it, and the number is recorded as measured rather than
+trimmed to the sentence.
+
+### What Changed
+
+Only `src/mcp/tools.zig` and its tests. No core, no frontend, no query path.
+
+| Where | Change |
+| --- | --- |
+| argument table | `mention_limit`, default 50 and maximum 500, so the advertised schema and the validator both derive from one declaration; the tool description says a mention is a name match over unresolved claims and never a relationship |
+| `references` | a third pass per shown target, `.{ .designator = <target name>, .reference_query = true, .freshness = … }`, admitting a claim only when its designator name equals the anchor byte for byte **and** its source entity has the anchor's language, and only when the call's `resolution` argument admits it |
+| `writeMention` | the claim as it is recorded: assertion id, kind, the caller entity, the designator with its qualifier where one exists, resolution, producer, freshness, evidence — and no target field at all |
+| `writeResolutionExplained` | a mention carries its explanation at every detail level, not only in `full`; a mention rendered beside a definition of the same name without its reason is the one rendering that could be misread |
+| `writeDesignator` | one renderer for both lists, so a designator cannot drift between them |
+| totals and bounds | `unresolved_mentions_total`, `unresolved_mentions_truncated`, a share of `omitted_by_budget`, a `narrowing_hints` entry naming `mention_limit`, and `mention_limit` in the `budget` object |
+
+Design points worth stating, because each is a place the section could have been
+made to lie:
+
+- **Its own `seen` set.** An assertion has one target, so no claim can be in
+  both lists, but sharing the set would let one section silently swallow the
+  other's items. The sets are separate and the totals are separate.
+- **Not paged.** Mentions are bounded by `mention_limit` and repeated on every
+  page, exactly as `targets` are. The existing cursor continues the
+  relationships list and nothing else, so a mention cannot appear as a
+  continuation of a relationship page.
+- **Byte equality is asked twice.** The index anchors on the name, and the pass
+  compares the name again. The second comparison is not defensive: it is the
+  rule, and writing it where the rule lives keeps it from becoming a property of
+  the index.
+- **No direction gate.** A mention is about the name the anchor carries, not a
+  direction, so it is present under `direction=outgoing` too — present and
+  empty when nothing wrote the name, per D9.
+
+### Tests Added
+
+| Test | Proves |
+| --- | --- |
+| an unresolved mention is a recorded claim beside the anchor, never a relationship to it | two claims naming a Java `greeting`, each with category, `missing`, explanation, producer, freshness and caller location, none with a `target`; the class-qualified one carries `Util` and the field-qualified one carries no qualifier; no receiver or argument text in the answer; the Zig claim of the same name absent |
+| a mention section is exact, language-scoped, and present when it is empty | `resolution=fact` yields a present, empty section; the same name in Zig answers with the Zig claim and no Java one; a name nothing wrote yields an empty section rather than a missing one |
+| the mention section has its own limit, truncation, hint, and budget share | `mention_limit=1` returns 1 of 2, sets `unresolved_mentions_truncated`, hints `raise mention_limit`, leaves `relationships` unhinted and `relationships_total` at 0; a byte budget cuts the section, reports it in `omitted_by_budget.unresolved_mentions`, and hints `max_response_bytes` |
+| a mention carries the text around the name only under the evidence opt-in | `helper.greeting(secret, 42)` appears only with `--allow-evidence-text`, and only as `source_text` |
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core` | passed |
+| `zig build test` | passed |
+| `zig build test-mcp` | passed, 34 tests in the preview module |
+| `zig build dogfood` | passed |
+| `zig build preview-gate` | passed |
+| `zig fmt --check build.zig src tests` | clean |
+| `semidx_references name=bucket direction=incoming` over this repository | 0 relationships, 5 mentions, recorded above |
+
+### Residual Risk And Next Step
+
+- **Next step is Stage 4**: the external re-measure, including what the largest
+  bucket now costs a caller.
+- A hot name's bucket is walked in full before the limit cuts the list, because
+  the total is exact by D8. On the clone the largest bucket is 6,728 positions;
+  Stage 4 measures what that costs and opens a follow-up if it is not
+  interactive, rather than approximating the count.
+- The section is repeated on every relationships page. For a hot anchor that is
+  a real cost paid per page; `mention_limit=0` is not expressible, so a caller
+  who wants only relationships pays for at least the walk. If that shows up in
+  Stage 4's timings it is a finding, not a design to defend.
+- `docs/mcp/local_preview.md` does not describe the section yet, and still calls
+  a designator "callee names as written". Both are Stage 5's targets, and the
+  plan puts them there deliberately.
 
 ## Stage 0: Reproducible Baseline
 
