@@ -1,9 +1,9 @@
 ---
 title: "Java receiver coverage through indexed hierarchies progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-21"
 ---
 
@@ -13,6 +13,12 @@ Companion log for
 [docs/plans/014_java_receiver_coverage.md](../plans/014_java_receiver_coverage.md).
 
 ## Current Status
+
+**Stage 6 is complete and the plan is closed.** Runtime and documentation owners
+now agree with the shipped Java coverage. Follow-up 014 is fixed, the
+capability matrix, MCP preview reference, roadmap, glossary, and `MEMORY.md`
+were aligned, and no new deferred finding was created. The next preview release
+is the following step and is not part of this plan.
 
 **Stage 5 is complete.** A Java call on a receiver that is a value of a declared
 type now names the method that type declares. On `apache/dubbo` that is **3,294
@@ -93,12 +99,48 @@ indexed source, **3,628 (76.6%) reach at least one interface**.
 
 | Stage | Status | Outcome |
 | --- | --- | --- |
+| Stage 6: Documentation, drift control, and closure | Completed | Accepted review findings fixed: the runtime Java capability note and canonical docs now describe interfaces, declared-supertypes references, closed-chain guard relaxation, `this`, and covered value receivers. Follow-up 014 is fixed; Plan 014 and this progress log are historical. Drift control checked the source-of-truth owners named in the plan. No release or version bump was made, and no new follow-up was opened. |
 | Stage 0: Price both halves on the clone | Completed | Baseline on `apache/dubbo` at `df9c5e1` reproduces Plan 013 Stage 0 to the unit: 230,859 assertions, 92,637 facts, 138,222 unresolved, 118,471 unresolved calls, every reason family identical. Guard families are 8,083 references and 6,206 receivers, exactly as Follow-up 013 records. **Gate A: PASS** — A1 3,628 of 4,738 interface-dependent, A2 4,738 against a floor of 1,000. Gate C input measured early: 2,172 addressable value receivers today, 3,041 with the guard relaxed. |
 | Stage 5: A value receiver with a declared type | Completed | D9 and D10 shipped under [ADR 012](../adr/012_java_value_receiver_calls.md). Seven conditions, each with its own reason; `this.m()` admitted and `super.m()` declined; a value receiver's decline carries no qualifier. **3,294 calls converted**, `receiver_bound` 55,565 → 0, and the eleven families that replace it sum to the whole. |
 | Stage 4: External re-measure of the supertype half | Completed | Guard families 8,083/6,206/4,049 → 6,064/4,403/3,251; `enclosing_supertypes` and `unqualified_supertypes` both zero; 1,690 claims converted and the gap to Gate A's bound accounted for exactly. **Gate C: PASS** — 2,657 against a floor of 1,000. Ingestion 3.1 s, 227 MB; 200 `semidx_context depth=2` calls under the noise floor; Plan 011 work bounds unchanged. Follow-up 013 closed. |
 | Stage 3: The guard lifts only on a closed chain | Completed | D4-D8 shipped. One test asked three times, each about what its own decline was about; ten named conditions; a converging batch. 1,690 claims converted on the clone, every one of the 10,322 that left the guard's families accounted for. |
 | Stage 2: A declared supertype is a recorded claim | Completed | D3 shipped, plus `src/frontends/java_hierarchy.zig`: a projection that walks recorded supertype claims and reports a closed chain or the first condition that opened it, used by nothing in the frontend yet. **Gate B: PASS** — 4,190 against a floor of 700, 86% of Gate A's upper bound and equal to its strict bound. On the fixture corpus the frontend change alone is byte-identical; on the clone, references +2,443 and every other claim family unchanged. A Stage 1 defect was found and fixed: 53 wrong facts removed. |
 | Stage 1: Interfaces are declarations the graph holds | Completed | D1 and D2 shipped. Interfaces and their methods are definitions with role `interface` and `method`; an unmodified interface method is recorded `public`; the package and class-shape projections carry both roles; the top-level interface diagnostic is gone and the enum, record and annotation type ones stay. On the clone: +3,022 definitions, +1,757 references, +1,411 calls, 247 reference claims converted, and **not one guard-declined claim moved**. [ADR 011](../adr/011_java_hierarchy_from_indexed_source.md). |
+
+## Stage 6: Documentation, Drift Control, And Closure
+
+### Review Findings
+
+- **Accepted and fixed:** the runtime Java capability note still described the
+  pre-Plan-014 rules. It now names interfaces, declared-supertypes references,
+  closed-chain guard relaxation, `this`, and covered value receivers.
+- **Accepted and fixed:** Stage 6 documentation closure was incomplete.
+  Follow-up 014 is fixed, the follow-up index is current, the capability matrix,
+  MCP preview reference, roadmap, glossary, and `MEMORY.md` agree with the
+  shipped behavior, and this plan plus this progress log are historical.
+
+### Drift Control
+
+The owners named by the plan were checked after the edits:
+`src/frontends/java.zig`, `docs/spec/capability_matrix.md`,
+`docs/mcp/local_preview.md`, `MEMORY.md`,
+`docs/design/001_project_roadmap.md`, `GLOSSARY.md`, follow-ups 013 and 014,
+the follow-up index, this plan, and this progress log. Follow-up 013 was already
+fixed and completed, and no new deferred finding was found, so no Follow-up 020
+was opened. No release or version bump was made. The next preview release is the
+following step and is not part of this plan.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | pass, Zig 0.16.0 |
+| `zig fmt --check build.zig src tests` | pass |
+| `zig build test-core` | pass |
+| `zig build test` | pass |
+| `zig build test-mcp` | pass |
+| `zig build dogfood` | pass; recovery-injection `failed command` lines were expected and the command exited 0 |
+| `zig build preview-gate` | pass; recovery-injection `failed command` lines were expected and the command exited 0 |
 
 ## Stage 0: Price Both Halves On The Clone
 

@@ -616,24 +616,25 @@ Notifications, including malformed ones, are never answered.
   declares. On-demand imports (`import a.b.*;`) and static imports never
   resolve.
 - A Java invocation written `ClassName.method(...)` is a `calls` fact only when
-  nothing in scope binds that name — no parameter, local, field, `for`
-  variable, `catch` parameter, resource, lambda parameter, or pattern — the
-  enclosing class declares no supertypes, the name reaches one current
-  top-level class inside the boundary above, that class declares no supertypes,
-  and it declares exactly one method of the invoked name that is `static` and
-  either public or inside the enclosing class
-  ([ADR 009](../adr/009_java_static_calls.md)). So `semidx_references incoming`
-  on a static utility method lists its callers. A unit that writes
-  `import static a.b.C.*;` resolves no simple-name receiver at all: such an
-  import brings in static fields semidx cannot enumerate, and in Java a field
-  obscures a type of its name, so every receiver in that unit stays an
-  unresolved designator saying so. A receiver that is a value
-  (`local.m()`, `field.m()`, `new T().m()`, `a().b()`, `super.m()`) stays an
-  unresolved designator, and so does an overloaded, inherited, non-static, or
-  less-accessible target — each saying which condition failed. Nothing here
-  records dispatch, hiding, or overload selection. Java definitions carry the
-  shape a caller has to check as extension labels: `java.supertypes` on a
-  class, `java.access` and `java.static` on a method.
+  nothing in scope binds that name, no on-demand static import may bind it to a
+  field, the receiver resolves to one current top-level class or interface
+  inside the boundary above, any relevant supertype chain is closed and does
+  not claim the name being ruled out, and the target declares exactly one
+  accessible `static` method
+  ([ADR 009](../adr/009_java_static_calls.md),
+  [ADR 011](../adr/011_java_hierarchy_from_indexed_source.md)). So
+  `semidx_references incoming` on a static utility method lists its callers.
+  A call through `this` or a covered value receiver (`local.m()`, `field.m()`,
+  or a parameter) is also a fact when the receiver's declared simple type
+  resolves to one current covered top-level type, the target declares exactly
+  one accessible method, and a closed target chain declares no method of that
+  name ([ADR 012](../adr/012_java_value_receiver_calls.md)). `super.m()`,
+  `new T().m()`, chained or field-access receivers, inherited targets,
+  overloads, generic/array/inferred receiver types, dispatch, hiding, and
+  overload selection stay unresolved with distinct reasons. Java definitions
+  carry the shape a caller has to check as extension labels: `java.supertypes`,
+  `java.supertype_names`, member and field name lists on a covered type, and
+  `java.access` and `java.static` on a method.
 - A reference to a type with no source under `--root` — every JDK type, and
   anything from a dependency not checked out here — is an unresolved designator.
   semidx reads no `.jar`, no class file, and no build descriptor, so no

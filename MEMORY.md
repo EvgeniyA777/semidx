@@ -209,10 +209,10 @@ documents that own history, rationale, and evidence.
 - No admitted shared-core `module` or `IMPORTS`.
 - No complete language support. Java, Clojure, and Zig fixtures prove current
   slice behavior; they are not a supported-language roster.
-- No Java on-demand or static import resolution, qualified names, nested
-  classes, inheritance, classpath symbols, interface/enum/record targets, or
-  reading of any build descriptor: cross-module visibility a build tool would
-  permit stays unresolved
+- No Java on-demand or static import resolution, qualified names, nested classes,
+  inherited target selection, classpath symbols, enum/record/annotation targets,
+  interface constants, or build descriptors: cross-module visibility a build
+  tool would permit stays unresolved
   ([Follow-up 011](docs/followups/011_java_cross_module_visibility.md)).
 - No Clojure namespace or lexical-scope model beyond the current conservative
   same-unit rules.
@@ -296,10 +296,7 @@ documents that own history, rationale, and evidence.
   otherwise stays unresolved naming the condition that failed. Java definitions
   carry `java.supertypes`, `java.access` and `java.static`; a resolved call
   declares a provider dependency, an unresolved one is reached by an
-  aspect-grained reader hint. Value receivers stay with
-  [014](docs/followups/014_java_instance_receiver_calls.md) and the supertype
-  guard with [013](docs/followups/013_java_supertype_guard_relaxation.md); its
-  post-closure review left
+  aspect-grained reader hint. Its post-closure review left
   [017](docs/followups/017_plan_012_external_evidence_reproducibility.md) and
   [018](docs/followups/018_unexplained_assertion_delta.md) open and fixed
   [015](docs/followups/015_unit_path_change_does_not_reanalyze.md) and
@@ -311,6 +308,7 @@ documents that own history, rationale, and evidence.
   It converted no claim and moved no fact; on apache/dubbo at `df9c5e1` it took
   unresolved calls reachable from the definition they name from 10,141 to
   91,087 of 118,471.
+- [Plan 014](docs/plans/014_java_receiver_coverage.md) is **executed**: Java interfaces, declared-supertypes references, closed-chain guard relaxation, `this`, and covered simple value receivers under [ADR 012](docs/adr/012_java_value_receiver_calls.md) are shipped; follow-ups [013](docs/followups/013_java_supertype_guard_relaxation.md) and [014](docs/followups/014_java_instance_receiver_calls.md) are fixed.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients read `content`, not `structuredContent`, so the copy is load-bearing.

@@ -1,10 +1,10 @@
 ---
 title: "Java receiver coverage through indexed hierarchies"
 doc_type: "plan"
-lifecycle: "active"
-status: "planned"
-agent_action: "reference_for_context"
-updated: "2026-09-20"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
+updated: "2026-09-21"
 ---
 
 # 014: Java Receiver Coverage Through Indexed Hierarchies

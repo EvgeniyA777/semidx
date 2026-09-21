@@ -1,10 +1,10 @@
 ---
 title: "Java instance receiver calls"
 doc_type: "follow_up"
-lifecycle: "active"
-status: "open"
-agent_action: "use_as_input_for_future_plan_only"
-updated: "2026-09-19"
+lifecycle: "completed"
+status: "fixed"
+agent_action: "historical_reference_only"
+updated: "2026-09-21"
 ---
 
 # Java Instance Receiver Calls
@@ -21,7 +21,27 @@ was written for, and which its own Stage 0 gate declined. See
 and
 [Amendment 1](../plans/012_java_semantic_quality_without_query_regression.md#amendment-1-from-instance-receivers-to-static-calls).
 
-## Current Behavior
+## Resolution
+
+[Plan 014](../plans/014_java_receiver_coverage.md) fixed this follow-up in
+Stage 5 under [ADR 012](../adr/012_java_value_receiver_calls.md). A call through
+`this` or a covered simple value receiver is now a `CALLS` fact when the
+receiver's declared simple type resolves inside the current Java visibility
+boundary, the target declares exactly one accessible method, and a closed target
+supertype chain declares no method of that name. `super.m()`, inherited targets,
+non-simple receivers, generic/array/wildcard/inferred declared types, overloads,
+and build/classpath-only targets stay unresolved with named reasons.
+
+On apache/dubbo at `df9c5e1`, Stage 5 converted **3,294 calls** and replaced
+the `receiver_bound` family (**55,565** claims) with eleven families that say
+which ADR 012 condition failed. Across Plan 014, Java call facts went from 5,028
+to 9,518 and reference facts from 1,740 to 3,920
+([progress log](../reports/014_java_receiver_coverage_progress.md#stage-5-a-value-receiver-with-a-declared-type)).
+
+This document is historical. The remaining Java receiver gaps are non-scope
+coverage, not this follow-up staying open.
+
+## Original Finding
 
 Any `method_invocation` with an `object` field is recorded as an unresolved
 `CALLS` assertion whose designator is the full invocation text. That is 4,624 of

@@ -25,24 +25,29 @@ pub const capabilities: contract.Capabilities = .{
     .entity_roles = &.{ "class", "interface", "method" },
     .relationship_kinds = &.{ .defines, .references, .calls },
     .coverage_note = "top-level classes and interfaces, their methods, method " ++
-        "return types, class field types, and invocations inside method bodies, " ++
-        "where an unqualified " ++
-        "invocation resolves only to the enclosing type's one method of that " ++
-        "name when that type has no supertypes and the call is not inside a " ++
-        "nested class body; an invocation qualified by a simple name resolves " ++
-        "only when nothing in scope binds that name, the enclosing type declares " ++
-        "no supertypes, the name resolves to a current top-level class or " ++
-        "interface that declares no supertypes, and that type declares exactly " ++
-        "one method of the invoked name, `static` and either public or inside " ++
-        "the enclosing type — a receiver that is a value, an inherited or " ++
-        "overloaded method, and dispatch are not resolved; a simple type name " ++
-        "not declared in the unit resolves to the one current top-level class " ++
-        "or interface another unit declares in the same explicit package, " ++
-        "unless a type parameter, member type, supertype, import, or " ++
-        "uncovered type declaration could give the name another meaning. An " ++
-        "interface method with no access modifier is recorded as `public`, as " ++
-        "Java defines it; an interface's constants, and enum, record, and " ++
-        "annotation type declarations, stay outside this coverage",
+        "return types, class field types, declared supertypes, and invocations " ++
+        "inside method bodies. A simple type name not declared in the unit " ++
+        "resolves to the one current top-level class or interface in the same " ++
+        "visibility scope, unless a type parameter, member type, supertype " ++
+        "chain, import, or uncovered type declaration could give the name " ++
+        "another meaning; declared supertypes are recorded as references under " ++
+        "that same rule. An unqualified invocation resolves to the enclosing " ++
+        "type's one method of that name when the call is not inside a nested " ++
+        "class body and any declared supertype chain is closed in indexed " ++
+        "source and declares no method of that name. An invocation qualified " ++
+        "by a simple name resolves as a class-qualified static call when no " ++
+        "binding, on-demand static import, or inherited field can claim the " ++
+        "receiver name, the name resolves to one current top-level class or " ++
+        "interface, the target declares exactly one accessible static method, " ++
+        "and any required enclosing or target chain is closed. A call through " ++
+        "`this` or a covered value receiver resolves when the receiver's " ++
+        "declared simple type resolves, the target declares exactly one " ++
+        "accessible method, and a closed target chain declares no method of " ++
+        "that name; `super`, inherited targets, dispatch, overload selection, " ++
+        "non-simple, generic, array, and inferred receiver types stay outside " ++
+        "coverage. An interface method with no access modifier is recorded as " ++
+        "`public`, as Java defines it; interface constants, and enum, record, " ++
+        "and annotation type declarations, stay outside this coverage",
 };
 
 /// Guards against unbounded recursion on pathological input. Exceeding it is

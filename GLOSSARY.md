@@ -40,14 +40,14 @@ including identity limitations of frontends and source ingestion. It exists so
 partial coverage is visible to consumers rather than hidden behind a
 uniform-looking graph.
 
-**class shape** — The part of a class other units' analysis depends on, as
-distinct from the class's existence: its current declared member set, the access
-of those members within a frontend's covered rules, and whether it declares
-supertypes. It is not a graph kind and not an inheritance model; it names which
-provider changes oblige a dependent unit to be reanalyzed. What counts as class
-shape for a given language is owned by that language's ADR and reported in the
-[capability matrix](docs/spec/capability_matrix.md); this entry records the
-concept, not the roster.
+**class shape** — The part of a covered type other units' analysis depends on,
+as distinct from the type's existence: its current declared member set, the
+access of those members within a frontend's covered rules, and whether it
+declares supertypes. It is not a graph kind and not an inheritance model; it
+names which provider changes oblige a dependent unit to be reanalyzed. What
+counts as class shape for a given language is owned by that language's ADR and
+reported in the [capability matrix](docs/spec/capability_matrix.md); this entry
+records the concept, not the roster.
 
 **consumer** — Anything that reads the graph rather than producing it: search,
 AI agents, IDE integration, impact analysis, documentation linkage, or future

@@ -162,15 +162,13 @@ The next useful sequence follows from that, not from the plan that preceded it:
    [Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md) is
    executed and converted nothing: the 118,471 unresolved calls on apache/dubbo
    are the same claims with the same reasons, and 91,087 of them can now be
-   found by asking about the definition they name, against 10,141 before. The
-   next Java coverage step is now the priority, priced by
-   [Plan 012](../plans/012_java_semantic_quality_without_query_regression.md) on
-   the same clone rather than by Plan 010's older sample: the supertype guard
-   ([Follow-up 013](../followups/013_java_supertype_guard_relaxation.md))
-   converts 13 of 335 measured cases safely, and the instance-receiver type
-   environment ([Follow-up 014](../followups/014_java_instance_receiver_calls.md))
-   addresses 63 exact facts. Java remains the enterprise stress test for whether
-   semidx helps on serious local codebases.
+   found by asking about the definition they name, against 10,141 before.
+   [Plan 014](../plans/014_java_receiver_coverage.md) then executed the priced
+   Java coverage step: interfaces and declared supertypes are graph claims, the
+   closed-chain guard conversion landed, and covered value receivers converted
+   3,294 calls on the same clone. Java remains the enterprise stress test for
+   whether semidx helps on serious local codebases; the immediate follow-up is
+   the next preview release, not another hidden expansion of Java semantics.
 3. **Defer SQLite and persistence until the in-memory projection contract is
    proven.** Storage can help cold start, memory pressure, and long-running
    local use later, but it should back the same graph-authoritative snapshot and
@@ -191,14 +189,14 @@ Current follow-ups should be picked up where they naturally fit:
 | Only with a second language asking a comparable question | [011: Java cross-module visibility](../followups/011_java_cross_module_visibility.md) | Follow-up 003 is closed by [ADR 008](../adr/008_java_visibility_boundaries.md); what remains is recovering cross-module references a build descriptor would permit, worth 1.5% of cross-unit facts on the probed repository. Reading build descriptors badly reintroduces the false fact that was just removed, so this waits for evidence, not appetite. |
 | When Clojure becomes an active coverage target | [008: Clojure lexical scope coverage](../followups/008_clojure_lexical_scope_coverage.md) | The current conservative unresolved behavior is correct. Exact lexical scope and known `clojure.core` binding forms are valuable, but only when Clojure coverage is being deliberately expanded. |
 
-After the preview is usable, prioritize work that increases exact graph value
-for real local development:
+After the next preview is released, prioritize work that increases exact graph
+value for real local development:
 
-- Reaching a recorded claim from the name it wrote, because an impact question
-  that returns nothing on a real repository is the adoption signal the first
-  probe failed, and the claims are already in the graph.
-- Java coverage where the probe showed it stops — supertypes and receiver calls
-  — rather than further boundary work.
+- MCP client-output evidence, especially the text fallback behavior named by
+  Follow-up 010, before changing what preview users see.
+- The remaining Java gaps only when new evidence reprices them: non-simple
+  receivers, inherited targets, overloads, build/classpath boundaries, and
+  unsupported declarations are not silently part of Plan 014.
 - Zig frontend depth where dogfood shows the highest pain, after the adoption
   track's Java-scale latency and coverage priorities are not being displaced.
 - Source identity evidence for move-plus-edit refactors.
