@@ -1,0 +1,25 @@
+## Done
+- Small current-doc cleanup is recorded: `MEMORY.md` and
+  `docs/design/001_project_roadmap.md` treat `v0.1.0-preview.4` as the
+  current source-built preview instead of a release candidate, and the roadmap
+  names the preview.4 tag/release boundary.
+- `MEMORY.md` was compacted back toward its role as a bounded operational index;
+  older per-plan detail should live in progress logs and release notes.
+- No code behavior changed.
+
+## In progress
+- None.
+
+## Remaining
+- Restart the environment so the active MCP process sees the new build.
+- Step 2: collect preview adoption and MCP client-output evidence, especially
+  [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md).
+- Step 3: choose the next large lane from measured user/agent pain across Zig
+  dogfood depth, remaining Java gaps, packaging/daemon work,
+  semantic-contract work, or persistence.
+- Remove this temporary `progress.txt` after it is consumed.
+
+## Current problems
+- The MCP server visible in this session may still be the pre-restart process,
+  so do not draw conclusions from its reported version until the environment is
+  restarted.

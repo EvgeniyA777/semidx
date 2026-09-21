@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-20"
+updated: "2026-09-21"
 ---
 
 # Project Roadmap
@@ -35,27 +35,25 @@ semantic truth.
 
 ## Current Position
 
-As of 2026-09-20, the Zig dogfood frontend, its Plan 006 widening, and the first
+As of 2026-09-21, the Zig dogfood frontend, its Plan 006 widening, and the
 local MCP preview are implemented and reviewed. The local MCP previews
-`v0.1.0-preview.1`, `v0.1.0-preview.2`, and `v0.1.0-preview.3` are tagged and
-pushed to `origin`. Plan 009's progressive MCP discovery work is published in
-`v0.1.0-preview.3`.
+`v0.1.0-preview.1` through `v0.1.0-preview.4` are tagged and pushed to `origin`.
+`v0.1.0-preview.4` is the current source-built preview.
 
-Since then the adoption track advanced by four executed plans:
+Since preview.3, the adoption track advanced through
 [Plan 010](../plans/010_java_resolution_boundaries.md) (external Java evidence
-and resolution boundaries), [Plan 011](../plans/011_external_scale_graph_query_indexes.md)
-(snapshot and relationship indexes, closing Follow-up 012),
+and resolution boundaries),
+[Plan 011](../plans/011_external_scale_graph_query_indexes.md) (snapshot and
+relationship indexes),
 [Plan 012](../plans/012_java_semantic_quality_without_query_regression.md)
-(class-qualified static calls as facts), and
-[Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md), which
-made a recorded claim reachable from the name it wrote without resolving
-anything: a designator is a structured name
-([ADR 010](../adr/010_designator_is_a_structured_name.md)) and
-`semidx_references` answers with relationships plus `unresolved_mentions`. On
-apache/dubbo at `df9c5e1` that moved unresolved calls reachable from the
-definition they name from 10,141 to 91,087 of 118,471 — 8.6% to 76.9% — with
-facts, resolutions and diagnostics identical to the unit. None of the four is
-the next priority any more.
+(class-qualified static calls),
+[Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md)
+(structured designators and `unresolved_mentions`), and
+[Plan 014](../plans/014_java_receiver_coverage.md) (interfaces, declared
+supertypes, closed-chain guard relaxation, and covered value receivers). On
+apache/dubbo at `df9c5e1`, Plan 013 moved unresolved calls reachable from the
+definition they name from 10,141 to 91,087 of 118,471 with facts unchanged, and
+Plan 014 converted 1,690 guard-blocked claims plus 3,294 value-receiver calls.
 
 Implemented:
 
@@ -89,9 +87,17 @@ Implemented:
   MCP discovery now starts with `semidx_outline`, references are compact by
   default, list tools have whole-response budgets, truncation hints, and
   authenticated cursors, and `semidx_context` supports bounded traversal.
+- [Plans 010-014](../releases/v0.1.0-preview.4.md) are implemented, reviewed,
+  and published in `v0.1.0-preview.4`: Java visibility boundaries, Java-scale
+  query indexes, class-qualified static calls, structured designators with
+  unresolved mentions, and the Java hierarchy/value-receiver coverage slice.
 
 Tagged (annotated tags, pushed to `origin`):
 
+- `v0.1.0-preview.4` at `e095d95` ([release notes](../releases/v0.1.0-preview.4.md)):
+  the preview.3 surface plus Java visibility, Java-scale query indexes,
+  class-qualified static calls, structured designators, unresolved mentions,
+  declared hierarchy claims, and covered Java value receivers.
 - `v0.1.0-preview.3` at `58af737` ([release notes](../releases/v0.1.0-preview.3.md)):
   the preview.2 surface plus Plan 009 progressive MCP discovery, compact
   references, response budgets, narrowing hints, authenticated cursors, and
@@ -122,7 +128,7 @@ Not yet present:
 | M2: Repository-scale local graph | Done | Move from hand-picked files to repository scans and incremental maintenance. | Scan/edit/remove paths preserve consistent graph state and bounded affected-region work. |
 | M3: First cross-unit semantic value | Done | Establish one language-correct cross-unit fact without admitting modules/imports prematurely. | Java same-package type references resolve under the narrow rule. |
 | M4: Dogfood language and local MCP preview | Done | Make semidx useful to its own development loop and to local agents. | Zig dogfood works; `semidx-mcp` answers graph-backed tools over stdio with source text off by default. |
-| M5: Preview release | Done | Make one source-built semidx usable against many local repository roots. | `v0.1.0-preview.1`, `v0.1.0-preview.2`, and `v0.1.0-preview.3` are tagged and pushed, without a stable semantic contract promise. |
+| M5: Preview release | Done | Make one source-built semidx usable against many local repository roots. | `v0.1.0-preview.1` through `v0.1.0-preview.4` are tagged and pushed, without a stable semantic contract promise. |
 | M6: Stable local CLI/MCP product | Later | Stabilize the local user-facing product surface. | `v0.1.0` is cut with documented CLI/MCP behavior, install path, version reporting, and support boundaries. |
 | M7: Published semantic contract | Later | Version the semantic model exposed to consumers. | SPEC/CORE publish contract versioning, schema shape, capability matrix, and migration rules. |
 | M8: Deeper semantic coverage | Later | Expand exact graph value without collapsing unsupported or unresolved states. | New language or relationship coverage lands through focused plans, ADRs where needed, and conformance evidence. |
@@ -167,33 +173,33 @@ The next useful sequence follows from that, not from the plan that preceded it:
    Java coverage step: interfaces and declared supertypes are graph claims, the
    closed-chain guard conversion landed, and covered value receivers converted
    3,294 calls on the same clone. Java remains the enterprise stress test for
-   whether semidx helps on serious local codebases; the immediate follow-up is
-   the next preview release, not another hidden expansion of Java semantics.
+   whether semidx helps on serious local codebases. That work is now published
+   in `v0.1.0-preview.4`.
 3. **Defer SQLite and persistence until the in-memory projection contract is
    proven.** Storage can help cold start, memory pressure, and long-running
    local use later, but it should back the same graph-authoritative snapshot and
    query-index contract rather than becoming the first fix for query latency.
-4. Use the MCP preview while developing semidx itself and collect evidence for
-   the next semantic expansion, including how real clients show tool results to
-   models ([follow-up 010](../followups/010_mcp_text_fallback_client_measurement.md)).
+4. Use `v0.1.0-preview.4` while developing semidx itself and collect evidence
+   for the next semantic or product expansion, including how real clients show
+   tool results to models
+   ([Follow-up 010](../followups/010_mcp_text_fallback_client_measurement.md)).
 
 Current follow-ups should be picked up where they naturally fit:
 
 | Timing | Follow-up | Why then |
 | --- | --- | --- |
 | Whenever someone re-derives a sample by hand | [017: Plan 012 external numbers are not reproducible](../followups/017_plan_012_external_evidence_reproducibility.md) | Narrowed by Plan 013 Stage 0, which recorded a new baseline on a named clone and reproduced Plan 012's whole-graph families to the unit. What is left is one check nobody has run: drawing the sample from the written selection rule without the program. |
-| Before changing MCP fallback output; useful during or right after the next preview release pass | [010: MCP text fallback client measurement](../followups/010_mcp_text_fallback_client_measurement.md) | The Plan 009 response budget controls structured output, but every result still carries the JSON text fallback. Measure real clients before shortening or configuring it. This does not block publishing the Plan 009 preview unless the release notes need fresh client observations. |
+| Before changing MCP fallback output; useful during or after preview.4 adoption | [010: MCP text fallback client measurement](../followups/010_mcp_text_fallback_client_measurement.md) | The Plan 009 response budget controls structured output, but every result still carries the JSON text fallback. Measure real clients before shortening or configuring it. |
 | After Java-adoption latency and the next Java coverage decision | [006: Zig cross-unit and member call resolution](../followups/006_zig_cross_unit_and_member_calls.md) | This remains the highest-value open semantic gap for semidx's own development, but dogfood-only coverage is no longer ahead of proving the adoption-track habit loop. |
 | When the next Zig frontend plan touches callee parsing or call-shape normalization | [001: Zig logical negation calls](../followups/001_zig_logical_negation_calls.md) | Keep it small and parser-evidenced. It is a correctness improvement, but not worth a standalone plan unless the Zig call walker is already open. |
 | Parser maintenance or grammar upgrade pass | [002: Zig empty container grammar](../followups/002_zig_empty_container_grammar.md) | First check whether a newer pinned grammar fixes the tree. Until then, the current analysis failure is honest and safer than guessing declarations from an erroneous parse tree. |
 | Only with a second language asking a comparable question | [011: Java cross-module visibility](../followups/011_java_cross_module_visibility.md) | Follow-up 003 is closed by [ADR 008](../adr/008_java_visibility_boundaries.md); what remains is recovering cross-module references a build descriptor would permit, worth 1.5% of cross-unit facts on the probed repository. Reading build descriptors badly reintroduces the false fact that was just removed, so this waits for evidence, not appetite. |
 | When Clojure becomes an active coverage target | [008: Clojure lexical scope coverage](../followups/008_clojure_lexical_scope_coverage.md) | The current conservative unresolved behavior is correct. Exact lexical scope and known `clojure.core` binding forms are valuable, but only when Clojure coverage is being deliberately expanded. |
 
-After the next preview is released, prioritize work that increases exact graph
-value for real local development:
+After `v0.1.0-preview.4`, keep the next large-work decision evidence-led:
 
-- MCP client-output evidence, especially the text fallback behavior named by
-  Follow-up 010, before changing what preview users see.
+- MCP client-output and habit-loop evidence, especially the text fallback
+  behavior named by Follow-up 010, before changing what preview users see.
 - The remaining Java gaps only when new evidence reprices them: non-simple
   receivers, inherited targets, overloads, build/classpath boundaries, and
   unsupported declarations are not silently part of Plan 014.

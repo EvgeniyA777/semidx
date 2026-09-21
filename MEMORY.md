@@ -275,41 +275,22 @@ documents that own history, rationale, and evidence.
 
 ## Near-Term Priorities
 
-- Plan 009 is published in `0.1.0-preview.3`; preview.4 is the current release candidate.
+- `v0.1.0-preview.4` is the current source-built preview; Plan 009 remains the
+  preview.3 release boundary and Plans 010-014 are published in preview.4.
 - The project is on the adoption track: work is chosen because it moves semidx
   toward the audience named in
   [the adoption strategy](docs/design/002_product_adoption_strategy.md), not
   because it improves semidx's view of itself. Dogfood-only coverage such as
   [006](docs/followups/006_zig_cross_unit_and_member_calls.md) sits behind that.
-- [Plan 010](docs/plans/010_java_resolution_boundaries.md) is executed:
-  resolution is bounded by ADR 008's source root with single-type imports inside
-  it, Follow-up 003 is closed and cross-module visibility split into
-  [011](docs/followups/011_java_cross_module_visibility.md). The remaining Java
-  blockers are coverage, not the boundary.
-- [Plan 011](docs/plans/011_external_scale_graph_query_indexes.md) is executed
-  and Follow-up 012 is closed: identity lookups are constant time, anchored
-  queries inspect exactly what they return under a committed work bound past
-  Dubbo's assertion count, and `semidx_context depth=2` there fell from 90.71 s
-  to 0.019 s.
-- [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
-  is **executed**: `ClassName.method(...)` is a `CALLS` fact when every
-  [ADR 009](docs/adr/009_java_static_calls.md) condition holds at once, and
-  otherwise stays unresolved naming the condition that failed. Java definitions
-  carry `java.supertypes`, `java.access` and `java.static`; a resolved call
-  declares a provider dependency, an unresolved one is reached by an
-  aspect-grained reader hint. Its post-closure review left
-  [017](docs/followups/017_plan_012_external_evidence_reproducibility.md) and
-  [018](docs/followups/018_unexplained_assertion_delta.md) open and fixed
-  [015](docs/followups/015_unit_path_change_does_not_reanalyze.md) and
-  [016](docs/followups/016_java_static_call_rule_narrow_gaps.md).
-- [Plan 013](docs/plans/013_unresolved_mentions_from_the_callee_anchor.md) is
-  **executed**: structured designators and `unresolved_mentions`, closing
-  [019](docs/followups/019_designator_may_carry_source_expression.md) and
-  narrowing [017](docs/followups/017_plan_012_external_evidence_reproducibility.md).
-  It converted no claim and moved no fact; on apache/dubbo at `df9c5e1` it took
-  unresolved calls reachable from the definition they name from 10,141 to
-  91,087 of 118,471.
-- [Plan 014](docs/plans/014_java_receiver_coverage.md) is **executed**: Java interfaces, declared-supertypes references, closed-chain guard relaxation, `this`, and covered simple value receivers under [ADR 012](docs/adr/012_java_value_receiver_calls.md) are shipped; follow-ups [013](docs/followups/013_java_supertype_guard_relaxation.md) and [014](docs/followups/014_java_instance_receiver_calls.md) are fixed.
+- Plans 010-014 are executed and published in preview.4. Durable evidence lives
+  in their progress logs; the short version is Java visibility boundaries,
+  Java-scale indexes, class-qualified static calls, structured unresolved
+  mentions, interfaces, declared-supertypes references, closed-chain guard
+  relaxation, `this`, and covered simple value receivers.
+- Next large direction: first collect preview adoption and MCP client-output
+  evidence, especially [010](docs/followups/010_mcp_text_fallback_client_measurement.md);
+  then choose between Zig dogfood depth, remaining Java gaps, packaging/daemon
+  work, semantic-contract work, or persistence by measured pain.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients read `content`, not `structuredContent`, so the copy is load-bearing.
@@ -329,20 +310,10 @@ documents that own history, rationale, and evidence.
 
 ## Current Evidence Pointers
 
-- Plans 001-009 history — vertical slice, repository-scale ingestion, Java
-  same-package resolution, Zig frontend and MCP preview, release readiness,
-  dogfood coverage, response budgets, habit-loop gate, progressive discovery —
-  is one progress log per plan in [docs/reports/](docs/reports/), with the
-  preview notes in [docs/releases/](docs/releases/); current release candidate
+- Plans 001-014 history lives in one progress log per plan under
+  [docs/reports/](docs/reports/), with preview notes in
+  [docs/releases/](docs/releases/); current preview:
   [v0.1.0-preview.4](docs/releases/v0.1.0-preview.4.md).
-- Plan 010 Java resolution boundaries, and the first external evidence:
-  [docs/reports/010_java_resolution_boundaries_progress.md](docs/reports/010_java_resolution_boundaries_progress.md).
-- Plan 011 query indexes, the cost model and its measurements:
-  [docs/reports/011_external_scale_graph_query_indexes_progress.md](docs/reports/011_external_scale_graph_query_indexes_progress.md).
-- Plan 012 Java static calls, its costs and its post-closure review:
-  [docs/reports/012_java_semantic_quality_without_query_regression_progress.md](docs/reports/012_java_semantic_quality_without_query_regression_progress.md).
-- Plan 013 designators and mentions, with the external before/after:
-  [docs/reports/013_unresolved_mentions_from_the_callee_anchor_progress.md](docs/reports/013_unresolved_mentions_from_the_callee_anchor_progress.md).
 - Active follow-ups: [docs/followups/README.md](docs/followups/README.md).
 - Product direction: [docs/design/001_project_roadmap.md](docs/design/001_project_roadmap.md),
   [docs/design/002_product_adoption_strategy.md](docs/design/002_product_adoption_strategy.md).
