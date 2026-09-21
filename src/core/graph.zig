@@ -698,6 +698,43 @@ pub const Graph = struct {
         return null;
     }
 
+    /// The relationship claims that `source` currently makes, as its own unit's
+    /// analysis recorded them.
+    ///
+    /// The companion of `currentDefinitionFact`, and bounded the same way: a
+    /// relationship is observed in the unit the source entity was introduced in,
+    /// so reading them costs what that unit holds rather than what the
+    /// repository holds. Like every projection input, it answers nothing about a
+    /// unit whose analysis is not current — a claim read from a stale unit would
+    /// be a claim about source the working copy no longer has.
+    ///
+    /// This is a read over assertions that already exist. It adds no kind, no
+    /// index, and no stored state.
+    pub fn currentRelationshipsFrom(
+        self: *Graph,
+        source: EntityId,
+        out: *std.ArrayList(model.Assertion),
+        gpa: Allocator,
+    ) Allocator.Error!void {
+        const found = self.entity(source) orelse return;
+        if (!found.isLive()) return;
+        const observed = found.evidence orelse return;
+        const record = self.unit(observed.unit) orelse return;
+        if (!record.isLive() or record.analysis() != .current) return;
+
+        const bucket = self.assertionBucket(observed.unit) orelse return;
+        self.unit_work += bucket.items.len;
+        for (bucket.items) |assertion| {
+            const claim = switch (assertion.claim) {
+                .relationship => |relationship| relationship,
+                else => continue,
+            };
+            if (claim.source != source) continue;
+            if (assertion.revision < record.content_revision) continue;
+            try out.append(gpa, assertion);
+        }
+    }
+
     fn definitionBucket(self: *Graph, id: SourceUnitId) ?*std.ArrayList(EntityId) {
         const index = id.index();
         if (index >= self.unit_definitions.items.len) return null;

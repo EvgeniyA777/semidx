@@ -70,6 +70,27 @@ pub const class_shape = struct {
     pub const declared = "declared";
 };
 
+/// The member types a top-level type declares, as one label.
+///
+/// A member type is not a definition this frontend records, so a later analysis
+/// asking "could an inherited member type of this name shadow it" has nothing to
+/// look up. The declaring analysis already knows, so it writes the names down
+/// where the graph can carry them. A Java identifier cannot contain a comma, so
+/// the separator cannot occur inside a name.
+pub const member_types = struct {
+    pub const key = "java.member_types";
+    pub const separator = ',';
+
+    pub fn contains(value: []const u8, name: []const u8) bool {
+        if (name.len == 0) return false;
+        var names = std.mem.splitScalar(u8, value, separator);
+        while (names.next()) |candidate| {
+            if (std.mem.eql(u8, candidate, name)) return true;
+        }
+        return false;
+    }
+};
+
 pub const method_access = struct {
     pub const key = "java.access";
     pub const public = "public";
@@ -678,6 +699,7 @@ pub fn analyze(
         };
         const name = try builder.dupe(name_node.text(source));
         const has_supertypes = declaresSupertypes(node);
+        const declared_member_types = try memberTypeNames(builder, node.childByFieldName("body"), source);
 
         const index = try builder.addEntity(.{
             .kind = .definition,
@@ -699,6 +721,7 @@ pub fn analyze(
                         .key = class_shape.key,
                         .value = if (has_supertypes) class_shape.declared else class_shape.none,
                     },
+                    .{ .key = member_types.key, .value = declared_member_types },
                 }),
             },
             .resolution = .{ .fact = .{
@@ -827,6 +850,8 @@ pub fn analyze(
             } },
         });
 
+        try emitSupertypeReferences(builder, source, class, unit_scope);
+
         const body = class.body orelse continue;
         var members = body.namedChildren();
         while (members.next()) |member| {
@@ -950,12 +975,38 @@ const UnitScope = struct {
     context: Context,
 };
 
+/// Where in a type declaration a name was written.
+///
+/// It decides one thing, and only one: whether the enclosing type's own
+/// supertypes may give the name another meaning. Inside the body they may — a
+/// member type could be inherited. In the `extends` or `implements` clause they
+/// may not, because the scope of a member declared in or inherited by a type is
+/// the *body* of that type (JLS 6.3), and the header is not the body. A type
+/// cannot inherit a name before it has said what it inherits from.
+const Position = enum { body, supertype };
+
 /// Where one type reference sits.
 const TypeScope = struct {
     unit: UnitScope,
     class: ClassInfo,
     /// The method whose return type is being read, if any.
     method: ?ts.Node,
+    position: Position = .body,
+};
+
+/// What every claim a declared supertype makes carries in front of
+/// `resolveType`'s own words, on the resolved and the unresolved path alike.
+///
+/// A relationship carries no extension payload, so this prefix is how a claim
+/// says which position it was read in. `java_hierarchy` reads it back to walk
+/// the hierarchy and nothing else; both ends name this one constant, so the two
+/// cannot drift apart.
+pub const supertype_claim = struct {
+    pub const prefix = "declared supertype: ";
+
+    pub fn marks(words: []const u8) bool {
+        return std.mem.startsWith(u8, words, prefix);
+    }
 };
 
 const TypeResolution = struct {
@@ -980,13 +1031,94 @@ fn emitTypeReference(
         .source = .{ .entity = from },
         .target = resolved.target,
         .evidence = evidenceOf(builder, type_node, name),
-        .resolution = resolved.resolution,
+        .resolution = switch (scope.position) {
+            .body => resolved.resolution,
+            .supertype => try markSupertype(builder, resolved.resolution),
+        },
     });
     if (resolved.provider) |provider| try declareProvider(
         builder,
         provider,
         "resolved a simple type name to a top-level class declared in the same Java package",
     );
+}
+
+/// The same answer, saying which position it was read in.
+///
+/// `resolveType`'s own words are kept verbatim behind the prefix. A supertype
+/// that does not resolve therefore still says exactly why, which is what makes
+/// an open chain visible as an unresolved name rather than as an absence.
+fn markSupertype(
+    builder: *contract.BatchBuilder,
+    resolution: model.Resolution,
+) !model.Resolution {
+    return switch (resolution) {
+        .fact => |established| .{ .fact = .{
+            .method = try builder.print("{s}{s}", .{ supertype_claim.prefix, established.method }),
+        } },
+        .unresolved => |declined| .{ .unresolved = .{
+            .missing = declined.missing,
+            .explanation = try builder.print("{s}{s}", .{ supertype_claim.prefix, declined.explanation }),
+        } },
+        // This frontend records none, and inventing one here would be the first.
+        .approximate => resolution,
+    };
+}
+
+/// Emits one `references` claim per declared supertype, from the declaring
+/// type's own entity, resolved in the declaring unit's scope.
+///
+/// That scope is the only correct one: what `Foo` means in an `extends` clause
+/// is decided by the imports and package of the unit that wrote it, never by a
+/// unit that later walks the chain
+/// ([ADR 011](../../docs/adr/011_java_hierarchy_from_indexed_source.md), D3).
+fn emitSupertypeReferences(
+    builder: *contract.BatchBuilder,
+    source: []const u8,
+    class: ClassInfo,
+    unit: UnitScope,
+) !void {
+    const scope: TypeScope = .{
+        .unit = unit,
+        .class = class,
+        .method = null,
+        .position = .supertype,
+    };
+    if (class.node.childByFieldName("superclass")) |superclass| {
+        try emitSupertypeList(builder, source, class.index, superclass, scope);
+    }
+    if (class.node.childByFieldName("interfaces")) |interfaces| {
+        try emitSupertypeList(builder, source, class.index, interfaces, scope);
+    }
+    var children = class.node.namedChildren();
+    while (children.next()) |child| {
+        if (!std.mem.eql(u8, child.kind(), "extends_interfaces")) continue;
+        try emitSupertypeList(builder, source, class.index, child, scope);
+    }
+}
+
+/// A `superclass` holds its type directly; a `super_interfaces` and an
+/// `extends_interfaces` hold a `type_list` of them.
+fn emitSupertypeList(
+    builder: *contract.BatchBuilder,
+    source: []const u8,
+    from: u32,
+    holder: ts.Node,
+    scope: TypeScope,
+) !void {
+    var children = holder.namedChildren();
+    while (children.next()) |child| {
+        const kind = child.kind();
+        if (std.mem.eql(u8, kind, "annotation") or std.mem.eql(u8, kind, "marker_annotation")) continue;
+        if (std.mem.eql(u8, kind, "type_list")) {
+            var types = child.namedChildren();
+            while (types.next()) |entry| {
+                try emitTypeReference(builder, source, from, entry, scope);
+            }
+            continue;
+        }
+        try emitTypeReference(builder, source, from, child, scope);
+    }
 }
 
 /// Resolves a type name the way ADR 004 and ADR 008 permit and no further.
@@ -1036,9 +1168,9 @@ fn resolveType(
         return unresolvedType(name, "the enclosing class declares a member type of this name, " ++
             "which this frontend does not cover");
     }
-    if (scope.class.node.childByFieldName("superclass") != null or
-        scope.class.node.childByFieldName("interfaces") != null)
-    {
+    // The guard reads the enclosing type's recorded shape rather than two class
+    // fields, so an interface's `extends` counts exactly as a class's does.
+    if (scope.position == .body and scope.class.has_supertypes) {
         return unresolvedType(name, "the enclosing class has supertypes, and a member type " ++
             "it may inherit under this name is not resolved");
     }
@@ -1218,6 +1350,27 @@ fn declaresTypeParameter(declaration: ts.Node, source: []const u8, name: []const
         }
     }
     return false;
+}
+
+/// The names of the type declarations directly inside a type body, joined for
+/// the `java.member_types` label. Empty when it declares none.
+fn memberTypeNames(
+    builder: *contract.BatchBuilder,
+    body: ?ts.Node,
+    source: []const u8,
+) ![]const u8 {
+    const type_body = body orelse return "";
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(builder.gpa);
+
+    var members = type_body.namedChildren();
+    while (members.next()) |member| {
+        if (!isTypeDeclaration(member.kind())) continue;
+        const name = member.childByFieldName("name") orelse continue;
+        if (joined.items.len != 0) try joined.append(builder.gpa, member_types.separator);
+        try joined.appendSlice(builder.gpa, name.text(source));
+    }
+    return builder.dupe(joined.items);
 }
 
 fn declaresMemberType(body: ?ts.Node, source: []const u8, name: []const u8) bool {
@@ -1476,9 +1629,7 @@ fn qualifiedTarget(
             .{name},
         ));
     }
-    if (scope.class.node.childByFieldName("superclass") != null or
-        scope.class.node.childByFieldName("interfaces") != null)
-    {
+    if (scope.class.has_supertypes) {
         return unresolvedInvocation("the enclosing class has supertypes, and a field it may inherit " ++
             "could give the receiver name a value this working copy cannot see");
     }

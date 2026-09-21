@@ -14,7 +14,24 @@ Companion log for
 
 ## Current Status
 
-**Stage 1 is complete.** A top-level Java interface and its methods are
+**Stage 2 is complete and Gate B passes.** Every declared supertype is now a
+recorded `references` claim resolved in the declaring unit's own scope, and a
+hierarchy projection walks those claims and reports either the types it reached
+or the first condition that stopped it. **4,190 guard-declined claims have a
+chain the real graph closes, against a floor of 700** — 86% of Stage 0's
+source-derived upper bound, and equal to its strict bound to the unit, so the
+model and the implementation agree.
+
+The stage also removed **53 wrong facts** it had no plan to remove: Stage 1
+admitted interfaces but left two guards reading two class-only grammar fields,
+so a name inside an interface that `extends` another resolved as if nothing
+could be inherited. That is recorded below as a defect found and fixed, with
+every moved claim counted.
+
+No guard was relaxed. On the fixture corpus, with supertype claims emitted and
+no fixture added, all six totals are byte-identical to Stage 1's.
+
+**Stage 1** before it made a top-level Java interface and its methods
 definitions the graph holds, under the labels a class carries and with the
 implicit modifiers Java defines. On `apache/dubbo` that is **617 declarations
 and 2,405 methods** that were a diagnostic and are now findable, outlinable, and
@@ -37,6 +54,7 @@ indexed source, **3,628 (76.6%) reach at least one interface**.
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 0: Price both halves on the clone | Completed | Baseline on `apache/dubbo` at `df9c5e1` reproduces Plan 013 Stage 0 to the unit: 230,859 assertions, 92,637 facts, 138,222 unresolved, 118,471 unresolved calls, every reason family identical. Guard families are 8,083 references and 6,206 receivers, exactly as Follow-up 013 records. **Gate A: PASS** — A1 3,628 of 4,738 interface-dependent, A2 4,738 against a floor of 1,000. Gate C input measured early: 2,172 addressable value receivers today, 3,041 with the guard relaxed. |
+| Stage 2: A declared supertype is a recorded claim | Completed | D3 shipped, plus `src/frontends/java_hierarchy.zig`: a projection that walks recorded supertype claims and reports a closed chain or the first condition that opened it, used by nothing in the frontend yet. **Gate B: PASS** — 4,190 against a floor of 700, 86% of Gate A's upper bound and equal to its strict bound. On the fixture corpus the frontend change alone is byte-identical; on the clone, references +2,443 and every other claim family unchanged. A Stage 1 defect was found and fixed: 53 wrong facts removed. |
 | Stage 1: Interfaces are declarations the graph holds | Completed | D1 and D2 shipped. Interfaces and their methods are definitions with role `interface` and `method`; an unmodified interface method is recorded `public`; the package and class-shape projections carry both roles; the top-level interface diagnostic is gone and the enum, record and annotation type ones stay. On the clone: +3,022 definitions, +1,757 references, +1,411 calls, 247 reference claims converted, and **not one guard-declined claim moved**. [ADR 011](../adr/011_java_hierarchy_from_indexed_source.md). |
 
 ## Stage 0: Price Both Halves On The Clone
@@ -641,3 +659,208 @@ the declaring unit's scope, adds the hierarchy projection beside
 closed in the real graph, against a floor of 700. Stage 0's source-derived upper
 bound for that number is 4,738 lenient and 4,113 strict, so Gate B has room —
 but the graph's answer is what counts, and a fail ends the sequence at Stage 2.
+
+## Stage 2: A Declared Supertype Is A Recorded Claim
+
+### What Changed
+
+| File | Change |
+| --- | --- |
+| `src/core/graph.zig` | `currentRelationshipsFrom`: the companion of `currentDefinitionFact`, bounded the same way. A read over assertions that already exist — no kind, no index, no stored state |
+| `src/frontends/java.zig` | every declared supertype emits a `references` claim from the declaring type, resolved by the unchanged `resolveType` in a `supertype` position; `supertype_claim.prefix` marks those claims; `member_types` records what a type declares so a later walk can ask; both guards now read the enclosing type's recorded shape instead of two class-only grammar fields |
+| `src/frontends/java_hierarchy.zig` | new projection: direct supertypes, the closure, and two rule-out questions. It resolves nothing and names no target |
+| `src/frontends/root.zig` | exports it |
+| `fixtures/vertical-slice/java/Circle.java` | new: a class implementing an interface its own unit declares, so the corpus carries a closed chain |
+| `tests/vertical_slice_test.zig` | three new tests, one re-pinned corpus count |
+| `src/java_coverage.zig` | walks the graph hierarchy for Gate B, and splits references by position |
+
+### How A Supertype Claim Says It Is One
+
+A declared supertype and a field's type are both `references` claims out of the
+same entity, and a relationship carries no extension payload. So the claim says
+which position it was read in the only place it can: the Java frontend writes
+`supertype_claim.prefix` in front of `resolveType`'s own words, on the resolved
+and the unresolved path alike, and `java_hierarchy` reads it back. Both ends
+name one constant, so the two cannot drift apart.
+
+`resolveType`'s words are kept verbatim behind the prefix, which is what
+Stage 2 needs: an unresolved supertype still says exactly why, so an open chain
+is visible as a name that reached nothing rather than as an absence. It is the
+same shape `qualifiedTarget` already used for "the receiver is not read as a
+class: …".
+
+### The Position Decides One Thing
+
+`resolveType` gained a position, and it decides exactly one condition: whether
+the enclosing type's **own** supertypes may give the name another meaning.
+
+Inside the body they may — a member type could be inherited. In an `extends` or
+`implements` clause they may not: the scope of a member declared in or inherited
+by a type is the *body* of that type (JLS 6.3), and the header is not the body.
+A type cannot inherit a name before it has said what it inherits from. Without
+that distinction a supertype of any type that declares supertypes would decline
+by the guard it is evidence for, every chain would be open, and Gate B would
+read zero by construction rather than by measurement.
+
+Everything else `resolveType` asks is unchanged and still asked, including the
+conservative one: a member type of the name declared in the type's own body
+still declines a supertype of that name. Strictly the header is outside that
+scope too, but declining leaves the chain open, which is the safe direction.
+
+### A Stage 1 Defect, Found And Fixed
+
+Stage 1 admitted interfaces as declarations but left two guards reading
+`superclass` and `interfaces` directly off the grammar. An interface writes its
+supertypes in an `extends_interfaces` child, which carries no field name, so
+both guards saw an interface that `extends` another as having no supertypes and
+let names resolve as if nothing could be inherited. Both now read the enclosing
+type's recorded shape, which is the same value the `java.supertypes` label
+carries.
+
+It is a correctness fix in the direction §3 requires, and every claim it moved
+is counted. On the clone:
+
+| | Before | After | Moved |
+| --- | ---: | ---: | ---: |
+| References in a non-supertype position, facts | 2,206 | 2,154 | **−52** |
+| Same, unresolved | 21,042 | 21,094 | +52 |
+| Same, total | 23,248 | 23,248 | 0 |
+| `calls` facts | 5,196 | 5,195 | **−1** |
+| `enclosing_supertypes` (the receiver guard) | 6,206 | 6,240 | +34 |
+| `receiver_reaches_no_class` | 14,148 | 14,117 | −31 |
+| `target_supertypes` | 780 | 778 | −2 |
+| Guard's reference family | 8,083 | 8,294 | +211 |
+
+**53 assertions changed category from fact to unresolved, and nothing changed
+the other way.** Each was a name resolved inside an interface that extends
+another. The 34 that entered the receiver guard's family decompose exactly: 1
+was a fact, 31 declined for another receiver reason, 2 for a target reason. Of
+the 211 that entered the reference guard's family, 52 were facts and 159
+declined for another reason.
+
+### The Fixture Corpus
+
+**With supertype claims emitted and no fixture added**, the corpus totals are
+byte-identical to Stage 1's: 138 definitions, 483 assertions, 412 facts, 71
+unresolved, 0 approximate, 54 diagnostics. That is what "no guard changes in
+this stage" had to mean and what it was proven to mean.
+
+`java/Circle.java` then adds a class implementing an interface its own unit
+declares, so the corpus carries a closed hierarchy that whatever indexes the
+fixtures exercises:
+
+| Claim | Before | After | Δ |
+| --- | ---: | ---: | ---: |
+| `entity_exists` | 169 | 174 | +5 |
+| `contains` | 30 | 31 | +1 |
+| `defines` | 138 | 142 | +4 |
+| `references` | 24 | 27 | +3 |
+| `calls` | 94 | 94 | 0 |
+| `identity_correspondence` | 28 | 32 | +4 |
+| **total** | **483** | **500** | **+17** |
+
+Facts 412 → 427, unresolved 71 → 73, **diagnostics 54 → 54**. Of the three new
+references, the supertype is a local fact and the two `String` return types are
+unresolved.
+
+The vertical-slice fixture paths do not spell their declared package, so under
+[ADR 008](../adr/008_java_visibility_boundaries.md) they resolve nothing across
+units. That is why the corpus hierarchy is declared inside one unit: a
+cross-unit supertype there would be unresolved for a reason that has nothing to
+do with this stage.
+
+### On The Clone
+
+| Measurement | Stage 1 | Stage 2 | Δ |
+| --- | ---: | ---: | ---: |
+| Definitions | 29,531 | 29,531 | 0 |
+| Recorded assertions | 243,106 | 245,549 | +2,443 |
+| Current facts | 102,350 | 103,402 | +1,052 |
+| Current unresolved | 140,756 | 142,147 | +1,391 |
+| Diagnostics | 59,964 | 59,964 | 0 |
+| `entity_exists` / `contains` / `defines` / `calls` | — | — | **0** |
+| `references` | 23,248 | 25,691 | **+2,443** |
+
+**Exactly one claim family moved.** The 2,443 new claims are every supertype a
+class or an interface declares — the source model counts 2,448 declared links,
+and the five it counts that are not emitted belong to `enum` declarations, which
+are not definitions and so make no claims.
+
+By position:
+
+| | fact | unresolved |
+| --- | ---: | ---: |
+| Declared supertype | 1,105 | 1,338 |
+| Every other position | 2,154 | 21,094 |
+
+1,105 + 1,338 = 2,443, and 2,154 + 21,094 = 23,248, which is Stage 1's whole
+reference total. No reference claim appeared or disappeared outside the
+supertype position; 52 changed category, and that is the defect above.
+
+Reference facts reaching an interface went 366 → 1,048.
+
+### Gate B
+
+Measured over the real graph with `java_hierarchy.closureOf`, over the reference
+and receiver families as D12 defines it:
+
+| | reference | receiver | unqualified |
+| --- | ---: | ---: | ---: |
+| Enclosing type not in the graph | 0 | 0 | 0 |
+| **Chain closed** | **2,247** | **1,943** | 951 |
+| `supertype_unresolved` | 6,047 | 4,297 | 3,131 |
+| `supertype_not_a_type` | 0 | 0 | 0 |
+| `supertype_provider_stale` | 0 | 0 | 0 |
+| `cycle` | 0 | 0 | 0 |
+| `depth_cap` | 0 | 0 | 0 |
+
+| Test | Number | Floor | Verdict |
+| --- | ---: | ---: | --- |
+| **B** — guard-declined claims whose chain is closed in indexed source | **4,190** | 700 | **PASS** |
+
+4,190 is 86% of Gate A's source-derived upper bound of 4,823, and it equals
+Gate A's **strict** bound of 4,190 to the unit. That is the strongest evidence
+this plan has produced: Stage 0's strict bound modelled exactly what an
+unchanged `resolveType` answers about a supertype's written shape, and the
+implementation reproduced it without either being fitted to the other.
+
+The gap to the lenient bound is 633 claims, and it is entirely the shape rule: a
+supertype written as `Foo<T>` or `a.b.C` declines, so its chain is open. Nothing
+on this clone hits a cycle, a depth cap, a stale provider, or a non-type
+supertype.
+
+Gate A re-measures to 4,823 rather than Stage 0's 4,738 because the guard fix
+put 245 more claims in the families it is measured over; the walk itself is
+unchanged.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core` | pass |
+| `zig build test` | pass, 276/278 with 2 skipped; 102 tests in the vertical-slice lane (was 99) |
+| `zig build test-mcp` | pass, 35/36 with 1 skipped |
+| `zig build dogfood` | pass, 10/10 steps, 5/5 tests |
+| `zig fmt --check build.zig src tests` | clean |
+| `zig build java-coverage -Doptimize=ReleaseFast -- --root <clone>` | the tables above |
+| `zig build claim-sample … --size 40000` | families sum to the whole, `unclassified` 0 |
+
+### Residual Risk
+
+- **A supertype claim is identified by a prefix on its own resolution words.**
+  It is the only channel a relationship has, both ends name one constant, and a
+  test would fail loudly if they drifted — but it is a string, and a core that
+  someday gives relationships an extension payload should take it over.
+- **633 closable claims are lost to the type shape rule.** A supertype written
+  generically or qualified leaves its chain open. Follow-up 014 already prices
+  the receiver-side version of that relaxation; the supertype-side version is a
+  new finding this plan has not priced.
+- **The 5 unemitted enum supertype links are accounted for but not pinned.** No
+  test asserts that an enum's `implements` makes no claim.
+
+### Next Stage
+
+Stage 3 wires the projection into the frontend: the guard lifts only where the
+chain is closed and nothing reachable declares the name, on the reference and
+the receiver side, with a distinct reason for every failure and a reader hinted
+for every type its walk visited.

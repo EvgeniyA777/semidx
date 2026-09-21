@@ -83,6 +83,7 @@ const semidx = @import("semidx");
 const model = semidx.model;
 const ts = semidx.ts;
 const java = semidx.frontends.java;
+const hierarchy = semidx.frontends.java_hierarchy;
 
 /// Plan 014 D5. A walk that reaches it declines with its own reason.
 const max_chain_depth: u32 = 16;
@@ -525,6 +526,20 @@ const GuardTally = struct {
     /// By the first condition that left the chain open, lenient mode.
     lenient_reasons: [8]usize = [_]usize{0} ** 8,
     strict_reasons: [8]usize = [_]usize{0} ** 8,
+
+    // -- the same question, asked of the graph rather than of the source ------
+    //
+    // The rows above are the upper bound Gate A is measured on: they read the
+    // declared hierarchy out of the source and check nothing else. The rows
+    // below walk the claims the frontend actually recorded, through the
+    // projection the frontend itself will use, and are what Gate B is measured
+    // on.
+
+    /// The enclosing type has no definition in the published snapshot.
+    graph_type_not_found: usize = 0,
+    graph_closed: usize = 0,
+    /// By `java_hierarchy.OpenReason`.
+    graph_reasons: [5]usize = [_]usize{0} ** 5,
 };
 
 /// Where a value-receiver call stops, in the order Plan 014 D10 asks.
@@ -817,7 +832,7 @@ pub fn main(init: std.process.Init) !void {
     defer walker.visited.deinit(gpa);
     defer walker.path.deinit(gpa);
 
-    const guard = try reportGuardFamily(out, gpa, &snapshot, &world, &walker, options.top);
+    const guard = try reportGuardFamily(out, gpa, &index.graph, &snapshot, &world, &walker, options.top);
     try reportValueReceivers(out, gpa, arena, &snapshot, &world, &walker, found);
     try reportGateA(out, guard);
 
@@ -1034,6 +1049,37 @@ fn reportInterfaceTargets(
     try out.print("Reference facts whose target is an interface: {d}\n", .{moved + fresh});
     try out.print("  {s:<34} {d}\n", .{ "made by an interface or its method", fresh });
     try out.print("  {s:<34} {d}\n", .{ "made by something that already existed", moved });
+
+    // A declared supertype and a field's type are both `references` claims out
+    // of the same entity, so a total over both hides which of them moved. The
+    // split is by the prefix the frontend writes, which is the same thing the
+    // hierarchy projection reads.
+    var supertype = [_]usize{0} ** 3;
+    var other = [_]usize{0} ** 3;
+    for (snapshot.assertions) |assertion| {
+        if (snapshot.assertionFreshness(assertion) != .current) continue;
+        const relationship = assertion.relationship() orelse continue;
+        if (relationship.kind != .references) continue;
+        const words = switch (assertion.resolution) {
+            .fact => |established| established.method,
+            .unresolved => |declined| declined.explanation,
+            .approximate => |guess| guess.basis,
+        };
+        const at = @intFromEnum(assertion.resolution.category());
+        if (java.supertype_claim.marks(words)) supertype[at] += 1 else other[at] += 1;
+    }
+    try out.print("References by position\n", .{});
+    try out.print("  {s:<22} {s:>10} {s:>12}\n", .{ "", "fact", "unresolved" });
+    try out.print("  {s:<22} {d:>10} {d:>12}\n", .{
+        "declared supertype",
+        supertype[@intFromEnum(model.ResolutionCategory.fact)],
+        supertype[@intFromEnum(model.ResolutionCategory.unresolved)],
+    });
+    try out.print("  {s:<22} {d:>10} {d:>12}\n", .{
+        "every other position",
+        other[@intFromEnum(model.ResolutionCategory.fact)],
+        other[@intFromEnum(model.ResolutionCategory.unresolved)],
+    });
     try out.print("\n", .{});
 }
 
@@ -1109,6 +1155,7 @@ fn tallyOf(result: *GuardResult, which: usize) *GuardTally {
 fn reportGuardFamily(
     out: anytype,
     gpa: std.mem.Allocator,
+    graph: *semidx.Graph,
     snapshot: *const semidx.Snapshot,
     world: *const World,
     walker: *Walker,
@@ -1134,6 +1181,9 @@ fn reportGuardFamily(
     for (world.units, 0..) |unit, at| {
         try path_to_unit.put(gpa, unit.path, @intCast(at));
     }
+
+    var closure: std.ArrayList(model.EntityId) = .empty;
+    defer closure.deinit(gpa);
 
     for (snapshot.assertions) |assertion| {
         if (snapshot.assertionFreshness(assertion) != .current) continue;
@@ -1190,6 +1240,18 @@ fn reportGuardFamily(
         if (world.decls[start].supertypes.len == 0) {
             tally.no_supertypes += 1;
             continue;
+        }
+
+        // The same question asked of the graph, through the projection the
+        // frontend will use, rather than of the source model.
+        if (snapshot.findDefinition(view.path, class_name)) |enclosing| {
+            closure.clearRetainingCapacity();
+            switch (try hierarchy.closureOf(graph, enclosing.id, gpa, &closure)) {
+                .closed => tally.graph_closed += 1,
+                .open => |reason| tally.graph_reasons[@intFromEnum(reason)] += 1,
+            }
+        } else {
+            tally.graph_type_not_found += 1;
         }
 
         walker.strict = false;
@@ -1270,6 +1332,37 @@ fn reportGuardFamily(
             row.values[0],
             row.values[1],
             row.values[2],
+        });
+    }
+
+    try out.print("\nThe same question asked of the graph, through the hierarchy projection\n", .{});
+    const graph_rows = [_]struct { label: []const u8, values: [3]usize }{
+        .{ .label = "enclosing type not in graph", .values = .{
+            result.references.graph_type_not_found,
+            result.receivers.graph_type_not_found,
+            result.unqualified.graph_type_not_found,
+        } },
+        .{ .label = "chain closed", .values = .{
+            result.references.graph_closed,
+            result.receivers.graph_closed,
+            result.unqualified.graph_closed,
+        } },
+    };
+    for (graph_rows) |row| {
+        try out.print("{s:<26} {d:>9} {d:>9} {d:>9}\n", .{
+            row.label,
+            row.values[0],
+            row.values[1],
+            row.values[2],
+        });
+    }
+    for (std.enums.values(hierarchy.OpenReason)) |reason| {
+        const at = @intFromEnum(reason);
+        try out.print("{s:<26} {d:>9} {d:>9} {d:>9}\n", .{
+            reason.tag(),
+            result.references.graph_reasons[at],
+            result.receivers.graph_reasons[at],
+            result.unqualified.graph_reasons[at],
         });
     }
 
@@ -1366,6 +1459,15 @@ fn reportGateA(out: anytype, guard: GuardResult) !void {
     try out.print("  A2  closed-hierarchy upper bound: {d} (floor 1000)\n", .{closable});
     try out.print("      verdict: {s}\n", .{if (closable >= 1000) "PASS" else "FAIL"});
     try out.print("  For reference, the strict bound today's `resolveType` shape rule would give: {d}\n", .{strict});
+
+    const realized = guard.references.graph_closed + guard.receivers.graph_closed;
+    try out.print("\nGate B (Plan 014 D12)\n", .{});
+    try out.print("  guard-declined claims whose chain is closed in the real graph: {d} (floor 700)\n", .{realized});
+    try out.print("  verdict: {s}\n", .{if (realized >= 700) "PASS" else "FAIL"});
+    try out.print("  against Gate A's source-derived upper bound of {d}: {d}%\n", .{
+        closable,
+        if (closable == 0) 0 else realized * 100 / closable,
+    });
 }
 
 // -- the value-receiver family --------------------------------------------

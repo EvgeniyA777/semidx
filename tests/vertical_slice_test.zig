@@ -4824,6 +4824,231 @@ test "an interface constant obscures a receiver name exactly as a class field do
     });
 }
 
+// -- Plan 014 Stage 2: a declared supertype is a recorded claim ---------------
+
+const hierarchy = semidx.frontends.java_hierarchy;
+
+/// A chain of `links` classes, each extending the next, the last extending
+/// nothing. `D0` is the deepest reader.
+fn addChain(index: *semidx.Index, links: u32) !void {
+    var buffer: [128]u8 = undefined;
+    var body: [128]u8 = undefined;
+    var at: u32 = 0;
+    while (at <= links) : (at += 1) {
+        const path = try std.fmt.bufPrint(&buffer, "module/src/main/java/lib/D{d}.java", .{at});
+        const source = if (at == links)
+            try std.fmt.bufPrint(&body, "package lib;\n\nclass D{d} {{}}\n", .{at})
+        else
+            try std.fmt.bufPrint(&body, "package lib;\n\nclass D{d} extends D{d} {{}}\n", .{ at, at + 1 });
+        _ = try index.addUnit(path, .java, source);
+    }
+}
+
+fn supertypeReferences(
+    snapshot: *const semidx.Snapshot,
+    source: model.EntityId,
+    gpa: std.mem.Allocator,
+) !std.ArrayList(model.Assertion) {
+    var found: std.ArrayList(model.Assertion) = .empty;
+    errdefer found.deinit(gpa);
+    var claims = snapshot.relationships(.{ .kind = .references, .source = source });
+    while (claims.next()) |claim| {
+        const words = switch (claim.resolution) {
+            .fact => |established| established.method,
+            .unresolved => |declined| declined.explanation,
+            .approximate => |guess| guess.basis,
+        };
+        if (!std.mem.startsWith(u8, words, "declared supertype: ")) continue;
+        try found.append(gpa, claim);
+    }
+    return found;
+}
+
+test "a declared supertype is a reference resolved in the declaring unit's scope" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("module/src/main/java/lib/Base.java", .java, "package lib;\n\nclass Base {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/Marker.java", .java, "package lib;\n\ninterface Marker {}\n");
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Mid.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Mid extends Base implements Marker {
+        \\    Base field;
+        \\}
+        \\
+        ,
+    );
+    // An interface writes its supertypes in a position a field lookup cannot
+    // reach, so this is the case a `superclass`-only reader would miss.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Drawable.java",
+        .java,
+        "package lib;\n\ninterface Drawable extends Marker {}\n",
+    );
+    _ = try index.addUnit("module/src/main/java/lib/Orphan.java", .java, "package lib;\n\nclass Orphan extends Absent {}\n");
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const base = snapshot.findDefinition("module/src/main/java/lib/Base.java", "Base").?;
+    const marker = snapshot.findDefinition("module/src/main/java/lib/Marker.java", "Marker").?;
+    const mid = snapshot.findDefinition("module/src/main/java/lib/Mid.java", "Mid").?;
+
+    var claims = try supertypeReferences(&snapshot, mid.id, testing.allocator);
+    defer claims.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 2), claims.items.len);
+
+    // Both are facts naming the type the declaring unit's own scope reaches,
+    // and each carries the range of the name it was read from — the header
+    // line, not the field on the line below it.
+    var reached_base = false;
+    var reached_marker = false;
+    for (claims.items) |claim| {
+        try testing.expect(claim.resolution.isFact());
+        try testing.expectEqual(@as(u32, 2), claim.evidence.?.range.start_row);
+        const target = claim.claim.relationship.target.entity;
+        if (target == base.id) reached_base = true;
+        if (target == marker.id) reached_marker = true;
+    }
+    try testing.expect(reached_base);
+    try testing.expect(reached_marker);
+
+    // The field type on the next line is a claim of its own, and the enclosing
+    // type's supertypes still decline it: the position is what differs, not the
+    // rule.
+    try expectExplanation(try referenceFrom(&snapshot, mid.id, "Base"), "the enclosing class has supertypes");
+
+    const drawable = snapshot.findDefinition("module/src/main/java/lib/Drawable.java", "Drawable").?;
+    var extends = try supertypeReferences(&snapshot, drawable.id, testing.allocator);
+    defer extends.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), extends.items.len);
+    try testing.expect(extends.items[0].resolution.isFact());
+    try testing.expectEqual(marker.id, extends.items[0].claim.relationship.target.entity);
+
+    // A supertype that resolves to nothing stays unresolved and keeps
+    // `resolveType`'s own words behind the prefix, which is what makes an open
+    // chain visible as a name rather than as an absence.
+    const orphan = snapshot.findDefinition("module/src/main/java/lib/Orphan.java", "Orphan").?;
+    var missing = try supertypeReferences(&snapshot, orphan.id, testing.allocator);
+    defer missing.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), missing.items.len);
+    try testing.expect(!missing.items[0].resolution.isFact());
+    try testing.expectEqualStrings("Absent", missing.items[0].claim.relationship.target.designator.name);
+    try expectExplanation(missing.items[0], "no current top-level class of this name is declared in package `lib`");
+}
+
+test "the hierarchy projection reports a closed chain, an open one, a cycle and a depth cap" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("module/src/main/java/lib/Base.java", .java, "package lib;\n\nclass Base {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/Marker.java", .java, "package lib;\n\ninterface Marker {}\n");
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Mid.java",
+        .java,
+        "package lib;\n\nclass Mid extends Base implements Marker {}\n",
+    );
+    _ = try index.addUnit("module/src/main/java/lib/Leaf.java", .java, "package lib;\n\nclass Leaf extends Mid {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/Orphan.java", .java, "package lib;\n\nclass Orphan extends Absent {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/CycleA.java", .java, "package lib;\n\nclass CycleA extends CycleB {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/CycleB.java", .java, "package lib;\n\nclass CycleB extends CycleA {}\n");
+    // One link more than the cap admits.
+    try addChain(&index, hierarchy.max_depth + 1);
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+    const graph = &index.graph;
+
+    var visited: std.ArrayList(model.EntityId) = .empty;
+    defer visited.deinit(testing.allocator);
+
+    // Closed: every link is a current fact naming a current top-level type, and
+    // the walk reports what it visited so a caller can depend on all of it.
+    const leaf = snapshot.findDefinition("module/src/main/java/lib/Leaf.java", "Leaf").?;
+    try testing.expect((try hierarchy.closureOf(graph, leaf.id, testing.allocator, &visited)).isClosed());
+    try testing.expectEqual(@as(usize, 4), visited.items.len);
+    try testing.expectEqual(leaf.id, visited.items[0]);
+    for ([_][2][]const u8{
+        .{ "module/src/main/java/lib/Mid.java", "Mid" },
+        .{ "module/src/main/java/lib/Base.java", "Base" },
+        .{ "module/src/main/java/lib/Marker.java", "Marker" },
+    }) |wanted| {
+        const id = snapshot.findDefinition(wanted[0], wanted[1]).?.id;
+        try testing.expect(std.mem.indexOfScalar(model.EntityId, visited.items, id) != null);
+    }
+
+    // A type that declares nothing is closed with itself alone.
+    visited.clearRetainingCapacity();
+    const base = snapshot.findDefinition("module/src/main/java/lib/Base.java", "Base").?;
+    try testing.expect((try hierarchy.closureOf(graph, base.id, testing.allocator, &visited)).isClosed());
+    try testing.expectEqual(@as(usize, 1), visited.items.len);
+
+    const cases = [_]struct {
+        path: []const u8,
+        name: []const u8,
+        reason: hierarchy.OpenReason,
+    }{
+        .{ .path = "module/src/main/java/lib/Orphan.java", .name = "Orphan", .reason = .supertype_unresolved },
+        .{ .path = "module/src/main/java/lib/CycleA.java", .name = "CycleA", .reason = .cycle },
+        .{ .path = "module/src/main/java/lib/D0.java", .name = "D0", .reason = .depth_cap },
+    };
+    for (cases) |case| {
+        visited.clearRetainingCapacity();
+        const start = snapshot.findDefinition(case.path, case.name).?;
+        const outcome = try hierarchy.closureOf(graph, start.id, testing.allocator, &visited);
+        switch (outcome) {
+            .closed => {
+                std.debug.print("{s} was closed, expected {s}\n", .{ case.name, case.reason.tag() });
+                return error.TestExpectedOpenChain;
+            },
+            .open => |reason| try testing.expectEqual(case.reason, reason),
+        }
+    }
+
+    // A chain exactly at the cap is closed; the one link past it is not.
+    visited.clearRetainingCapacity();
+    const first_under = snapshot.findDefinition("module/src/main/java/lib/D2.java", "D2").?;
+    try testing.expect((try hierarchy.closureOf(graph, first_under.id, testing.allocator, &visited)).isClosed());
+}
+
+test "an edit that breaks a link closes and opens the chain that reads it" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+
+    try tree.write("src/main/java/lib/Base.java", "package lib;\n\nclass Base {}\n");
+    try tree.write("src/main/java/lib/Mid.java", "package lib;\n\nclass Mid extends Base {}\n");
+    try tree.write("src/main/java/lib/Leaf.java", "package lib;\n\nclass Leaf extends Mid {}\n");
+    _ = try tree.rescan();
+
+    var visited: std.ArrayList(model.EntityId) = .empty;
+    defer visited.deinit(testing.allocator);
+
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        const leaf = snapshot.findDefinition("src/main/java/lib/Leaf.java", "Leaf").?;
+        try testing.expect((try hierarchy.closureOf(&tree.index.graph, leaf.id, testing.allocator, &visited)).isClosed());
+    }
+
+    // Break the middle of the chain. Nothing about `Leaf` changed, and the
+    // projection is re-read from the graph, so the chain it reports opens.
+    try tree.write("src/main/java/lib/Mid.java", "package lib;\n\nclass Mid extends Gone {}\n");
+    _ = try tree.rescan();
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    const leaf = after.findDefinition("src/main/java/lib/Leaf.java", "Leaf").?;
+    visited.clearRetainingCapacity();
+    const outcome = try hierarchy.closureOf(&tree.index.graph, leaf.id, testing.allocator, &visited);
+    switch (outcome) {
+        .closed => return error.TestExpectedOpenChain,
+        .open => |reason| try testing.expectEqual(hierarchy.OpenReason.supertype_unresolved, reason),
+    }
+}
+
 // -- Plan 013 Stage 1: a designator is a structured name ---------------------
 
 /// The claim of `kind` from `source` whose designator holds `name`, or an error
@@ -5049,10 +5274,27 @@ test "the fixture corpus records the same facts it did before designators became
     //
     // Diagnostics do not move, and that is the point of the fixture: a
     // top-level interface no longer reports an unsupported construct.
-    try testing.expectEqual(@as(usize, 138), snapshot.countEntities(.{ .kind = .definition }));
-    try testing.expectEqual(@as(usize, 483), snapshot.assertions.len);
-    try testing.expectEqual(@as(usize, 412), snapshot.countAssertions(.{ .resolution = .fact }));
-    try testing.expectEqual(@as(usize, 71), snapshot.countUnresolvedAssertions());
+    //
+    // Stage 2 moved them again, and again only by adding a fixture. With
+    // supertype claims emitted and `java/Circle.java` absent the totals were
+    // still 138, 483, 412, 71, 0 and 54 — every existing answer byte-identical,
+    // which is what that stage had to prove. `Circle.java` then adds one class
+    // implementing an interface its own unit declares: 5 existence claims,
+    // 1 `contains`, 4 `defines`, 3 `references` (the supertype a local fact,
+    // two `String` return types unresolved), and 4 identity correspondences.
+    try testing.expectEqual(@as(usize, 142), snapshot.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 500), snapshot.assertions.len);
+    try testing.expectEqual(@as(usize, 427), snapshot.countAssertions(.{ .resolution = .fact }));
+    try testing.expectEqual(@as(usize, 73), snapshot.countUnresolvedAssertions());
     try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
     try testing.expectEqual(@as(usize, 54), snapshot.diagnostics.len);
+
+    // The corpus now carries a closed hierarchy, so the projection is exercised
+    // by whatever indexes the fixtures rather than only by a written tree.
+    const circle = snapshot.findDefinition("java/Circle.java", "Circle").?;
+    var visited: std.ArrayList(model.EntityId) = .empty;
+    defer visited.deinit(testing.allocator);
+    try testing.expect((try hierarchy.closureOf(&index.graph, circle.id, testing.allocator, &visited)).isClosed());
+    try testing.expectEqual(@as(usize, 2), visited.items.len);
+    try testing.expectEqual(snapshot.findDefinition("java/Circle.java", "Drawable").?.id, visited.items[1]);
 }

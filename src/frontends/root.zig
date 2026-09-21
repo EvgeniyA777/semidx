@@ -14,6 +14,7 @@ const ts = @import("semidx_tree_sitter");
 pub const java = @import("java.zig");
 pub const java_packages = @import("java_packages.zig");
 pub const java_members = @import("java_members.zig");
+pub const java_hierarchy = @import("java_hierarchy.zig");
 pub const clojure = @import("clojure.zig");
 pub const zig = @import("zig.zig");
 
