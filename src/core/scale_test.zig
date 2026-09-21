@@ -326,6 +326,10 @@ fn countAnchoredIncoming(snapshot: *const Snapshot, focus: EntityId) !usize {
     return snapshot.countRelationships(.{ .target = focus });
 }
 
+fn countDesignated(snapshot: *const Snapshot, name: []const u8) !usize {
+    return snapshot.countRelationships(.{ .designator = name });
+}
+
 /// The depth-2 shape `semidx_context` walks: expand the frontier one anchored
 /// query per entity, following entity targets only.
 fn traverseDepth2(snapshot: *const Snapshot, focus: EntityId, gpa: Allocator) !usize {
@@ -829,6 +833,21 @@ fn expectWorkFollowsTheNeighbourhood(synthetic: *const Synthetic, snapshot: *con
     try testing.expectEqual(@as(usize, fan_in), incoming.answers);
     try testing.expectEqual(incoming.answers, incoming.candidates);
 
+    // The designator anchor, which Plan 013 gives a consumer. Its walk is its
+    // own bucket and nothing else: the answers may be fewer than the positions
+    // examined, because freshness and resolution stay post-filters, but the
+    // positions examined are exactly what the index holds under that name.
+    const shared_bucket = snapshot.relationship_index.designator.bucket(shared_designator).len;
+    const designated = try measure(countDesignated, .{ snapshot, shared_designator });
+    try testing.expect(designated.answers > 1);
+    try testing.expectEqual(shared_bucket, designated.candidates);
+    try testing.expect(designated.answers <= designated.candidates);
+
+    // A name one unit recorded costs one position at either size, which is the
+    // part that must not grow with the repository.
+    const unique = try measure(countDesignated, .{ snapshot, "synthetic.U24" });
+    try testing.expectEqual(@as(usize, 1), unique.candidates);
+
     const traversal = try measure(traverseDepth2, .{ snapshot, synthetic.focus, testing.allocator });
     try testing.expectEqual(synthetic.depth2Reach(), traversal.answers);
     try testing.expectEqual(traversal.answers, traversal.candidates);
@@ -848,6 +867,11 @@ fn expectWorkFollowsTheNeighbourhood(synthetic: *const Synthetic, snapshot: *con
     try testing.expectEqual(outgoing.answers, scanned.answers);
     try testing.expectEqual(snapshot.assertions.len, scanned.candidates);
     try testing.expect(scanned.candidates > scanned.answers);
+
+    const scanned_designated = try measure(countDesignated, .{ snapshot, shared_designator });
+    try testing.expectEqual(designated.answers, scanned_designated.answers);
+    try testing.expectEqual(snapshot.assertions.len, scanned_designated.candidates);
+    try testing.expect(scanned_designated.candidates > designated.candidates);
 
     const scanned_traversal = try measure(traverseDepth2, .{ snapshot, synthetic.focus, testing.allocator });
     try testing.expectEqual(traversal.answers, scanned_traversal.answers);

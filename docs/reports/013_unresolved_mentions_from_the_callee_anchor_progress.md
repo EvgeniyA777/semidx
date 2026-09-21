@@ -14,10 +14,12 @@ Companion log for
 
 ## Current Status
 
-**Stages 0 and 1 are complete.** A designator is now a name and, where the
+**Stages 0, 1 and 2 are complete.** A designator is now a name and, where the
 source wrote a scope in front of it that the frontend knows to be one, that
 scope as its own field. Nothing resolved, nothing became a fact, and the fixture
-corpus records the same 396 facts it did before, pinned by a test.
+corpus records the same 396 facts it did before, pinned by a test. The
+designator-anchored query is proven to walk its own bucket and nothing else, at
+three graph sizes.
 
 The baseline every later claim is compared against is recorded below, taken
 from a named clone at a named commit with named commands. Stage 0 itself changed
@@ -37,7 +39,7 @@ keys**. The stage order stands and Stage 1 may proceed.
 | --- | --- | --- |
 | Stage 0: Reproducible baseline | Completed | Baseline recorded from `apache/dubbo` at `df9c5e1`: 230,859 assertions, 92,637 facts, 138,222 unresolved, of which 118,471 unresolved calls and 19,751 unresolved references. 83.6% of unresolved call designators are expressions, not names. Five named definitions return 0, 93, 23, 8 and 0 incoming relationships against designator buckets of 1,091, 324, 293, 245 and 221. |
 | Stage 1: A designator is a structured name | Completed | `model.Designator` carries `name` and an optional `qualifier`; all three frontends record it and hand the written form to the evidence; the index keys on `name`. Fixture corpus: 134 definitions, 465 assertions, 396 facts, 69 unresolved, 54 diagnostics — identical before and after. Distinct designator keys over that corpus: 20 → 16. [ADR 010](../adr/010_designator_is_a_structured_name.md). |
-| Stage 2: The bucket is the whole walk | Not started | — |
+| Stage 2: The bucket is the whole walk | Completed | A designator query's inspected positions equal its bucket exactly, at 64, 256 and 12,500 units; a name one unit recorded costs one position at every size; the same query without the index costs the whole assertion array. On the clone the index fell from 57,068 keys and 3.65 MiB to **9,091 keys and 0.92 MiB**. |
 | Stage 3: `unresolved_mentions` in `semidx_references` | Not started | — |
 | Stage 4: External re-measure | Not started | — |
 | Stage 5: Documentation and closure | Not started | — |
@@ -145,6 +147,96 @@ product defect.
   here produces one, so the branch is covered by the code path and the index
   rule rather than by a test over real source; Stage 4's external run is where
   it would first appear at scale.
+
+## Stage 2: The Bucket Is The Whole Walk
+
+### What Changed
+
+Only `src/core/scale_test.zig`. No signature, no ordering, no result: the query
+path Plan 011 built already answered a designator anchor from
+`DesignatorAdjacency`, and Stage 1 changed its key from a run of source text to
+`designator.name`. This stage proves the bound before a tool depends on it.
+
+The bound is now asserted beside the source- and target-anchored ones, so it is
+checked at 64 units, at 256, and — under
+`zig build test-core -Doptimize=ReleaseFast` — at 12,500 units and more than
+230,753 assertions:
+
+| Claim | How it fails |
+| --- | --- |
+| A designator query inspects exactly the positions its bucket holds | `candidates` stops equalling `DesignatorAdjacency.bucket(name).len` |
+| Answers may be fewer than positions inspected, because freshness and resolution stay post-filters | an answer count above the positions inspected |
+| A name one unit recorded costs one position, at either size | the unique-designator query examines more than one |
+| Without the index the same query costs the whole assertion array | `bypass_relationship_index` stops making `candidates` equal `assertions.len` |
+
+The last row is what makes the others a claim rather than a number: the bound
+has to be one the old access path breaks.
+
+An absent designator was already covered: *an anchor the index does not hold
+returns empty without a scan* asserts zero inspected positions for
+`synthetic.NeverRecorded`, beside a removed and a never-issued entity id. It
+predates this stage and still holds, and Stage 1's key change is exactly the
+kind of change that would have broken it.
+
+### The Index After Stage 1
+
+`zig build designator-shape -Doptimize=ReleaseFast -- --root <clone>`, same
+clone and commit as Stage 0:
+
+| | Stage 0 | After Stage 1 | Change |
+| --- | ---: | ---: | ---: |
+| Distinct designator keys | 57,068 | **9,091** | −84% |
+| Bucketed positions | 138,222 | 138,222 | 0 |
+| `DesignatorAdjacency.byteSize()` | 3,829,688 B | **962,488 B** | −75% |
+| Keys that are a simple name | 3,492 | 7,907 | +4,415 |
+| Keys that are a qualified name | 93 | 93 | 0 |
+| Keys that are an expression | 53,483 | **1,091** | −52,392 |
+| Positions per key | 2.4 | 15.2 | ×6.3 |
+
+The change is explained, not assumed. The 52,392 expression keys that
+disappeared were Java call sites, each standing for about one claim; their
+claims now key on the method name they name. The 1,091 expression keys that
+remain are Java **type** designators — generic and array type syntax such as
+`List<String>` — which D2 deliberately leaves as they are, and the 93 qualified
+keys are qualified type names, unchanged to the unit. The positions did not
+move: the same 138,222 claims are bucketed, under fewer names.
+
+And the claims themselves:
+
+| | Stage 0 | After Stage 1 |
+| --- | ---: | ---: |
+| Java call designators: simple name / qualified / expression | 19,368 / 0 / 99,103 | **118,471 / 0 / 0** |
+| Java call designators carrying a qualifier | — | 1,681 |
+| Java call designators with no name at all | — | 0 |
+| Java type references: simple / qualified / expression | 15,551 / 227 / 3,973 | 15,551 / 227 / 3,973 |
+| Facts / unresolved | 92,637 / 138,222 | 92,637 / 138,222 |
+
+Not one designator on the clone is expression text any more, not one type
+reference moved, and not one fact moved. The 1,681 qualifiers are the
+class-qualified calls whose receiver this frontend established as a class before
+declining the method choice — 1.4% of unresolved calls, which is what D1's rule
+costs in coverage and buys in honesty.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core` | passed |
+| `zig build test-core -Doptimize=ReleaseFast` | passed, including the 12,500-unit bound |
+| `zig build test` | passed |
+| `zig fmt --check build.zig src tests` | clean |
+
+### Residual Risk And Next Step
+
+- **Next step is Stage 3**: `unresolved_mentions` in `semidx_references`.
+- The bound is over synthetic graphs, where one shared designator is recorded by
+  every eighth unit. The real distribution is heavier: the largest bucket on the
+  clone now holds 6,728 positions (`assertEquals`), against 4,389 at Stage 0.
+  D8 says to record such a number rather than approximate it, and Stage 4
+  measures what that bucket costs a caller.
+- Bucket sizes grew because names group. That is the point of the change, and it
+  is also what makes Stage 3's limit and budget load-bearing rather than
+  decorative.
 
 ## Stage 0: Reproducible Baseline
 
