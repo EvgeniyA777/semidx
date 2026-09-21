@@ -2,7 +2,7 @@
 title: "Unresolved mentions from the callee anchor"
 doc_type: "plan"
 lifecycle: "active"
-status: "planned"
+status: "in_progress"
 agent_action: "reference_for_context"
 updated: "2026-09-20"
 ---

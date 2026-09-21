@@ -186,6 +186,28 @@ pub fn build(b: *std.Build) void {
     const claim_sample_step = b.step("claim-sample", "Sample definitions and classify their outgoing claims (pass --root <dir>)");
     claim_sample_step.dependOn(&run_claim_sample.step);
 
+    // Developer-only measurement command, on the same terms as the two above.
+    const designator_shape = b.addExecutable(.{
+        .name = "semidx-designator-shape",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/designator_shape.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "semidx", .module = semidx },
+                .{ .name = "semidx_core", .module = core },
+            },
+        }),
+    });
+    b.installArtifact(designator_shape);
+
+    const run_designator_shape = b.addRunArtifact(designator_shape);
+    run_designator_shape.step.dependOn(b.getInstallStep());
+    if (b.args) |args| run_designator_shape.addArgs(args);
+    const designator_shape_step = b.step("designator-shape", "Report what designators hold and how the designator index buckets them (pass --root <dir>)");
+    designator_shape_step.dependOn(&run_designator_shape.step);
+
     // The local MCP stdio preview. A consumer of published snapshots: it
     // imports the assembled index and nothing below it.
     const version_options = b.addOptions();

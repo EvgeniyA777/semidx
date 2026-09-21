@@ -233,11 +233,17 @@ documents that own history, rationale, and evidence.
   `scripts/constitution.freeze.sha256`.
 - Memory freshness is enforced by `scripts/check-memory-freshness.sh` and the
   pre-push hook for high-signal documentation and policy changes.
-- External Java measurement has a harness: `zig build claim-sample`
-  (`src/claim_sample.zig`), a developer tool no lane depends on. It samples by
+- External Java measurement has two harnesses, both developer tools no lane
+  depends on: `zig build claim-sample` (`src/claim_sample.zig`), which samples by
   `sha256(seed + key)` rank and counts any unclassified reason rather than
-  dropping it. Tooling is `sh` or Zig ([tooling.md](docs/agent-policy/tooling.md));
-  Plan 012's numbers predate it ([017](docs/followups/017_plan_012_external_evidence_reproducibility.md)).
+  dropping it, and `zig build designator-shape` (`src/designator_shape.zig`),
+  which reports what unresolved designators hold and how `DesignatorAdjacency`
+  buckets them. Tooling is `sh` or Zig ([tooling.md](docs/agent-policy/tooling.md));
+  Plan 012's numbers predate them ([017](docs/followups/017_plan_012_external_evidence_reproducibility.md)).
+  Current external baseline, apache/dubbo at `df9c5e1`: 92,637 facts, 138,222
+  unresolved, 118,471 unresolved calls, and 83.6% of their designators are
+  expression text rather than names
+  ([Plan 013 Stage 0](docs/reports/013_unresolved_mentions_from_the_callee_anchor_progress.md)).
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java coverage, not its boundary, is what limits it — receiver-qualified and

@@ -156,7 +156,7 @@ changed the project's terms, not just its tooling.
 | --- | --- | --- |
 | Guards and launchers | Run by git hooks, by build lanes, or in the daily loop — `check-*.sh`, `semidx-mcp.sh`, `install-git-hooks.sh` | POSIX `sh`. A hook that cannot start is a hook that is not there |
 | Environment setup | Run once to prepare a machine — `setup-*.sh` | External tools and the network, named in the script and failing loudly when absent |
-| Developer tools | Inspection and measurement commands — `semidx-dev`, `semidx-claim-sample` | Zig, built by `zig build` as its own step that no lane depends on |
+| Developer tools | Inspection and measurement commands — `semidx-dev`, `semidx-claim-sample`, `semidx-designator-shape` | Zig, built by `zig build` as its own step that no lane depends on |
 
 **A developer tool is written in Zig.** The toolchain is already required, the
 formatter and compiler check it like any other source, and it can read the graph

@@ -135,41 +135,64 @@ clone:
 | A different seed | a different sample |
 | `--root . --language zig` | 228 unresolved calls, all `unclassified`, five explanations printed — the miss is loud, and no Zig families are written yet |
 
+## The Baseline Now Exists
+
+[Plan 013 Stage 0](../reports/013_unresolved_mentions_from_the_callee_anchor_progress.md#stage-0-reproducible-baseline)
+ran the harness against a clone of `apache/dubbo` at `df9c5e1`, recorded the
+clone path, the commit, the seed and every number, and owns the result. What it
+found, on 2026-09-20 at `8025a0c`:
+
+| | Plan 012 close (`8a1f083`) | Now (`8025a0c`) |
+| --- | ---: | ---: |
+| Sampled outgoing claims, 1,200 definitions | 6,710 | 7,283 |
+| `calls` facts / unresolved in that sample | 313 / 5,523 | 265 / 5,281 |
+| Whole-graph facts / unresolved | 92,759 / 138,100 | 92,637 / 138,222 |
+| Whole-graph unresolved calls | 118,349 | 118,471 |
+
+The sample rows **replace** Plan 012's rather than confirm them: the harness
+draws by `sha256(seed + "\n" + key)` rank, and the 1,200 definitions Plan 012
+measured were drawn by a script nobody kept, so its headline numbers — 6,710
+claims, 5,662 then 5,523 unresolved calls, 174 then 313 call facts, 139
+static-call facts — remain unverifiable by anyone and now stand beside a
+baseline that is not.
+
+The whole-graph rows are comparable, because the harness sampling all 26,509
+definitions is a census. Every family matches Plan 012's whole-graph table to
+the unit except the 122 claims that [Follow-up 016](016_java_static_call_rule_narrow_gaps.md)
+moved from fact to unresolved, which are accounted for claim by claim in the
+Stage 0 log. That is the re-take 016 owed.
+
 ## Why It Is Still Open
 
-The harness is new, so it produces a **new** baseline rather than confirming the
-old one. Stage 0's selection was never recorded and cannot be recovered, so the
-1,200 definitions Plan 012 measured are not the 1,200 this script draws, and its
-headline numbers — 6,710 claims, 5,662 unresolved calls, 174 then 313 call
-facts, 139 static-call facts — remain unverifiable by anyone.
-
-Nothing here has been run against `apache/dubbo` at `df9c5e1`: there is no clone
-in this environment. Until there is, the entry stays open, because closing it
-would assert a check that did not run.
-
-There is also a number to re-take rather than confirm.
-[Follow-up 016](016_java_static_call_rule_narrow_gaps.md) tightened the static
-call rule after 139 was measured, so the next run answers a different question
-than the old one did, and the difference is the measurement 016 owes.
+One required check did not run: **nobody reimplemented the selection rule and
+drew the same sample independently.** Two runs of the same binary produced
+byte-identical reports, which proves determinism, not that the rule written down
+here is enough to re-derive the sample without this repository's build. Until
+someone draws the sample from the rule alone, the claim this entry exists to
+make — that the procedure, not the program, is the evidence — is untested.
 
 ## Acceptance Direction
 
-Close this entry when a run against a clone of `apache/dubbo` at `df9c5e1`
-records a new baseline in a report that owns it, stating plainly that it
-replaces Plan 012's numbers rather than confirming them.
+The baseline this asked for is recorded and owned by the Plan 013 Stage 0 log.
+What remains is narrow: close this entry when someone draws the sample from the
+selection rule alone — without running `semidx-claim-sample` — and gets the
+sample the harness gets.
 
 ## Required Tests
 
 This entry asks for reproducibility, not behavior, so its checks are not unit
 tests:
 
-- `zig build claim-sample -Doptimize=ReleaseFast -- --root <clone of
+- ~~`zig build claim-sample -Doptimize=ReleaseFast -- --root <clone of
   apache/dubbo at df9c5e1>` completes and its families sum to the whole with
-  `unclassified` at zero.
-- The same command, run twice, produces identical reports.
-- A second person, given only the selection rule above and the seed, draws the
-  same sample as the script.
-- The new baseline is recorded in a report, beside a statement that Plan 012's
-  139 was measured under the looser rule 016 replaced.
-- No build lane refers to the script: `zig build test`, `zig build test-mcp`,
-  `zig build dogfood` and `zig build preview-gate` are unchanged by it.
+  `unclassified` at zero.~~ Done: 118,471 unresolved calls, families sum to the
+  whole, `unclassified` 0.
+- ~~The same command, run twice, produces identical reports.~~ Done.
+- **A second person, given only the selection rule above and the seed, draws the
+  same sample as the script.** Not done; this is what keeps the entry open.
+- ~~The new baseline is recorded in a report, beside a statement that Plan 012's
+  139 was measured under the looser rule 016 replaced.~~ Done, in the Plan 013
+  Stage 0 log.
+- ~~No build lane refers to the script: `zig build test`, `zig build test-mcp`,
+  `zig build dogfood` and `zig build preview-gate` are unchanged by it.~~ Still
+  true, and true of `semidx-designator-shape` beside it.
