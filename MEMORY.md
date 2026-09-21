@@ -254,25 +254,23 @@ documents that own history, rationale, and evidence.
 
 - Plan 009 is complete and published as `0.1.0-preview.3` with
   `zig build preview-gate` in its release gate.
-- The project has entered the adoption track: work is now chosen because it
-  moves semidx toward the audience named in
+- The project has entered the adoption track: work is chosen because it moves
+  semidx toward the audience named in
   [the adoption strategy](docs/design/002_product_adoption_strategy.md), not
-  because it improves semidx's view of itself. Dogfood-only coverage work,
-  including [Follow-up 006](docs/followups/006_zig_cross_unit_and_member_calls.md),
-  is deprioritized behind that.
+  because it improves semidx's view of itself. Dogfood-only coverage work, including
+  [006](docs/followups/006_zig_cross_unit_and_member_calls.md), sits behind that.
 - [Plan 010](docs/plans/010_java_resolution_boundaries.md) is executed: external
   Java evidence from apache/dubbo at `df9c5e1` (119 Maven modules, 4,050 units),
-  resolution bounded by ADR 008's source root with single-type imports inside
-  it, Follow-up 003 closed and cross-module visibility split into
-  [Follow-up 011](docs/followups/011_java_cross_module_visibility.md). The
-  remaining Java blockers are coverage, not the boundary.
+  resolution bounded by ADR 008's source root with single-type imports inside it,
+  Follow-up 003 closed and cross-module visibility split into
+  [011](docs/followups/011_java_cross_module_visibility.md). The remaining Java
+  blockers are coverage, not the boundary.
 - [Plan 011](docs/plans/011_external_scale_graph_query_indexes.md) is executed
-  and Follow-up 012 is closed. Snapshot identity lookups are constant time, and
-  anchored relationship queries inspect exactly as many assertions as they
-  return, proven by a committed work bound at 244,559 assertions (past Dubbo's
-  230,753). Plan 012 Stage 0 re-measured the external latency the plan left
-  unclaimed: `semidx_context depth=2` on apache/dubbo fell from 90.71 s to
-  0.019 s in the same build mode, so the claim rests on observation too.
+  and Follow-up 012 is closed: snapshot identity lookups are constant time and
+  anchored relationship queries inspect exactly what they return, under a
+  committed work bound at 244,559 assertions (past Dubbo's 230,753). Plan 012
+  Stage 0 observed it externally too: `semidx_context depth=2` on apache/dubbo
+  fell from 90.71 s to 0.019 s in the same build mode.
 - [Plan 012](docs/plans/012_java_semantic_quality_without_query_regression.md)
   is **executed**: `ClassName.method(...)` is a `CALLS` fact when every
   [ADR 009](docs/adr/009_java_static_calls.md) condition holds at once, and
@@ -283,28 +281,36 @@ documents that own history, rationale, and evidence.
   sample: 139 static facts against a floor of 100, `calls` facts 174 → 313, and
   the [costs](docs/reports/012_java_semantic_quality_without_query_regression_progress.md#what-it-costs)
   recorded rather than smoothed. Value receivers stay with
-  [Follow-up 014](docs/followups/014_java_instance_receiver_calls.md), the
-  supertype guard with
-  [Follow-up 013](docs/followups/013_java_supertype_guard_relaxation.md). A
+  [014](docs/followups/014_java_instance_receiver_calls.md), the supertype guard
+  with [013](docs/followups/013_java_supertype_guard_relaxation.md); the
   post-closure review left
   [017](docs/followups/017_plan_012_external_evidence_reproducibility.md) and
-  [018](docs/followups/018_unexplained_assertion_delta.md) open and fixed two
-  bugs: [016](docs/followups/016_java_static_call_rule_narrow_gaps.md) — a unit
-  with an on-demand static import resolves no simple-name receiver, since such
-  an import binds field names semidx cannot enumerate and a field obscures a
-  type of its name, which costs recall, so 139 overstates the rule until 017;
-  and [015](docs/followups/015_unit_path_change_does_not_reanalyze.md) — a unit
-  moved to another directory is reanalyzed and marks what it exposes changed,
-  because its place decides who may resolve names to it.
+  [018](docs/followups/018_unexplained_assertion_delta.md) open and fixed
+  [016](docs/followups/016_java_static_call_rule_narrow_gaps.md) — an on-demand
+  static import binds field names semidx cannot enumerate and a field obscures a
+  type of its name, so such a unit resolves no simple-name receiver and 139
+  overstates the rule until 017 — and
+  [015](docs/followups/015_unit_path_change_does_not_reanalyze.md): a moved unit
+  is reanalyzed and marks what it exposes changed, because its place decides who
+  may resolve names to it.
+- [Plan 013](docs/plans/013_unresolved_mentions_from_the_callee_anchor.md) is
+  **planned, not started**: reach a recorded claim from the name it wrote. A
+  designator becomes a structured name — identifier plus the qualifier the
+  source wrote, where a frontend knows the prefix names a scope — and
+  `semidx_references` gains an `unresolved_mentions` section that renders
+  recorded claims and asserts nothing. It converts no claim: on apache/dubbo
+  118,349 unresolved calls each carry a location and a reason, and none is
+  reachable from the definition it names. Its readiness review opened
+  [019](docs/followups/019_designator_may_carry_source_expression.md) — a Java
+  designator is the whole invocation text and renders with no opt-in, so
+  expression text reaches default MCP output.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
-  clients ignore `structuredContent` and read `content`, so the text copy is
-  load-bearing rather than legacy, and MCP SEP-2200 — the same change semidx was
-  considering — was declined upstream on 2026-05-25. Only a
-  `--text-fallback=full|none` diagnostic probe is added; `none` identifies
-  whether a client reads structured content and is never a production value. The
-  ADR owns the reasoning, including why `summary` is rejected, and
-  [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
+  clients read `content`, not `structuredContent`, so the copy is load-bearing,
+  and upstream declined SEP-2200 on 2026-05-25. Only the
+  `--text-fallback=full|none` diagnostic probe is added, `none` never a
+  production value; the ADR owns the rest, including why `summary` is rejected,
+  and [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
   closes against it.
 - Source identity needs stronger evidence for move-plus-edit refactors. Prefer
   explicit VCS/IDE move events or language-aware refactoring evidence over
@@ -319,25 +325,12 @@ documents that own history, rationale, and evidence.
 
 ## Current Evidence Pointers
 
-- Plan 001 history:
-  [docs/reports/001_zig_vertical_slice_progress.md](docs/reports/001_zig_vertical_slice_progress.md).
-- Plan 002 and consolidated repository-scale ingestion history:
-  [docs/reports/002_consolidated_progress.md](docs/reports/002_consolidated_progress.md).
-- Plan 003 Java same-package resolution:
-  [docs/reports/003_java_package_type_resolution_progress.md](docs/reports/003_java_package_type_resolution_progress.md).
-- Plan 004 Zig frontend and MCP preview:
-  [docs/reports/004_zig_frontend_and_mcp_preview_progress.md](docs/reports/004_zig_frontend_and_mcp_preview_progress.md).
-- Plan 005 release readiness:
-  [docs/reports/005_mcp_preview_release_readiness_progress.md](docs/reports/005_mcp_preview_release_readiness_progress.md)
-  [docs/releases/v0.1.0-preview.1.md](docs/releases/v0.1.0-preview.1.md), and
-  [docs/releases/v0.1.0-preview.2.md](docs/releases/v0.1.0-preview.2.md);
-  current candidate: [docs/releases/v0.1.0-preview.3.md](docs/releases/v0.1.0-preview.3.md).
-- Plan 006 Zig dogfood coverage:
-  [docs/reports/006_zig_dogfood_semantic_coverage_progress.md](docs/reports/006_zig_dogfood_semantic_coverage_progress.md).
-- Plan 007 response budgets and schema ergonomics:
-  [docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md](docs/reports/007_mcp_response_budget_and_schema_ergonomics_progress.md).
-- Plan 008 habit loop gate: [docs/reports/008_habit_loop_release_gate_progress.md](docs/reports/008_habit_loop_release_gate_progress.md).
-- Plan 009 progressive discovery: [docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md](docs/reports/009_mcp_progressive_discovery_and_budgets_progress.md).
+- Plans 001-009 history — vertical slice, repository-scale ingestion, Java
+  same-package resolution, Zig frontend and MCP preview, release readiness,
+  dogfood coverage, response budgets, habit-loop gate, progressive discovery —
+  is one progress log per plan in [docs/reports/](docs/reports/), with the
+  preview notes in [docs/releases/](docs/releases/); current release candidate
+  [v0.1.0-preview.3](docs/releases/v0.1.0-preview.3.md).
 - Plan 010 Java resolution boundaries, and the first external evidence:
   [docs/reports/010_java_resolution_boundaries_progress.md](docs/reports/010_java_resolution_boundaries_progress.md).
 - Plan 011 query indexes, the cost model and its measurements:

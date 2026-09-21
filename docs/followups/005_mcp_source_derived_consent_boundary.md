@@ -4,7 +4,7 @@ doc_type: "follow_up"
 lifecycle: "completed"
 status: "completed"
 agent_action: "historical_reference_only"
-updated: "2026-09-16"
+updated: "2026-09-20"
 ---
 
 # MCP Source-Derived Consent Boundary
@@ -86,6 +86,15 @@ Stage 5) and whether a data-level allowlist is needed.
 - Keep the default no-source-text MCP tests from Plan 004.
 - If a data-level allowlist is added, test every default-off field and every
   opt-in field independently.
+
+## Later Finding
+
+[Follow-up 019](019_designator_may_carry_source_expression.md), 2026-09-20,
+narrows the resolution below rather than reopening it. The boundary documented
+here is the intended one, and designators are correctly listed as source-derived
+graph values — but a Java designator today is the whole invocation text, so
+expression text does reach default output. The documentation states the
+boundary; the Java frontend does not yet hold it.
 
 ## Resolution
 

@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-18"
+updated: "2026-09-20"
 ---
 
 # Project Roadmap
@@ -35,11 +35,20 @@ semantic truth.
 
 ## Current Position
 
-As of 2026-09-18, the Zig dogfood frontend, its Plan 006 widening, and the first
+As of 2026-09-20, the Zig dogfood frontend, its Plan 006 widening, and the first
 local MCP preview are implemented and reviewed. The local MCP previews
 `v0.1.0-preview.1`, `v0.1.0-preview.2`, and `v0.1.0-preview.3` are tagged and
 pushed to `origin`. Plan 009's progressive MCP discovery work is published in
 `v0.1.0-preview.3`.
+
+Since then the adoption track advanced by three executed plans:
+[Plan 010](../plans/010_java_resolution_boundaries.md) (external Java evidence
+and resolution boundaries), [Plan 011](../plans/011_external_scale_graph_query_indexes.md)
+(snapshot and relationship indexes, closing Follow-up 012), and
+[Plan 012](../plans/012_java_semantic_quality_without_query_regression.md)
+(class-qualified static calls as facts). None of them is the next priority any
+more; [Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md) is
+planned and not started.
 
 Implemented:
 
@@ -136,21 +145,25 @@ What it showed, in
 
 The next useful sequence follows from that, not from the plan that preceded it:
 
-1. **Make the habit loop interactive at Java-adoption scale.**
-   [Plan 011](../plans/011_external_scale_graph_query_indexes.md) is the next
-   implementation priority. `semidx_health`, `semidx_references`, and
-   `semidx_context` must stop paying multiplicative snapshot lookup and
-   assertion-scan costs before more Java coverage can matter productively. A
-   graph that knows more but takes 90 s to answer focused context will be
-   bypassed by agents and developers.
-2. **Then widen Java where the probe showed impact-analysis pain.** Java is not
-   just another language in the adoption track; it is the enterprise stress test
-   for whether semidx can help on serious local codebases. After Plan 011,
-   coverage work should target the measured blockers: the supertype guard
-   declined 62% of the unresolved references whose target does have source in
-   the working copy, and unresolved receivers accounted for 4,624 of 5,662
-   unresolved calls in the sample. Either of those is worth more than any
-   remaining boundary work.
+1. **Make the habit loop interactive at Java-adoption scale. Done.**
+   [Plan 011](../plans/011_external_scale_graph_query_indexes.md) is executed and
+   Follow-up 012 is closed: snapshot identity lookups are constant time, anchored
+   relationship queries inspect exactly what they return under a committed work
+   bound, and `semidx_context depth=2` on apache/dubbo fell from 90.71 s to
+   0.019 s in the same build mode.
+2. **Make the impact answer reachable before widening Java further.**
+   [Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md) is the
+   next implementation priority, and it converts nothing: on apache/dubbo the
+   graph holds 118,349 unresolved calls, each with a location and a stated
+   reason, and none can be found by asking about the definition it names. Java
+   coverage follows it, priced by
+   [Plan 012](../plans/012_java_semantic_quality_without_query_regression.md) on
+   the same clone rather than by Plan 010's older sample: the supertype guard
+   ([Follow-up 013](../followups/013_java_supertype_guard_relaxation.md))
+   converts 13 of 335 measured cases safely, and the instance-receiver type
+   environment ([Follow-up 014](../followups/014_java_instance_receiver_calls.md))
+   addresses 63 exact facts. Java remains the enterprise stress test for whether
+   semidx helps on serious local codebases.
 3. **Defer SQLite and persistence until the in-memory projection contract is
    proven.** Storage can help cold start, memory pressure, and long-running
    local use later, but it should back the same graph-authoritative snapshot and
@@ -163,7 +176,8 @@ Current follow-ups should be picked up where they naturally fit:
 
 | Timing | Follow-up | Why then |
 | --- | --- | --- |
-| Now, before widening Java coverage | [012: External-scale graph query latency](../followups/012_external_scale_query_latency.md) through [Plan 011](../plans/011_external_scale_graph_query_indexes.md) | The first Java adoption probe showed semantically honest but non-interactive impact queries. Fixing snapshot identity lookups and anchored relationship access protects the habit loop before the graph grows wider. |
+| Now, with [Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md) Stage 0 | [017: Plan 012 external numbers are not reproducible](../followups/017_plan_012_external_evidence_reproducibility.md) | Plan 013 re-measures on the same clone and commit, so the baseline it must record first is the one 017 asks for. Measuring twice for two reasons would be the waste. |
+| With Plan 013 Stages 3 and 5 | [019: A designator may carry source expression text, ungated](../followups/019_designator_may_carry_source_expression.md) | The plan already rewrites that field; fixing it separately would be the same frontend rewrite done twice. |
 | Before changing MCP fallback output; useful during or right after the next preview release pass | [010: MCP text fallback client measurement](../followups/010_mcp_text_fallback_client_measurement.md) | The Plan 009 response budget controls structured output, but every result still carries the JSON text fallback. Measure real clients before shortening or configuring it. This does not block publishing the Plan 009 preview unless the release notes need fresh client observations. |
 | After Java-adoption latency and the next Java coverage decision | [006: Zig cross-unit and member call resolution](../followups/006_zig_cross_unit_and_member_calls.md) | This remains the highest-value open semantic gap for semidx's own development, but dogfood-only coverage is no longer ahead of proving the adoption-track habit loop. |
 | When the next Zig frontend plan touches callee parsing or call-shape normalization | [001: Zig logical negation calls](../followups/001_zig_logical_negation_calls.md) | Keep it small and parser-evidenced. It is a correctness improvement, but not worth a standalone plan unless the Zig call walker is already open. |
@@ -174,9 +188,9 @@ Current follow-ups should be picked up where they naturally fit:
 After the preview is usable, prioritize work that increases exact graph value
 for real local development:
 
-- Plan 011's snapshot lookup and relationship-index work, because interactive
-  impact analysis is prerequisite product infrastructure for every larger
-  repository.
+- Reaching a recorded claim from the name it wrote, because an impact question
+  that returns nothing on a real repository is the adoption signal the first
+  probe failed, and the claims are already in the graph.
 - Java coverage where the probe showed it stops — supertypes and receiver calls
   — rather than further boundary work.
 - Zig frontend depth where dogfood shows the highest pain, after the adoption

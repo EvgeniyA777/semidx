@@ -65,7 +65,9 @@ Read before starting:
 - [Plan 012 progress](../reports/012_java_semantic_quality_without_query_regression_progress.md),
   for the counts this plan is built on
 - [Follow-up 017](../followups/017_plan_012_external_evidence_reproducibility.md),
-  which Stage 0 closes
+  which Stage 0 closes, and
+  [Follow-up 019](../followups/019_designator_may_carry_source_expression.md),
+  which D1, D10 and D11 close
 - `src/core/model.zig`: `Target`, `SourceEvidence`
 - `src/core/graph.zig`: `RelationshipFilter`, `candidatesFor`,
   `RelationshipIterator`
@@ -548,16 +550,16 @@ Required behavior:
 - `MEMORY.md` states, as current reality and not as history, that designators
   are structured names and that `semidx_references` answers with facts plus
   mentions.
-- `docs/design/001_project_roadmap.md`: refresh Current Position and Near-Term
-  Direction, which still name Plan 011 as the next priority although Plans 011
-  and 012 are executed.
+- `docs/design/001_project_roadmap.md`: record the outcome in Current Position
+  and Near-Term Direction, which name this plan as the planned next step.
 - `docs/spec/capability_matrix.md`: its source-text row says producers record
   "a name or callee" as evidence, which D1 makes true where it is not today.
-  Correct it, the `src/mcp/tools.zig` header claim, and
-  [Follow-up 005](../followups/005_mcp_source_derived_consent_boundary.md)
-  together, so the consent boundary is stated as it stands after D11.
-- Follow-up 017 closed or narrowed by Stage 0's baseline; Follow-ups 013 and
-  014 left open and explicitly unaffected.
+  Correct it and the `src/mcp/tools.zig` header claim together, and close
+  [Follow-up 019](../followups/019_designator_may_carry_source_expression.md),
+  which records that defect as current behavior and which D11 fixes.
+- Follow-up 017 closed or narrowed by Stage 0's baseline; Follow-up 019 closed
+  by Stages 3 and 5; Follow-ups 013 and 014 left open and explicitly
+  unaffected.
 
 Done when plan status, follow-up statuses, `MEMORY.md`, the preview reference,
 and the progress log agree, and no document still calls a designator the text as

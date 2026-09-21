@@ -4,7 +4,7 @@ doc_type: "specification"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-18"
+updated: "2026-09-20"
 ---
 
 # Preview Capability Matrix
@@ -112,8 +112,8 @@ claim.
 | Response budget | Every list tool stops appending whole items once the structured result would pass `max_response_bytes` (32000 by default), always returns at least one item, and reports `budget_exhausted` and `omitted_by_budget`; the fixed closing fields are not counted. Each result repeats its structured object as JSON text. |
 | Continuation | Cut lists carry `narrowing_hints` naming declared arguments; hints are usage guidance, not claims. `semidx_outline`, `semidx_repo_map`, `semidx_find_definitions`, and `semidx_references` return `next_cursor`, which carries the call's tool, snapshot revision, position, and canonical arguments under a tag keyed by a per-process secret: an altered cursor, or one from another process, does not verify and is refused; a verified one is used only for the same tool and revision and for arguments equal byte for byte, and a cursor from before a refresh that published a new revision is a tool error. |
 | Traversal | `semidx_context` with `depth` 2 or 3 and a `direction` lists further relationships step by step, renders each entity once and names it by id afterwards, never expands an entity twice or follows a designator, and keeps each edge's resolution, producer, and freshness. |
-| Source text | Off by default: no unit contents are ever returned. `--allow-evidence-text` adds each claim's recorded evidence text, at most 400 bytes; current producers record a name or callee there, not a body. |
-| Source-derived values | Always returned: root and unit paths, entity names, designators, ranges, ids, and diagnostic messages. They are derived from the indexed source and go to the client process that launched the server. |
+| Source text | Off by default for unit contents: no file is ever read back. `--allow-evidence-text` adds each claim's recorded evidence text, at most 400 bytes; a producer records there the same string it put in the designator, which is a name or callee — except a qualified Java invocation, which is the invocation text as written. |
+| Source-derived values | Always returned: root and unit paths, entity names, designators, ranges, ids, and diagnostic messages. They are derived from the indexed source and go to the client process that launched the server. One of them is wider than this row implies: a qualified Java designator is verbatim invocation text, receiver and arguments included, and designators are not gated by the evidence opt-in ([Follow-up 019](../followups/019_designator_may_carry_source_expression.md)). |
 | Versions | Product version `0.1.0-preview.3` in `--version`, `serverInfo.version`, and `semidx_health`; `semantic_contract_version` is always `null`. |
 | Refresh | Publishes a new snapshot only on success. A failure after reconciliation started never publishes a partly updated graph: the index is rebuilt from the same scan and published by the next refresh, which then reports `entity_ids_preserved: false`; ids from earlier snapshots name nothing in the rebuilt index. |
 
