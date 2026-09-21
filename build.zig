@@ -208,6 +208,28 @@ pub fn build(b: *std.Build) void {
     const designator_shape_step = b.step("designator-shape", "Report what designators hold and how the designator index buckets them (pass --root <dir>)");
     designator_shape_step.dependOn(&run_designator_shape.step);
 
+    // Developer-only measurement command, on the same terms as the three above.
+    const java_coverage = b.addExecutable(.{
+        .name = "semidx-java-coverage",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/java_coverage.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "semidx", .module = semidx },
+                .{ .name = "semidx_core", .module = core },
+            },
+        }),
+    });
+    b.installArtifact(java_coverage);
+
+    const run_java_coverage = b.addRunArtifact(java_coverage);
+    run_java_coverage.step.dependOn(b.getInstallStep());
+    if (b.args) |args| run_java_coverage.addArgs(args);
+    const java_coverage_step = b.step("java-coverage", "Price the Java supertype guard and value-receiver families against the declared hierarchy (pass --root <dir>)");
+    java_coverage_step.dependOn(&run_java_coverage.step);
+
     // The local MCP stdio preview. A consumer of published snapshots: it
     // imports the assembled index and nothing below it.
     const version_options = b.addOptions();
