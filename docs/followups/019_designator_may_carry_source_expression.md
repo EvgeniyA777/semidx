@@ -1,9 +1,9 @@
 ---
 title: "A designator may carry source expression text, ungated"
 doc_type: "follow_up"
-lifecycle: "active"
-status: "open"
-agent_action: "use_as_input_for_future_plan_only"
+lifecycle: "completed"
+status: "fixed"
+agent_action: "historical_reference_only"
 updated: "2026-09-20"
 ---
 
@@ -83,7 +83,31 @@ living only inside a plan that has not been executed.
   receiver or argument text.
 - A frontend test proving expression text reaches `SourceEvidence.text` only.
 
-## Status
+## Resolution
 
-Open. Closes with Plan 013 Stages 3 and 5 unless that plan is abandoned, in
-which case this becomes a standalone fix.
+**Fixed** by [Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md)
+Stages 1, 3 and 5, and recorded as a decision in
+[ADR 010](../adr/010_designator_is_a_structured_name.md).
+
+A designator is a name in parts: the identifier a producer read, plus the scope
+the source wrote in front of it where the producer knows the prefix names one.
+The Java frontend records the invocation's name and hands the invocation text to
+`evidenceOf` explicitly, so the expression that used to be the designator is now
+evidence and reaches a result only under `--allow-evidence-text`.
+
+Measured on apache/dubbo at `df9c5e1`, the clone this entry cited for scale:
+every one of the **118,471** unresolved Java call designators is a name, where
+99,103 of them were invocation text
+([Plan 013 Stage 2](../reports/013_unresolved_mentions_from_the_callee_anchor_progress.md#the-index-after-stage-1)).
+
+The three documents that stated the boundary now state what is true: the
+`src/mcp/tools.zig` header, the [capability matrix](../spec/capability_matrix.md)
+source-text and source-derived rows, and
+[docs/mcp/local_preview.md](../mcp/local_preview.md). Both required tests exist:
+an MCP test proves a qualified Java call's default rendering carries no receiver
+or argument text, and a frontend test proves the expression reaches
+`SourceEvidence.text` only.
+
+Java **type** designators are deliberately untouched: generic and qualified type
+syntax such as `List<String>` is still recorded as written, which ADR 010 D2
+records as a separate decision with its own evidence rather than a leftover.

@@ -1,13 +1,21 @@
 ---
 title: "Unresolved mentions from the callee anchor"
 doc_type: "plan"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-20"
 ---
 
 # 013: Unresolved Mentions From The Callee Anchor
+
+**Executed and closed on 2026-09-20.** Every stage is complete and recorded in
+[the progress log](../reports/013_unresolved_mentions_from_the_callee_anchor_progress.md),
+with the decision in [ADR 010](../adr/010_designator_is_a_structured_name.md).
+On apache/dubbo at `df9c5e1` the unresolved calls reachable from the definition
+they name went from 10,141 to 91,087 of 118,471, with facts, resolutions and
+diagnostics identical to the unit. This document is history now: read the
+progress log and the ADR for what shipped.
 
 ## Goal
 

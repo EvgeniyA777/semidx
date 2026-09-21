@@ -1,9 +1,9 @@
 ---
 title: "Unresolved mentions from the callee anchor progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-20"
 ---
 
@@ -14,9 +14,9 @@ Companion log for
 
 ## Current Status
 
-**Stages 0 to 4 are complete.** A designator is now a name and, where the
-source wrote a scope in front of it that the frontend knows to be one, that
-scope as its own field. Nothing resolved, nothing became a fact, and the fixture
+**The plan is complete.** A designator is a name and, where the source wrote a
+scope in front of it that the frontend knows to be one, that scope as its own
+field. Nothing resolved, nothing became a fact, and the fixture
 corpus records the same 396 facts it did before, pinned by a test. The
 designator-anchored query is proven to walk its own bucket and nothing else, at
 three graph sizes, and `semidx_references` now answers from the callee anchor:
@@ -48,7 +48,7 @@ keys**. The stage order stands and Stage 1 may proceed.
 | Stage 2: The bucket is the whole walk | Completed | A designator query's inspected positions equal its bucket exactly, at 64, 256 and 12,500 units; a name one unit recorded costs one position at every size; the same query without the index costs the whole assertion array. On the clone the index fell from 57,068 keys and 3.65 MiB to **9,091 keys and 0.92 MiB**. |
 | Stage 3: `unresolved_mentions` in `semidx_references` | Completed | A third pass anchored on the target's name, admitted by byte equality and the anchor's language, rendered with its own reason and no target entity. Own limit (`mention_limit`, 50/500), own totals, own truncation, own hint, own budget share. The plan's demonstration passes. |
 | Stage 4: External re-measure | Completed | Reachability from a definition's name: **8.6% → 76.9%** of unresolved calls. Five named anchors answer 0/93/23/8/0 relationships and 2,389/324/293/883/460 mentions. 5–7 ms per call at the hottest anchors. Facts, resolutions and diagnostics identical to Stage 0. |
-| Stage 5: Documentation and closure | Not started | — |
+| Stage 5: Documentation and closure | Completed | The preview reference, the capability matrix, `GLOSSARY.md`, `MEMORY.md`, the roadmap and the `tools.zig` header say what shipped; Follow-up 019 is closed, 017 narrowed, 013 and 014 untouched. |
 
 ## Stage 1: A Designator Is A Structured Name
 
@@ -494,6 +494,70 @@ than a result, and there is none.
 - 27,384 unresolved calls remain unreachable from any definition in the clone.
   That is not a gap this plan left: those names belong to code that is not in
   the indexed root.
+
+## Stage 5: Documentation And Closure
+
+### What Now Says What Shipped
+
+| Document | Change |
+| --- | --- |
+| [docs/mcp/local_preview.md](../mcp/local_preview.md) | a designator is `{"name": …, "qualifier": …}` with the rule for when a qualifier exists; a new **Unresolved Mentions** section with the admission rule, the bounds, the empty-section meaning, and the sentence that a mention is a name match over unresolved claims and never a relationship; `mention_limit` in the tool and budget tables; `unresolved_mentions` in `omitted_by_budget`; the consent bullet says text around a name is evidence text |
+| [docs/spec/capability_matrix.md](../spec/capability_matrix.md) | the source-text row says what a producer actually records as evidence; the source-derived row says a designator is a name and a scope, `print` qualified by `std.debug` rather than `config.load(secret, 42)`; a new Unresolved mentions row |
+| [GLOSSARY.md](../../GLOSSARY.md) | owns *unresolved mention*, and the *source-derived graph values* entry says a designator is a name in parts |
+| [MEMORY.md](../../MEMORY.md) | states both as current reality, with the external before/after, and keeps the file under its line bound by compressing executed-plan detail into the reports that own it |
+| [docs/design/001_project_roadmap.md](../design/001_project_roadmap.md) | Current Position names four executed plans; Near-Term Direction marks the impact-reachability step done and makes Java coverage the next priority; the follow-up timing table no longer schedules 019 |
+| `src/mcp/tools.zig` header | its claim that `SourceEvidence.text` is the only source-text field a snapshot carries now holds as written, and says since when |
+
+### Follow-Ups
+
+| Entry | State |
+| --- | --- |
+| [019](../followups/019_designator_may_carry_source_expression.md) | **fixed**, with its resolution recorded and both required tests named; moved to the completed table |
+| [017](../followups/017_plan_012_external_evidence_reproducibility.md) | **narrowed** by Stage 0, not closed: the baseline exists, and the one check nobody ran is drawing the sample from the written rule alone |
+| [013](../followups/013_java_supertype_guard_relaxation.md), [014](../followups/014_java_instance_receiver_calls.md) | **open and unaffected**. Neither was implemented, partially or otherwise. Stage 4 makes their subjects easier to see — `getThis` shows 223 supertype-guard declines and `getUrl` 355 value-receiver declines, each named receiver by receiver — which is evidence for a future plan, not a change to either entry |
+
+### Definition Of Done
+
+| Plan requirement | State |
+| --- | --- |
+| Structured designators in all three frontends, qualifier where the source wrote a scope, written form in evidence | Stage 1, with a fixture test per language |
+| Default results carry no expression text, and the documents say so | Stages 1, 3 and 5; MCP test plus the corrected matrix, preview reference and module header |
+| ADR 010 records the decision and answers the §11 test | Committed, listed in [docs/adr/README.md](../adr/README.md) |
+| `unresolved_mentions` bounded, rendered, present-and-empty, exact | Stage 3, four MCP tests |
+| `semidx_references name=bucket direction=incoming` returns the recorded call sites and zero relationships | Stage 3: 0 relationships, 5 mentions — the plan's three plus two this plan's own stages added |
+| A work-bound test proves a designator query inspects only its bucket | Stage 2, at three graph sizes |
+| Facts, resolutions, explanations, producers, freshness and identity provably unchanged on fixtures and on the clone | Stages 1 and 4; the fixture totals are pinned by a test and the clone's totals are identical to the unit |
+| Stage 0 and Stage 4 numbers from a named clone, commit and seed; 017 closed or narrowed | Stages 0 and 4; 017 narrowed |
+| The preview reference, glossary, memory and roadmap agree, and no release or version bump | This stage; `semantic_contract_version` stays `null` and the product version is unchanged at `0.1.0-preview.3` |
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `./scripts/check-zig-version.sh` | Zig 0.16.0 matches the target |
+| `zig fmt --check build.zig src tests` | clean |
+| `zig build test-core` | passed |
+| `zig build test` | passed |
+| `zig build test-mcp` | passed |
+| `zig build dogfood` | passed |
+| `zig build preview-gate` | passed |
+| `./scripts/check-memory-freshness.sh` | passed, `MEMORY.md` at 349 lines |
+
+### Residual Risk
+
+- `mention_limit` caps at 500, so a full reason distribution for a hot name
+  needs the harness rather than the preview. Recorded in Stage 4 rather than
+  papered over.
+- The mention section is repeated on every relationships page and is not
+  suppressible; a caller who wants relationships only still pays for the bucket
+  walk. Measured at single-digit milliseconds on the worst anchor the clone
+  offers, and worth revisiting if a consumer ever pages a hot anchor hard.
+- Java generic and qualified type designators are still written as source
+  (`List<String>`), by D2. The 4,200 of them on the clone are the input to
+  whatever decides that next.
+- 27,384 unresolved calls on the clone name something no definition there
+  carries. They stay unreachable, which is what indexing only the working copy
+  means.
 
 ## Stage 0: Reproducible Baseline
 

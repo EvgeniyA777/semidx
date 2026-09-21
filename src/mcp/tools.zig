@@ -10,7 +10,11 @@
 //! Source text is never rendered unless the server was started with the
 //! evidence-text opt-in. `SourceEvidence.text` is the only source-text field a
 //! snapshot carries, and `writeEvidence` is the only place that reads it; the
-//! server never reads a unit's contents at all.
+//! server never reads a unit's contents at all. Since
+//! [ADR 010](../../docs/adr/010_designator_is_a_structured_name.md) that claim
+//! holds as written: a designator, which renders unconditionally, is a name and
+//! an optional qualifier, so the expression a source wrote around a name leaves
+//! only through the opt-in.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;

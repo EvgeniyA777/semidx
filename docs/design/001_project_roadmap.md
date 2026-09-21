@@ -41,14 +41,21 @@ local MCP preview are implemented and reviewed. The local MCP previews
 pushed to `origin`. Plan 009's progressive MCP discovery work is published in
 `v0.1.0-preview.3`.
 
-Since then the adoption track advanced by three executed plans:
+Since then the adoption track advanced by four executed plans:
 [Plan 010](../plans/010_java_resolution_boundaries.md) (external Java evidence
 and resolution boundaries), [Plan 011](../plans/011_external_scale_graph_query_indexes.md)
-(snapshot and relationship indexes, closing Follow-up 012), and
+(snapshot and relationship indexes, closing Follow-up 012),
 [Plan 012](../plans/012_java_semantic_quality_without_query_regression.md)
-(class-qualified static calls as facts). None of them is the next priority any
-more; [Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md) is
-planned and not started.
+(class-qualified static calls as facts), and
+[Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md), which
+made a recorded claim reachable from the name it wrote without resolving
+anything: a designator is a structured name
+([ADR 010](../adr/010_designator_is_a_structured_name.md)) and
+`semidx_references` answers with relationships plus `unresolved_mentions`. On
+apache/dubbo at `df9c5e1` that moved unresolved calls reachable from the
+definition they name from 10,141 to 91,087 of 118,471 — 8.6% to 76.9% — with
+facts, resolutions and diagnostics identical to the unit. None of the four is
+the next priority any more.
 
 Implemented:
 
@@ -151,12 +158,12 @@ The next useful sequence follows from that, not from the plan that preceded it:
    relationship queries inspect exactly what they return under a committed work
    bound, and `semidx_context depth=2` on apache/dubbo fell from 90.71 s to
    0.019 s in the same build mode.
-2. **Make the impact answer reachable before widening Java further.**
-   [Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md) is the
-   next implementation priority, and it converts nothing: on apache/dubbo the
-   graph holds 118,349 unresolved calls, each with a location and a stated
-   reason, and none can be found by asking about the definition it names. Java
-   coverage follows it, priced by
+2. **Make the impact answer reachable before widening Java further. Done.**
+   [Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md) is
+   executed and converted nothing: the 118,471 unresolved calls on apache/dubbo
+   are the same claims with the same reasons, and 91,087 of them can now be
+   found by asking about the definition they name, against 10,141 before. The
+   next Java coverage step is now the priority, priced by
    [Plan 012](../plans/012_java_semantic_quality_without_query_regression.md) on
    the same clone rather than by Plan 010's older sample: the supertype guard
    ([Follow-up 013](../followups/013_java_supertype_guard_relaxation.md))
@@ -176,8 +183,7 @@ Current follow-ups should be picked up where they naturally fit:
 
 | Timing | Follow-up | Why then |
 | --- | --- | --- |
-| Now, with [Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md) Stage 0 | [017: Plan 012 external numbers are not reproducible](../followups/017_plan_012_external_evidence_reproducibility.md) | Plan 013 re-measures on the same clone and commit, so the baseline it must record first is the one 017 asks for. Measuring twice for two reasons would be the waste. |
-| With Plan 013 Stages 3 and 5 | [019: A designator may carry source expression text, ungated](../followups/019_designator_may_carry_source_expression.md) | The plan already rewrites that field; fixing it separately would be the same frontend rewrite done twice. |
+| Whenever someone re-derives a sample by hand | [017: Plan 012 external numbers are not reproducible](../followups/017_plan_012_external_evidence_reproducibility.md) | Narrowed by Plan 013 Stage 0, which recorded a new baseline on a named clone and reproduced Plan 012's whole-graph families to the unit. What is left is one check nobody has run: drawing the sample from the written selection rule without the program. |
 | Before changing MCP fallback output; useful during or right after the next preview release pass | [010: MCP text fallback client measurement](../followups/010_mcp_text_fallback_client_measurement.md) | The Plan 009 response budget controls structured output, but every result still carries the JSON text fallback. Measure real clients before shortening or configuring it. This does not block publishing the Plan 009 preview unless the release notes need fresh client observations. |
 | After Java-adoption latency and the next Java coverage decision | [006: Zig cross-unit and member call resolution](../followups/006_zig_cross_unit_and_member_calls.md) | This remains the highest-value open semantic gap for semidx's own development, but dogfood-only coverage is no longer ahead of proving the adoption-track habit loop. |
 | When the next Zig frontend plan touches callee parsing or call-shape normalization | [001: Zig logical negation calls](../followups/001_zig_logical_negation_calls.md) | Keep it small and parser-evidenced. It is a correctness improvement, but not worth a standalone plan unless the Zig call walker is already open. |

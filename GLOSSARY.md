@@ -230,7 +230,10 @@ snapshot.
 
 **source-derived graph values** — Paths, names, designators, ranges, ids,
 diagnostic messages, and other values returned from the graph that are derived
-from local source without being source text. Sending them to a hosted consumer is
+from local source without being source text. A designator is a name in parts —
+the identifier a producer read, plus the scope the source wrote in front of it
+where the producer knows there is one — and never a run of source text
+([ADR 010](docs/adr/010_designator_is_a_structured_name.md)). Sending them to a hosted consumer is
 still outbound source-derived data and requires the user's configured
 destination and consent boundary.
 
@@ -270,6 +273,17 @@ define graph meaning.
 items. Truncation must say which result set was bounded and preserve enough
 metadata for the consumer to decide whether to make a narrower or more detailed
 follow-up query.
+
+**unresolved mention** — A recorded assertion whose producer could not resolve
+it and whose designator name equals a definition's name exactly, in that
+definition's language, rendered beside that definition so the claim can be found
+from the name it wrote. A mention is a name match over unresolved claims, never
+a relationship to the definition it is shown beside: it keeps its own
+resolution, reason, producer, freshness and evidence, and names no target. It
+establishes nothing, which is why it does not contradict
+[ADR 003](docs/adr/003_reject_name_match_assertions.md); the designator it
+matches on is the structured name
+[ADR 010](docs/adr/010_designator_is_a_structured_name.md) defines.
 
 **work bound** — A deterministic assertion about how much work an operation
 inspects — candidates, records, or propagation rounds — committed as a test
