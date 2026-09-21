@@ -840,7 +840,7 @@ pub fn main(init: std.process.Init) !void {
     defer walker.path.deinit(gpa);
 
     const guard = try reportGuardFamily(out, gpa, &index.graph, &snapshot, &world, &walker, options.top);
-    try reportValueReceivers(out, gpa, arena, &snapshot, &world, &walker, found);
+    try reportValueReceivers(out, gpa, arena, &index.graph, &snapshot, &world, &walker, found);
     try reportGateA(out, guard);
 
     try out.flush();
@@ -1075,6 +1075,31 @@ fn reportInterfaceTargets(
         const at = @intFromEnum(assertion.resolution.category());
         if (java.supertype_claim.marks(words)) supertype[at] += 1 else other[at] += 1;
     }
+    // Which rule established each call fact. A conversion on the receiver side
+    // and one on the unqualified side are two different families, and a total
+    // over both cannot be compared against a gate measured on one of them.
+    var by_rule = [_]usize{0} ** 3;
+    for (snapshot.assertions) |assertion| {
+        if (snapshot.assertionFreshness(assertion) != .current) continue;
+        const relationship = assertion.relationship() orelse continue;
+        if (relationship.kind != .calls) continue;
+        const established = switch (assertion.resolution) {
+            .fact => |fact| fact.method,
+            else => continue,
+        };
+        if (std.mem.eql(u8, established, java.static_call_method)) {
+            by_rule[0] += 1;
+        } else if (std.mem.eql(u8, established, java.unqualified_call_method)) {
+            by_rule[1] += 1;
+        } else {
+            by_rule[2] += 1;
+        }
+    }
+    try out.print("Call facts by the rule that established them\n", .{});
+    try out.print("  {s:<34} {d}\n", .{ "class-qualified (receiver side)", by_rule[0] });
+    try out.print("  {s:<34} {d}\n", .{ "unqualified", by_rule[1] });
+    try out.print("  {s:<34} {d}\n", .{ "any other rule", by_rule[2] });
+
     try out.print("References by position\n", .{});
     try out.print("  {s:<22} {s:>10} {s:>12}\n", .{ "", "fact", "unresolved" });
     try out.print("  {s:<22} {d:>10} {d:>12}\n", .{
@@ -1463,7 +1488,12 @@ fn reportGateA(out: anytype, guard: GuardResult) !void {
         guard.receivers.lenient_closed_with_interface;
     const strict = guard.references.strict_closed + guard.receivers.strict_closed;
 
-    try out.print("Gate A (Plan 014 D12)\n", .{});
+    try out.print("Gate A and Gate B (Plan 014 D12)\n", .{});
+    try out.print("  Both are measured over the claims the guard still declines. Once Plan 014\n", .{});
+    try out.print("  Stage 3 has shipped, a claim whose chain closes has been converted and is no\n", .{});
+    try out.print("  longer in that family, so these price what is left rather than what was\n", .{});
+    try out.print("  available. The verdicts belong to the stage that measured them: Gate A to\n", .{});
+    try out.print("  Stage 0, Gate B to Stage 2.\n", .{});
     try out.print("  A1  interface-dependent closable claims: {d} of {d}\n", .{ interfaced, closable });
     try out.print("      verdict: {s}\n", .{if (interfaced * 2 >= closable and closable != 0) "PASS" else "FAIL"});
     try out.print("  A2  closed-hierarchy upper bound: {d} (floor 1000)\n", .{closable});
@@ -1486,6 +1516,7 @@ fn reportValueReceivers(
     out: anytype,
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
+    graph: *semidx.Graph,
     snapshot: *const semidx.Snapshot,
     world: *const World,
     walker: *Walker,
@@ -1565,8 +1596,11 @@ fn reportValueReceivers(
         var classifier: Classifier = .{
             .world = world,
             .walker = walker,
+            .graph = graph,
+            .snapshot = snapshot,
             .gpa = gpa,
             .unit = unit_index,
+            .path = unit.path,
             .source = unit.bytes,
             .pending = pending[unit_index].items,
             .today = &today,
@@ -1588,7 +1622,7 @@ fn reportValueReceivers(
         total,
         unplaced,
     });
-    try out.print("{s:<30} {s:>10} {s:>10}\n", .{ "where the call stops", "today", "relaxed" });
+    try out.print("{s:<30} {s:>10} {s:>10}\n", .{ "where the call stops", "today", "guard off" });
     var today_sum: usize = 0;
     var relaxed_sum: usize = 0;
     for (std.enums.values(ReceiverStop)) |stop| {
@@ -1606,8 +1640,8 @@ fn reportValueReceivers(
     }
 
     const addressable = relaxed[@intFromEnum(ReceiverStop.addressable)];
-    try out.print("\nGate C input (measured here on today's graph, not after Stage 3)\n", .{});
-    try out.print("  value-receiver calls addressable under D10: {d} today, {d} with the guard relaxed (floor 1000)\n", .{
+    try out.print("\nGate C (Plan 014 D12)\n", .{});
+    try out.print("  value-receiver calls addressable under D10: {d} today, {d} with the guard off entirely (floor 1000)\n", .{
         today[@intFromEnum(ReceiverStop.addressable)],
         addressable,
     });
@@ -1617,12 +1651,17 @@ fn reportValueReceivers(
 const Classifier = struct {
     world: *const World,
     walker: *Walker,
+    graph: *semidx.Graph,
+    snapshot: *const semidx.Snapshot,
     gpa: std.mem.Allocator,
     unit: u32,
+    path: []const u8,
     source: []const u8,
     pending: []PendingCall,
     today: *[stop_count]usize,
     relaxed: *[stop_count]usize,
+    /// The enclosing type of the class being walked, as the graph holds it.
+    enclosing: ?model.EntityId = null,
 
     fn run(self: *Classifier, tree_root: ts.Node) !void {
         var top_level = tree_root.namedChildren();
@@ -1633,8 +1672,10 @@ const Classifier = struct {
             const kind = TypeKind.fromNodeKind(node.kind()) orelse continue;
             if (!kind.inChain()) continue;
             const name_node = node.childByFieldName("name") orelse continue;
-            const class_index = findTopLevel(self.world, self.unit, name_node.text(self.source)) orelse continue;
+            const type_name = name_node.text(self.source);
+            const class_index = findTopLevel(self.world, self.unit, type_name) orelse continue;
             const body = node.childByFieldName("body") orelse continue;
+            self.enclosing = if (self.snapshot.findDefinition(self.path, type_name)) |found| found.id else null;
 
             var fields: std.ArrayList(Binding) = .empty;
             defer fields.deinit(self.gpa);
@@ -1781,14 +1822,34 @@ const Classifier = struct {
             .decl => |index| index,
         };
 
-        // The one condition the two modes disagree about. It applies only when
-        // the receiver type is not declared in this unit: a name the unit
-        // declares itself never reaches the guard.
+        // The one condition the two columns disagree about, asked the way
+        // Stage 3 asks it: the guard applies only when the receiver type is not
+        // declared in this unit, the enclosing type declares supertypes, and
+        // its chain does not rule the name out.
         const guarded = self.world.decls[target].unit != self.unit and
-            self.world.decls[class_index].supertypes.len != 0;
+            self.world.decls[class_index].supertypes.len != 0 and
+            !self.chainRulesOut(name);
 
         const outcome = self.targetStop(call, target, class_index);
         return .{ if (guarded) .enclosing_supertypes_guard else outcome, outcome };
+    }
+
+    /// Whether the enclosing type's chain is closed in the graph and nothing it
+    /// reaches declares a member type of `name` — which is exactly what
+    /// `resolveType` asks since Plan 014 Stage 3.
+    fn chainRulesOut(self: *Classifier, name: []const u8) bool {
+        const start = self.enclosing orelse return false;
+        var closure: std.ArrayList(model.EntityId) = .empty;
+        defer closure.deinit(self.gpa);
+        const outcome = hierarchy.closureOf(self.graph, start, self.gpa, &closure) catch return false;
+        if (!outcome.isClosed()) return false;
+        for (closure.items) |id| {
+            if (id == start) continue;
+            const entity = self.graph.entity(id) orelse continue;
+            const declared = entity.extension.get(java.member_types.key) orelse continue;
+            if (java.member_types.contains(declared, name)) return false;
+        }
+        return true;
     }
 
     fn targetStop(self: *Classifier, call: PendingCall, target: u32, class_index: u32) ReceiverStop {

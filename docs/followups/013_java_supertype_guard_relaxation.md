@@ -1,13 +1,64 @@
 ---
 title: "Java supertype guard relaxation"
 doc_type: "follow_up"
-lifecycle: "active"
-status: "open"
-agent_action: "use_as_input_for_future_plan_only"
-updated: "2026-09-19"
+lifecycle: "completed"
+status: "fixed"
+agent_action: "historical_reference_only"
+updated: "2026-09-21"
 ---
 
 # Java Supertype Guard Relaxation
+
+## Resolution
+
+**Fixed** by [Plan 014](../plans/014_java_receiver_coverage.md) Stages 1 to 4,
+under [ADR 011](../adr/011_java_hierarchy_from_indexed_source.md).
+
+The guard now lifts wherever the chain above the enclosing type is closed in
+indexed source and nothing that chain reaches declares the name. It lifts on all
+three of its sides, and each asks about what its own decline was about: a member
+type for a reference, a field for a receiver, a method for an unqualified call.
+
+What made that possible is what this entry said would have to come first. The
+hierarchy is recorded: a top-level interface is a definition (D1), every
+declared supertype is a `references` claim resolved in its declaring unit's
+scope (D3), and a projection walks those claims with a visited path and a depth
+cap of 16 (D4, D5). The chain rules out and never selects (D6), so no inherited
+member is ever named as a target.
+
+Measured on the same clone at the same commit, `apache/dubbo` at `df9c5e1`:
+
+| | Before | After |
+| --- | ---: | ---: |
+| Unresolved references the guard declines | 8,083 | **6,064** |
+| Unresolved call receivers it declines | 6,206 | **4,403** |
+| Unqualified invocations it declines | 4,049 | **3,251** |
+| `enclosing_supertypes` reason family | 6,206 | **0** |
+| `unqualified_supertypes` reason family | 4,049 | **0** |
+
+4,898 claims left the guard's families. **1,690 became facts** — 661 references,
+198 receivers, 831 unqualified calls. 243 kept their unresolved answer because a
+type the chain reaches claims the name, which is the rule doing its work. The
+remaining 3,208 decline for the condition the guard used to come before, almost
+always a name no indexed unit in scope declares.
+
+This entry predicted 13 safely convertible references in a 1,200-definition
+sample, scaling to about 554 whole-graph, and named interfaces as the dominant
+blocker at 218 of 335. Both held: Plan 014 Stage 0 measured 3,628 of 4,738
+closable claims as interface-dependent, and the realized 1,690 is three times
+the pre-interface forecast.
+
+The invalidation question this entry attached came with it and was measured
+before the relaxation was accepted. No chain on the clone reaches depth 5 or
+visits more than six types, and the largest number of reader units a single type
+would owe a reanalysis is 37 out of 4,050. Reading a chain declares a dependency
+on every unit in it, and a reader is hinted for every type its walk visited.
+
+Two findings this entry did not anticipate are recorded in the
+[Plan 014 progress log](../reports/014_java_receiver_coverage_progress.md):
+a closed chain answers the guard and nothing else, so most claims that lose the
+guard meet the next condition rather than becoming facts; and upkeep had to
+learn to converge, because reanalysis can now change what a later reader sees.
 
 ## Classification
 

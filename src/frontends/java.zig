@@ -2017,7 +2017,7 @@ fn invocationTarget(
     return .{
         .index = found,
         .resolution = .{ .fact = .{
-            .method = "unqualified invocation of the only method of this name in a class without supertypes",
+            .method = unqualified_call_method,
         } },
     };
 }
@@ -2190,7 +2190,9 @@ fn externalStaticTarget(
     };
 }
 
-const static_call_method = "class-qualified invocation of the one `static` method of this name " ++
+pub const unqualified_call_method = "unqualified invocation of the only method of this name in a class without supertypes";
+
+pub const static_call_method = "class-qualified invocation of the one `static` method of this name " ++
     "declared in a class without supertypes";
 
 fn targetHasSupertypes(builder: *contract.BatchBuilder, receiver: []const u8) !InvocationTarget {

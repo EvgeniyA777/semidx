@@ -14,7 +14,18 @@ Companion log for
 
 ## Current Status
 
-**Stage 3 is complete.** The supertype guard now lifts wherever the chain above
+**Stage 4 is complete and Gate C passes at 2,657 against a floor of 1,000.** The
+supertype half is measured on the clone and
+[Follow-up 013](../followups/013_java_supertype_guard_relaxation.md) is closed.
+Across Stages 1 to 3 the graph gained 3,022 definitions and 12,709 facts, the
+guard's two reason families went to zero, and **1,690 claims converted**. The
+realized count is 18% of Gate A's upper bound, and the gap is accounted for to
+the unit rather than explained away: the type shape rule takes 548, 243 chains
+closed with the name claimed inside them, and 3,208 claims lost the guard only
+to meet the condition it used to come before. Ingestion is 3.1 s and 227 MB, and
+200 `semidx_context depth=2` calls cost less than the noise floor.
+
+**Stage 3** before it. The supertype guard now lifts wherever the chain above
 the enclosing type is closed in indexed source and nothing it reaches declares
 the name — on all three of its sides, each asking about the thing it is actually
 about: a member type for a reference, a field for a receiver, a method for an
@@ -72,6 +83,8 @@ indexed source, **3,628 (76.6%) reach at least one interface**.
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 0: Price both halves on the clone | Completed | Baseline on `apache/dubbo` at `df9c5e1` reproduces Plan 013 Stage 0 to the unit: 230,859 assertions, 92,637 facts, 138,222 unresolved, 118,471 unresolved calls, every reason family identical. Guard families are 8,083 references and 6,206 receivers, exactly as Follow-up 013 records. **Gate A: PASS** — A1 3,628 of 4,738 interface-dependent, A2 4,738 against a floor of 1,000. Gate C input measured early: 2,172 addressable value receivers today, 3,041 with the guard relaxed. |
+| Stage 4: External re-measure of the supertype half | Completed | Guard families 8,083/6,206/4,049 → 6,064/4,403/3,251; `enclosing_supertypes` and `unqualified_supertypes` both zero; 1,690 claims converted and the gap to Gate A's bound accounted for exactly. **Gate C: PASS** — 2,657 against a floor of 1,000. Ingestion 3.1 s, 227 MB; 200 `semidx_context depth=2` calls under the noise floor; Plan 011 work bounds unchanged. Follow-up 013 closed. |
+| Stage 3: The guard lifts only on a closed chain | Completed | D4-D8 shipped. One test asked three times, each about what its own decline was about; ten named conditions; a converging batch. 1,690 claims converted on the clone, every one of the 10,322 that left the guard's families accounted for. |
 | Stage 2: A declared supertype is a recorded claim | Completed | D3 shipped, plus `src/frontends/java_hierarchy.zig`: a projection that walks recorded supertype claims and reports a closed chain or the first condition that opened it, used by nothing in the frontend yet. **Gate B: PASS** — 4,190 against a floor of 700, 86% of Gate A's upper bound and equal to its strict bound. On the fixture corpus the frontend change alone is byte-identical; on the clone, references +2,443 and every other claim family unchanged. A Stage 1 defect was found and fixed: 53 wrong facts removed. |
 | Stage 1: Interfaces are declarations the graph holds | Completed | D1 and D2 shipped. Interfaces and their methods are definitions with role `interface` and `method`; an unmodified interface method is recorded `public`; the package and class-shape projections carry both roles; the top-level interface diagnostic is gone and the enum, record and annotation type ones stay. On the clone: +3,022 definitions, +1,757 references, +1,411 calls, 247 reference claims converted, and **not one guard-declined claim moved**. [ADR 011](../adr/011_java_hierarchy_from_indexed_source.md). |
 
@@ -1059,3 +1072,178 @@ moved.
 - **The convergence loop is bounded at 8 rounds.** Exhausting it is reported as
   a diagnostic. Nothing measured here comes close, and no test drives it to the
   bound.
+
+## Stage 4: External Re-Measure Of The Supertype Half
+
+Same clone, same commit, same build mode as Stage 0:
+`~/.cache/semidx-external/dubbo` at `df9c5e1`, `-Doptimize=ReleaseFast`.
+
+### The Whole Graph, Stage 0 To Now
+
+| Measurement | Stage 0 | Now | Δ |
+| --- | ---: | ---: | ---: |
+| Source units | 4,050 | 4,050 | 0 |
+| Definitions | 26,509 | **29,531** | +3,022 |
+| Recorded assertions | 230,859 | 245,803 | +14,944 |
+| Current facts | 92,637 | **105,346** | +12,709 |
+| Current unresolved | 138,222 | 140,457 | +2,235 |
+| Approximate | 0 | 0 | 0 |
+| Stale | 0 | 0 | 0 |
+| Diagnostics | 59,022 | 59,964 | +942 |
+| Frontend reads per scan | 7,291 | 7,770 | +479 |
+
+By claim:
+
+| Claim | Stage 0 | Now | Δ | What made it |
+| --- | ---: | ---: | ---: | --- |
+| `entity_exists` | 30,560 | 33,582 | +3,022 | 617 interfaces and 2,405 of their methods |
+| `contains` | 4,050 | 4,050 | 0 | — |
+| `defines` | 26,509 | 29,531 | +3,022 | the same declarations |
+| `references` | 21,491 | 25,691 | +4,200 | 1,757 interface method return types, 2,443 declared supertypes |
+| `calls` | 123,499 | 124,910 | +1,411 | invocations in `default` and `static` interface method bodies |
+| `identity_correspondence` | 24,750 | 28,039 | +3,289 | more entities, and a batch that now converges |
+
+Stage 0's column is derived from its own recorded totals; the derivation is the
+one Stage 1 validated against a measured row.
+
+### The Guard Family, Before And After
+
+| | Stage 0 | Now | Δ |
+| --- | ---: | ---: | ---: |
+| Unresolved references the guard declines | 8,083 | **6,064** | −2,019 |
+| Unresolved call receivers it declines | 6,206 | **4,403** | −1,803 |
+| Unqualified invocations it declines | 4,049 | **3,251** | −798 |
+
+The two families `claim_sample` named for it read **zero**:
+`enclosing_supertypes` 6,206 → 0 and `unqualified_supertypes` 4,049 → 0. Ten
+chain families hold 7,654 claims between them, each naming the condition that
+stopped the walk, and the families sum to the whole with `unclassified` at zero.
+
+### Converted Claims, By Side
+
+The relaxation is Stage 2 → Stage 3, which is the only interval in which the
+guard's rule changed. Every number below is measured, and the split is forced by
+the fact that every family the moved claims landed in — `receiver_reaches_no_class`,
+`target_supertypes`, `target_overloaded`, `target_not_static`,
+`target_inaccessible` — is reachable only through the receiver rule:
+
+| Side | Left the guard family | Became facts | Moved to a later decline | Chain closed, name claimed |
+| --- | ---: | ---: | ---: | ---: |
+| Reference | 2,230 | **661** | 1,569 | 17 |
+| Receiver | 1,837 | **198** | 1,639 | 106 |
+| Unqualified | 831 | **831** | 0 | 120 |
+| **Total** | **4,898** | **1,690** | **3,208** | **243** |
+
+Call facts by the rule that established them, today: 2,343 class-qualified and
+3,881 unqualified, 6,224 in all against Stage 0's 5,028.
+
+### The Realized Count Against Gate A's Upper Bound
+
+Gate A's upper bound was **4,738** over the reference and receiver families.
+Realized on those two families: **859**, which is 18% — below half, so the gap
+is named rather than smoothed over. It is consumed in three places, and the
+three account for it exactly:
+
+1. **The type shape rule takes 548.** Gate A's bound was lenient: it followed
+   the base name of a generic supertype. `resolveType` does not, and this plan's
+   Non-Scope forbids changing that. Gate B, measured on the real graph at
+   Stage 2, was **4,190** — the lenient 4,738 minus the chains whose links are
+   written generically or qualified.
+2. **243 chains closed and something in them claimed the name.** That is the
+   rule working: 17 references, 106 receivers, 120 unqualified calls where a
+   reachable type declares a member type, a field, or a method of that name.
+   Every one of them would have been a wrong fact.
+3. **3,208 claims lost the guard and met the next condition.** This is the whole
+   of the remainder, and it is the honest cost of relaxing a guard that came
+   first: what it used to hide is now what declines. Overwhelmingly the name is
+   a JDK or dependency type no indexed unit declares, so `resolveType` reaches
+   its package lookup and says so.
+
+   Reference side: 2,247 closed chains at Stage 2 = 661 facts + 1,569 later
+   declines + 17 claimed names. Receiver side: 1,943 = 198 + 1,639 + 106. Both
+   close to the unit.
+
+The plan's own forecast was that Stage 4 would realize "roughly 4,100". It
+realized 1,690 across all three sides. The forecast counted closed chains and
+assumed a closed chain means a fact; a closed chain only means the **guard** is
+answered, and the name still has to reach something.
+
+### Gate C
+
+Measured on the graph after Stage 3, over the 55,565 value-receiver claims, all
+of them located:
+
+| Condition | Value-receiver calls addressable under D10 | Floor | Verdict |
+| --- | ---: | ---: | --- |
+| Today's rule | **2,657** | 1,000 | **PASS** |
+| With the guard off entirely | 3,042 | 1,000 | — |
+
+2,657 is 2.7 times the floor and 1.9 times Plan 012's sample-scaled forecast of
+about 1,390. Stage 3 moved it from 2,173 to 2,657: **484 value receivers became
+addressable because the enclosing type's chain now rules their type name out.**
+
+Where the other 52,908 stop, unchanged in shape from Stage 0: 14,897 declare a
+type shape Plan 012's covered list does not admit, 22,829 a type no indexed unit
+in scope declares, 3,320 an uncovered binding introducer. 836 satisfy every
+condition and are blocked only because their receiver type is an interface —
+which Stage 5 is free to admit, since an interface is a definition now.
+
+**Stage 5 is executed.**
+
+### The Habit Loop
+
+| Measurement | Now | Prior record |
+| --- | ---: | --- |
+| Index 4,050 units and publish | **3.1 s** | Plan 013 Stage 0 recorded 3.5 s for the same command including its build step |
+| Peak memory, index and publish | **227 MB** | not previously recorded |
+| Peak memory, index plus the full coverage classification | 239 MB | — |
+| 200 × `semidx_context depth=2` on the largest hierarchy anchor | **≤ 0.3 s total over the index baseline** | Plan 013 measured 5–7 ms per call on its hottest `semidx_references` anchors |
+
+The 200-call probe is measured by difference: `semidx-mcp` over stdio with
+`initialize` alone takes 3.09–3.63 s, and with 200 `semidx_context depth=2`
+calls appended takes 3.39–3.41 s. Every response is a complete, non-error result
+of about 93 KB. Per-call cost is therefore under the noise floor of this method
+— well inside interactive.
+
+The Plan 011 work bounds are asserted by tests, and all of them pass: changing
+one unit costs the same whatever else the repository holds, building a tree
+costs work proportional to the tree rather than to its square, adding units
+reanalyzes only what was added, and deciding a static call costs the invoked
+name's candidates rather than the repository.
+
+The one cost that grew is the write path: 7,770 frontend reads per scan against
+Stage 0's 7,291. 374 of those are the interfaces Stage 1 added, and 105 are the
+convergence rounds Stage 3 added. That is 6.6% more reads for a graph with 11%
+more definitions.
+
+### Follow-up 013
+
+Closed. Its acceptance direction asked for exactly what shipped — the hierarchy
+established from indexed source, cycles and depth handled, every reachable type
+checked for the name, and the invalidation cost measured before the relaxation
+was accepted — and its required tests all exist and pass. Its status and numbers
+are updated in the entry itself.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core`, `test`, `test-mcp`, `dogfood`, `preview-gate` | all pass |
+| `zig fmt --check build.zig src tests` | clean |
+| `./zig-out/bin/semidx-java-coverage --root <clone>` | the tables above, 7.5 s |
+| `./zig-out/bin/semidx-designator-shape --root <clone>` | 3.1 s, 227 MB |
+| `./zig-out/bin/semidx-mcp --root <clone>` over stdio, 200 calls | 20/20 and 200/200 non-error results |
+| `zig build claim-sample … --size 40000` | families sum to the whole, `unclassified` 0 |
+
+### Residual Risk
+
+- **548 closable claims are lost to the type shape rule** and 3,208 more decline
+  for the condition the guard used to precede. Neither is a regression; both are
+  measured, and the second is the larger finding: a closed chain answers the
+  guard and nothing else.
+- **The receiver-side conversion count of 198 is derived**, not counted
+  directly. The derivation rests on every later-decline family being reachable
+  only through the receiver rule, which is true of the five that moved.
+- **The latency probe is by difference**, not per call. It bounds the cost
+  rather than measuring it, which is enough to say the habit loop is unaffected
+  and not enough to compare two implementations.
