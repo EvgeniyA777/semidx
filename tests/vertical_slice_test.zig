@@ -2703,26 +2703,40 @@ test "a receiver name any binding introducer declares is not read as a class" {
     defer snapshot.deinit();
 
     const shadowed = "module/src/main/java/lib/Shadowed.java";
-    const bound = "declared here as a binding";
+    // Since Plan 014 Stage 5 the answer splits by introducer. A covered one —
+    // a field, a formal parameter, a local declarator — gives the name a type,
+    // and the call names that type's method: `Other.make`, the instance one,
+    // and never `Util.make`, the static one a frontend reading the name as a
+    // class would have picked. Everything else still poisons the name.
+    const poisoned = "bound here by a construct this frontend reads no type from";
+    const other_make: StaticTarget = .{
+        .path = "module/src/main/java/lib/Other.java",
+        .class = "Other",
+        .method = "make",
+    };
     const cases = [_]StaticCall{
-        .{ .path = shadowed, .class = "Shadowed", .method = "byParameter", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "bySpread", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byLocal", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byForEach", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byCatch", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byResource", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byLambda", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byInferredLambda", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byTypedLambda", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byPattern", .call = "Util.make()", .expect = .{ .unresolved = bound } },
-        .{ .path = shadowed, .class = "Shadowed", .method = "byRecordPattern", .call = "Util.make()", .expect = .{ .unresolved = bound } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byParameter", .call = "Util.make()", .expect = .{ .fact = other_make } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byLocal", .call = "Util.make()", .expect = .{ .fact = other_make } },
         .{
             .path = "module/src/main/java/lib/Fielded.java",
             .class = "Fielded",
             .method = "byField",
             .call = "Util.make()",
-            .expect = .{ .unresolved = bound },
+            .expect = .{ .fact = other_make },
         },
+        // Varargs bind an array, and every construct below binds inside its own
+        // subtree while this frontend reads bindings for the whole method. A
+        // type read from one of them could give a name a meaning outside it,
+        // which would be a wrong fact rather than a decline.
+        .{ .path = shadowed, .class = "Shadowed", .method = "bySpread", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byForEach", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byCatch", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byResource", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byLambda", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byInferredLambda", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byTypedLambda", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byPattern", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
+        .{ .path = shadowed, .class = "Shadowed", .method = "byRecordPattern", .call = "Util.make()", .expect = .{ .unresolved = poisoned } },
         // The scope of a local declaration is the rest of the block, so the
         // name before it is still the class. This is the one case in the
         // matrix that distinguishes a lexical rule from poisoning the method.
@@ -2889,7 +2903,11 @@ test "a receiver that is a value stays unresolved, whatever the static rule admi
         .{ .path = values, .class = "Values", .method = "byChain", .call = "self().make()", .expect = .{ .unresolved = "receiver" } },
         .{ .path = values, .class = "Values", .method = "byLiteral", .call = "\"text\".length()", .expect = .{ .unresolved = "receiver" } },
         .{ .path = values, .class = "Values", .method = "byClassLiteral", .call = "Other.class.getName()", .expect = .{ .unresolved = "receiver" } },
-        .{ .path = values, .class = "Values", .method = "byThis", .call = "this.self()", .expect = .{ .unresolved = "receiver" } },
+        // `this` names the enclosing type exactly, so it is admitted in
+        // principle. Here the enclosing type's own chain is open, so the
+        // question of what it may inherit cannot be answered and the answer
+        // says which condition stopped it.
+        .{ .path = values, .class = "Values", .method = "byThis", .call = "this.self()", .expect = .{ .unresolved = "a method of this name it may inherit is not ruled out" } },
         .{ .path = values, .class = "Values", .method = "bySuper", .call = "super.toString()", .expect = .{ .unresolved = "receiver" } },
     };
     for (cases) |case| try expectStaticCall(&snapshot, case);
@@ -4858,12 +4876,15 @@ test "an interface constant obscures a receiver name exactly as a class field do
     var snapshot = try index.publish();
     defer snapshot.deinit();
 
+    // The constant gives the name a type, and that type is `String`, which no
+    // indexed unit declares — so the call is still not `Util.make`, and it says
+    // which of the two reasons it is.
     try expectStaticCall(&snapshot, .{
         .path = "module/src/main/java/lib/Holder.java",
         .class = "Holder",
         .method = "call",
         .call = "Util.make()",
-        .expect = .{ .unresolved = "is declared here as a binding" },
+        .expect = .{ .unresolved = "the receiver's declared type `String` is not read as a type" },
     });
 }
 
@@ -5129,7 +5150,11 @@ test "a chain closed in indexed source lifts the guard on all three of its sides
         .java,
         "package lib;\n\nclass Helper {\n    public static String make() { return null; }\n}\n",
     );
-    _ = try index.addUnit("module/src/main/java/lib/Root.java", .java, "package lib;\n\nclass Root {}\n");
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Root.java",
+        .java,
+        "package lib;\n\nclass Root {\n    public String only() { return null; }\n}\n",
+    );
     _ = try index.addUnit("module/src/main/java/lib/Base.java", .java, "package lib;\n\nclass Base extends Root {}\n");
 
     const reader = try chainReader("Reader", "Base", testing.allocator);
@@ -5431,6 +5456,258 @@ test "adding and removing a supertype anywhere in a chain reanalyzes the reader"
             try referenceFrom(&snapshot, class.id, "Helper"),
             "supertype chain declares a member type of this name",
         );
+    }
+}
+
+// -- Plan 014 Stage 5: a value receiver with a declared type ------------------
+
+// The cases [Follow-up 014](../docs/followups/014_java_instance_receiver_calls.md)
+// named as required, written against
+// [ADR 012](../docs/adr/012_java_value_receiver_calls.md).
+
+fn addValueReceiverProviders(index: *semidx.Index) !void {
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Other.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Other {
+        \\    public String make() { return null; }
+        \\    public String twice() { return null; }
+        \\    public String twice(String name) { return null; }
+        \\    String packaged() { return null; }
+        \\}
+        \\
+        ,
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Root.java",
+        .java,
+        "package lib;\n\nclass Root {\n    public String only() { return null; }\n}\n",
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Derived.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Derived extends Root {
+        \\    public String make() { return null; }
+        \\}
+        \\
+        ,
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Shady.java",
+        .java,
+        "package lib;\n\nclass Shady extends Absent {\n    public String make() { return null; }\n}\n",
+    );
+    // `only` is declared here and overridden from `Root`, so the chain closes
+    // and still rules nothing out: which of the two a call reaches is dispatch,
+    // and dispatch is not resolved.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Inheriting.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Inheriting extends Root {
+        \\    public String only() { return null; }
+        \\}
+        \\
+        ,
+    );
+}
+
+test "a receiver that is a value of a declared type names the method that type declares" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addValueReceiverProviders(&index);
+
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Caller.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Caller {
+        \\    Other asField;
+        \\    Caller self;
+        \\
+        \\    String own() { return null; }
+        \\
+        \\    void byField() { asField.make(); }
+        \\    void byParameter(Other value) { value.make(); }
+        \\    void byLocal() { Other value = null; value.make(); }
+        \\    void byThis() { this.own(); }
+        \\    void sameUnit() { self.own(); }
+        \\    void byCreation() { new Other().make(); }
+        \\    void byChain() { asField.make().trim(); }
+        \\    void bySuper() { super.toString(); }
+        \\    void overloaded(Other value) { value.twice(); }
+        \\    void inaccessible(Other value) { value.packaged(); }
+        \\    void missing(Other value) { value.absent(); }
+        \\    void unknownType(Absent value) { value.make(); }
+        \\    void targetChainClosed(Derived value) { value.make(); }
+        \\    void targetChainOpen(Shady value) { value.make(); }
+        \\    void targetInherits(Inheriting value) { value.only(); }
+        \\    void duplicated() {
+        \\        { Other value = null; value.make(); }
+        \\        { Caller value = null; value.own(); }
+        \\    }
+        \\    void nested() { Runnable task = new Runnable() { public void run() { Other value = null; value.make(); } }; }
+        \\}
+        \\
+        ,
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const other_make: StaticTarget = .{
+        .path = "module/src/main/java/lib/Other.java",
+        .class = "Other",
+        .method = "make",
+    };
+    const own: StaticTarget = .{
+        .path = "module/src/main/java/lib/Caller.java",
+        .class = "Caller",
+        .method = "own",
+    };
+    const caller = "module/src/main/java/lib/Caller.java";
+    const cases = [_]StaticCall{
+        // Every covered introducer, and a type in another unit.
+        .{ .path = caller, .class = "Caller", .method = "byField", .call = "asField.make()", .expect = .{ .fact = other_make } },
+        .{ .path = caller, .class = "Caller", .method = "byParameter", .call = "value.make()", .expect = .{ .fact = other_make } },
+        .{ .path = caller, .class = "Caller", .method = "byLocal", .call = "value.make()", .expect = .{ .fact = other_make } },
+        // `this` names the enclosing type exactly.
+        .{ .path = caller, .class = "Caller", .method = "byThis", .call = "this.own()", .expect = .{ .fact = own } },
+        // A type this unit declares itself, reached through a field of it.
+        .{ .path = caller, .class = "Caller", .method = "sameUnit", .call = "self.own()", .expect = .{ .fact = own } },
+        // The target declares supertypes, and the chain rules the name out.
+        .{
+            .path = caller,
+            .class = "Caller",
+            .method = "targetChainClosed",
+            .call = "value.make()",
+            .expect = .{ .fact = .{
+                .path = "module/src/main/java/lib/Derived.java",
+                .class = "Derived",
+                .method = "make",
+            } },
+        },
+
+        // A receiver that is not a simple name carries no name to read, so
+        // creation, chaining and `super` are all declined before any binding is
+        // consulted. `super.m()` selects an inherited member, which is what the
+        // chain is never walked to do.
+        .{ .path = caller, .class = "Caller", .method = "byCreation", .call = "new Other().make()", .expect = .{ .unresolved = "a receiver this frontend does not resolve" } },
+        .{ .path = caller, .class = "Caller", .method = "byChain", .call = "asField.make().trim()", .expect = .{ .unresolved = "a receiver this frontend does not resolve" } },
+        .{ .path = caller, .class = "Caller", .method = "bySuper", .call = "super.toString()", .expect = .{ .unresolved = "a receiver this frontend does not resolve" } },
+
+        // Each remaining condition, with its own reason.
+        .{ .path = caller, .class = "Caller", .method = "overloaded", .call = "value.twice()", .expect = .{ .unresolved = "are declared by the receiver's declared type" } },
+        .{ .path = caller, .class = "Caller", .method = "inaccessible", .call = "value.packaged()", .expect = .{ .unresolved = "outside the access this frontend resolves through a value receiver" } },
+        .{ .path = caller, .class = "Caller", .method = "missing", .call = "value.absent()", .expect = .{ .unresolved = "is declared by the receiver's declared type" } },
+        .{ .path = caller, .class = "Caller", .method = "unknownType", .call = "value.make()", .expect = .{ .unresolved = "is not read as a type" } },
+        .{ .path = caller, .class = "Caller", .method = "targetChainOpen", .call = "value.make()", .expect = .{ .unresolved = "declares supertypes and" } },
+        .{ .path = caller, .class = "Caller", .method = "targetInherits", .call = "value.only()", .expect = .{ .unresolved = "supertype chain declares a method of this name" } },
+        .{ .path = caller, .class = "Caller", .method = "nested", .call = "value.make()", .expect = .{ .unresolved = "class body declared in the method" } },
+    };
+    for (cases) |case| try expectStaticCall(&snapshot, case);
+
+    // Two locals of one name in two blocks are two bindings, each reaching its
+    // own type. A rule that poisoned the name on the duplicate would decline
+    // both; a rule that took the first would name the wrong method.
+    const duplicated = definitionIn(&snapshot, caller, "Caller", "duplicated").?;
+    var seen_other = false;
+    var seen_own = false;
+    var calls = snapshot.relationships(.{ .kind = .calls, .source = duplicated.id });
+    while (calls.next()) |call| {
+        try testing.expectEqual(model.ResolutionCategory.fact, call.resolution.category());
+        const target = call.claim.relationship.target.entity;
+        if (target == definitionIn(&snapshot, "module/src/main/java/lib/Other.java", "Other", "make").?.id) seen_other = true;
+        if (target == definitionIn(&snapshot, caller, "Caller", "own").?.id) seen_own = true;
+    }
+    try testing.expect(seen_other and seen_own);
+
+    // A value receiver names no scope, so nothing it declines carries a
+    // qualifier: the source wrote a variable, not a type.
+    var declines = snapshot.relationships(.{ .kind = .calls, .resolution = .unresolved });
+    while (declines.next()) |call| {
+        const explanation = call.resolution.unresolved.explanation;
+        if (std.mem.indexOf(u8, explanation, "receiver's declared type") == null) continue;
+        try testing.expect(call.claim.relationship.target.designator.qualifier == null);
+    }
+
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "a provider edit decides what a value-receiver call may claim" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+
+    try tree.write(
+        "src/main/java/lib/Other.java",
+        "package lib;\n\nclass Other {\n    public String make() { return null; }\n}\n",
+    );
+    try tree.write(
+        "src/main/java/lib/Caller.java",
+        "package lib;\n\nclass Caller {\n    void run(Other value) { value.make(); }\n}\n",
+    );
+    _ = try tree.rescan();
+
+    const caller_path = "src/main/java/lib/Caller.java";
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        try expectStaticCall(&snapshot, .{
+            .path = caller_path,
+            .class = "Caller",
+            .method = "run",
+            .call = "value.make()",
+            .expect = .{ .fact = .{
+                .path = "src/main/java/lib/Other.java",
+                .class = "Other",
+                .method = "make",
+            } },
+        });
+    }
+
+    // An overload appears in the provider. Nothing about the caller changed,
+    // and its fact must stop being one.
+    try tree.write(
+        "src/main/java/lib/Other.java",
+        "package lib;\n\nclass Other {\n    public String make() { return null; }\n" ++
+            "    public String make(String name) { return null; }\n}\n",
+    );
+    _ = try tree.rescan();
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        try expectStaticCall(&snapshot, .{
+            .path = caller_path,
+            .class = "Caller",
+            .method = "run",
+            .call = "value.make()",
+            .expect = .{ .unresolved = "are declared by the receiver's declared type" },
+        });
+    }
+
+    // The provider gains a supertype instead. The class shape changed, not the
+    // method, and the caller has to hear about that too.
+    try tree.write(
+        "src/main/java/lib/Other.java",
+        "package lib;\n\nclass Other extends Gone {\n    public String make() { return null; }\n}\n",
+    );
+    _ = try tree.rescan();
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        try expectStaticCall(&snapshot, .{
+            .path = caller_path,
+            .class = "Caller",
+            .method = "run",
+            .call = "value.make()",
+            .expect = .{ .unresolved = "declares supertypes and" },
+        });
     }
 }
 

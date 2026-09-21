@@ -241,7 +241,14 @@ pub const Analyzer = struct {
         // answer and what it must be reached for later. The pairs are recorded
         // as read before anything is resolved, because the reader that most
         // needs reaching is the one whose call resolves to nothing today.
-        const receivers = try java.staticCallReceivers(allocator, root, bytes);
+        // What the unit writes after a `.`, from both sides: the name itself
+        // where it may be a type, and the declared type of the binding where it
+        // is a value. Both are recorded as read before anything is resolved,
+        // because the reader that most needs reaching is the one whose call
+        // resolves to nothing today.
+        const named = try java.staticCallReceivers(allocator, root, bytes);
+        const valued = try java.valueReceiverPairs(allocator, root, bytes);
+        const receivers = try std.mem.concat(allocator, java.Receiver, &.{ named, valued });
         for (receivers) |receiver| {
             try self.java_members.noteReader(unit, receiver.class, receiver.method);
         }
@@ -251,9 +258,21 @@ pub const Analyzer = struct {
         // names are recorded as read before anything is resolved, so a unit
         // whose chain is open today is reached when the type that closes it
         // appears ([ADR 011](../../docs/adr/011_java_hierarchy_from_indexed_source.md), D7).
-        const supertypes = try java.supertypeNames(allocator, root, bytes);
-        for (supertypes) |name| try self.java_members.noteTypeReader(unit, name);
-        context.hierarchies = try java_hierarchy.hierarchiesFor(graph, context, supertypes, allocator);
+        // A receiver's declared type needs its own chain answered too, so the
+        // names asked about are the supertypes this unit writes and the types
+        // its value receivers are declared with.
+        var asked: std.ArrayList([]const u8) = .empty;
+        try asked.appendSlice(allocator, try java.supertypeNames(allocator, root, bytes));
+        for (valued) |pair| {
+            if (std.mem.indexOfScalar(u8, pair.class, 0) != null) continue;
+            var seen = false;
+            for (asked.items) |name| {
+                if (std.mem.eql(u8, name, pair.class)) seen = true;
+            }
+            if (!seen) try asked.append(allocator, pair.class);
+        }
+        for (asked.items) |name| try self.java_members.noteTypeReader(unit, name);
+        context.hierarchies = try java_hierarchy.hierarchiesFor(graph, context, asked.items, allocator);
         // A reader depends on every type its walk can reach, not only on the
         // one it named, so the whole closure is hinted too.
         for (context.hierarchies) |reached| {

@@ -250,6 +250,7 @@ pub fn hierarchiesFor(
         var member_types: std.ArrayList([]const u8) = .empty;
         var fields: std.ArrayList([]const u8) = .empty;
         var method_names: std.ArrayList([]const u8) = .empty;
+        var inherited: std.ArrayList([]const u8) = .empty;
         var type_names: std.ArrayList([]const u8) = .empty;
         var providers: std.ArrayList(model.SourceUnitId) = .empty;
 
@@ -271,7 +272,10 @@ pub fn hierarchiesFor(
             }
             methods.clearRetainingCapacity();
             try java_members.methodsOf(graph, shape, allocator, &methods);
-            for (methods.items) |method| try method_names.append(allocator, method.name);
+            for (methods.items) |method| {
+                try method_names.append(allocator, method.name);
+                if (id != target.entity) try inherited.append(allocator, method.name);
+            }
         }
 
         try found.append(allocator, .{
@@ -280,6 +284,7 @@ pub fn hierarchiesFor(
             .member_types = member_types.items,
             .fields = fields.items,
             .methods = method_names.items,
+            .inherited_methods = inherited.items,
             .types = type_names.items,
             .providers = providers.items,
         });

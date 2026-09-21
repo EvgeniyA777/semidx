@@ -14,7 +14,18 @@ Companion log for
 
 ## Current Status
 
-**Stage 4 is complete and Gate C passes at 2,657 against a floor of 1,000.** The
+**Stage 5 is complete.** A Java call on a receiver that is a value of a declared
+type now names the method that type declares. On `apache/dubbo` that is **3,294
+new call facts** — the largest single conversion this plan produced — and the
+`receiver_bound` family, 55,565 claims, reads zero, replaced by eleven families
+that each say which of ADR 012's seven conditions failed.
+[ADR 012](../adr/012_java_value_receiver_calls.md) records the decision.
+
+Across the whole plan, Java call facts went from 5,028 to 9,518 and reference
+facts from 1,740 to 3,920, with 3,022 definitions added and not one family
+moving that the log does not account for.
+
+**Stage 4** before it passed Gate C at 2,657 against a floor of 1,000. The
 supertype half is measured on the clone and
 [Follow-up 013](../followups/013_java_supertype_guard_relaxation.md) is closed.
 Across Stages 1 to 3 the graph gained 3,022 definitions and 12,709 facts, the
@@ -83,6 +94,7 @@ indexed source, **3,628 (76.6%) reach at least one interface**.
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 0: Price both halves on the clone | Completed | Baseline on `apache/dubbo` at `df9c5e1` reproduces Plan 013 Stage 0 to the unit: 230,859 assertions, 92,637 facts, 138,222 unresolved, 118,471 unresolved calls, every reason family identical. Guard families are 8,083 references and 6,206 receivers, exactly as Follow-up 013 records. **Gate A: PASS** — A1 3,628 of 4,738 interface-dependent, A2 4,738 against a floor of 1,000. Gate C input measured early: 2,172 addressable value receivers today, 3,041 with the guard relaxed. |
+| Stage 5: A value receiver with a declared type | Completed | D9 and D10 shipped under [ADR 012](../adr/012_java_value_receiver_calls.md). Seven conditions, each with its own reason; `this.m()` admitted and `super.m()` declined; a value receiver's decline carries no qualifier. **3,294 calls converted**, `receiver_bound` 55,565 → 0, and the eleven families that replace it sum to the whole. |
 | Stage 4: External re-measure of the supertype half | Completed | Guard families 8,083/6,206/4,049 → 6,064/4,403/3,251; `enclosing_supertypes` and `unqualified_supertypes` both zero; 1,690 claims converted and the gap to Gate A's bound accounted for exactly. **Gate C: PASS** — 2,657 against a floor of 1,000. Ingestion 3.1 s, 227 MB; 200 `semidx_context depth=2` calls under the noise floor; Plan 011 work bounds unchanged. Follow-up 013 closed. |
 | Stage 3: The guard lifts only on a closed chain | Completed | D4-D8 shipped. One test asked three times, each about what its own decline was about; ten named conditions; a converging batch. 1,690 claims converted on the clone, every one of the 10,322 that left the guard's families accounted for. |
 | Stage 2: A declared supertype is a recorded claim | Completed | D3 shipped, plus `src/frontends/java_hierarchy.zig`: a projection that walks recorded supertype claims and reports a closed chain or the first condition that opened it, used by nothing in the frontend yet. **Gate B: PASS** — 4,190 against a floor of 700, 86% of Gate A's upper bound and equal to its strict bound. On the fixture corpus the frontend change alone is byte-identical; on the clone, references +2,443 and every other claim family unchanged. A Stage 1 defect was found and fixed: 53 wrong facts removed. |
@@ -1247,3 +1259,135 @@ are updated in the entry itself.
 - **The latency probe is by difference**, not per call. It bounds the cost
   rather than measuring it, which is enough to say the habit loop is unaffected
   and not enough to compare two implementations.
+
+## Stage 5: A Value Receiver With A Declared Type
+
+### What Changed
+
+| File | Change |
+| --- | --- |
+| `src/frontends/java.zig` | a binding carries the type its declaration writes and the node that type was read from; `valueReceiverTarget`, `ownTypeTarget` and `externalValueTarget` ask ADR 012 D10's seven conditions in order; `valueReceiverPairs`, a lexical pre-pass over `<declared type>.<method>`; three declines that carry no qualifier |
+| `src/frontends/java_hierarchy.zig` | a closure reports its inherited methods apart from the type's own |
+| `src/frontends/root.zig` (analyzer) | candidates and hierarchies are built for value-receiver declared types as well as for class-name receivers, and both are noted as read |
+| `src/claim_sample.zig` | eleven value families, before the one they replace |
+| `docs/adr/012_java_value_receiver_calls.md` | new; `docs/adr/README.md` indexes it |
+| `tests/vertical_slice_test.zig` | two new tests, three re-pinned |
+
+### The Two Rules That Decide Which Binding Answers
+
+Plan 012's covered list is unchanged — a field, a formal parameter, a local
+declarator — and two rules decide between what is in scope:
+
+- **An uncovered binding wins over every covered one.** This frontend collects a
+  method's bindings for the whole method, so "lexically nearest" is not a scope.
+  A name any uncovered construct binds anywhere in the method is not read as a
+  value of a known type.
+- **A covered binding inside a lambda or a nested type body is recorded
+  uncovered.** Those bind inside their own subtree. A type read from one could
+  give a name a meaning outside it, which is a wrong fact rather than a decline.
+
+The second rule is what changed a case the Plan 012 matrix already had: a typed
+lambda parameter, `(Other Util) -> Util.make()`, is a `formal_parameter` node
+like any other, and reading it as covered would have made the call outside the
+lambda resolve to `Other`. It poisons instead, and the matrix says so.
+
+### What The Rule Refuses
+
+The matrix that used to prove "a receiver name any binding introducer declares
+is not read as a class" now proves something sharper. Every receiver in it is a
+value of type `Other`, whose `make` is an **instance** method, while a class
+called `Util` in scope declares a **static** `make`. A covered introducer now
+names `Other.make`. A frontend that read the name as a class would have named
+`Util.make` — a different method, not the same one by another route — and the
+matrix is written so that mistake cannot pass.
+
+### On The Clone
+
+| Measurement | Stage 4 | Stage 5 | Δ |
+| --- | ---: | ---: | ---: |
+| Recorded assertions | 245,803 | 245,975 | +172 |
+| Current facts | 105,346 | **108,812** | +3,466 |
+| Current unresolved | 140,457 | **137,163** | −3,294 |
+| `calls` facts | 6,224 | **9,518** | +3,294 |
+| Definitions, references, calls, diagnostics | — | — | **0** |
+
+The +172 assertions are identity correspondences from a converging batch; every
+other claim family is untouched. Call facts by rule: 2,343 class-qualified,
+3,881 unqualified, and **3,294 through a value receiver**.
+
+Unresolved calls, family by family:
+
+| Family | Stage 4 | Stage 5 | Δ |
+| --- | ---: | ---: | ---: |
+| **`receiver_bound`** | 55,565 | **0** | −55,565 |
+| `value_type_unresolved` | 0 | 25,947 | +25,947 |
+| `value_uncovered_type` | 0 | 14,942 | +14,942 |
+| `value_target_chain_open` | 0 | 5,877 | +5,877 |
+| `value_uncovered_introducer` | 0 | 3,387 | +3,387 |
+| `value_target_chain_declares` | 0 | 1,388 | +1,388 |
+| `value_target_overloaded` | 0 | 541 | +541 |
+| `value_target_inaccessible` | 0 | 207 | +207 |
+| `value_target_no_method` | 0 | 116 | +116 |
+| `receiver_not_simple_name` | 21,444 | 20,999 | **−445** |
+| the ten chain families | 7,654 | 7,961 | +307 |
+| `nested_class_body` | 829 | 833 | +4 |
+| every other family | — | — | 0 |
+| unresolved calls | 118,686 | **115,392** | −3,294 |
+
+The 445 that left `receiver_not_simple_name` are `this.m()`, which used to
+decline as a receiver this frontend does not resolve and is now decided by the
+enclosing type. The chain families gained 307 because a value receiver consults
+`resolveType`, so more calls now reach the enclosing type's guard than reached
+it before. The eleven value families sum to 52,405, and 52,405 + 3,160 = 55,565.
+
+Three of the eleven read zero — `value_type_shape_not_read`,
+`value_target_supertypes`, `value_target_supertypes_unknown`. Each is reachable
+and each has a fixture; the clone contains none of them.
+
+### Against Gate C
+
+Gate C measured **2,657** addressable before the rule existed. The rule produced
+**3,294**. 445 of the difference is `this.m()`, which the gate's model does not
+count: it classifies only claims in the `receiver_bound` family, and `this` is
+not a bound name.
+
+That leaves **192 calls the model did not predict and the implementation
+resolved**. The direction matters: Plan 014's branch handling warns against
+loosening a condition to reach a forecast, and this is the opposite — every one
+of D10's conditions is pinned by a test, and the model is the conservative side.
+It is recorded as a residual risk rather than reconciled, because reconciling it
+would mean tuning a measurement to an implementation.
+
+### The Fixture Corpus
+
+Unchanged: 142 definitions, 500 assertions, 427 facts, 73 unresolved, 0
+approximate, 54 diagnostics. The corpus has no value receiver whose declared
+type resolves, so nothing in it converts, and the conversions are proven by
+written trees.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core` | pass |
+| `zig build test` | pass, 281/283 with 2 skipped; 109 tests in the vertical-slice lane |
+| `zig build test-mcp` | pass, 35/36 with 1 skipped |
+| `zig build dogfood` | pass, 10/10 steps, 5/5 tests |
+| `zig build preview-gate` | pass, 14/14 steps, 6/6 tests |
+| `zig fmt --check build.zig src tests` | clean |
+| `zig build java-coverage -Doptimize=ReleaseFast -- --root <clone>` | the tables above |
+| `zig build claim-sample … --size 40000` | families sum to the whole, `unclassified` 0 |
+
+### Residual Risk
+
+- **192 conversions beyond Gate C's model.** Measured, not explained. Every D10
+  condition is pinned by a test; the gap is the model's conservatism, and
+  narrowing it would mean fitting the measurement to the implementation.
+- **The candidate pre-pass is a superset.** It offers `<declared type>.<method>`
+  pairs for every covered declaration of a receiver name in a type's subtree
+  without deciding which is in scope. That costs candidate-table entries and
+  reader hints, never an answer.
+- **`value_type_unresolved` at 25,947 is one family for two very different
+  causes** — a name nothing indexed declares, and a name outside the unit's
+  visibility scope. `resolveType`'s own words distinguish them inside the
+  sentence; the counter does not.

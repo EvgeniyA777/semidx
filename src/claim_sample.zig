@@ -53,6 +53,20 @@ const java_families = [_]Family{
     .{ .name = "receiver_not_simple_name", .fragment = "qualified by a receiver this frontend does not resolve" },
     .{ .name = "nested_class_body", .fragment = "class body declared in the method" },
     // A simple name something else claims.
+    // A receiver that is a value, since Plan 014 Stage 5. The binding decides
+    // the type, and each way that can fail is its own family.
+    .{ .name = "value_uncovered_introducer", .fragment = "bound here by a construct this frontend reads no type from" },
+    .{ .name = "value_uncovered_type", .fragment = "declared here with a type this frontend does not read" },
+    .{ .name = "value_type_unresolved", .fragment = "is not read as a type:" },
+    .{ .name = "value_type_shape_not_read", .fragment = "names a type whose current shape this analysis did not read" },
+    .{ .name = "value_target_supertypes", .fragment = "declares supertypes this analysis did not read" },
+    .{ .name = "value_target_chain_open", .fragment = "declares supertypes and" },
+    .{ .name = "value_target_chain_declares", .fragment = "supertype chain declares a method of this name" },
+    .{ .name = "value_target_supertypes_unknown", .fragment = "carries no record of whether it declares supertypes, so a method" },
+    .{ .name = "value_target_no_method", .fragment = "is declared by the receiver's declared type" },
+    .{ .name = "value_target_overloaded", .fragment = "are declared by the receiver's declared type" },
+    .{ .name = "value_target_inaccessible", .fragment = "outside the access this frontend resolves through a value receiver" },
+    // The family those eleven replace. It reads zero once Stage 5 ships.
     .{ .name = "receiver_bound", .fragment = "is declared here as a binding, so it is read as a value" },
     .{ .name = "on_demand_static_import", .fragment = "imports static members on demand" },
     // The chain declines Plan 014 Stage 3 added, one per condition that can

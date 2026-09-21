@@ -26,3 +26,4 @@ ratified constitution.
 - [009: Allow Java Static Calls Through A Class-Name Receiver](009_java_static_calls.md)
 - [010: Record A Designator As A Structured Name](010_designator_is_a_structured_name.md)
 - [011: Establish The Java Type Hierarchy From Indexed Source](011_java_hierarchy_from_indexed_source.md)
+- [012: Resolve A Java Call On A Receiver Whose Declared Type Is Known](012_java_value_receiver_calls.md)
