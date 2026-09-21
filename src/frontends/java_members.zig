@@ -1,5 +1,5 @@
-//! Java class shape: the methods a top-level class currently declares, and the
-//! modifiers a static call must check before it can name one.
+//! Java class shape: the methods a top-level class or interface currently
+//! declares, and the modifiers a static call must check before it can name one.
 //!
 //! This is a projection for the analyzer, exactly as `java_packages` is. It
 //! creates no entity, no signature kind, and no inheritance relationship, and it
@@ -57,10 +57,16 @@ fn isJavaFact(graph: *Graph, id: model.EntityId) bool {
     return std.mem.eql(u8, fact.producer.name, java.capabilities.producer.name);
 }
 
-fn isTopLevelClass(entity: model.Entity) bool {
+/// A top-level class or interface. Both declare methods a call may select, and
+/// ADR 009's conditions decide between them without needing to know which it
+/// was ([ADR 011](../../docs/adr/011_java_hierarchy_from_indexed_source.md)):
+/// an interface method is `static` only when it says so, and an interface with
+/// no `extends` declares no supertypes exactly as a class with no `extends`
+/// does.
+fn isTopLevelType(entity: model.Entity) bool {
     return entity.kind == .definition and
         entity.identity.language == .java and
-        std.mem.eql(u8, entity.identity.role, "class") and
+        java.isTypeRole(entity.identity.role) and
         entity.identity.container_path.len == 0 and
         entity.identity.name != null;
 }
@@ -73,14 +79,15 @@ fn isMethodOf(entity: model.Entity, class_name: []const u8) bool {
     return std.mem.eql(u8, entity.identity.container_path[0], class_name);
 }
 
-/// The class `id` names, when it is a current top-level Java class fact.
+/// The type `id` names, when it is a current top-level Java class or interface
+/// fact.
 ///
 /// A stale or failed unit yields nothing: what it once declared is not a current
-/// fact, and a call must not resolve against a class the working copy may no
+/// fact, and a call must not resolve against a type the working copy may no
 /// longer contain.
 pub fn classShapeOf(graph: *Graph, id: model.EntityId) ?ClassShape {
     const entity = graph.entity(id) orelse return null;
-    if (!entity.isLive() or !isTopLevelClass(entity)) return null;
+    if (!entity.isLive() or !isTopLevelType(entity)) return null;
     if (!isJavaFact(graph, id)) return null;
     const evidence = entity.evidence orelse return null;
     const record = graph.unit(evidence.unit) orelse return null;

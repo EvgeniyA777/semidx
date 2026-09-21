@@ -1552,6 +1552,8 @@ test "java type names outside the same-package rule stay unresolved and say why"
         \\
         \\interface Shape {}
         \\
+        \\enum Kind {}
+        \\
         \\class Greeter<T> {
         \\    Helper helper;
         \\    other.Elsewhere qualified;
@@ -1562,6 +1564,7 @@ test "java type names outside the same-package rule stay unresolved and say why"
         \\    Inner inner;
         \\    Imported imported;
         \\    Shape shape;
+        \\    Kind kind;
         \\    Loose loose;
         \\
         \\    class Inner {}
@@ -1597,7 +1600,17 @@ test "java type names outside the same-package rule stay unresolved and say why"
     try expectExplanation(try referenceFrom(&snapshot, class.id, "T"), "type parameter of the enclosing class");
     try expectExplanation(try referenceFrom(&snapshot, class.id, "Inner"), "member type");
     try expectExplanation(try referenceFrom(&snapshot, class.id, "Imported"), "import");
-    try expectExplanation(try referenceFrom(&snapshot, class.id, "Shape"), "non-class type");
+    // The move ADR 011 makes, pinned: `Shape` used to decline as a non-class
+    // type this frontend does not cover, and is now a declaration the unit
+    // holds, so the name resolves to it as a local fact. `Kind` is the half
+    // that did not move — an enum still claims its name and still declines.
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = class.id,
+        .target = snapshot.findDefinition("demo/Greeter.java", "Shape").?.id,
+        .resolution = .fact,
+    }));
+    try expectExplanation(try referenceFrom(&snapshot, class.id, "Kind"), "non-class type");
     try expectExplanation(try referenceFrom(&snapshot, shadowed.id, "Helper"), "type parameter of the enclosing method");
     try expectExplanation(try referenceFrom(&snapshot, default_user.id, "Loose"), "package declaration");
     try expectExplanation(try referenceFrom(&snapshot, child.id, "Helper"), "supertypes");
@@ -4471,6 +4484,346 @@ test "moving a directory costs the units in it and the readers they reach" {
     });
 }
 
+// -- Plan 014 Stage 1: interfaces are declarations the graph holds ------------
+
+// Written against [ADR 011](../docs/adr/011_java_hierarchy_from_indexed_source.md).
+// Two questions run through every case below: an interface is a declaration on
+// the same terms as a class, and nothing else became one.
+
+/// The unit every interface case resolves against: one interface with the three
+/// member shapes whose recorded modifiers differ, and one that extends it.
+fn addInterfaceProviders(index: *semidx.Index) !void {
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Shape.java",
+        .java,
+        \\package lib;
+        \\
+        \\interface Shape {
+        \\    String NAME = "shape";
+        \\
+        \\    String describe();
+        \\
+        \\    default String label() { return describe(); }
+        \\
+        \\    static Shape none() { return null; }
+        \\}
+        \\
+        ,
+    );
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Drawable.java",
+        .java,
+        \\package lib;
+        \\
+        \\interface Drawable extends Shape {
+        \\    static String make() { return null; }
+        \\}
+        \\
+        ,
+    );
+}
+
+test "a top-level interface is a definition with the labels a class carries" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addInterfaceProviders(&index);
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const shape = snapshot.findDefinition("module/src/main/java/lib/Shape.java", "Shape").?;
+    try testing.expectEqualStrings("interface", shape.identity.role);
+    try testing.expectEqual(@as(usize, 0), shape.identity.container_path.len);
+    try testing.expectEqualStrings("interface_declaration", shape.extension.get("java.construct").?);
+    try testing.expectEqualStrings("lib", shape.extension.get("java.package").?);
+    // An interface with no `extends` declares no supertypes, exactly as a class
+    // with no `extends` does; one that extends another declares them.
+    try testing.expectEqualStrings("none", shape.extension.get("java.supertypes").?);
+    const drawable = snapshot.findDefinition("module/src/main/java/lib/Drawable.java", "Drawable").?;
+    try testing.expectEqualStrings("declared", drawable.extension.get("java.supertypes").?);
+
+    // The interface introduces its methods, and only its methods: the constant
+    // is outside this coverage and is reported rather than left looking absent.
+    try testing.expectEqual(@as(usize, 3), snapshot.countRelationships(.{
+        .kind = .defines,
+        .source = shape.id,
+    }));
+
+    const describe = definitionIn(&snapshot, "module/src/main/java/lib/Shape.java", "Shape", "describe").?;
+    try testing.expectEqualStrings("method", describe.identity.role);
+    try testing.expectEqualStrings("Shape", describe.identity.container_path[0]);
+    try testing.expectEqualStrings("describe()", describe.identity.signature.?);
+    try testing.expectEqualStrings("String", describe.extension.get("java.return_type").?);
+
+    // The modifiers Java defines rather than the modifiers the source writes.
+    // A method with no access keyword is public here and package-private in a
+    // class, `default` changes neither answer, and only `static` is static.
+    const label = definitionIn(&snapshot, "module/src/main/java/lib/Shape.java", "Shape", "label").?;
+    const none = definitionIn(&snapshot, "module/src/main/java/lib/Shape.java", "Shape", "none").?;
+    try testing.expectEqualStrings("public", describe.extension.get("java.access").?);
+    try testing.expectEqualStrings("false", describe.extension.get("java.static").?);
+    try testing.expectEqualStrings("public", label.extension.get("java.access").?);
+    try testing.expectEqualStrings("false", label.extension.get("java.static").?);
+    try testing.expectEqualStrings("public", none.extension.get("java.access").?);
+    try testing.expectEqualStrings("true", none.extension.get("java.static").?);
+
+    // A method body inside an interface is read exactly as one inside a class:
+    // `label` calls the only `describe` its own type declares.
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .calls,
+        .source = label.id,
+        .target = describe.id,
+        .resolution = .fact,
+    }));
+    // And the return type of a method of this unit's own interface resolves to
+    // it, which is the same local answer a class would get.
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = none.id,
+        .target = shape.id,
+        .resolution = .fact,
+    }));
+}
+
+test "a top-level interface reports no unsupported construct and the other type declarations still do" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Kinds.java",
+        .java,
+        \\package lib;
+        \\
+        \\interface Admitted {}
+        \\
+        \\enum Colour { RED }
+        \\
+        \\record Point(int x, int y) {}
+        \\
+        \\@interface Marker {}
+        \\
+        ,
+    );
+    // A member interface is not a top-level declaration. It keeps the treatment
+    // every other member type has: reported unsupported, and still claiming its
+    // name against the enclosing class.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Outer.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Outer {
+        \\    Nested nested;
+        \\
+        \\    interface Nested {}
+        \\}
+        \\
+        ,
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    try testing.expect(snapshot.findDefinition("module/src/main/java/lib/Kinds.java", "Admitted") != null);
+    try testing.expect(snapshot.findDefinition("module/src/main/java/lib/Kinds.java", "Colour") == null);
+    try testing.expect(snapshot.findDefinition("module/src/main/java/lib/Kinds.java", "Point") == null);
+    try testing.expect(snapshot.findDefinition("module/src/main/java/lib/Kinds.java", "Marker") == null);
+    try testing.expect(snapshot.findDefinition("module/src/main/java/lib/Outer.java", "Nested") == null);
+
+    var seen_interface = false;
+    var seen = [_]bool{ false, false, false };
+    const remaining = [_][]const u8{ "enum_declaration", "record_declaration", "annotation_type_declaration" };
+    for (snapshot.diagnostics) |diagnostic| {
+        if (diagnostic.kind != .unsupported_construct) continue;
+        if (std.mem.indexOf(u8, diagnostic.message, "`interface_declaration` at the top level") != null) {
+            seen_interface = true;
+        }
+        for (remaining, 0..) |kind, at| {
+            if (std.mem.indexOf(u8, diagnostic.message, kind) != null) seen[at] = true;
+        }
+    }
+    try testing.expect(!seen_interface);
+    for (seen) |reported| try testing.expect(reported);
+
+    // The member interface still gives its name another meaning, so the field
+    // type stays unresolved rather than reaching a declaration.
+    const outer = snapshot.findDefinition("module/src/main/java/lib/Outer.java", "Outer").?;
+    try expectExplanation(try referenceFrom(&snapshot, outer.id, "Nested"), "member type");
+}
+
+test "a static call to an interface is decided by the conditions a class is decided by" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addInterfaceProviders(&index);
+
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Caller.java",
+        .java,
+        \\package lib;
+        \\
+        \\class Caller {
+        \\    void covered() { Shape.none(); }
+        \\    void notStatic() { Shape.describe(); }
+        \\    void missingMethod() { Shape.absent(); }
+        \\    void targetHasSupertypes() { Drawable.make(); }
+        \\}
+        \\
+        ,
+    );
+    // Another package reaching the interface by single-type import, which is
+    // the same route a class is reached by.
+    _ = try index.addUnit(
+        "module/src/main/java/app/Importer.java",
+        .java,
+        \\package app;
+        \\
+        \\import lib.Shape;
+        \\
+        \\class Importer {
+        \\    void covered() { Shape.none(); }
+        \\}
+        \\
+        ,
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const none: StaticTarget = .{
+        .path = "module/src/main/java/lib/Shape.java",
+        .class = "Shape",
+        .method = "none",
+    };
+    const cases = [_]StaticCall{
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "covered",
+            .call = "Shape.none()",
+            .expect = .{ .fact = none },
+        },
+        .{
+            .path = "module/src/main/java/app/Importer.java",
+            .class = "Importer",
+            .method = "covered",
+            .call = "Shape.none()",
+            .expect = .{ .fact = none },
+        },
+        // An interface method is public, so access never declines it; what
+        // declines it is the modifier the source did not write.
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "notStatic",
+            .call = "Shape.describe()",
+            .designator = .{ .name = "describe", .qualifier = "Shape" },
+            .expect = .{ .unresolved = "is not static" },
+        },
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "missingMethod",
+            .call = "Shape.absent()",
+            .expect = .{ .unresolved = "no method of this name" },
+        },
+        // An interface that extends another may inherit a method of the name,
+        // and the guard reads that from the same label a class carries.
+        .{
+            .path = "module/src/main/java/lib/Caller.java",
+            .class = "Caller",
+            .method = "targetHasSupertypes",
+            .call = "Drawable.make()",
+            .expect = .{ .unresolved = "supertypes" },
+        },
+    };
+    for (cases) |case| try expectStaticCall(&snapshot, case);
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "a simple name reaches an interface another unit declares in the same package" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addInterfaceProviders(&index);
+
+    const user = try index.addUnit("module/src/main/java/lib/User.java", .java,
+        \\package lib;
+        \\
+        \\class User {
+        \\    Shape shape;
+        \\}
+        \\
+    );
+    // The same name in another source root is another scope, for an interface
+    // exactly as for a class.
+    _ = try index.addUnit("other/src/main/java/lib/Outsider.java", .java,
+        \\package lib;
+        \\
+        \\class Outsider {
+        \\    Shape shape;
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const shape = snapshot.findDefinition("module/src/main/java/lib/Shape.java", "Shape").?;
+    const class = snapshot.findDefinition("module/src/main/java/lib/User.java", "User").?;
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = class.id,
+        .target = shape.id,
+        .resolution = .fact,
+    }));
+    // Reading it declares the dependency that keeps the fact current, the same
+    // declaration a resolved class name makes.
+    try testing.expect(index.graph.dependencies.count() > 0);
+    var declared = false;
+    for (index.graph.dependencies.declarations.items) |declaration| {
+        if (declaration.dependent == user) declared = true;
+    }
+    try testing.expect(declared);
+
+    const outsider = snapshot.findDefinition("other/src/main/java/lib/Outsider.java", "Outsider").?;
+    try expectExplanation(
+        try referenceFrom(&snapshot, outsider.id, "Shape"),
+        "source root this unit can see",
+    );
+}
+
+test "an interface constant obscures a receiver name exactly as a class field does" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+    try addStaticCallProviders(&index);
+
+    // `Util` is a class declaring a static `make`. Inside an interface that
+    // binds `Util` to a constant, the receiver is a value and not that class.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Holder.java",
+        .java,
+        \\package lib;
+        \\
+        \\interface Holder {
+        \\    String Util = "shadow";
+        \\
+        \\    default String call() { return Util.make(); }
+        \\}
+        \\
+        ,
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Holder.java",
+        .class = "Holder",
+        .method = "call",
+        .call = "Util.make()",
+        .expect = .{ .unresolved = "is declared here as a binding" },
+    });
+}
+
 // -- Plan 013 Stage 1: a designator is a structured name ---------------------
 
 /// The claim of `kind` from `source` whose designator holds `name`, or an error
@@ -4679,13 +5032,27 @@ test "the fixture corpus records the same facts it did before designators became
     var snapshot = try index.publish();
     defer snapshot.deinit();
 
-    // Measured on the commit before ADR 010 and required to be identical after
-    // it: this stage changed what a claim says its target is called, and
-    // nothing about what is a fact.
-    try testing.expectEqual(@as(usize, 134), snapshot.countEntities(.{ .kind = .definition }));
-    try testing.expectEqual(@as(usize, 465), snapshot.assertions.len);
-    try testing.expectEqual(@as(usize, 396), snapshot.countAssertions(.{ .resolution = .fact }));
-    try testing.expectEqual(@as(usize, 69), snapshot.countUnresolvedAssertions());
+    // ADR 010 required these to be identical before and after it: that stage
+    // changed what a claim says its target is called, and nothing about what is
+    // a fact.
+    //
+    // [ADR 011](../docs/adr/011_java_hierarchy_from_indexed_source.md) moved
+    // them, and only by adding `java/Shape.java` to the corpus. Admitting
+    // interfaces moved nothing that was already here: with the frontend changed
+    // and the fixture absent the totals were still 134, 465, 396, 69, 0 and 54.
+    // With the fixture the delta is exactly what one interface declaring three
+    // methods contributes — 5 existence claims (the file and four definitions),
+    // 1 `contains`, 4 `defines`, 3 `references` (two `String` return types
+    // unresolved, `none`'s own `Shape` a local fact), 1 `calls` (`label` calls
+    // `describe`), and 4 identity correspondences for `Greeter.java`, which is
+    // reanalyzed because package `demo` gained an export.
+    //
+    // Diagnostics do not move, and that is the point of the fixture: a
+    // top-level interface no longer reports an unsupported construct.
+    try testing.expectEqual(@as(usize, 138), snapshot.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 483), snapshot.assertions.len);
+    try testing.expectEqual(@as(usize, 412), snapshot.countAssertions(.{ .resolution = .fact }));
+    try testing.expectEqual(@as(usize, 71), snapshot.countUnresolvedAssertions());
     try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
     try testing.expectEqual(@as(usize, 54), snapshot.diagnostics.len);
 }

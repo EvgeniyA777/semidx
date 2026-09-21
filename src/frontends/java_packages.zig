@@ -1,5 +1,5 @@
-//! Java package bindings: which top-level class a simple type name can mean
-//! inside one explicit Java package, read from current graph facts.
+//! Java package bindings: which top-level class or interface a simple type name
+//! can mean inside one explicit Java package, read from current graph facts.
 //!
 //! This is a projection for the analyzer, not a graph model. It creates no
 //! package entity, no module, and no import relationship, and the table it
@@ -21,8 +21,8 @@ const java = @import("java.zig");
 const model = core.model;
 const Graph = core.Graph;
 
-/// One top-level class a unit currently establishes in an explicit package.
-/// Strings are borrowed from the graph.
+/// One top-level class or interface a unit currently establishes in an explicit
+/// package. Strings are borrowed from the graph.
 pub const Export = struct {
     package: []const u8,
     name: []const u8,
@@ -34,13 +34,18 @@ pub const Export = struct {
     }
 };
 
-/// Whether a definition is shaped like a top-level Java class declared in an
-/// explicit package, and if so its package. Says nothing about whether it is a
-/// current fact.
+/// Whether a definition is shaped like a top-level Java class or interface
+/// declared in an explicit package, and if so its package. Says nothing about
+/// whether it is a current fact.
+///
+/// An interface belongs here for the same reason a class does: it is a
+/// top-level type a simple name in the same package may mean, and ADR 004
+/// applies to it unchanged
+/// ([ADR 011](../../docs/adr/011_java_hierarchy_from_indexed_source.md)).
 fn exportedPackage(entity: model.Entity) ?[]const u8 {
     if (entity.kind != .definition) return null;
     if (entity.identity.language != .java) return null;
-    if (!std.mem.eql(u8, entity.identity.role, "class")) return null;
+    if (!java.isTypeRole(entity.identity.role)) return null;
     if (entity.identity.container_path.len != 0) return null;
     if (entity.identity.name == null) return null;
     if (!std.mem.eql(u8, entity.extension.namespace, "java")) return null;

@@ -802,6 +802,7 @@ pub fn main(init: std.process.Init) !void {
     defer world.by_name.deinit(gpa);
 
     try reportBaseline(out, options, scanned, &snapshot, &world);
+    try reportInterfaceTargets(out, gpa, &snapshot);
     try reportHierarchy(out, &world);
 
     var walker: Walker = .{
@@ -955,6 +956,84 @@ fn reportBaseline(
     for (std.enums.values(model.DiagnosticKind)) |kind| {
         try out.print("  {s:<22} {d}\n", .{ @tagName(kind), by_kind[@intFromEnum(kind)] });
     }
+
+    // What the recorded assertions are claims about. A stage that moves a total
+    // has to say which claims moved, and a total alone cannot.
+    var existence: usize = 0;
+    var correspondence: usize = 0;
+    var relationships = [_]usize{0} ** 4;
+    for (snapshot.assertions) |assertion| {
+        switch (assertion.claim) {
+            .entity_exists => existence += 1,
+            .identity_correspondence => correspondence += 1,
+            .relationship => |claim| relationships[@intFromEnum(claim.kind)] += 1,
+        }
+    }
+    try out.print("assertions by claim\n", .{});
+    try out.print("  {s:<22} {d}\n", .{ "entity_exists", existence });
+    for (std.enums.values(model.RelationshipKind)) |kind| {
+        try out.print("  {s:<22} {d}\n", .{ @tagName(kind), relationships[@intFromEnum(kind)] });
+    }
+    try out.print("  {s:<22} {d}\n", .{ "identity_correspondence", correspondence });
+    try out.print("\n", .{});
+}
+
+/// Which reference claims reach an interface, and which of them moved to get
+/// there.
+///
+/// Before interfaces were definitions no reference could target one, so every
+/// claim counted here is either a **new** claim — one made by an entity that did
+/// not exist either, an interface or a method of one — or a claim that used to
+/// be unresolved and now resolves. The second group is the coverage move
+/// [ADR 011](../docs/adr/011_java_hierarchy_from_indexed_source.md) makes
+/// outside the supertype guard, and Plan 014 requires it to be counted rather
+/// than described.
+fn reportInterfaceTargets(
+    out: anytype,
+    gpa: std.mem.Allocator,
+    snapshot: *const semidx.Snapshot,
+) !void {
+    var interfaces: std.AutoHashMapUnmanaged(u32, void) = .empty;
+    defer interfaces.deinit(gpa);
+    var entities = snapshot.entitiesMatching(.{ .kind = .definition, .language = .java, .role = "interface" });
+    while (entities.next()) |entity| {
+        try interfaces.put(gpa, @intFromEnum(entity.id), {});
+    }
+
+    // A method declared inside an interface is new for the same reason its
+    // interface is. It is recognised by its container being an interface of its
+    // own unit, which is where its `container_path` points.
+    var members: std.AutoHashMapUnmanaged(u32, void) = .empty;
+    defer members.deinit(gpa);
+    var methods = snapshot.entitiesMatching(.{ .kind = .definition, .language = .java, .role = "method" });
+    while (methods.next()) |method| {
+        if (method.identity.container_path.len != 1) continue;
+        const evidence = method.evidence orelse continue;
+        const view = snapshot.unit(evidence.unit) orelse continue;
+        const owner = snapshot.findDefinition(view.path, method.identity.container_path[0]) orelse continue;
+        if (!interfaces.contains(@intFromEnum(owner.id))) continue;
+        try members.put(gpa, @intFromEnum(method.id), {});
+    }
+
+    var moved: usize = 0;
+    var fresh: usize = 0;
+    for (snapshot.assertions) |assertion| {
+        if (snapshot.assertionFreshness(assertion) != .current) continue;
+        if (assertion.resolution.category() != .fact) continue;
+        const relationship = assertion.relationship() orelse continue;
+        if (relationship.kind != .references) continue;
+        const target = switch (relationship.target) {
+            .entity => |id| id,
+            .designator => continue,
+        };
+        if (!interfaces.contains(@intFromEnum(target))) continue;
+        const source = @intFromEnum(relationship.source);
+        if (interfaces.contains(source) or members.contains(source)) fresh += 1 else moved += 1;
+    }
+
+    try out.print("Reference facts whose target is an interface: {d}\n", .{moved + fresh});
+    try out.print("  {s:<34} {d}\n", .{ "made by an interface or its method", fresh });
+    try out.print("  {s:<34} {d}\n", .{ "made by something that already existed", moved });
     try out.print("\n", .{});
 }
 
@@ -1436,7 +1515,11 @@ const Classifier = struct {
     fn run(self: *Classifier, tree_root: ts.Node) !void {
         var top_level = tree_root.namedChildren();
         while (top_level.next()) |node| {
-            if (!std.mem.eql(u8, node.kind(), "class_declaration")) continue;
+            // Both declarations the frontend covers: a `default` or `static`
+            // method in an interface has a body, and the calls in it are the
+            // frontend's claims like any other.
+            const kind = TypeKind.fromNodeKind(node.kind()) orelse continue;
+            if (!kind.inChain()) continue;
             const name_node = node.childByFieldName("name") orelse continue;
             const class_index = findTopLevel(self.world, self.unit, name_node.text(self.source)) orelse continue;
             const body = node.childByFieldName("body") orelse continue;
@@ -1445,7 +1528,10 @@ const Classifier = struct {
             defer fields.deinit(self.gpa);
             var members = body.namedChildren();
             while (members.next()) |member| {
-                if (!std.mem.eql(u8, member.kind(), "field_declaration")) continue;
+                // An interface writes its fields as `constant_declaration`, and
+                // they obscure a receiver name exactly as a class field does.
+                if (!std.mem.eql(u8, member.kind(), "field_declaration") and
+                    !std.mem.eql(u8, member.kind(), "constant_declaration")) continue;
                 try appendDeclarators(self.gpa, &fields, member, self.source, .field);
             }
 

@@ -4,7 +4,7 @@ doc_type: "progress_log"
 lifecycle: "active"
 status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-09-20"
+updated: "2026-09-21"
 ---
 
 # 014: Java Receiver Coverage Through Indexed Hierarchies Progress
@@ -14,21 +14,30 @@ Companion log for
 
 ## Current Status
 
-**Stage 0 is complete and Gate A passes on both tests.** The plan's Start Rule
-asks one question before the stage order may stand: is the guard's closable
-opportunity dominated by interfaces? **It is.** Of the 4,738 guard-declined
-claims whose declared hierarchy is closed in indexed source, **3,628 (76.6%)
-reach at least one interface**, so more than three quarters of the opportunity
-disappears if interfaces stay diagnostics. Stages 1 to 4 are authorized.
+**Stage 1 is complete.** A top-level Java interface and its methods are
+definitions the graph holds, under the labels a class carries and with the
+implicit modifiers Java defines. On `apache/dubbo` that is **617 declarations
+and 2,405 methods** that were a diagnostic and are now findable, outlinable, and
+referenceable. [ADR 011](../adr/011_java_hierarchy_from_indexed_source.md)
+records the decision.
 
-The stage added one developer-only measurement command and changed no indexed
-behavior: no frontend, no core, no MCP surface, and no lane was touched.
+Nothing the guard declines moved: the two families Gate A is measured on are
+still 8,083 and 6,206, every unresolved-call reason family is accounted for
+claim by claim, and on the fixture corpus the frontend change alone left
+definitions, assertions, facts, unresolved, approximate and diagnostics
+identical. The one resolution that moved is the one ADR 011 predicted: **247
+reference claims that used to be unresolved now reach an interface.**
+
+Stage 0 before it recorded the baseline and the verdict that authorized this
+work: of the 4,738 guard-declined claims whose declared hierarchy is closed in
+indexed source, **3,628 (76.6%) reach at least one interface**.
 
 ## Stage Log
 
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 0: Price both halves on the clone | Completed | Baseline on `apache/dubbo` at `df9c5e1` reproduces Plan 013 Stage 0 to the unit: 230,859 assertions, 92,637 facts, 138,222 unresolved, 118,471 unresolved calls, every reason family identical. Guard families are 8,083 references and 6,206 receivers, exactly as Follow-up 013 records. **Gate A: PASS** — A1 3,628 of 4,738 interface-dependent, A2 4,738 against a floor of 1,000. Gate C input measured early: 2,172 addressable value receivers today, 3,041 with the guard relaxed. |
+| Stage 1: Interfaces are declarations the graph holds | Completed | D1 and D2 shipped. Interfaces and their methods are definitions with role `interface` and `method`; an unmodified interface method is recorded `public`; the package and class-shape projections carry both roles; the top-level interface diagnostic is gone and the enum, record and annotation type ones stay. On the clone: +3,022 definitions, +1,757 references, +1,411 calls, 247 reference claims converted, and **not one guard-declined claim moved**. [ADR 011](../adr/011_java_hierarchy_from_indexed_source.md). |
 
 ## Stage 0: Price Both Halves On The Clone
 
@@ -421,3 +430,214 @@ could still stop at a gate.
   Follow-up 013 to the unit.
 - **The fan-out figure counts only readers with a guard-declined claim.** The
   real D7 hint set is larger, and Stage 3 measures it.
+
+## Stage 1: Interfaces Are Declarations The Graph Holds
+
+### What Changed
+
+| File | Change |
+| --- | --- |
+| `src/frontends/java.zig` | `interface_declaration` at the top level becomes a definition with role `interface`; its methods become definitions with role `method`; `modifiersOf` takes the enclosing kind and applies Java's implicit `public`; an interface's constants join the obscuring set; `isTypeRole` names the two roles once for the projections to read; `declaresSupertypes` reads the `extends_interfaces` child a field lookup cannot reach |
+| `src/frontends/java_packages.zig` | a package exports both roles, so ADR 004 reaches an interface unchanged |
+| `src/frontends/java_members.zig` | `classShapeOf` answers for both roles, so ADR 009 decides a call on an interface by its existing conditions |
+| `fixtures/vertical-slice/java/Shape.java` | new: one interface with the three member shapes whose recorded modifiers differ |
+| `tests/vertical_slice_test.zig` | five new tests, one re-pinned corpus count, one re-pinned resolution |
+| `src/java_coverage.zig` | the measurement command learns assertions by claim kind, the interface-target count, and to walk an interface body |
+| `docs/adr/011_java_hierarchy_from_indexed_source.md` | new; `docs/adr/README.md` indexes it |
+
+### The Decision Boundary, Stated
+
+ADR 011 records D1 to D8 and D11. Stage 1 implements **D1 and D2 only**. The
+supertype reference (D3), the closedness test (D4 to D6, D8), and the dependency
+fan-out (D7) are decided there and implemented in Stages 2 and 3, each behind its
+own gate. Nothing in this stage walks a chain or relaxes a guard.
+
+Two boundaries inside D1 and D2 are choices rather than consequences, and are
+recorded as such:
+
+- **An interface's constants are collected and not referenced.** They join the
+  set of names that obscure a type, because a constant obscures a type of the
+  same name inside a `default` or `static` method exactly as a class field does
+  (JLS 6.4.2). They keep their `unsupported_construct` diagnostic, and no type
+  reference is emitted for them. Emitting one would be new reference coverage
+  this plan did not ask for.
+- **A member interface is not admitted.** It is not a top-level declaration, it
+  keeps the treatment every other member type has, and a test pins that its name
+  still declines against the enclosing class as a member type.
+
+### Nothing The Guard Declines Moved
+
+The fixture corpus answers this twice, and the second answer is the one that
+matters.
+
+**With the frontend changed and no fixture added**, the corpus totals are
+identical to the values ADR 010 pinned: 134 definitions, 465 assertions, 396
+facts, 69 unresolved, 0 approximate, 54 diagnostics. Admitting interfaces moved
+nothing that was already there, because the corpus declared no interface.
+
+**With `java/Shape.java` added**, the totals are re-pinned, and the delta is one
+interface declaring three methods, claim family by claim family:
+
+| Claim | Before | After | Δ | What it is |
+| --- | ---: | ---: | ---: | --- |
+| `entity_exists` | 164 | 169 | +5 | the file and four definitions |
+| `contains` | 29 | 30 | +1 | the repository contains the file |
+| `defines` | 134 | 138 | +4 | the unit defines `Shape`, which defines three methods |
+| `references` | 21 | 24 | +3 | two `String` return types unresolved, `none`'s own `Shape` a local fact |
+| `calls` | 93 | 94 | +1 | `label` calls `describe` |
+| `identity_correspondence` | 24 | 28 | +4 | `Greeter.java` is reanalyzed because package `demo` gained an export |
+| **total** | **465** | **483** | **+18** | |
+
+Facts 396 → 412, unresolved 69 → 71, approximate 0 → 0, **diagnostics 54 → 54**.
+The diagnostic total is the point of the fixture: one interface with three
+methods and one constant adds no `unsupported_construct` for the interface
+itself.
+
+### On The Clone
+
+Same clone, same commit, same build mode as Stage 0:
+`~/.cache/semidx-external/dubbo` at `df9c5e1`, `-Doptimize=ReleaseFast`.
+
+| Measurement | Stage 0 | Stage 1 | Δ |
+| --- | ---: | ---: | ---: |
+| Definitions | 26,509 | 29,531 | +3,022 |
+| Recorded assertions | 230,859 | 243,106 | +12,247 |
+| Current facts | 92,637 | 102,350 | +9,713 |
+| Current unresolved | 138,222 | 140,756 | +2,534 |
+| Approximate | 0 | 0 | 0 |
+| Stale | 0 | 0 | 0 |
+| Diagnostics | 59,022 | 59,964 | +942 |
+| `unsupported_construct` | 58,300 | 59,857 | +1,557 |
+| `confirmed_absence` | 722 | 107 | −615 |
+
+The 3,022 new definitions are 617 interfaces and 2,405 of their methods. The 615
+units that stop reporting `confirmed_absence` are units whose only declaration
+was an interface. Within `unsupported_construct` the only two movements are the
+617 top-level interface diagnostics disappearing and the diagnostics for what an
+interface body holds besides methods appearing; the net of +1,557 puts the
+second at 2,174.
+
+By claim, with Stage 0's column derived from its own recorded totals — the
+breakdown print was added during this stage, and the derivation is validated
+against Stage 1's measured row:
+
+| Claim | Stage 0 | Stage 1 | Δ |
+| --- | ---: | ---: | ---: |
+| `entity_exists` | 30,560 | 33,582 | +3,022 |
+| `contains` | 4,050 | 4,050 | 0 |
+| `defines` | 26,509 | 29,531 | +3,022 |
+| `references` | 21,491 | 23,248 | +1,757 |
+| `calls` | 123,499 | 124,910 | +1,411 |
+| `identity_correspondence` | 24,750 | 27,785 | +3,035 |
+
+### Every Move, Counted
+
+**References.** 366 reference facts now reach an interface. 119 of them are made
+by an interface or one of its methods, so they are new claims by new entities.
+The other **247 are the move**: claims that existed before this stage, were
+unresolved, and now resolve. That is the coverage ADR 011 predicted and the
+Plan 014 branch handling requires counted, and
+`tests/vertical_slice_test.zig` pins one example — a field whose type names an
+interface the same unit declares, which used to decline as "a non-class type of
+this name" and is now a local fact, beside an `enum` of the same shape that
+still declines.
+
+The whole reference delta closes on those numbers: 1,757 new reference claims
+from interface method return types, of which 219 are facts and 1,538 unresolved;
+plus the 247 conversions. Facts +219 +247 = +466, which is 1,740 → 2,206.
+Unresolved +1,538 −247 = +1,291, which is 19,751 → 21,042.
+
+**Calls.** Every unresolved-call reason family, from
+`zig build claim-sample -Doptimize=ReleaseFast -- --root <clone> --seed 20260918
+--size 40000 --language java`, a census over all definitions with `unclassified`
+at zero on both sides:
+
+| Family | Stage 0 | Stage 1 | Δ |
+| --- | ---: | ---: | ---: |
+| `receiver_not_simple_name` | 21,132 | 21,444 | +312 |
+| `nested_class_body` | 824 | 829 | +5 |
+| `receiver_bound` | 55,127 | 55,565 | +438 |
+| `on_demand_static_import` | 218 | 218 | 0 |
+| **`enclosing_supertypes`** | **6,206** | **6,206** | **0** |
+| `receiver_reaches_no_class` | 14,110 | 14,148 | +38 |
+| `target_supertypes` | 760 | 780 | +20 |
+| `target_overloaded` | 877 | 879 | +2 |
+| `target_inaccessible` | 44 | 44 | 0 |
+| `unqualified_no_method` | 13,707 | 13,888 | +181 |
+| `unqualified_overloaded` | 1,417 | 1,631 | +214 |
+| `unqualified_supertypes` | 4,049 | 4,082 | +33 |
+| the five families that are zero | 0 | 0 | 0 |
+| **total** | **118,471** | **119,714** | **+1,243** |
+
+Every delta is an addition, not a movement: +1,243 unresolved and +168 fact
+calls make the +1,411 the claim table records, and all of them are invocations
+inside `default` and `static` interface method bodies that no analysis read
+before. **`enclosing_supertypes` is unchanged at 6,206**, which is the family
+Gate A is measured on and the family Stage 3 exists to convert.
+
+The guard families in the coverage command agree: 8,083 references and 6,206
+receivers, identical to Stage 0. Gate A re-measures to the same 4,738 and 3,628,
+because the hierarchy is read from source and does not depend on what the graph
+holds.
+
+### The Measurement Command Reported Its Own Gap
+
+The first Stage 1 run of `semidx-java-coverage` reported **438 value-receiver
+claims it could not locate**, where Stage 0 reported none. They were the
+invocations inside interface method bodies: the classifier walked top-level
+classes only. The row exists so that a miss is loud rather than silent, and it
+did its job on the first stage that could produce one. The walk now covers both
+declarations and collects an interface's constants, and all 55,565 claims are
+located again.
+
+### One Concern With The Plan As Written, Stated And Followed
+
+Plan 014's Non-Scope says `resolveType`'s existing explanations keep their
+current wording. Several of them now say "class" where the rule they describe
+considers a class **or an interface** — for example "no current top-level class
+of this name is declared in package `demo`", which is emitted when the package
+declares neither. The conditions are unchanged and no claim moved, so this is
+wording rather than behavior, and it is left exactly as the plan requires. It is
+recorded here so Stage 6's drift control decides it deliberately rather than
+inheriting it. The invocation-path declines were not reworded either, for the
+same reason.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core` | pass |
+| `zig build test` | pass, 99 tests in the vertical slice lane (was 94) |
+| `zig build test-mcp` | pass, 35/36 with 1 skipped |
+| `zig build dogfood` | pass, 10/10 steps, 5/5 tests |
+| `zig fmt --check build.zig src tests` | clean |
+| `zig build java-coverage -Doptimize=ReleaseFast -- --root <clone>` | the tables above |
+| `zig build claim-sample -Doptimize=ReleaseFast -- --root <clone> --seed 20260918 --size 40000 --language java` | families sum to the whole, `unclassified` 0 |
+
+`zig build preview-gate` was not run: Stage 1's verification list does not name
+it, and no query shape, budget, or work bound changed. Stage 3 runs it.
+
+### Residual Risk
+
+- **An interface's constants have no type reference.** A name written only as a
+  constant's type is invisible to the graph. It is a recorded coverage boundary,
+  not a defect, and the member carries its own `unsupported_construct`.
+- **The 2,174 new member diagnostics are derived, not itemized.** They follow
+  from the net `unsupported_construct` delta and the 617 that disappeared. No
+  count of interface bodies' members was taken directly.
+- **`identity_correspondence` grew by 3,035, more than the 3,022 new
+  definitions.** Reanalysis within a batch re-emits correspondence for entities
+  that already existed, which is the same channel
+  [Follow-up 018](../followups/018_unexplained_assertion_delta.md) points at;
+  frontend reads on the clone went from 7,291 to 7,665. Nothing here is
+  unaccounted, but Stage 4 must read its assertion delta against this number
+  rather than against Stage 0's.
+
+### Next Stage
+
+Stage 2 makes each declared supertype a recorded `references` claim resolved in
+the declaring unit's scope, adds the hierarchy projection beside
+`java_members.zig`, and measures Gate B: guard-declined claims whose chain is
+closed in the real graph, against a floor of 700. Stage 0's source-derived upper
+bound for that number is 4,738 lenient and 4,113 strict, so Gate B has room —
+but the graph's answer is what counts, and a fail ends the sequence at Stage 2.

@@ -22,23 +22,27 @@ pub const version = std.fmt.comptimePrint("slice-001+ts-abi{d}", .{ts.runtime_ab
 pub const capabilities: contract.Capabilities = .{
     .language = .java,
     .producer = .{ .name = "frontend.java", .version = version },
-    .entity_roles = &.{ "class", "method" },
+    .entity_roles = &.{ "class", "interface", "method" },
     .relationship_kinds = &.{ .defines, .references, .calls },
-    .coverage_note = "top-level classes, their methods, method return types, " ++
-        "field types, and invocations inside method bodies, where an unqualified " ++
-        "invocation resolves only to the class's one method of that name when " ++
-        "the class has no supertypes and the call is not inside a nested class " ++
-        "body; an invocation qualified by a simple name resolves only when " ++
-        "nothing in scope binds that name, the enclosing class declares no " ++
-        "supertypes, the name resolves to a current top-level class that " ++
-        "declares no supertypes, and that class declares exactly one method of " ++
-        "the invoked name, `static` and either public or inside the enclosing " ++
-        "class — a receiver that is a value, an inherited or overloaded method, " ++
-        "and dispatch are not resolved; a simple type name " ++
+    .coverage_note = "top-level classes and interfaces, their methods, method " ++
+        "return types, class field types, and invocations inside method bodies, " ++
+        "where an unqualified " ++
+        "invocation resolves only to the enclosing type's one method of that " ++
+        "name when that type has no supertypes and the call is not inside a " ++
+        "nested class body; an invocation qualified by a simple name resolves " ++
+        "only when nothing in scope binds that name, the enclosing type declares " ++
+        "no supertypes, the name resolves to a current top-level class or " ++
+        "interface that declares no supertypes, and that type declares exactly " ++
+        "one method of the invoked name, `static` and either public or inside " ++
+        "the enclosing type — a receiver that is a value, an inherited or " ++
+        "overloaded method, and dispatch are not resolved; a simple type name " ++
         "not declared in the unit resolves to the one current top-level class " ++
-        "another unit declares in the same explicit package, unless a type " ++
-        "parameter, member type, supertype, import, or non-class type could " ++
-        "give the name another meaning",
+        "or interface another unit declares in the same explicit package, " ++
+        "unless a type parameter, member type, supertype, import, or " ++
+        "uncovered type declaration could give the name another meaning. An " ++
+        "interface method with no access modifier is recorded as `public`, as " ++
+        "Java defines it; an interface's constants, and enum, record, and " ++
+        "annotation type declarations, stay outside this coverage",
 };
 
 /// Guards against unbounded recursion on pathological input. Exceeding it is
@@ -59,7 +63,7 @@ const max_depth: u32 = 64;
 /// declared supertype may hide are Java's questions and no other language's.
 pub const class_shape = struct {
     pub const key = "java.supertypes";
-    /// The class declares no superclass and no interface.
+    /// The type declares no superclass and no interface.
     pub const none = "none";
     /// It declares at least one, so a member it inherits could be the target
     /// and the working copy cannot see that it is not.
@@ -144,16 +148,39 @@ pub const Supertypes = enum {
     }
 };
 
+/// Whether a role names a Java type declaration this frontend records.
+///
+/// The roles are this frontend's vocabulary, so the answer lives with them
+/// rather than being spelled out again in each projection that asks. A
+/// projection that compared against `"class"` alone would silently stop seeing
+/// interfaces the moment they became definitions, which is the failure this
+/// exists to make impossible.
+pub fn isTypeRole(role: []const u8) bool {
+    return std.mem.eql(u8, role, "class") or std.mem.eql(u8, role, "interface");
+}
+
 const Modifiers = struct {
     access: []const u8,
     is_static: bool,
 };
 
-/// The declared modifiers of a member, as written. A member with no access
-/// keyword is package-private, which is a decision Java makes rather than an
-/// absence of information.
-fn modifiersOf(node: ts.Node) Modifiers {
-    var found: Modifiers = .{ .access = method_access.package_private, .is_static = false };
+/// The declared modifiers of a member, as written, with the defaults Java
+/// applies to what is not written.
+///
+/// A class member with no access keyword is package-private. A member declared
+/// in an interface body with no access keyword is `public`, which is the same
+/// kind of decision: Java states it, so recording the absent modifier literally
+/// would say something about the source that is false, and would make every
+/// interface method look inaccessible to
+/// [ADR 009](../../docs/adr/009_java_static_calls.md)'s access check.
+///
+/// `default` and `abstract` are neither an access keyword nor `static`, so
+/// neither changes an answer here.
+fn modifiersOf(node: ts.Node, in_interface: bool) Modifiers {
+    var found: Modifiers = .{
+        .access = if (in_interface) method_access.public else method_access.package_private,
+        .is_static = false,
+    };
     var index: u32 = 0;
     while (index < node.childCount()) : (index += 1) {
         const child = node.childAt(index) orelse continue;
@@ -536,16 +563,29 @@ pub fn sharesScope(referring: []const u8, provider: []const u8) bool {
     return std.mem.eql(u8, tail[expected.len..], language_directory);
 }
 
+/// One top-level type declaration this frontend covers: a class or an
+/// interface.
+///
+/// Both are declarations the graph holds
+/// ([ADR 011](../../docs/adr/011_java_hierarchy_from_indexed_source.md)), and
+/// every rule below that asks what a name in this unit may mean asks it of both:
+/// an interface obscures a simple type name exactly as a class does, declares
+/// methods a call may select exactly as a class does, and may declare
+/// supertypes exactly as a class does.
 const ClassInfo = struct {
     index: u32,
     name: []const u8,
     node: ts.Node,
     body: ?ts.Node,
-    /// The names its field declarations bind. A field obscures a type of the
-    /// same name for every method of the class, so a receiver name it claims is
-    /// not read as a class name.
+    /// Whether it was written as an interface. It decides the role recorded, the
+    /// construct label, and the access an unmodified member declares.
+    is_interface: bool,
+    /// The names its field declarations bind — an interface's constants
+    /// included, because a constant obscures a type of the same name inside a
+    /// `default` or `static` method exactly as a field does (JLS 6.4.2). A
+    /// receiver name one of them claims is not read as a type name.
     fields: []const []const u8,
-    /// Whether it declares a superclass or interfaces, from which a method of
+    /// Whether it declares a superclass or an interface, from which a method of
     /// an invoked name could be inherited.
     has_supertypes: bool,
 };
@@ -617,10 +657,10 @@ pub fn analyze(
             }
         } else if (isTypeDeclaration(kind)) {
             if (node.childByFieldName("name")) |name_node| {
-                if (!std.mem.eql(u8, kind, "class_declaration")) try other_types.append(gpa, name_node.text(source));
+                if (!isCoveredTypeDeclaration(kind)) try other_types.append(gpa, name_node.text(source));
             }
         }
-        if (!std.mem.eql(u8, kind, "class_declaration")) {
+        if (!isCoveredTypeDeclaration(kind)) {
             try builder.addDiagnostic(.unsupported_construct, try builder.print(
                 "`{s}` at the top level is outside this frontend's coverage",
                 .{kind},
@@ -628,23 +668,23 @@ pub fn analyze(
             continue;
         }
 
+        const is_interface = std.mem.eql(u8, kind, "interface_declaration");
         const name_node = node.childByFieldName("name") orelse {
             try builder.addDiagnostic(
                 .unsupported_construct,
-                "a class declaration without a name is outside this frontend's coverage",
+                "a type declaration without a name is outside this frontend's coverage",
             );
             continue;
         };
         const name = try builder.dupe(name_node.text(source));
-        const has_supertypes = node.childByFieldName("superclass") != null or
-            node.childByFieldName("interfaces") != null;
+        const has_supertypes = declaresSupertypes(node);
 
         const index = try builder.addEntity(.{
             .kind = .definition,
             .identity = .{
                 .scope = scope,
                 .language = .java,
-                .role = "class",
+                .role = if (is_interface) "interface" else "class",
                 .name = name,
                 .signature = name,
                 .container_path = &.{},
@@ -653,7 +693,7 @@ pub fn analyze(
             .extension = .{
                 .namespace = "java",
                 .labels = try builder.labels(&.{
-                    .{ .key = "java.construct", .value = "class_declaration" },
+                    .{ .key = "java.construct", .value = kind },
                     .{ .key = "java.package", .value = package },
                     .{
                         .key = class_shape.key,
@@ -662,7 +702,10 @@ pub fn analyze(
                 }),
             },
             .resolution = .{ .fact = .{
-                .method = "class declaration in the analyzed source unit",
+                .method = if (is_interface)
+                    "interface declaration in the analyzed source unit"
+                else
+                    "class declaration in the analyzed source unit",
             } },
         });
 
@@ -672,6 +715,7 @@ pub fn analyze(
             .name = name,
             .node = node,
             .body = body,
+            .is_interface = is_interface,
             .fields = &.{},
             .has_supertypes = has_supertypes,
         });
@@ -684,7 +728,13 @@ pub fn analyze(
         var members = class_body.namedChildren();
         while (members.next()) |member| {
             const member_kind = member.kind();
-            if (std.mem.eql(u8, member_kind, "field_declaration")) {
+            // An interface writes its fields as `constant_declaration`. They are
+            // outside this frontend's coverage exactly as a class field is, and
+            // they obscure a type of the same name exactly as a class field
+            // does, so they are collected here and reported below.
+            if (std.mem.eql(u8, member_kind, "field_declaration") or
+                std.mem.eql(u8, member_kind, "constant_declaration"))
+            {
                 try appendDeclaredNames(gpa, &fields, member, source);
             }
             if (!std.mem.eql(u8, member_kind, "method_declaration")) {
@@ -702,7 +752,7 @@ pub fn analyze(
                 try builder.dupe(type_node.text(source))
             else
                 "";
-            const modifiers = modifiersOf(member);
+            const modifiers = modifiersOf(member, is_interface);
 
             const method_index = try builder.addEntity(.{
                 .kind = .definition,
@@ -751,7 +801,7 @@ pub fn analyze(
     if (classes.items.len == 0) {
         try builder.addDiagnostic(
             .confirmed_absence,
-            "the source unit parsed and declares no class within this frontend's coverage",
+            "the source unit parsed and declares no class or interface within this frontend's coverage",
         );
     }
 
@@ -891,8 +941,11 @@ const UnitScope = struct {
     /// It says nothing about a type position: there no variable competes for
     /// the name, so `resolveType` is left alone.
     static_on_demand: bool,
-    /// Top-level interfaces, enums, records, and annotation types. This
-    /// frontend does not cover them, but they still claim their names.
+    /// Top-level enums, records, and annotation types. This frontend does not
+    /// cover them, but they still claim their names. Interfaces are no longer
+    /// here: since [ADR 011](../../docs/adr/011_java_hierarchy_from_indexed_source.md)
+    /// a top-level interface is a declaration this unit holds, so it is found in
+    /// `classes` and resolves rather than declining.
     other_types: []const []const u8,
     context: Context,
 };
@@ -1092,6 +1145,34 @@ fn declareProvider(
         if (declared.provider == provider) return;
     }
     try builder.addDependency(provider, reason);
+}
+
+/// The two type declarations this frontend records as definitions.
+///
+/// An enum, a record, and an annotation type are deliberately not here. None of
+/// them can appear in a supertype chain, so admitting them would widen this
+/// frontend into general Java type coverage without answering the question
+/// interfaces answer
+/// ([ADR 011](../../docs/adr/011_java_hierarchy_from_indexed_source.md)). They
+/// keep their `unsupported_construct` diagnostic and keep claiming their names.
+fn isCoveredTypeDeclaration(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "class_declaration") or
+        std.mem.eql(u8, kind, "interface_declaration");
+}
+
+/// Whether a type declaration writes any supertype.
+///
+/// A class writes them in the `superclass` and `interfaces` fields. An interface
+/// writes them in an `extends_interfaces` child, which carries no field name and
+/// so is reachable only by walking the children.
+fn declaresSupertypes(node: ts.Node) bool {
+    if (node.childByFieldName("superclass") != null) return true;
+    if (node.childByFieldName("interfaces") != null) return true;
+    var children = node.namedChildren();
+    while (children.next()) |child| {
+        if (std.mem.eql(u8, child.kind(), "extends_interfaces")) return true;
+    }
+    return false;
 }
 
 fn isTypeDeclaration(kind: []const u8) bool {
