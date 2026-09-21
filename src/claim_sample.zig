@@ -55,6 +55,23 @@ const java_families = [_]Family{
     // A simple name something else claims.
     .{ .name = "receiver_bound", .fragment = "is declared here as a binding, so it is read as a value" },
     .{ .name = "on_demand_static_import", .fragment = "imports static members on demand" },
+    // The chain declines Plan 014 Stage 3 added, one per condition that can
+    // leave a hierarchy open. They come before `enclosing_supertypes` because
+    // that family's fragment is a substring of the receiver-side wording: the
+    // sentence still says what was being ruled out, and these say why the chain
+    // could not rule it out.
+    .{ .name = "chain_supertype_unresolved", .fragment = "supertypes and one of them is not resolved" },
+    .{ .name = "chain_not_read", .fragment = "supertypes and this analysis did not read what one of them reaches" },
+    .{ .name = "chain_ambiguous", .fragment = "supertypes and one of them is ambiguous" },
+    .{ .name = "chain_out_of_scope", .fragment = "supertypes and one of them is declared outside this unit's visibility scope" },
+    .{ .name = "chain_above_unresolved", .fragment = "supertypes and a supertype somewhere in its chain is not resolved" },
+    .{ .name = "chain_not_a_type", .fragment = "supertypes and a supertype somewhere in its chain is not a Java class or interface" },
+    .{ .name = "chain_provider_stale", .fragment = "supertypes and a type in its chain is declared in a unit whose analysis is not current" },
+    .{ .name = "chain_cycle", .fragment = "supertypes and its declared chain contains a cycle" },
+    .{ .name = "chain_too_deep", .fragment = "supertypes and its declared chain is deeper than this analysis walks" },
+    .{ .name = "chain_declares_name", .fragment = "supertype chain declares" },
+    // The two families the chain declines replace. They read zero once Stage 3
+    // ships, and they stay in the table so that is visible rather than assumed.
     .{ .name = "enclosing_supertypes", .fragment = "a field it may inherit" },
     .{ .name = "receiver_reaches_no_class", .fragment = "the receiver is not read as a class" },
     // The receiver is a class; the target is not established.

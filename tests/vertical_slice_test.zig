@@ -1361,20 +1361,40 @@ test "a java invocation is a fact only when the class leaves one method to selec
         try expectExplanation(try callFrom(&snapshot, run.id, line), "class body declared in the method");
     }
 
-    // A superclass or an interface may contribute a method of the same name.
+    // A superclass or an interface may contribute a method of the same name —
+    // unless the chain above the class is closed in indexed source and nothing
+    // it reaches declares that name.
+    //
+    // `Child extends Plain` is that case since Plan 014 Stage 3: `Plain` is
+    // declared in this very unit, it declares no supertype of its own, and it
+    // declares no `own`. The chain rules the name out, so the call names the
+    // one method `Child` itself declares.
     var classes = snapshot.entitiesMatching(.{ .kind = .definition, .name = "run" });
-    var checked: usize = 0;
+    var converted: usize = 0;
+    var declined: usize = 0;
     while (classes.next()) |candidate| {
         const container = candidate.identity.container_path[0];
         if (std.mem.eql(u8, container, "Plain")) continue;
         var calls = snapshot.relationships(.{ .kind = .calls, .source = candidate.id });
         const call = calls.next().?;
-        try expectExplanation(call, "supertypes");
-        checked += 1;
+        if (std.mem.eql(u8, container, "Child")) {
+            try testing.expectEqual(model.ResolutionCategory.fact, call.resolution.category());
+            const own = definitionIn(&snapshot, "demo/Calls.java", "Child", "own").?;
+            try testing.expectEqual(own.id, call.claim.relationship.target.entity);
+            converted += 1;
+            continue;
+        }
+        // `Worker implements Runnable`, and nothing indexed declares
+        // `Runnable`. The chain cannot be closed, so the answer does not move,
+        // and it now names which condition failed rather than only that
+        // supertypes exist.
+        try expectExplanation(call, "one of them is not resolved");
+        declined += 1;
     }
-    try testing.expectEqual(@as(usize, 2), checked);
+    try testing.expectEqual(@as(usize, 1), converted);
+    try testing.expectEqual(@as(usize, 1), declined);
 
-    try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+    try testing.expectEqual(@as(usize, 3), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
     try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
 }
 
@@ -4201,7 +4221,7 @@ test "an on-demand import that is not static leaves the receiver alone" {
     });
 }
 
-test "a target with no static label declines as unrecorded, not as an instance method" {
+test "a batch converges: a reader that read a provider's older state is read again" {
     var index = try semidx.Index.init(testing.allocator, "tree");
     defer index.deinit();
 
@@ -4227,13 +4247,36 @@ test "a target with no static label declines as unrecorded, not as an instance m
 
     var snapshot = try index.publish();
     defer snapshot.deinit();
+    // The provider is reanalyzed inside this batch, after the reader had
+    // already read its unlabelled state. Before Plan 014 Stage 3 the batch
+    // stopped there and the reader kept an explanation that was false about
+    // the graph's own contents: it said `Legacy.make` carried no record of
+    // whether it is `static` while the graph held that record. Upkeep now
+    // reanalyzes what a previous round changed, so an incrementally built
+    // graph answers what a graph built from scratch answers.
     try expectStaticCall(&snapshot, .{
         .path = "module/src/main/java/lib/Reader.java",
         .class = "Reader",
         .method = "declined",
         .call = "Legacy.make()",
-        .expect = .{ .unresolved = "carries no record of whether it is `static`" },
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Legacy.java",
+            .class = "Legacy",
+            .method = "make",
+        } },
     });
+    const make = definitionIn(&snapshot, "module/src/main/java/lib/Legacy.java", "Legacy", "make").?;
+    try testing.expectEqualStrings("true", make.extension.get("java.static").?);
+
+    // The decline the unlabelled state produces is still the one this frontend
+    // gives, and it is still not the same answer as the method being an
+    // instance method. Nothing in ordinary source reaches it
+    // ([Follow-up 016](../docs/followups/016_java_static_call_rule_narrow_gaps.md)),
+    // so it is pinned where it is decided rather than through a provider a
+    // converging batch repairs.
+    try testing.expectEqual(semidx.frontends.java.Static.unknown, semidx.frontends.java.Static.fromLabel(""));
+    try testing.expectEqual(semidx.frontends.java.Static.no, semidx.frontends.java.Static.fromLabel("false"));
+    try testing.expectEqual(semidx.frontends.java.Access.unknown, semidx.frontends.java.Access.fromLabel(""));
 }
 
 /// Writes one Java class and one of its methods into the graph the way the Java
@@ -4916,10 +4959,17 @@ test "a declared supertype is a reference resolved in the declaring unit's scope
     try testing.expect(reached_base);
     try testing.expect(reached_marker);
 
-    // The field type on the next line is a claim of its own, and the enclosing
-    // type's supertypes still decline it: the position is what differs, not the
-    // rule.
-    try expectExplanation(try referenceFrom(&snapshot, mid.id, "Base"), "the enclosing class has supertypes");
+    // The field type on the next line is a claim of its own. Since Stage 3 the
+    // guard above it lifts where the chain rules the name out, and here it
+    // does: `Base` and `Marker` are both closed and neither declares a member
+    // type called `Base`. The two claims are still separate claims, with
+    // separate ranges.
+    try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = mid.id,
+        .target = base.id,
+        .resolution = .fact,
+    }));
 
     const drawable = snapshot.findDefinition("module/src/main/java/lib/Drawable.java", "Drawable").?;
     var extends = try supertypeReferences(&snapshot, drawable.id, testing.allocator);
@@ -5046,6 +5096,341 @@ test "an edit that breaks a link closes and opens the chain that reads it" {
     switch (outcome) {
         .closed => return error.TestExpectedOpenChain,
         .open => |reason| try testing.expectEqual(hierarchy.OpenReason.supertype_unresolved, reason),
+    }
+}
+
+// -- Plan 014 Stage 3: the guard lifts only on a closed chain -----------------
+
+// The cases [Follow-up 013](../docs/followups/013_java_supertype_guard_relaxation.md)
+// named as required before the guard could be relaxed at all.
+
+/// A unit of `lib` whose class extends `Base` and reads `Helper` as a field
+/// type, a receiver, and an unqualified call.
+fn chainReader(name: []const u8, extends: []const u8, gpa: std.mem.Allocator) ![]u8 {
+    return std.fmt.allocPrint(gpa,
+        \\package lib;
+        \\
+        \\class {s} extends {s} {{
+        \\    Helper field;
+        \\    void read() {{ Helper.make(); }}
+        \\    void own() {{}}
+        \\    void call() {{ own(); }}
+        \\}}
+        \\
+    , .{ name, extends });
+}
+
+test "a chain closed in indexed source lifts the guard on all three of its sides" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Helper.java",
+        .java,
+        "package lib;\n\nclass Helper {\n    public static String make() { return null; }\n}\n",
+    );
+    _ = try index.addUnit("module/src/main/java/lib/Root.java", .java, "package lib;\n\nclass Root {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/Base.java", .java, "package lib;\n\nclass Base extends Root {}\n");
+
+    const reader = try chainReader("Reader", "Base", testing.allocator);
+    defer testing.allocator.free(reader);
+    _ = try index.addUnit("module/src/main/java/lib/Reader.java", .java, reader);
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const helper = snapshot.findDefinition("module/src/main/java/lib/Helper.java", "Helper").?;
+    const class = snapshot.findDefinition("module/src/main/java/lib/Reader.java", "Reader").?;
+
+    // The reference side: the field type resolves, because nothing `Reader`
+    // reaches declares a member type called `Helper`.
+    try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+        .kind = .references,
+        .source = class.id,
+        .target = helper.id,
+        .resolution = .fact,
+    }));
+    // The receiver side: the static call resolves, because nothing it reaches
+    // declares a field called `Helper`.
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Reader.java",
+        .class = "Reader",
+        .method = "read",
+        .call = "Helper.make()",
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Helper.java",
+            .class = "Helper",
+            .method = "make",
+        } },
+    });
+    // The unqualified side: the call resolves, because nothing it reaches
+    // declares a method called `own`.
+    try expectStaticCall(&snapshot, .{
+        .path = "module/src/main/java/lib/Reader.java",
+        .class = "Reader",
+        .method = "call",
+        .call = "own()",
+        .expect = .{ .fact = .{
+            .path = "module/src/main/java/lib/Reader.java",
+            .class = "Reader",
+            .method = "own",
+        } },
+    });
+
+    // Reading the chain is a dependency on every unit in it, not only on the
+    // one the name was written for.
+    var providers: usize = 0;
+    const reader_unit = snapshot.unitByPath("module/src/main/java/lib/Reader.java").?.id;
+    for (index.graph.dependencies.declarations.items) |declaration| {
+        if (declaration.dependent == reader_unit) providers += 1;
+    }
+    try testing.expect(providers >= 3);
+}
+
+test "every condition that leaves a chain open keeps the guard and names itself" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Helper.java",
+        .java,
+        "package lib;\n\nclass Helper {\n    public static String make() { return null; }\n}\n",
+    );
+    // A supertype nothing indexed declares — the case of an interface with no
+    // source in the working copy.
+    _ = try index.addUnit("module/src/main/java/lib/Absent.java", .java, "package lib;\n\nclass Absent {}\n");
+    _ = try index.addUnit(
+        "module/src/main/java/lib/OpenAbove.java",
+        .java,
+        "package lib;\n\nclass OpenAbove extends Gone {}\n",
+    );
+    // A member type of the referenced name anywhere in the chain.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Shadowing.java",
+        .java,
+        "package lib;\n\nclass Shadowing {\n    class Helper {}\n}\n",
+    );
+    // A field of the receiver's name anywhere in the chain.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Binding.java",
+        .java,
+        "package lib;\n\nclass Binding {\n    String Helper;\n}\n",
+    );
+    // A method of the invoked name anywhere in the chain.
+    _ = try index.addUnit(
+        "module/src/main/java/lib/Owning.java",
+        .java,
+        "package lib;\n\nclass Owning {\n    void own() {}\n}\n",
+    );
+    _ = try index.addUnit("module/src/main/java/lib/CycleA.java", .java, "package lib;\n\nclass CycleA extends CycleB {}\n");
+    _ = try index.addUnit("module/src/main/java/lib/CycleB.java", .java, "package lib;\n\nclass CycleB extends CycleA {}\n");
+
+    const readers = [_][2][]const u8{
+        .{ "Unindexed", "Missing" },
+        .{ "AboveOpen", "OpenAbove" },
+        .{ "Shadowed", "Shadowing" },
+        .{ "Bound", "Binding" },
+        .{ "Owner", "Owning" },
+        .{ "Cyclic", "CycleA" },
+    };
+    for (readers) |reader| {
+        const source = try chainReader(reader[0], reader[1], testing.allocator);
+        defer testing.allocator.free(source);
+        const path = try std.fmt.allocPrint(
+            testing.allocator,
+            "module/src/main/java/lib/{s}.java",
+            .{reader[0]},
+        );
+        defer testing.allocator.free(path);
+        _ = try index.addUnit(path, .java, source);
+    }
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    // What each side asks about is different, so a type in the chain that
+    // claims the name for one of them leaves the other two alone. That is the
+    // property a single collapsed reason would hide.
+    const Side = union(enum) { fact, declines: []const u8 };
+    const cases = [_]struct {
+        class: []const u8,
+        reference: Side,
+        receiver: Side,
+        unqualified: Side,
+    }{
+        // Nothing indexed declares `Missing`, so the chain does not start.
+        .{
+            .class = "Unindexed",
+            .reference = .{ .declines = "one of them is not resolved" },
+            .receiver = .{ .declines = "one of them is not resolved" },
+            .unqualified = .{ .declines = "one of them is not resolved" },
+        },
+        // `OpenAbove` is indexed and its own chain is not closed.
+        .{
+            .class = "AboveOpen",
+            .reference = .{ .declines = "a supertype somewhere in its chain is not resolved" },
+            .receiver = .{ .declines = "a supertype somewhere in its chain is not resolved" },
+            .unqualified = .{ .declines = "a supertype somewhere in its chain is not resolved" },
+        },
+        // A member type of the name: only the reference side asks about one,
+        // and the receiver inherits its answer through `resolveType`.
+        .{
+            .class = "Shadowed",
+            .reference = .{ .declines = "supertype chain declares a member type of this name" },
+            .receiver = .{ .declines = "supertype chain declares a member type of this name" },
+            .unqualified = .fact,
+        },
+        // A field of the receiver's name: only the receiver side asks.
+        .{
+            .class = "Bound",
+            .reference = .fact,
+            .receiver = .{ .declines = "supertype chain declares a field of this name" },
+            .unqualified = .fact,
+        },
+        // A method of the invoked name: only the unqualified side asks.
+        .{
+            .class = "Owner",
+            .reference = .fact,
+            .receiver = .fact,
+            .unqualified = .{ .declines = "supertype chain declares a method of this name" },
+        },
+        .{
+            .class = "Cyclic",
+            .reference = .{ .declines = "its declared chain contains a cycle" },
+            .receiver = .{ .declines = "its declared chain contains a cycle" },
+            .unqualified = .{ .declines = "its declared chain contains a cycle" },
+        },
+    };
+
+    const helper = snapshot.findDefinition("module/src/main/java/lib/Helper.java", "Helper").?;
+    for (cases) |case| {
+        const path = try std.fmt.allocPrint(
+            testing.allocator,
+            "module/src/main/java/lib/{s}.java",
+            .{case.class},
+        );
+        defer testing.allocator.free(path);
+        const class = snapshot.findDefinition(path, case.class).?;
+
+        switch (case.reference) {
+            .fact => try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+                .kind = .references,
+                .source = class.id,
+                .target = helper.id,
+                .resolution = .fact,
+            })),
+            .declines => |fragment| try expectExplanation(
+                try referenceFrom(&snapshot, class.id, "Helper"),
+                fragment,
+            ),
+        }
+        try expectStaticCall(&snapshot, .{
+            .path = path,
+            .class = case.class,
+            .method = "read",
+            .call = "Helper.make()",
+            .expect = switch (case.receiver) {
+                .fact => .{ .fact = .{
+                    .path = "module/src/main/java/lib/Helper.java",
+                    .class = "Helper",
+                    .method = "make",
+                } },
+                .declines => |fragment| .{ .unresolved = fragment },
+            },
+        });
+        try expectStaticCall(&snapshot, .{
+            .path = path,
+            .class = case.class,
+            .method = "call",
+            .call = "own()",
+            .expect = switch (case.unqualified) {
+                .fact => .{ .fact = .{ .path = path, .class = case.class, .method = "own" } },
+                .declines => |fragment| .{ .unresolved = fragment },
+            },
+        });
+    }
+
+    // Whatever else moves, no Java answer is ever a confidence, and the cycle
+    // above returned rather than hung.
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "adding and removing a supertype anywhere in a chain reanalyzes the reader" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+
+    try tree.write(
+        "src/main/java/lib/Helper.java",
+        "package lib;\n\nclass Helper {\n    public static String make() { return null; }\n}\n",
+    );
+    try tree.write("src/main/java/lib/Root.java", "package lib;\n\nclass Root {}\n");
+    try tree.write("src/main/java/lib/Base.java", "package lib;\n\nclass Base extends Root {}\n");
+    const reader = try chainReader("Reader", "Base", testing.allocator);
+    defer testing.allocator.free(reader);
+    try tree.write("src/main/java/lib/Reader.java", reader);
+    _ = try tree.rescan();
+
+    const reader_path = "src/main/java/lib/Reader.java";
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        const class = snapshot.findDefinition(reader_path, "Reader").?;
+        const helper = snapshot.findDefinition("src/main/java/lib/Helper.java", "Helper").?;
+        try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+            .kind = .references,
+            .source = class.id,
+            .target = helper.id,
+            .resolution = .fact,
+        }));
+    }
+
+    // `Root` is two links above the reader and the reader never names it. Give
+    // it a supertype nothing declares: the chain opens, and the fact the reader
+    // recorded must stop being one.
+    try tree.write("src/main/java/lib/Root.java", "package lib;\n\nclass Root extends Gone {}\n");
+    _ = try tree.rescan();
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        const class = snapshot.findDefinition(reader_path, "Reader").?;
+        try expectExplanation(
+            try referenceFrom(&snapshot, class.id, "Helper"),
+            "a supertype somewhere in its chain is not resolved",
+        );
+    }
+
+    // Close it again by declaring what it names. Nothing about the reader or
+    // about `Root` changed this time; only a unit two links above appeared.
+    try tree.write("src/main/java/lib/Gone.java", "package lib;\n\nclass Gone {}\n");
+    _ = try tree.rescan();
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        const class = snapshot.findDefinition(reader_path, "Reader").?;
+        const helper = snapshot.findDefinition("src/main/java/lib/Helper.java", "Helper").?;
+        try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+            .kind = .references,
+            .source = class.id,
+            .target = helper.id,
+            .resolution = .fact,
+        }));
+    }
+
+    // And a member type appearing two links above takes it away again, which is
+    // the case a chain is walked to rule out.
+    try tree.write(
+        "src/main/java/lib/Root.java",
+        "package lib;\n\nclass Root extends Gone {\n    class Helper {}\n}\n",
+    );
+    _ = try tree.rescan();
+    {
+        var snapshot = try tree.index.publish();
+        defer snapshot.deinit();
+        const class = snapshot.findDefinition(reader_path, "Reader").?;
+        try expectExplanation(
+            try referenceFrom(&snapshot, class.id, "Helper"),
+            "supertype chain declares a member type of this name",
+        );
     }
 }
 

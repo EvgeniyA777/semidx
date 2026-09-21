@@ -417,6 +417,14 @@ fn directoryOf(path: []const u8) []const u8 {
 /// unit analyzed after the last change already saw the final ones and is not.
 /// Reanalysis cannot change exports — they depend only on a unit's own
 /// contents — so one round settles the batch.
+/// How many times one batch will reanalyze what a previous round changed.
+///
+/// A supertype chain makes reanalysis able to change what a later reader sees,
+/// so a batch no longer settles in one round. The bound is small because the
+/// chains it follows are: a walk is capped at 16 links, and a repository whose
+/// hierarchies need more rounds than this is reported rather than chased.
+const max_upkeep_rounds: u32 = 8;
+
 /// A `Class.method` aspect that changed, and the step it changed at. The
 /// class-level aspect has an empty method name.
 const ChangedAspect = struct {
@@ -496,6 +504,7 @@ const Upkeep = struct {
         try frontends.java_packages.exportsOf(&self.index.graph, unit, self.gpa, &self.before);
         self.shape_before.clearRetainingCapacity();
         try frontends.java_members.aspectsOf(&self.index.graph, unit, self.gpa, &self.shape_before);
+        try frontends.java_hierarchy.annotateChains(&self.index.graph, self.shape_before.items, self.gpa);
     }
 
     /// The captured unit left the index and exports nothing now.
@@ -514,6 +523,7 @@ const Upkeep = struct {
         try frontends.java_packages.exportsOf(&self.index.graph, unit, self.gpa, &self.after);
         self.shape_after.clearRetainingCapacity();
         try frontends.java_members.aspectsOf(&self.index.graph, unit, self.gpa, &self.shape_after);
+        try frontends.java_hierarchy.annotateChains(&self.index.graph, self.shape_after.items, self.gpa);
         try self.markChanges();
     }
 
@@ -546,6 +556,7 @@ const Upkeep = struct {
 
             self.shape_after.clearRetainingCapacity();
             try frontends.java_members.aspectsOf(&self.index.graph, unit, self.gpa, &self.shape_after);
+            try frontends.java_hierarchy.annotateChains(&self.index.graph, self.shape_after.items, self.gpa);
             for (self.shape_after.items) |aspect| {
                 try self.noteChangedAspect(aspect.class, aspect.method);
             }
@@ -669,14 +680,52 @@ const Upkeep = struct {
             }
         }
 
-        // Independent of hash-map iteration order.
-        std.mem.sort(model.SourceUnitId, owed.items, {}, lessUnit);
-        for (owed.items) |unit| {
-            _ = try self.index.analyzer.indexUnit(graph, unit);
-            work.reanalysis();
-            if (outcome) |counts| {
-                counts.invalidated += 1;
-                counts.analyzed += 1;
+        // Reanalysis used to settle a batch in one round, because the only
+        // thing it could change was a claim, and a claim reaches its readers
+        // through declarations made before the batch. A supertype chain broke
+        // that: reanalyzing a unit can change the *chain verdict* of a type it
+        // declares, and a reader further down owes itself another pass — even
+        // though nothing that unit exports changed.
+        //
+        // So the reanalysis is a loop: each round records what the units it
+        // reanalyzed now expose, and the next round is whoever reads something
+        // that moved. It terminates because a verdict that stops changing stops
+        // producing readers, and it is bounded anyway.
+        var round: u32 = 0;
+        while (owed.items.len != 0) : (round += 1) {
+            if (round >= max_upkeep_rounds) {
+                self.exhausted = true;
+                break;
+            }
+            // Independent of hash-map iteration order.
+            std.mem.sort(model.SourceUnitId, owed.items, {}, lessUnit);
+            // An aspect already noted in an earlier round has its step moved
+            // rather than a second entry appended, so the round is bounded by
+            // the step counter and not by a slice.
+            const round_start = self.step;
+            for (owed.items) |unit| {
+                try self.captureBefore(unit);
+                _ = try self.index.analyzer.indexUnit(graph, unit);
+                try self.recordAnalysis(unit);
+                work.reanalysis();
+                if (outcome) |counts| {
+                    counts.invalidated += 1;
+                    counts.analyzed += 1;
+                }
+            }
+
+            owed.clearRetainingCapacity();
+            for (self.changed_shapes.items) |changed| {
+                if (changed.step <= round_start) continue;
+                const readers = try self.index.analyzer.java_members.readersOf(
+                    changed.class,
+                    changed.method,
+                    self.gpa,
+                );
+                for (readers) |unit| {
+                    if ((self.analyzed_at.get(unit) orelse 0) >= changed.step) continue;
+                    try appendOwed(self.gpa, &owed, graph, unit);
+                }
             }
         }
 

@@ -77,19 +77,50 @@ pub const class_shape = struct {
 /// look up. The declaring analysis already knows, so it writes the names down
 /// where the graph can carry them. A Java identifier cannot contain a comma, so
 /// the separator cannot occur inside a name.
-pub const member_types = struct {
-    pub const key = "java.member_types";
-    pub const separator = ',';
+pub const member_types = NameList("java.member_types");
 
-    pub fn contains(value: []const u8, name: []const u8) bool {
-        if (name.len == 0) return false;
-        var names = std.mem.splitScalar(u8, value, separator);
-        while (names.next()) |candidate| {
-            if (std.mem.eql(u8, candidate, name)) return true;
+/// The names a top-level type's field declarations bind, as one label.
+///
+/// A field is not a definition this frontend records either, and a receiver
+/// name a field claims is read as a value rather than as a type (JLS 6.4.2).
+/// Asking whether a type further up a chain binds a name needs the names
+/// written down where the graph can carry them.
+pub const field_names = NameList("java.field_names");
+
+/// The simple names a top-level type writes in its `extends` and `implements`
+/// clauses, as one label.
+///
+/// `java.supertypes` says *whether* a type declares any; this says which. A
+/// reader that walked a chain has to be reanalyzed when a type in it starts
+/// declaring a different supertype, and a boolean cannot report that.
+pub const supertype_names = NameList("java.supertype_names");
+
+/// One label holding several Java names. A Java identifier cannot contain a
+/// comma, so the separator cannot occur inside a name.
+fn NameList(comptime label_key: []const u8) type {
+    return struct {
+        pub const key = label_key;
+        pub const separator = ',';
+
+        pub fn contains(value: []const u8, name: []const u8) bool {
+            if (name.len == 0) return false;
+            var names = std.mem.splitScalar(u8, value, separator);
+            while (names.next()) |candidate| {
+                if (std.mem.eql(u8, candidate, name)) return true;
+            }
+            return false;
         }
-        return false;
-    }
-};
+
+        pub fn appendTo(gpa: std.mem.Allocator, out: *std.ArrayList([]const u8), value: []const u8) !void {
+            if (value.len == 0) return;
+            var names = std.mem.splitScalar(u8, value, separator);
+            while (names.next()) |candidate| {
+                if (candidate.len == 0) continue;
+                try out.append(gpa, candidate);
+            }
+        }
+    };
+}
 
 pub const method_access = struct {
     pub const key = "java.access";
@@ -311,6 +342,10 @@ pub const Context = struct {
     /// `Name.method(...)` pairs it writes. A name with no entry either resolves
     /// to a class the unit declares itself, or to no class at all.
     members: []const ClassMembers = &.{},
+    /// What each name this unit writes as a supertype reaches. A name with no
+    /// entry either names a type the unit declares itself — whose chain the
+    /// frontend walks from its own source — or no type at all.
+    hierarchies: []const Hierarchy = &.{},
 
     pub const empty: Context = .{ .package = "", .types = &.{}, .imports = &.{} };
 
@@ -340,6 +375,14 @@ pub const Context = struct {
         }
         return null;
     }
+
+    /// What the supertype `name` reaches, when the analyzer read it.
+    pub fn hierarchyLookup(self: Context, name: []const u8) ?Hierarchy {
+        for (self.hierarchies) |entry| {
+            if (std.mem.eql(u8, entry.name, name)) return entry;
+        }
+        return null;
+    }
 };
 
 /// One `Name.method(...)` a source unit writes, as written.
@@ -347,6 +390,50 @@ pub const Receiver = struct {
     class: []const u8,
     method: []const u8,
 };
+
+/// What one type this unit names as a supertype reaches, as the analyzer read
+/// it from the graph.
+///
+/// It is a projection and carries no authority: it says what a walk over
+/// recorded claims found, and the frontend decides what that means. The three
+/// name lists are what a chain is walked to **rule out** — never to select, so
+/// no entity of the closure appears here
+/// ([ADR 011](../../docs/adr/011_java_hierarchy_from_indexed_source.md), D6).
+pub const Hierarchy = struct {
+    /// The simple name the unit writes in an `extends` or `implements` clause.
+    name: []const u8,
+    /// Null when everything reachable from it is a current fact naming a
+    /// current top-level Java class or interface; otherwise the condition that
+    /// stopped the walk, in this frontend's own words.
+    open: ?[]const u8,
+    /// Every member type name declared anywhere in the closure.
+    member_types: []const []const u8 = &.{},
+    /// Every field name bound anywhere in the closure.
+    fields: []const []const u8 = &.{},
+    /// Every method name declared anywhere in the closure.
+    methods: []const []const u8 = &.{},
+    /// The names of the types the closure spans, so a reader can be hinted for
+    /// every one of them and not only for the one it wrote.
+    types: []const []const u8 = &.{},
+    /// Every unit the closure spans, so a reader that relies on it can declare
+    /// a dependency on all of them.
+    providers: []const model.SourceUnitId = &.{},
+
+    pub fn declares(self: Hierarchy, what: Member, name: []const u8) bool {
+        const names = switch (what) {
+            .member_type => self.member_types,
+            .field => self.fields,
+            .method => self.methods,
+        };
+        for (names) |candidate| {
+            if (std.mem.eql(u8, candidate, name)) return true;
+        }
+        return false;
+    }
+};
+
+/// What a chain is walked to rule out. Each guard asks about exactly one.
+pub const Member = enum { member_type, field, method };
 
 /// The explicit package a Java source unit declares, or null when it declares
 /// none. Annotations on the declaration are not part of the name, and the name
@@ -500,6 +587,80 @@ fn collectReceivers(
     while (children.next()) |child| {
         try collectReceivers(allocator, child, source, found, seen, depth + 1);
     }
+}
+
+/// Every type node a top-level declaration writes in a supertype position.
+///
+/// A class writes them in the `superclass` and `interfaces` fields; an
+/// interface writes them in an `extends_interfaces` child, which carries no
+/// field name. `superclass` holds its type directly, the other two hold a
+/// `type_list` of them.
+pub fn collectSupertypeNodes(
+    gpa: std.mem.Allocator,
+    declaration: ts.Node,
+    out: *std.ArrayList(ts.Node),
+) !void {
+    if (declaration.childByFieldName("superclass")) |superclass| {
+        try appendSupertypeNodes(gpa, superclass, out);
+    }
+    if (declaration.childByFieldName("interfaces")) |interfaces| {
+        try appendSupertypeNodes(gpa, interfaces, out);
+    }
+    var children = declaration.namedChildren();
+    while (children.next()) |child| {
+        if (!std.mem.eql(u8, child.kind(), "extends_interfaces")) continue;
+        try appendSupertypeNodes(gpa, child, out);
+    }
+}
+
+fn appendSupertypeNodes(
+    gpa: std.mem.Allocator,
+    holder: ts.Node,
+    out: *std.ArrayList(ts.Node),
+) !void {
+    var children = holder.namedChildren();
+    while (children.next()) |child| {
+        const kind = child.kind();
+        if (std.mem.eql(u8, kind, "annotation") or std.mem.eql(u8, kind, "marker_annotation")) continue;
+        if (std.mem.eql(u8, kind, "type_list")) {
+            var types = child.namedChildren();
+            while (types.next()) |entry| try out.append(gpa, entry);
+            continue;
+        }
+        try out.append(gpa, child);
+    }
+}
+
+/// Every distinct simple name this unit writes in a supertype position.
+///
+/// A lexical pre-pass and not a decision, exactly as `staticCallReceivers` is:
+/// whether the name reaches a type at all is decided during analysis. The
+/// analyzer reads it to remember that this unit asked about those types, and to
+/// offer what each of them reaches. A name written generically or qualified is
+/// left out, because `resolveType` declines it and an open chain needs no
+/// closure.
+pub fn supertypeNames(
+    allocator: std.mem.Allocator,
+    root: ts.Node,
+    source: []const u8,
+) ![]const []const u8 {
+    var nodes: std.ArrayList(ts.Node) = .empty;
+    defer nodes.deinit(allocator);
+    var found: std.ArrayList([]const u8) = .empty;
+
+    var top_level = root.namedChildren();
+    while (top_level.next()) |node| {
+        if (!isCoveredTypeDeclaration(node.kind())) continue;
+        nodes.clearRetainingCapacity();
+        try collectSupertypeNodes(allocator, node, &nodes);
+        for (nodes.items) |supertype| {
+            if (!std.mem.eql(u8, supertype.kind(), "type_identifier")) continue;
+            const name = supertype.text(source);
+            if (containsName(found.items, name)) continue;
+            try found.append(allocator, name);
+        }
+    }
+    return found.items;
 }
 
 /// Whether an import declaration carries the `static` keyword, which is an
@@ -699,7 +860,10 @@ pub fn analyze(
         };
         const name = try builder.dupe(name_node.text(source));
         const has_supertypes = declaresSupertypes(node);
-        const declared_member_types = try memberTypeNames(builder, node.childByFieldName("body"), source);
+        const body_for_labels = node.childByFieldName("body");
+        const declared_member_types = try memberTypeNames(builder, body_for_labels, source);
+        const declared_fields = try fieldNames(builder, body_for_labels, source);
+        const declared_supertypes = try declaredSupertypeNames(builder, node, source);
 
         const index = try builder.addEntity(.{
             .kind = .definition,
@@ -722,6 +886,8 @@ pub fn analyze(
                         .value = if (has_supertypes) class_shape.declared else class_shape.none,
                     },
                     .{ .key = member_types.key, .value = declared_member_types },
+                    .{ .key = field_names.key, .value = declared_fields },
+                    .{ .key = supertype_names.key, .value = declared_supertypes },
                 }),
             },
             .resolution = .{ .fact = .{
@@ -1169,10 +1335,14 @@ fn resolveType(
             "which this frontend does not cover");
     }
     // The guard reads the enclosing type's recorded shape rather than two class
-    // fields, so an interface's `extends` counts exactly as a class's does.
+    // fields, so an interface's `extends` counts exactly as a class's does. It
+    // lifts only where the chain above the type is closed in indexed source and
+    // nothing it reaches declares a member type of this name (ADR 011 D4, D6).
     if (scope.position == .body and scope.class.has_supertypes) {
-        return unresolvedType(name, "the enclosing class has supertypes, and a member type " ++
-            "it may inherit under this name is not resolved");
+        try declareChainProviders(builder, unit, scope.class, source, builder.gpa);
+        if (try chainRulesOut(builder, unit, scope.class, source, name, .member_type)) |reason| {
+            return unresolvedType(name, reason);
+        }
     }
     if (containsName(unit.static_imported, name)) {
         return unresolvedType(name, "a static import names this type, and a static import " ++
@@ -1236,6 +1406,208 @@ fn resolveType(
             .{ unit.package, count, if (count == 1) "class" else "classes" },
         )),
     };
+}
+
+/// What a chain walk answers, and the words each answer is declined with.
+///
+/// Every condition is its own sentence. A widened rule that collapsed six
+/// declines into one would make the families that this plan converts
+/// indistinguishable from the families it does not, which is the failure the
+/// counters exist to make impossible.
+pub const chain = struct {
+    pub const depth_cap: u32 = 16;
+
+    /// What each guard walks the chain to rule out. It is named in every
+    /// decline, so a reader can tell a reference's answer from a receiver's
+    /// even where the condition that failed is the same one.
+    pub fn ruledOut(what: Member) []const u8 {
+        return switch (what) {
+            .member_type => "a member type it may inherit under this name",
+            .field => "a field it may inherit under this name",
+            .method => "a method of this name it may inherit",
+        };
+    }
+
+    /// The conditions that leave a chain open, each a contiguous phrase that
+    /// does not mention what was being ruled out — so one counter can hold a
+    /// condition across all three guards, and the sentence still says both.
+    pub const unresolved_here = "one of them is not resolved";
+    pub const ambiguous = "one of them is ambiguous";
+    pub const out_of_scope = "one of them is declared outside this unit's visibility scope";
+    pub const not_read = "this analysis did not read what one of them reaches";
+    pub const unresolved_above = "a supertype somewhere in its chain is not resolved";
+    pub const not_a_type = "a supertype somewhere in its chain is not a Java class or interface";
+    pub const provider_stale = "a type in its chain is declared in a unit whose analysis is not current";
+    pub const cycle = "its declared chain contains a cycle";
+    pub const too_deep = "its declared chain is deeper than this analysis walks";
+
+    pub fn openWords(
+        builder: *contract.BatchBuilder,
+        condition: []const u8,
+        what: Member,
+    ) ![]const u8 {
+        return builder.print(
+            "the enclosing type has supertypes and {s}, so {s} is not ruled out",
+            .{ condition, ruledOut(what) },
+        );
+    }
+
+    pub fn declaresWords(builder: *contract.BatchBuilder, what: Member) ![]const u8 {
+        return builder.print(
+            "a type in the enclosing type's supertype chain declares {s} of this name",
+            .{switch (what) {
+                .member_type => "a member type",
+                .field => "a field",
+                .method => "a method",
+            }},
+        );
+    }
+};
+
+/// Whether the chain above `class` is closed in indexed source and nothing it
+/// reaches declares `name`.
+///
+/// Returns null when the chain rules the name out, and the condition that
+/// failed otherwise. It never returns an entity: the chain is walked to rule
+/// out and never to select (ADR 011 D6), so no caller can turn this into a
+/// target.
+///
+/// The local half is walked from this unit's own source, because a type this
+/// unit declares is one the frontend can read directly. The external half is
+/// one lookup: the analyzer already walked the whole closure of every supertype
+/// name this unit writes and summarised it.
+fn chainRulesOut(
+    builder: *contract.BatchBuilder,
+    unit: UnitScope,
+    class: ClassInfo,
+    source: []const u8,
+    name: []const u8,
+    what: Member,
+) !?[]const u8 {
+    const gpa = builder.gpa;
+    var path: std.ArrayList(u32) = .empty;
+    defer path.deinit(gpa);
+    var nodes: std.ArrayList(ts.Node) = .empty;
+    defer nodes.deinit(gpa);
+    return walkChain(builder, unit, class, source, name, what, &path, &nodes, 0);
+}
+
+fn walkChain(
+    builder: *contract.BatchBuilder,
+    unit: UnitScope,
+    class: ClassInfo,
+    source: []const u8,
+    name: []const u8,
+    what: Member,
+    path: *std.ArrayList(u32),
+    nodes: *std.ArrayList(ts.Node),
+    depth: u32,
+) !?[]const u8 {
+    const gpa = builder.gpa;
+    if (depth >= chain.depth_cap) return try chain.openWords(builder, chain.too_deep, what);
+    if (std.mem.indexOfScalar(u32, path.items, class.index) != null) {
+        return try chain.openWords(builder, chain.cycle, what);
+    }
+
+    const mark = nodes.items.len;
+    defer nodes.shrinkRetainingCapacity(mark);
+    try collectSupertypeNodes(gpa, class.node, nodes);
+    // Taken once: deeper frames append past this mark and truncate back to it,
+    // so these entries never move.
+    const count = nodes.items.len - mark;
+
+    try path.append(gpa, class.index);
+    defer _ = path.pop();
+
+    var at: usize = 0;
+    while (at < count) : (at += 1) {
+        const supertype = nodes.items[mark + at];
+        // A supertype written generically, qualified, or as anything but a bare
+        // name is what `resolveType` declines, so the chain is open there.
+        if (!std.mem.eql(u8, supertype.kind(), "type_identifier")) {
+            return try chain.openWords(builder, chain.unresolved_here, what);
+        }
+        const supertype_name = supertype.text(source);
+
+        if (findClassInfo(unit.classes, supertype_name)) |local| {
+            if (declaresLocally(local, source, name, what)) return try chain.declaresWords(builder, what);
+            if (try walkChain(builder, unit, local, source, name, what, path, nodes, depth + 1)) |reason| {
+                return reason;
+            }
+            continue;
+        }
+
+        const reached = unit.context.hierarchyLookup(supertype_name) orelse {
+            // No entry means the analyzer read nothing for the name. Why it
+            // read nothing is a question the same bindings answer, in the same
+            // terms `resolveType` would use.
+            const binding = unit.context.importLookup(supertype_name) orelse
+                unit.context.lookup(unit.package, supertype_name);
+            const condition = if (binding) |found| switch (found) {
+                .unique => chain.not_read,
+                .ambiguous => chain.ambiguous,
+                .out_of_scope => chain.out_of_scope,
+            } else chain.unresolved_here;
+            return try chain.openWords(builder, condition, what);
+        };
+        if (reached.open) |condition| return try chain.openWords(builder, condition, what);
+        if (reached.declares(what, name)) return try chain.declaresWords(builder, what);
+    }
+    return null;
+}
+
+/// Whether a type this unit declares itself binds `name` in the way `what` asks
+/// about. Its methods are not read here: an unqualified invocation is the only
+/// guard that asks about a method, and it reads the unit's own method list.
+fn declaresLocally(class: ClassInfo, source: []const u8, name: []const u8, what: Member) bool {
+    return switch (what) {
+        .member_type => declaresMemberType(class.body, source, name),
+        .field => containsName(class.fields, name),
+        .method => declaresMethodNamed(class.body, source, name),
+    };
+}
+
+fn declaresMethodNamed(body: ?ts.Node, source: []const u8, name: []const u8) bool {
+    const type_body = body orelse return false;
+    var members = type_body.namedChildren();
+    while (members.next()) |member| {
+        if (!std.mem.eql(u8, member.kind(), "method_declaration")) continue;
+        const declared = member.childByFieldName("name") orelse continue;
+        if (std.mem.eql(u8, declared.text(source), name)) return true;
+    }
+    return false;
+}
+
+fn findClassInfo(classes: []const ClassInfo, name: []const u8) ?ClassInfo {
+    for (classes) |class| {
+        if (std.mem.eql(u8, class.name, name)) return class;
+    }
+    return null;
+}
+
+/// Declares a dependency on every unit a used chain spans, so an edit to any
+/// type in it reanalyzes this reader (ADR 011 D7).
+fn declareChainProviders(
+    builder: *contract.BatchBuilder,
+    unit: UnitScope,
+    class: ClassInfo,
+    source: []const u8,
+    gpa: std.mem.Allocator,
+) !void {
+    var nodes: std.ArrayList(ts.Node) = .empty;
+    defer nodes.deinit(gpa);
+    try collectSupertypeNodes(gpa, class.node, &nodes);
+    for (nodes.items) |supertype| {
+        if (!std.mem.eql(u8, supertype.kind(), "type_identifier")) continue;
+        const reached = unit.context.hierarchyLookup(supertype.text(source)) orelse continue;
+        for (reached.providers) |provider| {
+            try declareProvider(
+                builder,
+                provider,
+                "walked the declared supertype chain of the enclosing type",
+            );
+        }
+    }
 }
 
 /// How a simple type name can be written where this frontend reads one.
@@ -1369,6 +1741,61 @@ fn memberTypeNames(
         const name = member.childByFieldName("name") orelse continue;
         if (joined.items.len != 0) try joined.append(builder.gpa, member_types.separator);
         try joined.appendSlice(builder.gpa, name.text(source));
+    }
+    return builder.dupe(joined.items);
+}
+
+/// The names a type's field declarations bind, joined for the
+/// `java.field_names` label. An interface's constants are fields here, as they
+/// are everywhere else in this frontend.
+fn fieldNames(
+    builder: *contract.BatchBuilder,
+    body: ?ts.Node,
+    source: []const u8,
+) ![]const u8 {
+    const type_body = body orelse return "";
+    var names: std.ArrayList([]const u8) = .empty;
+    defer names.deinit(builder.gpa);
+
+    var members = type_body.namedChildren();
+    while (members.next()) |member| {
+        const kind = member.kind();
+        if (!std.mem.eql(u8, kind, "field_declaration") and
+            !std.mem.eql(u8, kind, "constant_declaration")) continue;
+        try appendDeclaredNames(builder.gpa, &names, member, source);
+    }
+    return joinNames(builder, names.items, field_names.separator);
+}
+
+/// The simple names a type writes in a supertype position, joined for the
+/// `java.supertype_names` label. A name written generically or qualified is
+/// kept as written, because the label exists to change when the declaration
+/// changes, not to be resolved.
+fn declaredSupertypeNames(
+    builder: *contract.BatchBuilder,
+    declaration: ts.Node,
+    source: []const u8,
+) ![]const u8 {
+    var nodes: std.ArrayList(ts.Node) = .empty;
+    defer nodes.deinit(builder.gpa);
+    try collectSupertypeNodes(builder.gpa, declaration, &nodes);
+
+    var names: std.ArrayList([]const u8) = .empty;
+    defer names.deinit(builder.gpa);
+    for (nodes.items) |node| try names.append(builder.gpa, node.text(source));
+    return joinNames(builder, names.items, supertype_names.separator);
+}
+
+fn joinNames(
+    builder: *contract.BatchBuilder,
+    names: []const []const u8,
+    separator: u8,
+) ![]const u8 {
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(builder.gpa);
+    for (names) |name| {
+        if (joined.items.len != 0) try joined.append(builder.gpa, separator);
+        try joined.appendSlice(builder.gpa, name);
     }
     return builder.dupe(joined.items);
 }
@@ -1512,7 +1939,7 @@ fn emitInvocation(
     const target = if (receiver) |object|
         try qualifiedTarget(builder, source, scope, object, name, nested)
     else
-        try invocationTarget(builder, scope, name, nested);
+        try invocationTarget(builder, source, scope, name, nested);
 
     try builder.addRelationship(.{
         .kind = .calls,
@@ -1559,6 +1986,7 @@ const InvocationTarget = struct {
 /// names a method without establishing which one.
 fn invocationTarget(
     builder: *contract.BatchBuilder,
+    source: []const u8,
     scope: CallScope,
     name: []const u8,
     nested: bool,
@@ -1580,8 +2008,12 @@ fn invocationTarget(
         "{d} methods of this name are declared in the enclosing class, and overloads are not resolved",
         .{count},
     ));
-    if (scope.method.class_has_supertypes) return unresolvedInvocation("the enclosing class has supertypes, " ++
-        "and a method of this name it may inherit could be the target");
+    if (scope.method.class_has_supertypes) {
+        try declareChainProviders(builder, scope.unit, scope.class, source, builder.gpa);
+        if (try chainRulesOut(builder, scope.unit, scope.class, source, name, .method)) |reason| {
+            return unresolvedInvocation(reason);
+        }
+    }
     return .{
         .index = found,
         .resolution = .{ .fact = .{
@@ -1630,8 +2062,10 @@ fn qualifiedTarget(
         ));
     }
     if (scope.class.has_supertypes) {
-        return unresolvedInvocation("the enclosing class has supertypes, and a field it may inherit " ++
-            "could give the receiver name a value this working copy cannot see");
+        try declareChainProviders(builder, scope.unit, scope.class, source, builder.gpa);
+        if (try chainRulesOut(builder, scope.unit, scope.class, source, name, .field)) |reason| {
+            return unresolvedInvocation(reason);
+        }
     }
 
     // Duped once: from here on the name may become a designator's qualifier,

@@ -264,6 +264,27 @@ pub const Aspect = struct {
     access: Access,
     static: Static,
     supertypes: Supertypes,
+    /// The class-level aspect only, from the type's own labels: which
+    /// supertypes it declares, which member types, and which fields. A reader
+    /// that walked a chain can change its answer when any of them changes, and
+    /// `supertypes` being a boolean cannot report that a type now extends
+    /// something else (ADR 011 D7).
+    supertype_names: []const u8 = "",
+    member_types: []const u8 = "",
+    field_names: []const u8 = "",
+    /// Whether the chain above this type is closed, and if not why, in the
+    /// hierarchy projection's own words. Filled by `java_hierarchy`, because
+    /// the answer is a walk over claims rather than a label.
+    ///
+    /// It is here because nothing else can report it: a type whose own
+    /// supertype appears elsewhere in the repository changes no byte and no
+    /// label of its own, and every reader that walked through it has to hear
+    /// about it.
+    chain: []const u8 = "",
+    /// Which entity the class-level aspect speaks about, so the chain can be
+    /// walked for it. Never compared: an entity keeps its id across an edit,
+    /// and a new class is already a new key.
+    entity: ?model.EntityId = null,
 
     /// Whether two aspects speak about the same thing.
     pub fn sameKey(a: Aspect, b: Aspect) bool {
@@ -276,7 +297,11 @@ pub const Aspect = struct {
             a.count == b.count and
             a.access == b.access and
             a.static == b.static and
-            a.supertypes == b.supertypes;
+            a.supertypes == b.supertypes and
+            std.mem.eql(u8, a.supertype_names, b.supertype_names) and
+            std.mem.eql(u8, a.member_types, b.member_types) and
+            std.mem.eql(u8, a.field_names, b.field_names) and
+            std.mem.eql(u8, a.chain, b.chain);
     }
 };
 
@@ -307,6 +332,7 @@ pub fn aspectsOf(
         const class = classShapeOf(graph, id) orelse continue;
         if (class.unit != unit) continue;
 
+        const entity = graph.entity(id).?;
         try out.append(gpa, .{
             .class = class.name,
             .method = "",
@@ -314,6 +340,10 @@ pub fn aspectsOf(
             .access = .unknown,
             .static = .unknown,
             .supertypes = class.supertypes,
+            .supertype_names = entity.extension.get(java.supertype_names.key) orelse "",
+            .member_types = entity.extension.get(java.member_types.key) orelse "",
+            .field_names = entity.extension.get(java.field_names.key) orelse "",
+            .entity = id,
         });
 
         methods.clearRetainingCapacity();
@@ -422,6 +452,18 @@ pub const Members = struct {
         try buffer.append(self.gpa, 0);
         try buffer.appendSlice(self.gpa, method);
         try self.add(&self.pairs, buffer.items, unit);
+        try self.add(&self.classes, class, unit);
+    }
+
+    /// Remembers that `unit` read the class-level shape of `class` — which is
+    /// what walking a supertype chain does. It is the same channel
+    /// `noteReader` feeds, at the granularity a chain change moves.
+    pub fn noteTypeReader(
+        self: *Members,
+        unit: model.SourceUnitId,
+        class: []const u8,
+    ) Allocator.Error!void {
+        if (class.len == 0) return;
         try self.add(&self.classes, class, unit);
     }
 

@@ -14,7 +14,25 @@ Companion log for
 
 ## Current Status
 
-**Stage 2 is complete and Gate B passes.** Every declared supertype is now a
+**Stage 3 is complete.** The supertype guard now lifts wherever the chain above
+the enclosing type is closed in indexed source and nothing it reaches declares
+the name — on all three of its sides, each asking about the thing it is actually
+about: a member type for a reference, a field for a receiver, a method for an
+unqualified call. On `apache/dubbo` that converts **1,690 claims** — 661
+references and 1,029 calls — and every claim that did not convert now names
+which of ten conditions stopped it.
+
+Two families disappear entirely (`enclosing_supertypes` and
+`unqualified_supertypes`, both to zero) and every claim that left them is
+accounted for: 1,029 became facts, 7,654 decline with a named condition, and
+1,639 decline for a later reason the guard used to mask.
+
+The stage also made a batch converge. Reanalysis can now change what a later
+reader sees, so upkeep repeats until nothing moves; before this, an
+incrementally built graph could keep an explanation that was false about its own
+contents.
+
+**Stage 2** before it passed Gate B. Every declared supertype is now a
 recorded `references` claim resolved in the declaring unit's own scope, and a
 hierarchy projection walks those claims and reports either the types it reached
 or the first condition that stopped it. **4,190 guard-declined claims have a
@@ -864,3 +882,180 @@ Stage 3 wires the projection into the frontend: the guard lifts only where the
 chain is closed and nothing reachable declares the name, on the reference and
 the receiver side, with a distinct reason for every failure and a reader hinted
 for every type its walk visited.
+
+## Stage 3: The Guard Lifts Only On A Closed Chain
+
+### What Changed
+
+| File | Change |
+| --- | --- |
+| `src/frontends/java.zig` | `java.field_names` and `java.supertype_names` labels; `Hierarchy` and `Context.hierarchies`; `supertypeNames`, a lexical pre-pass; `chainRulesOut`, the walk the three guards ask; ten decline sentences, each naming a condition and what it was ruling out; `declareChainProviders` |
+| `src/frontends/java_hierarchy.zig` | `hierarchiesFor`, which resolves each supertype name the way the frontend would and summarises its closure; `annotateChains`, which puts the chain verdict in the shape aspect |
+| `src/frontends/java_members.zig` | `Aspect` carries the supertype, member-type and field-name sets and the chain verdict; `noteTypeReader` registers a class-grained reader |
+| `src/frontends/root.zig` (analyzer) | notes every supertype name and every type in its closure as a reader, and builds the hierarchy projection |
+| `src/root.zig` (upkeep) | reanalysis repeats while it keeps changing what a reader sees, bounded at 8 rounds |
+| `src/claim_sample.zig` | the ten chain families, before the two they replace |
+| `src/java_coverage.zig` | the guard families are matched by what each side rules out |
+| `tests/vertical_slice_test.zig` | three new tests, two re-pinned |
+
+### Three Guards, Three Questions
+
+The guard was one condition with one sentence. It is now one test asked three
+times, and each asks about the thing its own decline was about:
+
+| Side | What an inherited member could do | What the chain is asked |
+| --- | --- | --- |
+| `resolveType` | a member type could give the name another meaning | does any reachable type declare a **member type** of this name |
+| The receiver rule | a field could bind the name to a value (JLS 6.4.2) | does any reachable type declare a **field** of this name |
+| The unqualified rule | an inherited method could be the target | does any reachable type declare a **method** of this name |
+
+A test pins that separation: a type in the chain declaring a member type called
+`Helper` leaves the receiver and the unqualified sides resolving, a field called
+`Helper` leaves the reference and the unqualified sides resolving, and a method
+called `own` leaves the other two alone. A single collapsed reason would hide
+all three.
+
+Fields and member types are not definitions, so the question is answered from
+labels their own declaring analysis wrote — `java.field_names` and
+`java.member_types` — read back through the closure. Methods are definitions and
+are read as such.
+
+### The Local Half And The External Half
+
+A chain can alternate between types this unit declares and types it does not.
+The frontend walks the local half from its own source, because a type in its own
+unit is one it can read directly, and asks the projection about the external
+half, which the analyzer has already summarised in full. Neither half resolves a
+name twice: the external lookup follows the same order `resolveType` does, an
+import before the unit's own package.
+
+Cycles and depth are handled on both halves: the local walk carries a path stack
+and the same cap of 16, and the projection carries its own.
+
+### Every Condition Says Which One It Was
+
+Ten sentences, each naming a condition and what it was ruling out. The condition
+is a contiguous phrase that does not mention the member, so one counter holds it
+across all three guards while the sentence still says both:
+
+| Condition | On the clone |
+| --- | ---: |
+| one of them is not resolved | 3,989 |
+| one of them is declared outside this unit's visibility scope | 1,985 |
+| a supertype somewhere in its chain is not resolved | 1,445 |
+| a type its chain reaches declares the name | 235 |
+| this analysis did not read what one of them reaches | 0 |
+| one of them is ambiguous | 0 |
+| a supertype somewhere in its chain is not a Java class or interface | 0 |
+| a type in its chain is declared in a unit whose analysis is not current | 0 |
+| its declared chain contains a cycle | 0 |
+| its declared chain is deeper than this analysis walks | 0 |
+
+The six that read zero are reachable — every one has a fixture test — and the
+clone simply contains none of them. The counters sum to the whole with
+`unclassified` at zero on both sides of the change.
+
+### What Moved, Claim By Claim
+
+Unresolved calls, Stage 2 → Stage 3:
+
+| Family | Stage 2 | Stage 3 | Δ |
+| --- | ---: | ---: | ---: |
+| **`enclosing_supertypes`** | 6,240 | **0** | −6,240 |
+| **`unqualified_supertypes`** | 4,082 | **0** | −4,082 |
+| the ten chain families | 0 | **7,654** | +7,654 |
+| `receiver_reaches_no_class` | 14,117 | 15,580 | +1,463 |
+| `target_supertypes` | 778 | 839 | +61 |
+| `target_overloaded` | 879 | 992 | +113 |
+| `target_not_static` | 0 | 1 | +1 |
+| `target_inaccessible` | 44 | 45 | +1 |
+| every other family | — | — | **0** |
+| unresolved calls | 119,715 | **118,686** | −1,029 |
+| `calls` facts | 5,195 | **6,224** | +1,029 |
+
+10,322 claims left the two families the guard owned. 1,029 became facts, 7,654
+decline with a named condition, and **1,639 decline for a reason the guard used
+to mask** — a receiver that reaches no class, an overloaded target, a target
+with supertypes of its own. That last group is the honest cost of lifting a
+guard that came first: what it hid is now visible, and none of it is a
+regression.
+
+References: facts 3,259 → 3,920 and unresolved 22,432 → 21,771, so **661
+converted**. Total for the stage: **1,690 claims**, and the whole-graph totals
+move by exactly that plus the identity correspondences a converging batch adds.
+
+### A Batch Now Converges
+
+Reanalysis used to settle a batch in one round, because the only thing it could
+change was a claim, and a claim reaches its readers through declarations made
+before the batch. A supertype chain breaks that: reanalyzing a unit can change
+the **chain verdict** of a type it declares, and a reader further down owes
+itself another pass even though nothing that unit exports changed.
+
+Upkeep therefore loops. Each round records what the units it reanalyzed now
+expose, and the next round is whoever reads something that moved. It terminates
+because a verdict that stops changing stops producing readers, and it is bounded
+at 8 rounds, reported as a diagnostic like the existing propagation budget.
+
+The cost on the clone is **105 extra frontend reads** out of 7,770, and it buys
+235 more converted claims than the single round produced.
+
+It also repaired something that was already wrong. A test had a provider whose
+`java.static` label was hand-recorded as absent; the provider was reanalyzed
+inside the batch, and the reader — analyzed before that — kept an explanation
+saying the graph held no record of whether the method was `static` while the
+graph held exactly that record. An incrementally built graph now answers what a
+graph built from scratch answers, and the test says so.
+
+### The Fan-Out, Measured After The Relaxation
+
+Over the 10,467 reference and receiver claims that still decline:
+
+| Chain depth reached | Claims | | Types one walk visits | Claims |
+| ---: | ---: | --- | ---: | ---: |
+| 0 | 6,093 | | 1 | 6,093 |
+| 1 | 2,584 | | 2 | 2,562 |
+| 2 | 1,051 | | 3 | 1,041 |
+| 3 | 443 | | 4 | 374 |
+| 4 | 296 | | 5 | 381 |
+| | | | 6 | 16 |
+
+No walk reaches depth 5 or visits more than six types. 1,311 distinct types were
+visited, and the largest reader set a single type would owe a reanalysis is
+**37** — the interface `Prioritized`, in a repository of 4,050 units. Stage 0
+predicted 33 from the pre-relaxation family; the relaxation moved it by four.
+
+### The Fixture Corpus
+
+Unchanged: 142 definitions, 500 assertions, 427 facts, 73 unresolved, 0
+approximate, 54 diagnostics. The corpus contains no type whose chain both closes
+and carries a declined name, so nothing in it converts — which is why the
+conversions are proven by written trees and the corpus proves that nothing else
+moved.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build test-core` | pass |
+| `zig build test` | pass, 105 tests in the vertical-slice lane (was 102) |
+| `zig build test-mcp` | pass, 35/36 with 1 skipped |
+| `zig build dogfood` | pass, 10/10 steps, 5/5 tests |
+| `zig build preview-gate` | pass, 14/14 steps, 6/6 tests |
+| `zig fmt --check build.zig src tests` | clean |
+| `zig build java-coverage -Doptimize=ReleaseFast -- --root <clone>` | 24 s wall clock including the build |
+| `zig build claim-sample … --size 40000` | families sum to the whole, `unclassified` 0 |
+
+### Residual Risk
+
+- **The walk is not cached.** `chainRulesOut` runs per declined name, so a type
+  with many names re-walks its own chain. The clone indexes in the same time it
+  did before, so the branch handling's cache is not taken; a repository with
+  deeper hierarchies may need it.
+- **1,639 claims moved to a later decline.** They are not worse off — the guard
+  was masking those reasons — but any reading of "the guard family shrank by
+  10,322" that treats all of it as conversion is wrong, and the table above is
+  the correction.
+- **The convergence loop is bounded at 8 rounds.** Exhausting it is reported as
+  a diagnostic. Nothing measured here comes close, and no test drives it to the
+  bound.

@@ -171,49 +171,125 @@ fn descend(
     return .closed;
 }
 
-/// Whether any type in `closure` declares a member of `name` that could give an
-/// inherited meaning to it.
+/// Fills in the chain verdict of every class-level aspect.
 ///
-/// It rules out and never selects: the answer is a boolean about the whole
-/// closure, and no entity is returned, so no caller can turn it into a target.
-pub fn declaresMethod(
+/// It is separate from `java_members.aspectsOf` so the two projections stay
+/// separate: one reports what a type declares, the other what a walk over
+/// claims finds. The verdict belongs in the aspect because nothing else can
+/// report it — a type whose supertype appears elsewhere in the repository
+/// changes no byte and no label of its own, and every reader that walked
+/// through it has to hear about that (ADR 011 D7).
+pub fn annotateChains(
     graph: *Graph,
-    closure: []const model.EntityId,
-    skip: model.EntityId,
-    name: []const u8,
+    aspects: []java_members.Aspect,
     gpa: Allocator,
-) Allocator.Error!bool {
-    var methods: std.ArrayList(java_members.Method) = .empty;
-    defer methods.deinit(gpa);
+) Allocator.Error!void {
+    var closure: std.ArrayList(model.EntityId) = .empty;
+    defer closure.deinit(gpa);
 
-    for (closure) |id| {
-        if (id == skip) continue;
-        const shape = java_members.classShapeOf(graph, id) orelse continue;
-        methods.clearRetainingCapacity();
-        try java_members.methodsOf(graph, shape, gpa, &methods);
-        for (methods.items) |method| {
-            if (std.mem.eql(u8, method.name, name)) return true;
-        }
+    for (aspects) |*aspect| {
+        if (aspect.method.len != 0) continue;
+        const id = aspect.entity orelse continue;
+        closure.clearRetainingCapacity();
+        aspect.chain = switch (try closureOf(graph, id, gpa, &closure)) {
+            .closed => "closed",
+            .open => |reason| reason.tag(),
+        };
     }
-    return false;
 }
 
-/// Whether any type in `closure` declares a member type of `name`.
+/// What each name a unit writes in a supertype position reaches.
 ///
-/// A member type is not a definition this frontend records, so the question is
-/// answered from the label its declaring analysis wrote rather than from
-/// definitions that do not exist.
-pub fn declaresMemberType(
+/// The names are the question, so they bound the answer: each is looked up in
+/// the order the frontend would look it up — a single-type import before the
+/// unit's own package — and only what a closure holds is carried. A name that
+/// reaches no unique type gets no entry; the frontend resolves it against the
+/// unit's own declarations, or declines with `resolveType`'s reason.
+///
+/// Nothing here decides anything. The lists are what a chain is walked to rule
+/// out, and no entity of the closure leaves this function.
+pub fn hierarchiesFor(
     graph: *Graph,
-    closure: []const model.EntityId,
-    skip: model.EntityId,
-    name: []const u8,
-) bool {
-    for (closure) |id| {
-        if (id == skip) continue;
-        const found = graph.entity(id) orelse continue;
-        const declared = found.extension.get(java.member_types.key) orelse continue;
-        if (java.member_types.contains(declared, name)) return true;
+    context: java.Context,
+    names: []const []const u8,
+    allocator: Allocator,
+) Allocator.Error![]const java.Hierarchy {
+    var found: std.ArrayList(java.Hierarchy) = .empty;
+    var closure: std.ArrayList(model.EntityId) = .empty;
+    defer closure.deinit(allocator);
+    var methods: std.ArrayList(java_members.Method) = .empty;
+    defer methods.deinit(allocator);
+
+    for (names) |name| {
+        if (indexOfName(found.items, name) != null) continue;
+
+        const binding = context.importLookup(name) orelse
+            context.lookup(context.package, name) orelse continue;
+        const target = switch (binding) {
+            .unique => |unique| unique,
+            .ambiguous, .out_of_scope => continue,
+        };
+        if (java_members.classShapeOf(graph, target.entity) == null) {
+            try found.append(allocator, .{ .name = name, .open = java.chain.provider_stale });
+            continue;
+        }
+
+        closure.clearRetainingCapacity();
+        const outcome = try closureOf(graph, target.entity, allocator, &closure);
+        const open: ?[]const u8 = switch (outcome) {
+            .closed => null,
+            .open => |reason| switch (reason) {
+                .supertype_unresolved => java.chain.unresolved_above,
+                .supertype_not_a_type => java.chain.not_a_type,
+                .supertype_provider_stale => java.chain.provider_stale,
+                .cycle => java.chain.cycle,
+                .depth_cap => java.chain.too_deep,
+            },
+        };
+
+        var member_types: std.ArrayList([]const u8) = .empty;
+        var fields: std.ArrayList([]const u8) = .empty;
+        var method_names: std.ArrayList([]const u8) = .empty;
+        var type_names: std.ArrayList([]const u8) = .empty;
+        var providers: std.ArrayList(model.SourceUnitId) = .empty;
+
+        // What the walk visited is carried even when it failed. A reader owes a
+        // dependency and a hint to every type it read, and an open chain is
+        // read exactly as far as the condition that stopped it (ADR 011 D7).
+        for (closure.items) |id| {
+            const shape = java_members.classShapeOf(graph, id) orelse continue;
+            try type_names.append(allocator, shape.name);
+            if (std.mem.indexOfScalar(model.SourceUnitId, providers.items, shape.unit) == null) {
+                try providers.append(allocator, shape.unit);
+            }
+            const entity = graph.entity(id).?;
+            if (entity.extension.get(java.member_types.key)) |value| {
+                try java.member_types.appendTo(allocator, &member_types, value);
+            }
+            if (entity.extension.get(java.field_names.key)) |value| {
+                try java.field_names.appendTo(allocator, &fields, value);
+            }
+            methods.clearRetainingCapacity();
+            try java_members.methodsOf(graph, shape, allocator, &methods);
+            for (methods.items) |method| try method_names.append(allocator, method.name);
+        }
+
+        try found.append(allocator, .{
+            .name = name,
+            .open = open,
+            .member_types = member_types.items,
+            .fields = fields.items,
+            .methods = method_names.items,
+            .types = type_names.items,
+            .providers = providers.items,
+        });
     }
-    return false;
+    return found.items;
+}
+
+fn indexOfName(entries: []const java.Hierarchy, name: []const u8) ?usize {
+    for (entries, 0..) |entry, at| {
+        if (std.mem.eql(u8, entry.name, name)) return at;
+    }
+    return null;
 }

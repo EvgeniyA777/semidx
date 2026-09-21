@@ -246,6 +246,19 @@ pub const Analyzer = struct {
             try self.java_members.noteReader(unit, receiver.class, receiver.method);
         }
         context.members = try java_members.membersFor(graph, context, receivers, allocator);
+
+        // The same shape, for the types this unit names as supertypes: the
+        // names are recorded as read before anything is resolved, so a unit
+        // whose chain is open today is reached when the type that closes it
+        // appears ([ADR 011](../../docs/adr/011_java_hierarchy_from_indexed_source.md), D7).
+        const supertypes = try java.supertypeNames(allocator, root, bytes);
+        for (supertypes) |name| try self.java_members.noteTypeReader(unit, name);
+        context.hierarchies = try java_hierarchy.hierarchiesFor(graph, context, supertypes, allocator);
+        // A reader depends on every type its walk can reach, not only on the
+        // one it named, so the whole closure is hinted too.
+        for (context.hierarchies) |reached| {
+            for (reached.types) |type_name| try self.java_members.noteTypeReader(unit, type_name);
+        }
         return context;
     }
 

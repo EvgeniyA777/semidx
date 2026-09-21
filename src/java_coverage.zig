@@ -98,9 +98,16 @@ const max_walk_depth: u32 = 64;
 // its claims disappear from a row here, which is visible, rather than moving
 // them somewhere plausible, which is not.
 
-const guard_reference_words = "the enclosing class has supertypes, and a member type";
-const guard_receiver_words = "the enclosing class has supertypes, and a field it may inherit";
-const guard_unqualified_words = "the enclosing class has supertypes, and a method of this name it may inherit";
+// Plan 014 Stage 3 replaced one sentence per guard with one sentence per
+// condition, each still naming what was being ruled out. A family is therefore
+// the member phrase, which is what the guard is about, and the condition is a
+// separate axis the tables below report.
+const guard_reference_words = "a member type it may inherit under this name is not ruled out";
+const guard_receiver_words = "a field it may inherit under this name is not ruled out";
+const guard_unqualified_words = "a method of this name it may inherit is not ruled out";
+const declares_member_type = "supertype chain declares a member type";
+const declares_field = "supertype chain declares a field";
+const declares_method = "supertype chain declares a method";
 const receiver_bound_words = "is declared here as a binding, so it is read as a value";
 
 // -- the source model ------------------------------------------------------
@@ -1193,10 +1200,13 @@ fn reportGuardFamily(
         };
         const relationship = assertion.relationship() orelse continue;
         const which: usize = switch (relationship.kind) {
-            .references => if (std.mem.indexOf(u8, explanation, guard_reference_words) != null) 0 else continue,
-            .calls => if (std.mem.indexOf(u8, explanation, guard_receiver_words) != null)
+            .references => if (std.mem.indexOf(u8, explanation, guard_reference_words) != null or
+                std.mem.indexOf(u8, explanation, declares_member_type) != null) 0 else continue,
+            .calls => if (std.mem.indexOf(u8, explanation, guard_receiver_words) != null or
+                std.mem.indexOf(u8, explanation, declares_field) != null)
                 1
-            else if (std.mem.indexOf(u8, explanation, guard_unqualified_words) != null)
+            else if (std.mem.indexOf(u8, explanation, guard_unqualified_words) != null or
+                std.mem.indexOf(u8, explanation, declares_method) != null)
                 2
             else
                 continue,
