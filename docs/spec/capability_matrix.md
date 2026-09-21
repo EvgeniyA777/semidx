@@ -4,12 +4,12 @@ doc_type: "specification"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-20"
+updated: "2026-09-21"
 ---
 
 # Preview Capability Matrix
 
-What the `0.1.0-preview.3` implementation records, per producer, and what it
+What the `0.1.0-preview.4` implementation records, per producer, and what it
 does not. Owned by [SPEC.md](../../SPEC.md#coverage-and-conformance).
 
 This is an **unversioned preview matrix**. It describes current implementation
@@ -115,7 +115,7 @@ claim.
 | Unresolved mentions | `semidx_references` also returns `unresolved_mentions`: recorded claims whose producer could not resolve them and whose designator name equals the target definition's name byte for byte, in that definition's language. Each keeps its own resolution, reason, producer, freshness and evidence and names no target, so a mention is a name match over unresolved claims and never a relationship to the definition ([ADR 003](../adr/003_reject_name_match_assertions.md)). Bounded by its own `mention_limit` (50, max 500), never paged by cursor, never merged into `relationships`, and present and empty when nothing named the definition. |
 | Source text | Off by default for unit contents: no file is ever read back. `--allow-evidence-text` adds each claim's recorded evidence text, at most 400 bytes. A producer records there what the source wrote around the claim — the invocation for a Java call, the callee for a Zig call, the symbol for a Clojure one — which is where expression text lives and the only place it appears ([ADR 010](../adr/010_designator_is_a_structured_name.md)). |
 | Source-derived values | Always returned: root and unit paths, entity names, designators, ranges, ids, and diagnostic messages. They are derived from the indexed source and go to the client process that launched the server. A designator is a name and, where the producer knows the prefix names a scope, that scope — `print` qualified by `std.debug`, never `config.load(secret, 42)`. Text the source wrote around a name is evidence text and stays behind the opt-in ([ADR 010](../adr/010_designator_is_a_structured_name.md)). |
-| Versions | Product version `0.1.0-preview.3` in `--version`, `serverInfo.version`, and `semidx_health`; `semantic_contract_version` is always `null`. |
+| Versions | Product version `0.1.0-preview.4` in `--version`, `serverInfo.version`, and `semidx_health`; `semantic_contract_version` is always `null`. |
 | Refresh | Publishes a new snapshot only on success. A failure after reconciliation started never publishes a partly updated graph: the index is rebuilt from the same scan and published by the next refresh, which then reports `entity_ids_preserved: false`; ids from earlier snapshots name nothing in the rebuilt index. |
 
 The full tool and field reference is [docs/mcp/local_preview.md](../mcp/local_preview.md).

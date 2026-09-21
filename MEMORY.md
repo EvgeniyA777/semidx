@@ -191,9 +191,10 @@ documents that own history, rationale, and evidence.
 - `scripts/semidx-mcp.sh` is the stable local launcher for agents. The older
   `scripts/start-mcp-server.sh` and `scripts/mcp-stdio.sh` remain compatibility
   aliases.
-- The product version is `0.1.0-preview.3` (`build.zig.zon`): the preview.2
-  surface plus Plan 009 progressive MCP discovery and response-budget behavior
-  ([release notes](docs/releases/v0.1.0-preview.3.md)). Annotated tags pushed
+- The product version is `0.1.0-preview.4` (`build.zig.zon`): the preview.3
+  surface plus Java visibility, query-scale, designator, unresolved-mention, and
+  receiver coverage work
+  ([release notes](docs/releases/v0.1.0-preview.4.md)). Annotated tags pushed
   to `origin`: `v0.1.0-preview.1` at `e36693a`, `v0.1.0-preview.2` at
   `8818bb6`, and `v0.1.0-preview.3` at `58af737`; no GitHub release was
   created.
@@ -274,7 +275,7 @@ documents that own history, rationale, and evidence.
 
 ## Near-Term Priorities
 
-- Plan 009 is published as `0.1.0-preview.3`, gated by `zig build preview-gate`.
+- Plan 009 is published in `0.1.0-preview.3`; preview.4 is the current release candidate.
 - The project is on the adoption track: work is chosen because it moves semidx
   toward the audience named in
   [the adoption strategy](docs/design/002_product_adoption_strategy.md), not
@@ -333,7 +334,7 @@ documents that own history, rationale, and evidence.
   dogfood coverage, response budgets, habit-loop gate, progressive discovery —
   is one progress log per plan in [docs/reports/](docs/reports/), with the
   preview notes in [docs/releases/](docs/releases/); current release candidate
-  [v0.1.0-preview.3](docs/releases/v0.1.0-preview.3.md).
+  [v0.1.0-preview.4](docs/releases/v0.1.0-preview.4.md).
 - Plan 010 Java resolution boundaries, and the first external evidence:
   [docs/reports/010_java_resolution_boundaries_progress.md](docs/reports/010_java_resolution_boundaries_progress.md).
 - Plan 011 query indexes, the cost model and its measurements:
