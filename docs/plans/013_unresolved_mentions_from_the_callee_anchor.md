@@ -58,7 +58,8 @@ When a stage offers a choice, decide in this order:
 Read before starting:
 
 - [ARCHITECTURE_CONSTITUTION.md](../../ARCHITECTURE_CONSTITUTION.md) §1, §3,
-  §6, §7, §11
+  §4, §6, §7, §11. §4 is on the list because D1 rewrites assertion
+  content: content ids move once, and entity identity is what must not.
 - [ADR 003](../adr/003_reject_name_match_assertions.md), which this plan must
   not weaken
 - [Plan 012 progress](../reports/012_java_semantic_quality_without_query_regression_progress.md),
@@ -212,10 +213,25 @@ and qualified type syntax. Normalizing those is a separate decision with its own
 evidence, and mixing it in would make Stage 1's before/after unreadable. Record
 what Stage 0 measures about them and leave them as they are.
 
-**D3 — This is a graph correctness fix, not an MCP convenience.** D1 is
-justified by `model.Target`'s own definition, independent of any consumer. §7 is
-satisfied because the MCP capability falls out of the fix; the fix is not shaped
-by the tool.
+**D3 — Java is a model correction; Zig and Clojure settle what the model leaves
+open.** `model.Target.designator` is defined as "a name read from source"
+([model.zig:135-137](../../src/core/model.zig#L135-L137)). Java stores
+`node.text(source)` for a qualified invocation, so `foo.bar(a, b)` — an
+expression, not a name — sits in a field that promises a name. D1 corrects that,
+and would be correct with no consumer in this repository.
+
+`std.debug.print` and `str/join` are qualified *names*. The model does not say
+which part of a qualified name the designator holds, and D1 settles that silence
+toward the last segment because that is the form D5's byte equality can anchor
+against a definition's name. The direction is chosen with the query in view, and
+ADR 010 states it that way rather than claiming the tool played no part.
+
+§7 is satisfied, for a narrower reason than "the consumer is irrelevant": the
+frontends keep deciding what a designator says (Boundary 1), the written form is
+preserved rather than discarded, and no semantic claim draws authority from the
+tool. A consumer settling an under-determined field is not a consumer defining
+the model — but that is the clause this plan is judged under, so ADR 010 answers
+§11.7 in these terms and not by assertion.
 
 **D4 — A mention is rendered, never asserted.** `unresolved_mentions` items are
 assertions read from the snapshot, each keeping its `resolution` category,
@@ -321,6 +337,12 @@ Required behavior:
 - Write ADR 010 recording D1, D2, and D3, answering every §11 question, and
   stating explicitly that ADR 003 is unaffected because no designator becomes a
   target.
+- §11.5 is answered, not waved through as inapplicable: `semidx_references`
+  reads one `ctx.snapshot` for every pass
+  ([tools.zig:1653-1671](../../src/mcp/tools.zig#L1653-L1671)), so the mention
+  pass observes the same graph state as the relationship passes; and D1 changes
+  assertion content only, leaving dependency and invalidation rules untouched,
+  so incremental maintenance is preserved with a one-time content-id move.
 
 Branch handling:
 
