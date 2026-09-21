@@ -196,8 +196,8 @@ documents that own history, rationale, and evidence.
   receiver coverage work
   ([release notes](docs/releases/v0.1.0-preview.4.md)). Annotated tags pushed
   to `origin`: `v0.1.0-preview.1` at `e36693a`, `v0.1.0-preview.2` at
-  `8818bb6`, and `v0.1.0-preview.3` at `58af737`; no GitHub release was
-  created.
+  `8818bb6`, `v0.1.0-preview.3` at `58af737`, and `v0.1.0-preview.4` at
+  `e095d95`; no GitHub release was created.
 
 ## What Does Not Exist
 
