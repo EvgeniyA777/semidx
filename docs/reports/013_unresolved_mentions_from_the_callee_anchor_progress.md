@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-**Stages 0 to 3 are complete.** A designator is now a name and, where the
+**Stages 0 to 4 are complete.** A designator is now a name and, where the
 source wrote a scope in front of it that the frontend knows to be one, that
 scope as its own field. Nothing resolved, nothing became a fact, and the fixture
 corpus records the same 396 facts it did before, pinned by a test. The
@@ -22,7 +22,10 @@ designator-anchored query is proven to walk its own bucket and nothing else, at
 three graph sizes, and `semidx_references` now answers from the callee anchor:
 on this repository `name=bucket direction=incoming` returns **zero
 relationships and five unresolved mentions**, each with its caller, its
-location, and the reason its own producer recorded.
+location, and the reason its own producer recorded. On apache/dubbo the change
+is measured: **80,946 more unresolved calls are reachable from the definition
+they name** — 91,087 of 118,471 against 10,141 before — at 5 to 7 ms a call,
+with no fact, resolution, or diagnostic moved.
 
 The baseline every later claim is compared against is recorded below, taken
 from a named clone at a named commit with named commands. Stage 0 itself changed
@@ -44,7 +47,7 @@ keys**. The stage order stands and Stage 1 may proceed.
 | Stage 1: A designator is a structured name | Completed | `model.Designator` carries `name` and an optional `qualifier`; all three frontends record it and hand the written form to the evidence; the index keys on `name`. Fixture corpus: 134 definitions, 465 assertions, 396 facts, 69 unresolved, 54 diagnostics — identical before and after. Distinct designator keys over that corpus: 20 → 16. [ADR 010](../adr/010_designator_is_a_structured_name.md). |
 | Stage 2: The bucket is the whole walk | Completed | A designator query's inspected positions equal its bucket exactly, at 64, 256 and 12,500 units; a name one unit recorded costs one position at every size; the same query without the index costs the whole assertion array. On the clone the index fell from 57,068 keys and 3.65 MiB to **9,091 keys and 0.92 MiB**. |
 | Stage 3: `unresolved_mentions` in `semidx_references` | Completed | A third pass anchored on the target's name, admitted by byte equality and the anchor's language, rendered with its own reason and no target entity. Own limit (`mention_limit`, 50/500), own totals, own truncation, own hint, own budget share. The plan's demonstration passes. |
-| Stage 4: External re-measure | Not started | — |
+| Stage 4: External re-measure | Completed | Reachability from a definition's name: **8.6% → 76.9%** of unresolved calls. Five named anchors answer 0/93/23/8/0 relationships and 2,389/324/293/883/460 mentions. 5–7 ms per call at the hottest anchors. Facts, resolutions and diagnostics identical to Stage 0. |
 | Stage 5: Documentation and closure | Not started | — |
 
 ## Stage 1: A Designator Is A Structured Name
@@ -340,6 +343,157 @@ made to lie:
 - `docs/mcp/local_preview.md` does not describe the section yet, and still calls
   a designator "callee names as written". Both are Stage 5's targets, and the
   plan puts them there deliberately.
+
+## Stage 4: External Re-Measure
+
+Same clone, same commit, same build mode as Stage 0:
+`~/.cache/semidx-external/dubbo` at `df9c5e1`, `-Doptimize=ReleaseFast`.
+
+### What The Change Bought
+
+The plan's question was whether a recorded claim can be found from the entity it
+named. Measured as: how many unresolved claims carry a name that a live
+definition in the clone carries, in the claim's own language.
+
+| | Before (`6616582`) | After (`5943606`) | Change |
+| --- | ---: | ---: | ---: |
+| Unresolved calls reachable from a definition's name | 10,141 | **91,087** | **+80,946** |
+| As a share of the 118,471 unresolved calls | 8.6% | **76.9%** | +68.3 pp |
+| Unresolved type references reachable | 1,965 | 1,965 | 0 |
+
+The before number was taken by porting the same counter into a worktree at the
+pre-Stage-1 commit and running it against the same clone, so the two numbers
+answer one question over one graph rather than being read off two different
+reports. The procedure is in `src/designator_shape.zig`'s header and the counter
+is one pass over the definitions building a name-to-language set, then one
+lookup per claim.
+
+The 27,384 unresolved calls that remain unreachable name something no definition
+in this clone carries — JDK and dependency methods, which
+[ADR 003](../adr/003_reject_name_match_assertions.md) and the capability matrix
+both say will stay unresolved. Type references did not move, as D2 requires.
+
+### The Five Definitions
+
+Chosen in Stage 0 by a stated rule and measured again here, through the preview
+with `mention_limit=500`:
+
+| Anchor | Definitions | Targets shown | Relationships before | Relationships after | Mentions now | Shown |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `assertTrue` | 2 | 2 | 0 | 0 | **2,389** | 500, truncated |
+| `URL` | 2 | 2 | 93 | 93 | **324** | 324 |
+| `getThis` | 16 | 16 | 23 | 23 | **293** | 293 |
+| `getUrl` | 71 | 50 | 8 | 8 | **883** | 500, truncated |
+| `verify` | 1 | 1 | 0 | 0 | **460** | 460 |
+| `assertEquals` (Stage 0's largest bucket) | 0 | 0 | 0 | 0 | **0** | — |
+
+No relationship count moved, which is the point: nothing resolved. `assertTrue`
+and `verify` answered with nothing before and now answer with 2,389 and 460
+located, explained claims.
+
+`assertEquals` is the honest zero. Its bucket is the largest in the graph at
+6,728 positions, and the clone declares no definition of that name — it is
+JUnit's — so there is no anchor to ask from and the section is empty. A bucket
+whose key names no definition is unreachable before this plan and after it.
+
+### What The Reasons Say
+
+The distribution of recorded reasons over the mentions each anchor returned.
+Where a section was truncated the distribution is over what was returned, and
+says so.
+
+| Anchor | Reason | Share |
+| --- | --- | ---: |
+| `assertTrue` (500 shown) | the receiver is not read as a class: a single-type import names this type | 266 |
+| | no method of this name is declared in the enclosing class | 215 |
+| | the enclosing class has supertypes, and a field it may inherit could give the receiver a value | 13 |
+| | the invocation is inside a class body declared in the method | 6 |
+| `URL` (324) | the enclosing class has supertypes, and a member type it may inherit could be it | 201 |
+| | the single-type import of this name reaches 1 current top-level class outside this unit's visibility | 122 |
+| | a single-type import names this type, and no indexed source unit declares it | 1 |
+| `getThis` (293) | the enclosing class has supertypes, and a method of this name it may inherit could be the target | 223 |
+| | no method of this name is declared in the enclosing class | 70 |
+| `getUrl` (500 shown) | the receiver name is declared here as a binding, so it is read as a value | 355 across 47 distinct receiver names |
+| | no method of this name is declared in the enclosing class | 55 |
+| | the invocation is qualified by a receiver this frontend does not resolve | 50 |
+| | the enclosing class has supertypes, and a method of this name it may inherit could be the target | 42 |
+| `verify` (460) | the receiver is not read as a class: a single-type import names this type | 236 |
+| | no method of this name is declared in the enclosing class | 220 |
+| | other | 4 |
+
+This is what the plan meant by reaching a claim "with each one's own reason
+attached". `getUrl`'s 355 value-receiver mentions are
+[Follow-up 014](../followups/014_java_instance_receiver_calls.md)'s subject,
+named receiver by receiver; `getThis`'s 223 are
+[Follow-up 013](../followups/013_java_supertype_guard_relaxation.md)'s. Neither
+follow-up moved, and neither was partially implemented: the claims are rendered
+exactly as their producers recorded them.
+
+None of the mentions these five anchors returned carries a qualifier, which is
+consistent: a qualifier is recorded only where the receiver was established as a
+class and the method choice then failed, and those 1,681 claims name the classes
+they were declined against rather than these five names.
+
+### Cost
+
+Wall clock by repetition, because one call is below the resolution of a process
+timer: one server process, `initialize` only, against the same process running
+500 identical `semidx_references` calls. The baseline is 5.75–6.27 s (indexing
+4,050 units dominates it), so each figure carries about ±1 ms of method noise.
+
+| Anchor | 500 calls | Per call | Positions the mention pass inspects |
+| --- | ---: | ---: | ---: |
+| `assertTrue` | 8.83 s | ~5.7 ms | 4,778 = 2,389 × 2 targets |
+| `URL` | 8.68 s | ~5.4 ms | 648 = 324 × 2 |
+| `getThis` | 9.41 s | ~6.8 ms | 4,688 = 293 × 16 |
+| `getUrl` | 9.39 s | ~6.8 ms | **44,150** = 883 × 50 |
+| `verify` | 8.84 s | ~5.7 ms | 460 = 460 × 1 |
+| `assertEquals` | 6.25 s | ~0.5 ms | 0 — no anchor, no pass |
+
+The inspected-position counts are exact rather than sampled: Stage 2 proves a
+designator query inspects its bucket and nothing else, so the work is the bucket
+size times the number of shown targets. `getUrl` is the worst case the clone
+offers — 50 definitions of one name, each walking the same 883-position bucket —
+and it costs under 7 ms. **The largest bucket's latency is interactive, so no
+follow-up is opened**, which is the branch the plan named.
+
+### Nothing Else Moved
+
+| | Stage 0 | Now |
+| --- | ---: | ---: |
+| Definitions | 26,509 | 26,509 |
+| Assertions recorded | 230,859 | 230,859 |
+| Facts | 92,637 | 92,637 |
+| Unresolved | 138,222 | 138,222 |
+| Approximate / stale | 0 / 0 | 0 / 0 |
+| Diagnostics | 59,022 | 59,022 |
+| Java type-reference designators: simple / qualified / expression | 15,551 / 227 / 3,973 | 15,551 / 227 / 3,973 |
+
+Identical to the unit. A delta here would have been a defect in Stage 1 rather
+than a result, and there is none.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig build designator-shape -Doptimize=ReleaseFast -- --root <clone>` | the tables above |
+| the same command at `6616582`, with the counter ported into a throwaway worktree | the before column |
+| `./zig-out/bin/semidx-mcp --root <clone>` over stdio, six anchors | relationships, mentions and reasons above |
+| the same, 500 repetitions per anchor, against an `initialize`-only baseline | the timings above |
+| `zig fmt --check build.zig src tests` | clean |
+
+### Residual Risk And Next Step
+
+- **Next step is Stage 5**: documentation and closure.
+- The reason distributions for `assertTrue` and `getUrl` are over the 500
+  mentions the limit returned, not over all 2,389 and 883. `mention_limit`
+  caps at 500 by D6, so a full distribution needs the harness rather than the
+  preview. It is named here rather than quietly presented as complete.
+- Per-call cost is measured by repetition against a noisy baseline. It
+  establishes the order — single-digit milliseconds — not a precise figure.
+- 27,384 unresolved calls remain unreachable from any definition in the clone.
+  That is not a gap this plan left: those names belong to code that is not in
+  the indexed root.
 
 ## Stage 0: Reproducible Baseline
 

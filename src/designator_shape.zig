@@ -18,6 +18,12 @@
 //!   * every unresolved relationship whose target is a designator, grouped by
 //!     the language of its source entity, its relationship kind, and the shape
 //!     of the designator text;
+//!   * how many of those claims are **reachable from a definition's name**: a
+//!     live definition in the indexed root carries that designator's name, in
+//!     the claim's own language, so asking that definition by name finds the
+//!     claim. This is the question Plan 013 exists to change the answer to;
+//!     the number is over the same claims either way, so a run before and a
+//!     run after are comparable.
 //!   * the designator index: how many distinct keys it holds, how many
 //!     positions they bucket, what it costs, and its largest buckets.
 //!
@@ -194,8 +200,23 @@ pub fn main(init: std.process.Init) !void {
     // could read no name at all.
     var qualified = [_][4]usize{[_]usize{0} ** 4} ** 3;
     var nameless = [_][4]usize{[_]usize{0} ** 4} ** 3;
+    var reachable = [_][4]usize{[_]usize{0} ** 4} ** 3;
     var sourceless: usize = 0;
     var designator_claims: usize = 0;
+
+    // Every name a live definition carries, per language. One pass over the
+    // entities, so the reachability question costs a lookup per claim instead
+    // of a scan per claim.
+    var defined: std.StringHashMapUnmanaged([3]bool) = .empty;
+    defer defined.deinit(gpa);
+    var definitions = snapshot.entitiesMatching(.{ .kind = .definition });
+    while (definitions.next()) |definition| {
+        const name = definition.identity.name orelse continue;
+        const language = definition.identity.language orelse continue;
+        const slot = try defined.getOrPut(gpa, name);
+        if (!slot.found_existing) slot.value_ptr.* = .{ false, false, false };
+        slot.value_ptr.*[@intFromEnum(language)] = true;
+    }
 
     for (snapshot.assertions) |assertion| {
         if (assertion.resolution.category() != .unresolved) continue;
@@ -216,6 +237,11 @@ pub fn main(init: std.process.Init) !void {
         const shape = shapeOf(language, designator.name);
         counts[@intFromEnum(language)][@intFromEnum(relationship.kind)][@intFromEnum(shape)] += 1;
         if (designator.qualifier != null) qualified[@intFromEnum(language)][@intFromEnum(relationship.kind)] += 1;
+        if (defined.get(designator.name)) |carriers| {
+            if (carriers[@intFromEnum(language)]) {
+                reachable[@intFromEnum(language)][@intFromEnum(relationship.kind)] += 1;
+            }
+        }
         if (designator.name.len == 0) nameless[@intFromEnum(language)][@intFromEnum(relationship.kind)] += 1;
     }
 
@@ -232,7 +258,7 @@ pub fn main(init: std.process.Init) !void {
     try out.print("diagnostics  {d}\n\n", .{snapshot.diagnostics.len});
 
     try out.print("Unresolved claims with a designator target: {d}\n\n", .{designator_claims});
-    try out.print("{s:<9} {s:<12} {s:>12} {s:>16} {s:>12} {s:>14} {s:>9}\n", .{
+    try out.print("{s:<9} {s:<12} {s:>12} {s:>16} {s:>12} {s:>14} {s:>9} {s:>10}\n", .{
         "language",
         "kind",
         "simple_name",
@@ -240,6 +266,7 @@ pub fn main(init: std.process.Init) !void {
         "expression",
         "with_qualifier",
         "nameless",
+        "reachable",
     });
     for (languages) |language| {
         for (kinds) |kind| {
@@ -247,7 +274,7 @@ pub fn main(init: std.process.Init) !void {
             var total: usize = 0;
             for (row) |count| total += count;
             if (total == 0) continue;
-            try out.print("{s:<9} {s:<12} {d:>12} {d:>16} {d:>12} {d:>14} {d:>9}\n", .{
+            try out.print("{s:<9} {s:<12} {d:>12} {d:>16} {d:>12} {d:>14} {d:>9} {d:>10}\n", .{
                 language.tag(),
                 @tagName(kind),
                 row[@intFromEnum(Shape.simple_name)],
@@ -255,6 +282,7 @@ pub fn main(init: std.process.Init) !void {
                 row[@intFromEnum(Shape.expression)],
                 qualified[@intFromEnum(language)][@intFromEnum(kind)],
                 nameless[@intFromEnum(language)][@intFromEnum(kind)],
+                reachable[@intFromEnum(language)][@intFromEnum(kind)],
             });
         }
     }
