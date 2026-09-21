@@ -83,8 +83,9 @@ assumption is checked first and recorded.
 
 ## Scope
 
-- Make every unresolved relationship target a **name**, in every frontend,
-  with the written form kept as evidence.
+- Make every unresolved relationship target a **structured name** — the
+  identifier plus the qualifier the source wrote — in every frontend, with any
+  expression text kept as evidence.
 - Record that decision as an ADR.
 - Prove the designator-anchored query inspects only its own bucket.
 - Add an `unresolved_mentions` section to `semidx_references`, with its own
@@ -113,8 +114,9 @@ identity. Do not touch dependency invalidation rules.
 Do not add persistence, watching, HTTP, a daemon, or a release. No product
 version bump in this plan.
 
-Do not return source text by default. The written form of a mention is evidence
-text and stays behind `--allow-evidence-text`.
+Do not return source text by default. A qualifier is a name and is rendered; an
+expression the source wrote around the name is evidence text and stays behind
+`--allow-evidence-text`.
 
 ## Sources Of Truth
 
@@ -135,12 +137,17 @@ text and stays behind `--allow-evidence-text`.
 **Drift control at readiness.** The owners above were checked and are aligned
 with this plan as written: no core kind is added, no contract is published,
 `semantic_contract_version` stays `null`, and no language coverage claim
-changes. Two documents will contradict the result once it lands and are
-therefore closure targets, not readiness blockers:
+changes. The designator gains structure while there is still no persistence and
+no published contract, which is the only window in which that costs nothing; a
+field that gains structure after a contract exists is a breaking change instead.
+Three documents will contradict the result once it lands and are therefore
+closure targets, not readiness blockers:
 [docs/mcp/local_preview.md](../mcp/local_preview.md), which currently describes
-a designator as "callee names as written", and
+a designator as "callee names as written",
 [GLOSSARY.md](../../GLOSSARY.md), which does not yet own the term
-*unresolved mention*.
+*unresolved mention*, and
+[docs/spec/capability_matrix.md](../spec/capability_matrix.md), whose
+source-text row describes what producers record as evidence today.
 
 ## Current Evidence
 
@@ -192,20 +199,32 @@ attached. The cost is one field's meaning and one result section.
 
 These are decisions, not open questions. An executing agent applies them.
 
-**D1 — A designator is a name.** Every frontend stores, as the designator, the
-identifier the source wrote for the thing it could not resolve:
+**D1 — A designator is a structured name, not a run of source text.** For the
+thing it could not resolve, a frontend emits the identifier that names it and,
+where the source wrote a name in front of that identifier, the qualifier it
+wrote:
 
 | Frontend | Today | After |
 | --- | --- | --- |
-| Java invocation | full invocation text for a qualified call | the invocation's `name` field, for every call |
+| Java invocation | full invocation text for a qualified call | `name` = the invocation's `name` field; `qualifier` = the class of a class-qualified static call, absent when the receiver is an expression |
 | Java type reference | the type text as written | unchanged in this plan (see D2) |
-| Zig call | the callee text (`std.debug.print`) | the last identifier of the callee path (`print`) |
-| Clojure symbol | the symbol text (`str/join`) | the name segment (`join`) |
+| Zig call | the callee text (`std.debug.print`) | `name` = `print`; `qualifier` = `std.debug` for an import-alias path, absent for a call on a value (`self.bucket` → `bucket`) |
+| Clojure symbol | the symbol text (`str/join`) | `name` = `join`; `qualifier` = `str` |
 
-The written form is not lost: it stays in `SourceEvidence.text`, which every one
-of these relationships already carries
-([model.zig:68-73](../../src/core/model.zig#L68-L73)), together with the range
-that locates it.
+The frontends apply one rule, not three: record a qualifier only where the
+frontend knows the prefix names a scope — an import-alias path, a namespace
+alias, a type — and never where the prefix is a value expression. Only a
+frontend can tell those apart, which is why this is Boundary 1's decision and
+not the index's or the tool's.
+
+`name` is the match key: the index buckets on it and D5 compares it. `qualifier`
+is a name the source wrote, not a fragment of source, so it renders like every
+other name rather than behind the evidence-text opt-in.
+
+A prefix that is an arbitrary expression — `getThing(secret).bar()` — is never a
+qualifier. It stays where source text belongs: `SourceEvidence.text` under
+`--allow-evidence-text`, with the range that locates it
+([model.zig:68-73](../../src/core/model.zig#L68-L73)).
 
 **D2 — Java type references are out of D1's rewrite.** A type reference's
 designator is already a name in the dominant case; the exceptions are generic
@@ -213,25 +232,28 @@ and qualified type syntax. Normalizing those is a separate decision with its own
 evidence, and mixing it in would make Stage 1's before/after unreadable. Record
 what Stage 0 measures about them and leave them as they are.
 
-**D3 — Java is a model correction; Zig and Clojure settle what the model leaves
-open.** `model.Target.designator` is defined as "a name read from source"
-([model.zig:135-137](../../src/core/model.zig#L135-L137)). Java stores
+**D3 — A model correction in all three frontends, with no field left for the
+query to settle.** `model.Target.designator` is defined as "a name read from
+source" ([model.zig:135-137](../../src/core/model.zig#L135-L137)). Java stores
 `node.text(source)` for a qualified invocation, so `foo.bar(a, b)` — an
-expression, not a name — sits in a field that promises a name. D1 corrects that,
-and would be correct with no consumer in this repository.
+expression, not a name — sits in a field that promises a name. Zig and Clojure
+store qualified *names*, which the field does not say how to hold.
 
-`std.debug.print` and `str/join` are qualified *names*. The model does not say
-which part of a qualified name the designator holds, and D1 settles that silence
-toward the last segment because that is the form D5's byte equality can anchor
-against a definition's name. The direction is chosen with the query in view, and
-ADR 010 states it that way rather than claiming the tool played no part.
+D1 answers both without discarding anything: a qualified name is recorded as a
+qualified name, in the parts the frontend already knows. Because nothing is
+thrown away, no part of D1 is decided by what the anchor query can compare — the
+query reads one field and has no say in what the other holds.
 
-§7 is satisfied, for a narrower reason than "the consumer is irrelevant": the
-frontends keep deciding what a designator says (Boundary 1), the written form is
-preserved rather than discarded, and no semantic claim draws authority from the
-tool. A consumer settling an under-determined field is not a consumer defining
-the model — but that is the clause this plan is judged under, so ADR 010 answers
-§11.7 in these terms and not by assertion.
+The rejected alternative is worth naming, because it is the obvious one: store
+only the last segment and keep the written form in evidence text. That version
+would have let a consumer settle an under-determined field, would have hidden
+language-specific naming behind an opt-in flag, and would have made ADR 010
+argue its way past §6 and §7 instead of satisfying them. It is also irreversible
+— a segment cannot be re-qualified later. It is not the version being executed.
+
+§7 therefore holds on the plain reading: the frontends decide what a designator
+says (Boundary 1), the core stores and indexes the fields it is given
+(Boundary 2), and no semantic claim draws its authority from the tool.
 
 **D4 — A mention is rendered, never asserted.** `unresolved_mentions` items are
 assertions read from the snapshot, each keeping its `resolution` category,
@@ -253,8 +275,8 @@ every other list. `mention_limit` defaults to 50 (max 500), declared in
 `src/mcp/tools.zig` so the advertised schema and the validator derive from it.
 
 **D7 — `detail` governs mentions too.** `compact` gives the caller entity by
-id with its name, role and location, the designator, the resolution category
-with its explanation, and freshness. `full` adds producer version, revision,
+id with its name, role and location, the designator with its qualifier where one
+was recorded, the resolution category with its explanation, and freshness. `full` adds producer version, revision,
 and the full entity rendering, consistent with every other list.
 
 **D8 — The walk is bucket-bounded and honest about it.** A mention query
@@ -267,12 +289,33 @@ a follow-up; do not invent an approximate count.
 section is present and empty. An absent section would be read as "not
 supported".
 
+**D10 — Evidence text is fed the written form explicitly.** Today `evidence.text`
+*is* the designator: all three frontends hand one string to both
+([java.zig:1284](../../src/frontends/java.zig#L1284),
+[zig.zig:814](../../src/frontends/zig.zig#L814),
+[clojure.zig:456](../../src/frontends/clojure.zig#L456)), and `evidenceOf` only
+attaches a range to whatever it is given. Changing what the designator holds
+therefore rewrites the evidence unless every call site is changed to pass the
+written text. Stage 1 changes both and proves they differ wherever the source
+wrote more than a bare name.
+
+**D11 — This closes a consent gap rather than opening one.** A designator renders
+unconditionally ([tools.zig:1073-1075](../../src/mcp/tools.zig#L1073-L1075))
+while evidence text is gated ([tools.zig:907](../../src/mcp/tools.zig#L907)), and
+today a Java designator is the whole invocation, receiver and arguments included.
+Expression text already leaves by default, against that module's own header claim
+that `SourceEvidence.text` is the only source-text field a snapshot carries
+([tools.zig:10-13](../../src/mcp/tools.zig#L10-L13)). After D1 the default output
+carries names and qualifiers only; Stage 5 corrects the documents that state the
+boundary.
+
 ## Architecture Boundaries
 
 1. **Frontends** own what a designator says, because only they know the
    language's naming. They do not know about the index or the tool.
-2. **Core graph** indexes and returns the string it was given. It never parses,
-   splits, or normalizes a designator.
+2. **Core graph** indexes and returns the fields it was given. It buckets on
+   `designator.name` because a frontend supplied that field; it never parses,
+   splits, or normalizes a designator itself.
 3. **MCP preview** anchors, bounds, and renders. It never decides what matches;
    byte equality and the language check are the whole rule.
 4. **Tests and gates** prove the designator contract per language, the bucket
@@ -317,21 +360,26 @@ Done when:
 
 Verification: `./scripts/check-zig-version.sh`, `zig build test-core`.
 
-### Stage 1: A Designator Is A Name
+### Stage 1: A Designator Is A Structured Name
 
-Purpose: make the graph store what its own model says it stores.
+Purpose: make the graph store what its own model says it stores, in the parts
+the frontends already know.
 
 Likely files:
 
+- `src/core/model.zig`, `src/core/contract.zig`,
+  `src/core/relationship_index.zig`, `src/mcp/tools.zig`
 - `src/frontends/java.zig`, `src/frontends/zig.zig`,
   `src/frontends/clojure.zig`
-- `docs/adr/010_designator_is_a_name.md`
+- `docs/adr/010_designator_is_a_structured_name.md`
 - fixtures and tests under `tests/`
 
 Required behavior:
 
-- Apply D1 per frontend. The written form moves to `evidence.text`; the range
-  is unchanged.
+- Give the designator its two fields in `model.zig` and `contract.zig`, key
+  `DesignatorAdjacency` on `name`, and render both in `tools.zig`.
+- Apply D1 per frontend, and D10 with it: the written form is passed to
+  `evidenceOf` explicitly. Ranges are unchanged.
 - No resolution, explanation, producer, freshness, or dependency changes. A
   claim that was unresolved stays unresolved for the same stated reason.
 - Write ADR 010 recording D1, D2, and D3, answering every §11 question, and
@@ -348,23 +396,29 @@ Branch handling:
 
 - If a callee path's last identifier is empty or absent (a computed callee, a
   parse error region), keep the claim unresolved and skip the mention key
-  rather than storing a synthetic name.
+  rather than storing a synthetic name. An absent qualifier is the normal case
+  and is recorded as absent, never as an empty string.
 - If a test asserts a designator that was an expression, it is the assertion
   that moves, and the progress log records each one. If a test asserts a
   *resolution* that moves, that is a defect in this stage.
 
 Done when:
 
-- A fixture test per language proves the designator is the name and the
-  evidence text is the written form: Java `foo.bar(a, b)` → `bar`, Zig
-  `std.debug.print(...)` → `print`, Clojure `str/join` → `join`.
+- A fixture test per language proves both fields and the evidence: Java
+  `foo.bar(a, b)` → name `bar`, no qualifier, evidence text `foo.bar(a, b)`;
+  Zig `std.debug.print(...)` → name `print`, qualifier `std.debug`; Clojure
+  `str/join` → name `join`, qualifier `str`.
+- A test proves the designator and the evidence text are no longer the same
+  string wherever the source wrote more than a bare name.
+- A test proves a Java instance receiver records no qualifier, and that its
+  expression text reaches a result only under `--allow-evidence-text`.
 - A test proves two different call sites naming the same method share one
   designator key.
 - Fact counts over the fixture corpus are unchanged, proven by a test, not by
   eye.
 - ADR 010 is committed and linked from the commit message.
 
-Verification: `zig build test-core`, `zig build test`,
+Verification: `zig build test-core`, `zig build test`, `zig build test-mcp`,
 `zig fmt --check build.zig src tests`.
 
 ### Stage 2: The Bucket Is The Whole Walk
@@ -377,8 +431,8 @@ Likely files:
 
 Required behavior:
 
-- A designator-anchored query inspects exactly the positions in its bucket.
-  Existing post-filters stay post-filters.
+- A designator-anchored query inspects exactly the positions in its bucket,
+  keyed by `designator.name`. Existing post-filters stay post-filters.
 - No signature, ordering, or result change. If ordering moves, the index build
   walked out of assertion order.
 
@@ -407,8 +461,8 @@ Required behavior:
   advertised schema and the validator derive from it.
 - For each shown target, run a third pass filtered by
   `.{ .designator = <target name>, .reference_query = true, .freshness = … }`,
-  admitting an assertion only when D5 holds and the existing `resolution`
-  argument admits it.
+  matching on `designator.name`, and admitting an assertion only when D5 holds
+  and the existing `resolution` argument admits it.
 - Emit `unresolved_mentions`, `unresolved_mentions_total`, and
   `unresolved_mentions_truncated` per D6, rendered per D7, present-and-empty
   per D9.
@@ -436,6 +490,8 @@ Done when:
   producer, and freshness, and names no target entity.
 - An MCP test proves `resolution=fact` returns an empty mention section, and
   that a cross-language same-name designator is not admitted.
+- An MCP test proves a mention renders the recorded qualifier with the
+  evidence-text opt-in off, and renders no expression text in that mode.
 - Budget, limit, truncation, and hint behavior are covered by tests in the
   Plan 009 style.
 
@@ -482,19 +538,24 @@ Likely files:
 
 Required behavior:
 
-- `docs/mcp/local_preview.md`: a designator is the name the producer could not
-  resolve; the written form is evidence text under `--allow-evidence-text`;
+- `docs/mcp/local_preview.md`: a designator is the structured name the producer
+  could not resolve — identifier plus recorded qualifier — and expression text
+  is evidence text under `--allow-evidence-text`;
   `unresolved_mentions` is documented with its limit, budget, exactness, and
   language scoping, and with the sentence that a mention is a name match over
   unresolved claims and not a relationship to the anchor.
 - `GLOSSARY.md` owns *unresolved mention*.
 - `MEMORY.md` states, as current reality and not as history, that designators
-  are names and that `semidx_references` answers with facts plus mentions.
+  are structured names and that `semidx_references` answers with facts plus
+  mentions.
 - `docs/design/001_project_roadmap.md`: refresh Current Position and Near-Term
   Direction, which still name Plan 011 as the next priority although Plans 011
   and 012 are executed.
-- `docs/spec/capability_matrix.md`: update only if a per-language statement
-  becomes inaccurate under D1.
+- `docs/spec/capability_matrix.md`: its source-text row says producers record
+  "a name or callee" as evidence, which D1 makes true where it is not today.
+  Correct it, the `src/mcp/tools.zig` header claim, and
+  [Follow-up 005](../followups/005_mcp_source_derived_consent_boundary.md)
+  together, so the consent boundary is stated as it stands after D11.
 - Follow-up 017 closed or narrowed by Stage 0's baseline; Follow-ups 013 and
   014 left open and explicitly unaffected.
 
@@ -512,8 +573,9 @@ Verification: `./scripts/check-zig-version.sh`,
 | --- | --- | --- | --- | --- | --- |
 | A mention is not a relationship | An agent reads mentions as callers | MCP integration | Separate section, own totals, unresolved category and explanation on every item, no target entity | `resolution=fact` yields an empty section | Stage 3 |
 | No fact moved | Renaming designators changes resolution | Frontend fixtures plus external diff | Fact counts identical over fixtures and the Dubbo clone | A resolution delta fails the stage | Stages 1 and 4 |
-| Written form preserved | The source form is lost with the expression text | Frontend fixture | Evidence text carries the written form with its range | Evidence text missing on a rewritten designator | Stage 1 |
-| Consent boundary intact | Expression text starts leaving by default | MCP test | Default results carry names, not written forms | Written form present without `--allow-evidence-text` | Stage 3 |
+| Written form preserved | The designator rewrite silently rewrites the evidence with it | Frontend fixture | Evidence text is fed the written form explicitly, with its range | Designator and evidence text identical where the source wrote more | Stage 1 |
+| Qualified naming preserved | A qualified name is flattened to its last segment | Frontend fixture | Qualifier recorded as its own field wherever the prefix names a scope | A qualified call whose qualifier is absent or empty | Stage 1 |
+| Consent boundary tightened | Expression text keeps leaving by default through the designator | MCP test | Default results carry names and qualifiers only | Any expression text present without `--allow-evidence-text` | Stages 1 and 3 |
 | Query stays bounded | A hot name scans the assertion array | Core work bound | Inspected work equals bucket size | Absent designator returns empty without a scan | Stage 2 |
 | Exactness of matching | Fuzzy or cross-language matches creep in | MCP test | Byte equality plus anchor language | Same name in another language not admitted | Stage 3 |
 | Budgets unchanged | The new section breaks pagination or budgets | MCP test | Existing cursor, limit, and budget behavior unchanged | Section cut yields a narrowing hint | Stage 3 |
@@ -522,8 +584,11 @@ Verification: `./scripts/check-zig-version.sh`,
 
 ## Definition Of Done
 
-- Every unresolved relationship target is a name, per D1, in all three
-  frontends, with the written form in evidence.
+- Every unresolved relationship target is a structured name per D1, in all
+  three frontends, with a qualifier wherever the source wrote one and the
+  written form in evidence per D10.
+- Default results carry no expression text, and the documents that state the
+  consent boundary say so per D11.
 - ADR 010 records the decision and answers the §11 test.
 - `semidx_references` returns `unresolved_mentions` bounded per D6, rendered
   per D7, present-and-empty per D9, and exact per D5.
