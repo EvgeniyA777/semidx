@@ -24,3 +24,4 @@ ratified constitution.
 - [007: Keep The MCP Text Fallback And Add A Diagnostic Probe Flag](007_text_fallback_migration_flag.md)
 - [008: Bound Java Same-Package Resolution To A Derived Source Root](008_java_visibility_boundaries.md)
 - [009: Allow Java Static Calls Through A Class-Name Receiver](009_java_static_calls.md)
+- [010: Record A Designator As A Structured Name](010_designator_is_a_structured_name.md)

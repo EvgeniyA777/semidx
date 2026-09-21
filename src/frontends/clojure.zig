@@ -452,7 +452,7 @@ fn emitDesignation(
     try builder.addRelationship(.{
         .kind = kind,
         .source = .{ .entity = def.index },
-        .target = if (resolved.index) |index| .{ .local = index } else .{ .designator = name },
+        .target = if (resolved.index) |index| .{ .local = index } else .{ .designator = designatorOf(name) },
         .evidence = evidenceOf(builder, node, name),
         .resolution = if (resolved.index != null)
             .{ .fact = .{
@@ -462,6 +462,22 @@ fn emitDesignation(
             .{ .unresolved = .{ .missing = .target_entity, .explanation = resolved.unresolved } },
     });
     return resolved.index != null;
+}
+
+/// The parts of a symbol this frontend could not resolve.
+///
+/// A Clojure symbol writes its scope in front of a `/`, and that scope is a
+/// namespace or a namespace alias — never a value expression — so `str/join` is
+/// recorded as the name `join` qualified by `str`. The slash is taken as a
+/// separator only when names stand on both sides of it, which leaves the symbol
+/// `/` itself, and anything shaped like it, a name.
+///
+/// No substring of a name is re-read anywhere else: this is the producer saying
+/// what it read, once ([ADR 010](../../docs/adr/010_designator_is_a_structured_name.md)).
+fn designatorOf(symbol: []const u8) model.Designator {
+    const cut = std.mem.indexOfScalar(u8, symbol, '/') orelse return .{ .name = symbol };
+    if (cut == 0 or cut + 1 == symbol.len) return .{ .name = symbol };
+    return .{ .name = symbol[cut + 1 ..], .qualifier = symbol[0..cut] };
 }
 
 const SymbolDecision = struct {

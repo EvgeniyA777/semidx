@@ -1027,7 +1027,10 @@ pub const Graph = struct {
                 .source = relationship.source,
                 .target = switch (relationship.target) {
                     .entity => relationship.target,
-                    .designator => |name| .{ .designator = try self.pool.intern(name) },
+                    .designator => |designator| .{ .designator = .{
+                        .name = try self.pool.intern(designator.name),
+                        .qualifier = try self.pool.internOptional(designator.qualifier),
+                    } },
                 },
             } },
             .entity_exists, .identity_correspondence => value,
@@ -1396,6 +1399,11 @@ pub const Snapshot = struct {
         /// occurrence recorded as a call is counted once and only once.
         reference_query: bool = false,
         resolution: ?model.ResolutionCategory = null,
+        /// A designator's `name`, which is what the designator index is keyed
+        /// on. A qualifier narrows nothing here: two claims naming the same
+        /// method through different scopes are both claims about that name, and
+        /// which of them a consumer wants is a question the consumer answers
+        /// from what each claim carries.
         designator: ?[]const u8 = null,
         /// `null` matches regardless of freshness. The default excludes claims
         /// recorded against contents the unit no longer has.
@@ -1447,7 +1455,7 @@ pub const Snapshot = struct {
                 }
                 if (self.filter.designator) |designator| {
                     switch (rel.target) {
-                        .designator => |value| if (!std.mem.eql(u8, value, designator)) continue,
+                        .designator => |value| if (!std.mem.eql(u8, value.name, designator)) continue,
                         .entity => continue,
                     }
                 }
@@ -1683,7 +1691,7 @@ test "a graph is built and queried without any language frontend" {
         .{ .fact = .{ .method = "same-container name match" } },
     );
     _ = try graph.addRelationship(
-        .{ .kind = .calls, .source = greet, .target = .{ .designator = "println" } },
+        .{ .kind = .calls, .source = greet, .target = .{ .designator = .{ .name = "println" } } },
         frontend,
         .{ .unit = unit, .range = testRange(31, 40), .text = "println()" },
         .{ .unresolved = .{ .missing = .target_entity, .explanation = "not in fixture scope" } },
@@ -1766,7 +1774,7 @@ test "containment cannot point at an unresolved designator" {
     const greet = try addDefinition(&graph, unit, "greet", testRange(0, 5));
 
     try testing.expectError(error.UnresolvedContainment, graph.addRelationship(
-        .{ .kind = .contains, .source = greet, .target = .{ .designator = "somewhere" } },
+        .{ .kind = .contains, .source = greet, .target = .{ .designator = .{ .name = "somewhere" } } },
         frontend,
         .{ .unit = unit, .range = testRange(0, 5), .text = "somewhere" },
         .{ .unresolved = .{ .missing = .container_entity, .explanation = "unknown container" } },
@@ -1794,13 +1802,13 @@ test "an invalid resolution never reaches the graph" {
     const greet = try addDefinition(&graph, unit, "greet", testRange(0, 5));
 
     try testing.expectError(error.UnresolvedTargetPresentedAsFact, graph.addRelationship(
-        .{ .kind = .calls, .source = greet, .target = .{ .designator = "println" } },
+        .{ .kind = .calls, .source = greet, .target = .{ .designator = .{ .name = "println" } } },
         frontend,
         .{ .unit = unit, .range = testRange(0, 5), .text = "println()" },
         .{ .fact = .{ .method = "guessed" } },
     ));
     try testing.expectError(error.MissingProducerName, graph.addRelationship(
-        .{ .kind = .calls, .source = greet, .target = .{ .designator = "println" } },
+        .{ .kind = .calls, .source = greet, .target = .{ .designator = .{ .name = "println" } } },
         .{ .name = "", .version = "slice-001" },
         .{ .unit = unit, .range = testRange(0, 5), .text = "println()" },
         .{ .unresolved = .{ .missing = .target_entity, .explanation = "not in fixture scope" } },
@@ -1815,7 +1823,7 @@ test "an unresolved designator is owned by the graph, not by its producer" {
 
     var producer_bytes = "println".*;
     _ = try graph.addRelationship(
-        .{ .kind = .calls, .source = greet, .target = .{ .designator = &producer_bytes } },
+        .{ .kind = .calls, .source = greet, .target = .{ .designator = .{ .name = &producer_bytes } } },
         frontend,
         .{ .unit = unit, .range = testRange(0, 5), .text = "println()" },
         .{ .unresolved = .{ .missing = .target_entity, .explanation = "not in fixture scope" } },

@@ -253,7 +253,7 @@ pub fn build(gpa: Allocator, spec: Spec) !Synthetic {
                 .{
                     .kind = .references,
                     .source = definitions[index * per_unit],
-                    .target = .{ .designator = designator },
+                    .target = .{ .designator = .{ .name = designator } },
                 },
                 producer,
                 .{ .unit = units[index], .range = range(0, 1), .text = designator },
@@ -567,7 +567,7 @@ fn oracle(
         }
         if (filter.designator) |designator| {
             switch (relationship.target) {
-                .designator => |value| if (!std.mem.eql(u8, value, designator)) continue,
+                .designator => |value| if (!std.mem.eql(u8, value.name, designator)) continue,
                 .entity => continue,
             }
         }
@@ -791,7 +791,7 @@ fn expectedIndexBytes(snapshot: *const Snapshot) usize {
             },
             .designator => |value| {
                 designator_targets += 1;
-                designators.put(testing.allocator, value, {}) catch unreachable;
+                designators.put(testing.allocator, value.name, {}) catch unreachable;
             },
         }
     }

@@ -799,8 +799,10 @@ fn emitCall(
     call: ts.Node,
     callee: ts.Node,
 ) !void {
-    const designator = try builder.dupe(callee.text(scope.source));
-    if (designator.len == 0) return;
+    // The callee as the source wrote it: the evidence for this claim, and the
+    // thing the designator is read out of rather than the designator itself.
+    const written = try builder.dupe(callee.text(scope.source));
+    if (written.len == 0) return;
 
     const decision = try decideCallee(builder, scope, function, locals, callee);
     try builder.addRelationship(.{
@@ -809,9 +811,9 @@ fn emitCall(
         .target = switch (decision) {
             .function => |index| .{ .local = index },
             .external => |target| .{ .external = target },
-            .unresolved => .{ .designator = designator },
+            .unresolved => .{ .designator = try calleeDesignator(builder, scope, function, locals, callee) },
         },
-        .evidence = evidenceOf(builder, call, designator),
+        .evidence = evidenceOf(builder, call, written),
         .resolution = switch (decision) {
             .function => .{ .fact = .{
                 .method = "bare callee naming the one top-level declaration of that name in the analyzed source unit, a function",
@@ -825,6 +827,80 @@ fn emitCall(
             } },
         },
     });
+}
+
+/// The name an unresolved callee designates, and the scope the source wrote in
+/// front of it.
+///
+/// A qualifier is recorded only for a path rooted in a top-level `@import`
+/// alias, because that is the one prefix this frontend knows to name a scope. A
+/// call through a value — `self.bucket()` — keeps the member name and records
+/// no qualifier, because `self` is a value and naming it a scope would be a
+/// claim this frontend cannot make. A computed callee reaches no identifier at
+/// all and records an empty name: nothing can find it by name, which is the
+/// answer, rather than the call's text standing in for one.
+fn calleeDesignator(
+    builder: *contract.BatchBuilder,
+    scope: CallScope,
+    function: FunctionBody,
+    locals: []const []const u8,
+    callee: ts.Node,
+) !model.Designator {
+    const kind = callee.kind();
+    if (std.mem.eql(u8, kind, "identifier")) {
+        return .{ .name = try builder.dupe(callee.text(scope.source)) };
+    }
+    if (std.mem.eql(u8, kind, "field_expression")) {
+        if (callee.childByFieldName("member")) |member| {
+            if (std.mem.eql(u8, member.kind(), "identifier")) {
+                const name = try builder.dupe(member.text(scope.source));
+                const prefix = callee.childByFieldName("object") orelse return .{ .name = name };
+                if (!namesAnImportedScope(scope, function, locals, prefix)) return .{ .name = name };
+                return .{ .name = name, .qualifier = try builder.dupe(prefix.text(scope.source)) };
+            }
+        }
+    }
+    return .{ .name = "" };
+}
+
+/// Whether a callee's prefix is a path of names rooted in a top-level `@import`
+/// alias that nothing in scope may give another meaning.
+///
+/// The conditions are the ones `decideQualified` asks before it resolves
+/// through an alias, for the same reason: a local, a container member, or a
+/// `usingnamespace` can make the root name mean something that is not the
+/// import.
+fn namesAnImportedScope(
+    scope: CallScope,
+    function: FunctionBody,
+    locals: []const []const u8,
+    prefix: ts.Node,
+) bool {
+    const root = pathRoot(scope.source, prefix) orelse return false;
+    if (countOf(locals, root) != 0) return false;
+    if (function.container) |container| {
+        if (container.using_namespace) return false;
+        if (countOf(container.names, root) != 0) return false;
+    }
+    if (scope.using_namespace) return false;
+    for (scope.aliases) |alias| {
+        if (std.mem.eql(u8, alias.declaration.alias, root)) return true;
+    }
+    return false;
+}
+
+/// The identifier `a`, given `a`, `a.b`, or `a.b.c`. Null for anything else,
+/// including a path rooted in a call, an index, or a parenthesized expression.
+fn pathRoot(source: []const u8, node: ts.Node) ?[]const u8 {
+    var current = node;
+    while (true) {
+        const kind = current.kind();
+        if (std.mem.eql(u8, kind, "identifier")) return current.text(source);
+        if (!std.mem.eql(u8, kind, "field_expression")) return null;
+        const member = current.childByFieldName("member") orelse return null;
+        if (!std.mem.eql(u8, member.kind(), "identifier")) return null;
+        current = current.childByFieldName("object") orelse return null;
+    }
 }
 
 const CallDecision = union(enum) {

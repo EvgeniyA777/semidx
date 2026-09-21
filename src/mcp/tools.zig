@@ -1072,7 +1072,17 @@ fn writeRelationship(ctx: *Context, s: *Stringify, assertion: model.Assertion, d
         },
         .designator => |designator| {
             try s.objectField("designator");
-            try protocol.writeString(s, designator);
+            try s.beginObject();
+            try s.objectField("name");
+            try protocol.writeString(s, designator.name);
+            // Absent is the normal case and is rendered by leaving the field
+            // out: a qualifier the producer did not record is not a null it
+            // did.
+            if (designator.qualifier) |qualifier| {
+                try s.objectField("qualifier");
+                try protocol.writeString(s, qualifier);
+            }
+            try s.endObject();
         },
     }
     try s.endObject();

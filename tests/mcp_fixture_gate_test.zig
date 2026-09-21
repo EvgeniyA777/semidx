@@ -142,7 +142,7 @@ test "habit loop gate: fixture profile degrades honestly over a controlled root"
     for (focus.get("outgoing").?.array.items) |relationship| {
         const target = relationship.object.get("target").?.object;
         if (target.get("designator")) |designator| {
-            if (std.mem.eql(u8, "report", designator.string)) {
+            if (std.mem.eql(u8, "report", designator.object.get("name").?.string)) {
                 report_unresolved = std.mem.eql(u8, "unresolved", category(relationship)) and
                     target.get("entity") == null and
                     relationship.object.get("resolution").?.object.get("missing") != null;

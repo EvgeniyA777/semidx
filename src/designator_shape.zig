@@ -21,6 +21,13 @@
 //!   * the designator index: how many distinct keys it holds, how many
 //!     positions they bucket, what it costs, and its largest buckets.
 //!
+//! Since [ADR 010](../docs/adr/010_designator_is_a_structured_name.md) a
+//! designator is a name and an optional qualifier, so the shape below is the
+//! shape of the **name** it holds, and the qualifier is counted separately. A
+//! run of the same report before that change measured the one string a
+//! designator was then, which is what makes the two comparable: the column that
+//! held expression text is the column that must empty.
+//!
 //! A designator's shape is decided by its own bytes, in three categories:
 //!
 //!   * `simple_name` — every byte is a name byte in the source entity's
@@ -183,6 +190,10 @@ pub fn main(init: std.process.Init) !void {
     // [language][kind][shape], plus one row for claims whose source entity the
     // snapshot no longer holds, which are counted apart rather than guessed at.
     var counts = [_][4][3]usize{[_][3]usize{[_]usize{0} ** 3} ** 4} ** 3;
+    // [language][kind]: claims carrying a qualifier, and claims whose producer
+    // could read no name at all.
+    var qualified = [_][4]usize{[_]usize{0} ** 4} ** 3;
+    var nameless = [_][4]usize{[_]usize{0} ** 4} ** 3;
     var sourceless: usize = 0;
     var designator_claims: usize = 0;
 
@@ -202,8 +213,10 @@ pub fn main(init: std.process.Init) !void {
             sourceless += 1;
             continue;
         };
-        const shape = shapeOf(language, designator);
+        const shape = shapeOf(language, designator.name);
         counts[@intFromEnum(language)][@intFromEnum(relationship.kind)][@intFromEnum(shape)] += 1;
+        if (designator.qualifier != null) qualified[@intFromEnum(language)][@intFromEnum(relationship.kind)] += 1;
+        if (designator.name.len == 0) nameless[@intFromEnum(language)][@intFromEnum(relationship.kind)] += 1;
     }
 
     try out.print("root:        {s}\n", .{options.root});
@@ -219,12 +232,14 @@ pub fn main(init: std.process.Init) !void {
     try out.print("diagnostics  {d}\n\n", .{snapshot.diagnostics.len});
 
     try out.print("Unresolved claims with a designator target: {d}\n\n", .{designator_claims});
-    try out.print("{s:<9} {s:<12} {s:>12} {s:>16} {s:>12}\n", .{
+    try out.print("{s:<9} {s:<12} {s:>12} {s:>16} {s:>12} {s:>14} {s:>9}\n", .{
         "language",
         "kind",
         "simple_name",
         "qualified_name",
         "expression",
+        "with_qualifier",
+        "nameless",
     });
     for (languages) |language| {
         for (kinds) |kind| {
@@ -232,12 +247,14 @@ pub fn main(init: std.process.Init) !void {
             var total: usize = 0;
             for (row) |count| total += count;
             if (total == 0) continue;
-            try out.print("{s:<9} {s:<12} {d:>12} {d:>16} {d:>12}\n", .{
+            try out.print("{s:<9} {s:<12} {d:>12} {d:>16} {d:>12} {d:>14} {d:>9}\n", .{
                 language.tag(),
                 @tagName(kind),
                 row[@intFromEnum(Shape.simple_name)],
                 row[@intFromEnum(Shape.qualified_name)],
                 row[@intFromEnum(Shape.expression)],
+                qualified[@intFromEnum(language)][@intFromEnum(kind)],
+                nameless[@intFromEnum(language)][@intFromEnum(kind)],
             });
         }
     }

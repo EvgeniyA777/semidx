@@ -68,8 +68,9 @@ pub const DraftTarget = union(enum) {
     local: u32,
     /// Resolved to a definition established outside the analyzed unit.
     external: ExternalTarget,
-    /// A name read from source that the frontend could not resolve.
-    designator: []const u8,
+    /// A name read from source that the frontend could not resolve, in the
+    /// parts the frontend read it in.
+    designator: model.Designator,
 };
 
 pub const DraftEntity = struct {

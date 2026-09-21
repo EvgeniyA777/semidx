@@ -358,7 +358,7 @@ fn syntheticBatch(
         .target = if (report_index) |index|
             .{ .local = index }
         else
-            .{ .designator = try builder.dupe("report") },
+            .{ .designator = .{ .name = try builder.dupe("report") } },
         .evidence = .{
             .unit = builder.unit,
             .range = range(500, 510),
@@ -402,7 +402,7 @@ test "an unresolved designator outlives the batch that produced it" {
         // one is visible rather than left to whatever reuses the memory.
         for (builder.relationships.items) |relationship| {
             switch (relationship.target) {
-                .designator => |name| @memset(@constCast(name), 'x'),
+                .designator => |designator| @memset(@constCast(designator.name), 'x'),
                 .local, .external => {},
             }
         }

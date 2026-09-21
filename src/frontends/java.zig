@@ -1065,9 +1065,15 @@ fn isSimpleTypeName(kind: []const u8) bool {
     return std.mem.eql(u8, kind, "type_identifier") or std.mem.eql(u8, kind, "identifier");
 }
 
+/// A type reference keeps the name the source wrote, unsplit.
+///
+/// [ADR 010](../../docs/adr/010_designator_is_a_structured_name.md) leaves type
+/// syntax out of its rewrite: a type name is already a name in the dominant
+/// case, and generic and qualified type syntax is a separate decision with its
+/// own evidence.
 fn unresolvedType(name: []const u8, explanation: []const u8) TypeResolution {
     return .{
-        .target = .{ .designator = name },
+        .target = .{ .designator = .{ .name = name } },
         .resolution = .{ .unresolved = .{ .missing = .target_entity, .explanation = explanation } },
     };
 }
@@ -1263,10 +1269,12 @@ fn emitInvocation(
     const name_node = node.childByFieldName("name") orelse return;
     const name = try builder.dupe(name_node.text(source));
 
-    // A qualified invocation keeps the text that was read as its designator,
-    // whatever its receiver turns out to be.
+    // The invocation names a method, and the name it names it by is the `name`
+    // field — whatever the receiver turns out to be. What the source wrote
+    // around that name is the evidence, which is why the written text is read
+    // here and handed to `evidenceOf` rather than being the designator.
+    const written = try builder.dupe(node.text(source));
     const receiver = node.childByFieldName("object");
-    const designator = if (receiver != null) try builder.dupe(node.text(source)) else name;
     const target = if (receiver) |object|
         try qualifiedTarget(builder, source, scope, object, name, nested)
     else
@@ -1280,8 +1288,8 @@ fn emitInvocation(
         else if (target.external) |external|
             .{ .external = external }
         else
-            .{ .designator = designator },
-        .evidence = evidenceOf(builder, node, designator),
+            .{ .designator = .{ .name = name, .qualifier = target.qualifier } },
+        .evidence = evidenceOf(builder, node, written),
         .resolution = target.resolution,
     });
     if (target.external) |external| try declareProvider(
@@ -1297,6 +1305,12 @@ const InvocationTarget = struct {
     /// Set when the target is a definition another unit established, which the
     /// batch must also declare a dependency on.
     external: ?contract.ExternalTarget = null,
+    /// The receiver name, set only where this frontend established that the
+    /// receiver names a class and then declined to pick a method of it. A
+    /// receiver it reads as a value, or does not read at all, leaves this
+    /// absent: a qualifier is a scope the source named, never an expression it
+    /// happened to write ([ADR 010](../../docs/adr/010_designator_is_a_structured_name.md)).
+    qualifier: ?[]const u8 = null,
     resolution: model.Resolution,
 };
 
@@ -1388,7 +1402,10 @@ fn qualifiedTarget(
             "could give the receiver name a value this working copy cannot see");
     }
 
-    const resolved = try resolveType(builder, source, receiver, try builder.dupe(name), .{
+    // Duped once: from here on the name may become a designator's qualifier,
+    // which outlives the source buffer the node points into.
+    const class_name = try builder.dupe(name);
+    const resolved = try resolveType(builder, source, receiver, class_name, .{
         .unit = scope.unit,
         .class = scope.class,
         .method = scope.method.node,
@@ -1405,8 +1422,8 @@ fn qualifiedTarget(
     }
 
     return switch (resolved.target) {
-        .local => |index| localStaticTarget(builder, scope, index, name, method),
-        .external => externalStaticTarget(builder, scope, name, method),
+        .local => |index| localStaticTarget(builder, scope, index, class_name, method),
+        .external => externalStaticTarget(builder, scope, class_name, method),
         // `resolveType` answers a fact with a target it established.
         .designator => unreachable,
     };
@@ -1469,14 +1486,14 @@ fn externalStaticTarget(
     // function's rule, and an unreachable decline is the right answer if it
     // ever breaks.
     const members = scope.unit.context.memberLookup(receiver) orelse
-        return unresolvedInvocation(try builder.print(
+        return classQualifiedDecline(receiver, try builder.print(
             "the receiver names class `{s}`, whose current shape this analysis did not read",
             .{receiver},
         ));
     switch (members.supertypes) {
         .none => {},
         .declared => return targetHasSupertypes(builder, receiver),
-        .unknown => return unresolvedInvocation(try builder.print(
+        .unknown => return classQualifiedDecline(receiver, try builder.print(
             "class `{s}` carries no record of whether it declares supertypes, " ++
                 "so a method of this name it may inherit is not ruled out",
             .{receiver},
@@ -1511,7 +1528,7 @@ const static_call_method = "class-qualified invocation of the one `static` metho
     "declared in a class without supertypes";
 
 fn targetHasSupertypes(builder: *contract.BatchBuilder, receiver: []const u8) !InvocationTarget {
-    return unresolvedInvocation(try builder.print(
+    return classQualifiedDecline(receiver, try builder.print(
         "class `{s}` declares supertypes, so a method of this name it may inherit, " ++
             "or hide, could be the target",
         .{receiver},
@@ -1519,14 +1536,14 @@ fn targetHasSupertypes(builder: *contract.BatchBuilder, receiver: []const u8) !I
 }
 
 fn noSuchMethod(builder: *contract.BatchBuilder, receiver: []const u8) !InvocationTarget {
-    return unresolvedInvocation(try builder.print(
+    return classQualifiedDecline(receiver, try builder.print(
         "class `{s}` declares no method of this name",
         .{receiver},
     ));
 }
 
 fn overloaded(builder: *contract.BatchBuilder, receiver: []const u8, count: u32) !InvocationTarget {
-    return unresolvedInvocation(try builder.print(
+    return classQualifiedDecline(receiver, try builder.print(
         "class `{s}` declares {d} methods of this name, and overloads are not resolved",
         .{ receiver, count },
     ));
@@ -1537,7 +1554,7 @@ fn notStatic(
     receiver: []const u8,
     method: []const u8,
 ) !InvocationTarget {
-    return unresolvedInvocation(try builder.print(
+    return classQualifiedDecline(receiver, try builder.print(
         "`{s}.{s}` is not static, so naming it through the class is not a call Java compiles",
         .{ receiver, method },
     ));
@@ -1551,7 +1568,7 @@ fn staticUnrecorded(
     receiver: []const u8,
     method: []const u8,
 ) !InvocationTarget {
-    return unresolvedInvocation(try builder.print(
+    return classQualifiedDecline(receiver, try builder.print(
         "`{s}.{s}` carries no record of whether it is `static`, so a call through the class name is not established",
         .{ receiver, method },
     ));
@@ -1563,7 +1580,7 @@ fn inaccessible(
     method: []const u8,
     access: Access,
 ) !InvocationTarget {
-    return unresolvedInvocation(try builder.print(
+    return classQualifiedDecline(receiver, try builder.print(
         "`{s}.{s}` is {s}, which is outside the access this frontend resolves across classes",
         .{ receiver, method, access.label() },
     ));
@@ -1669,6 +1686,17 @@ fn unresolvedInvocation(explanation: []const u8) InvocationTarget {
     return .{
         .resolution = .{ .unresolved = .{ .missing = .target_entity, .explanation = explanation } },
     };
+}
+
+/// A decline whose receiver this frontend did establish as a class.
+///
+/// Only these carry a qualifier. Every other decline either read the receiver
+/// as a value or never read it as anything, and a name this frontend could not
+/// place is not a scope it may claim the source named.
+fn classQualifiedDecline(class: []const u8, explanation: []const u8) InvocationTarget {
+    var target = unresolvedInvocation(explanation);
+    target.qualifier = class;
+    return target;
 }
 
 fn findClass(classes: []const ClassInfo, name: []const u8) ?u32 {

@@ -14,10 +14,15 @@ Companion log for
 
 ## Current Status
 
-**Stage 0 is complete.** The baseline every later claim is compared against is
-recorded below, taken from a named clone at a named commit with named commands.
-No frontend, core, or MCP behavior changed in this stage; the only code it added
-is one developer-only measurement command that no lane depends on.
+**Stages 0 and 1 are complete.** A designator is now a name and, where the
+source wrote a scope in front of it that the frontend knows to be one, that
+scope as its own field. Nothing resolved, nothing became a fact, and the fixture
+corpus records the same 396 facts it did before, pinned by a test.
+
+The baseline every later claim is compared against is recorded below, taken
+from a named clone at a named commit with named commands. Stage 0 itself changed
+no indexed behavior; the only code it added is one developer-only measurement
+command that no lane depends on.
 
 The plan's Start Rule asks Stage 0 one question before the rest may run: do the
 dominant unresolved families already key on a bare name? **They do not.** Of the
@@ -31,11 +36,115 @@ keys**. The stage order stands and Stage 1 may proceed.
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 0: Reproducible baseline | Completed | Baseline recorded from `apache/dubbo` at `df9c5e1`: 230,859 assertions, 92,637 facts, 138,222 unresolved, of which 118,471 unresolved calls and 19,751 unresolved references. 83.6% of unresolved call designators are expressions, not names. Five named definitions return 0, 93, 23, 8 and 0 incoming relationships against designator buckets of 1,091, 324, 293, 245 and 221. |
-| Stage 1: A designator is a structured name | Not started | — |
+| Stage 1: A designator is a structured name | Completed | `model.Designator` carries `name` and an optional `qualifier`; all three frontends record it and hand the written form to the evidence; the index keys on `name`. Fixture corpus: 134 definitions, 465 assertions, 396 facts, 69 unresolved, 54 diagnostics — identical before and after. Distinct designator keys over that corpus: 20 → 16. [ADR 010](../adr/010_designator_is_a_structured_name.md). |
 | Stage 2: The bucket is the whole walk | Not started | — |
 | Stage 3: `unresolved_mentions` in `semidx_references` | Not started | — |
 | Stage 4: External re-measure | Not started | — |
 | Stage 5: Documentation and closure | Not started | — |
+
+## Stage 1: A Designator Is A Structured Name
+
+[ADR 010](../adr/010_designator_is_a_structured_name.md) records the decision,
+answers all eight §11 questions, and states why
+[ADR 003](../adr/003_reject_name_match_assertions.md) is unaffected.
+
+### What Changed
+
+| Where | Change |
+| --- | --- |
+| `src/core/model.zig` | `Designator` with `name` and optional `qualifier`, an `eql`, and the field documentation that says what each part is and when a name is empty |
+| `src/core/contract.zig` | `DraftTarget.designator` takes the same type, so a frontend hands over parts rather than a string |
+| `src/core/graph.zig` | both parts interned; the relationship filter documents that it matches `designator.name` |
+| `src/core/relationship_index.zig` | `DesignatorAdjacency` keys on `designator.name` through one `designatorKey`, which skips an empty name rather than bucketing every nameless claim under one key |
+| `src/frontends/java.zig` | the invocation's `name` field is the designator; the receiver becomes a qualifier only in the six declines that had already established it as a class; the written invocation text is handed to `evidenceOf` |
+| `src/frontends/zig.zig` | `calleeDesignator` reads the last identifier, and `namesAnImportedScope` records a qualifier only for a path rooted in a top-level `@import` alias nothing in scope shadows |
+| `src/frontends/clojure.zig` | `designatorOf` splits a symbol at `/` when names stand on both sides, so `str/join` is `join` qualified by `str` and the symbol `/` stays a name |
+| `src/mcp/tools.zig` | a target renders `"designator": {"name": …}` plus `"qualifier"` where one was recorded |
+| `src/main.zig`, `src/designator_shape.zig` | the developer commands read the two fields; the shape report gains `with_qualifier` and `nameless` columns so Stage 4 compares like with like |
+
+### Facts Did Not Move
+
+Measured with `zig build designator-shape -Doptimize=ReleaseFast -- --root
+fixtures/vertical-slice`, run at `6616582` in a separate worktree and again
+after the change:
+
+| | Before | After |
+| --- | ---: | ---: |
+| Definitions | 134 | 134 |
+| Assertions recorded | 465 | 465 |
+| Facts | 396 | 396 |
+| Unresolved | 69 | 69 |
+| Approximate / stale | 0 / 0 | 0 / 0 |
+| Diagnostics | 54 | 54 |
+| Zig call designators: simple name / qualified / expression | 10 / 30 / 0 | 40 / 0 / 0 |
+| Claims carrying a qualifier | — | 18 |
+| Distinct designator keys | 20 | 16 |
+
+Those six totals are now pinned by a test, so the next change that moves a fact
+fails a lane instead of a re-measurement.
+
+### Assertions That Moved, And Why
+
+Every one is a test that asserted a designator which was expression text. No
+test that asserts a *resolution* moved, which the plan names as the failure
+condition for this stage.
+
+| Test | Was | Is |
+| --- | --- | --- |
+| `src/frontends/root.zig`, five Zig call expectations | `std.debug.print`, `Shape.make`, `self.stop`, `local.send`, `wire.send` | `print`, `make`, `stop`, `send`, `send` |
+| `tests/vertical_slice_test.zig`, 18 Zig call expectations | the callee path as written | a `model.Designator` literal, so both parts are asserted rather than one string |
+| `tests/vertical_slice_test.zig`, the Java static-call matrix | the invocation text was the designator | the invocation text is the evidence; four rows now also pin the designator, and the rest speak only about resolution |
+| `tests/vertical_slice_test.zig`, `twice` and `Helper` | `.target.designator` | `.target.designator.name` |
+| `src/mcp/root.zig`, three preview assertions | `"designator": "std.debug.print"` | `name` `print`, `qualifier` `std.debug` |
+| `tests/mcp_dogfood_test.zig`, two gate assertions | the designator string | the rendered `name`, and the qualifier for the package-import call |
+| `tests/mcp_fixture_gate_test.zig`, one gate assertion | the designator string | the rendered `name` |
+
+One helper changed behavior rather than wording: `expectUnresolvedCall` now
+walks the name's bucket for the claim carrying the expected qualifier. Four
+calls in one Zig function are written through four different import aliases and
+all name `run`, so taking the first claim of that name would have passed for the
+wrong claim. That is a test-helper limitation the new field exposed, not a
+product defect.
+
+### Tests Added
+
+| Test | Proves |
+| --- | --- |
+| a java designator is the invoked name… | `helper.describe(1, 2)` records name `describe`, no qualifier, and that exact text as evidence; `missing(1, 2)` records `missing` with the invocation as evidence; the type reference `Helper` is unchanged |
+| a java designator carries the class where the receiver was established as one | `Util.twice()` records `twice` qualified by `Util`, with the overload explanation intact |
+| a zig designator is the member name, qualified only by an import path | `std.debug.print` → `print` + `std.debug`; `self.bucket` → `bucket` alone |
+| a clojure designator is the symbol's name, qualified by its namespace | `str/join` → `join` + `str`, evidence `str/join` |
+| two call sites naming one method share one designator key | two receivers, two spans of text, one bucket of two claims |
+| the fixture corpus records the same facts it did before designators became names | the six totals above |
+| a designator renders as a name, and the expression around it only with the opt-in | a Java instance receiver renders `load` with no qualifier, and `config.load(secret, 42)` and `secret` appear in no default answer; both appear under `--allow-evidence-text` |
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `zig fmt --check build.zig src tests` | clean |
+| `zig build test-core` | passed |
+| `zig build test` | passed |
+| `zig build test-mcp` | passed |
+| `zig build dogfood` | passed, every gate hard-passed |
+| `zig build preview-gate` | passed |
+
+### Residual Risk And Next Step
+
+- **Next step is Stage 2**: a work-bound core test proving a designator query
+  inspects only its bucket, and the index key count recorded against Stage 0's.
+- The Java qualifier is recorded in exactly the declines that had already
+  established the receiver as a class — 1,681 of 118,471 unresolved calls in the
+  Stage 0 baseline. It is deliberately narrow: a receiver this frontend cannot
+  place is not a scope it may claim the source named. Stage 4 records the real
+  number.
+- Evidence text for unqualified Java invocations grew from the method name to
+  the whole invocation. It stays gated and inside the existing byte bound, and
+  the dogfood gate still reports no source text by default.
+- A computed callee records an empty name and is not in the index. No fixture
+  here produces one, so the branch is covered by the code path and the index
+  rule rather than by a test over real source; Stage 4's external run is where
+  it would first appear at scale.
 
 ## Stage 0: Reproducible Baseline
 

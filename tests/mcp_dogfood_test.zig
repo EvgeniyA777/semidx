@@ -259,7 +259,14 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
             // An unresolved claim names no entity and what is missing.
             try testing.expect(target.get("entity") == null);
             try testing.expect(relationship.object.get("resolution").?.object.get("missing") != null);
-            unresolved_designator = target.get("designator").?.string;
+            // A designator renders as the name it holds, with the scope the
+            // source wrote in front of it where the producer recorded one.
+            const designator = target.get("designator").?.object;
+            unresolved_designator = designator.get("name").?.string;
+            try testing.expect(unresolved_designator.?.len != 0);
+            if (designator.get("qualifier")) |qualifier| {
+                try testing.expect(qualifier.string.len != 0);
+            }
         } else if (target.get("entity")) |entity| {
             if (entity.object.get("id").?.integer == definition_id) fact_to_definition = true;
         }
@@ -394,7 +401,11 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     for (importer_focus.get("outgoing").?.array.items) |relationship| {
         const target = relationship.object.get("target").?.object;
         if (target.get("designator")) |designator| {
-            if (std.mem.startsWith(u8, designator.string, "std.")) package_call_unresolved = true;
+            // A call into a package import keeps the alias path as its
+            // qualifier and the member as its name: `std.debug.print` is
+            // recorded as `print` qualified by `std.debug`.
+            const qualifier = if (designator.object.get("qualifier")) |value| value.string else "";
+            if (std.mem.startsWith(u8, qualifier, "std")) package_call_unresolved = true;
         } else if (std.mem.eql(u8, "fact", category(relationship))) {
             const target_path = target.get("entity").?.object.get("evidence").?.object.get("unit").?.object.get("path").?.string;
             if (std.mem.eql(u8, target_path, imported_path)) imported_call_fact = true;

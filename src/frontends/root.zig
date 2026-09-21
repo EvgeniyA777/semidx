@@ -665,8 +665,8 @@ test "a bare zig call resolves only to the unit's one top-level function of that
     }
     try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
 
-    try expectZigCallUnresolved(&snapshot, "main", "std.debug.print", "not a bare name");
-    try expectZigCallUnresolved(&snapshot, "main", "Shape.make", "not a top-level `@import` alias");
+    try expectZigCallUnresolved(&snapshot, "main", "print", "not a bare name");
+    try expectZigCallUnresolved(&snapshot, "main", "make", "not a top-level `@import` alias");
     try expectZigCallUnresolved(&snapshot, "main", "param", "local binding");
     try expectZigCallUnresolved(&snapshot, "main", "local", "local binding");
     try expectZigCallUnresolved(&snapshot, "main", "capture", "local binding");
@@ -1101,9 +1101,9 @@ test "calls in a zig member body follow the same narrow rules, with the containe
     try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{ .kind = .calls, .source = run.id, .target = helper.id, .resolution = .fact }));
     try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{ .kind = .calls, .source = run.id, .target = send.id, .resolution = .fact }));
     try expectZigCallUnresolved(&snapshot, "run", "size", "enclosing container declares a member");
-    try expectZigCallUnresolved(&snapshot, "run", "self.stop", "qualifier is a parameter or local binding");
-    try expectZigCallUnresolved(&snapshot, "run", "local.send", "qualifier is a parameter or local binding");
-    try expectZigCallUnresolved(&snapshot, "stop", "wire.send", "qualifier is a parameter or local binding");
+    try expectZigCallUnresolved(&snapshot, "run", "stop", "qualifier is a parameter or local binding");
+    try expectZigCallUnresolved(&snapshot, "run", "send", "qualifier is a parameter or local binding");
+    try expectZigCallUnresolved(&snapshot, "stop", "send", "qualifier is a parameter or local binding");
 
     // The two `go` members are told apart by their container.
     var goes = snapshot.entitiesMatching(.{ .kind = .definition, .path = "probe.zig", .name = "go" });

@@ -300,16 +300,17 @@ documents that own history, rationale, and evidence.
   is reanalyzed and marks what it exposes changed, because its place decides who
   may resolve names to it.
 - [Plan 013](docs/plans/013_unresolved_mentions_from_the_callee_anchor.md) is
-  **planned, not started**: reach a recorded claim from the name it wrote. A
-  designator becomes a structured name — identifier plus the qualifier the
-  source wrote, where a frontend knows the prefix names a scope — and
-  `semidx_references` gains an `unresolved_mentions` section that renders
-  recorded claims and asserts nothing. It converts no claim: on apache/dubbo
-  118,349 unresolved calls each carry a location and a reason, and none is
-  reachable from the definition it names. Its readiness review opened
-  [019](docs/followups/019_designator_may_carry_source_expression.md) — a Java
-  designator is the whole invocation text and renders with no opt-in, so
-  expression text reaches default MCP output.
+  **in progress, Stages 0 and 1 done**: reach a recorded claim from the name it
+  wrote. A designator **is** a structured name now — `name` plus the qualifier
+  the source wrote, where a frontend knows the prefix names a scope
+  ([ADR 010](docs/adr/010_designator_is_a_structured_name.md)) — the index keys
+  on `name`, and default MCP output carries names and qualifiers only, which is
+  the [019](docs/followups/019_designator_may_carry_source_expression.md) leak
+  closed in the graph and owed its document update at Stage 5. Still to come:
+  the bucket-bound proof and an `unresolved_mentions` section in
+  `semidx_references` that renders recorded claims and asserts nothing. It
+  converts no claim: on apache/dubbo 118,471 unresolved calls each carry a
+  location and a reason, and none is reachable from the definition it names.
 - Text fallback duplication is **kept by decision**, not left open, by
   [ADR 007](docs/adr/007_text_fallback_migration_flag.md) (`proposed`): most MCP
   clients read `content`, not `structuredContent`, so the copy is load-bearing,

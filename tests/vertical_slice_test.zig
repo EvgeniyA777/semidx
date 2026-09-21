@@ -1353,7 +1353,7 @@ test "a java invocation is a fact only when the class leaves one method to selec
 
     // An overload is not selected by name.
     const overloaded = try callFrom(&snapshot, run.id, 9);
-    try testing.expectEqualStrings("twice", overloaded.claim.relationship.target.designator);
+    try testing.expectEqualStrings("twice", overloaded.claim.relationship.target.designator.name);
     try expectExplanation(overloaded, "overloads are not resolved");
 
     // Inside an anonymous or local class the name may mean that class's method.
@@ -1669,7 +1669,7 @@ fn expectGreeterUnresolved(tree: *Tree, fragment: []const u8) !void {
     var snapshot = try tree.index.publish();
     defer snapshot.deinit();
     const reference = try greeterReference(&snapshot);
-    try testing.expectEqualStrings("Helper", reference.relationship().?.target.designator);
+    try testing.expectEqualStrings("Helper", reference.relationship().?.target.designator.name);
     try expectExplanation(reference, fragment);
 }
 
@@ -2250,9 +2250,15 @@ const StaticCall = struct {
     path: []const u8,
     class: []const u8,
     method: []const u8,
-    /// The invocation exactly as written, which is both its designator while it
-    /// is unresolved and its evidence text either way.
+    /// The invocation exactly as written. It is the evidence text either way,
+    /// and since [ADR 010](../docs/adr/010_designator_is_a_structured_name.md)
+    /// it is no longer the designator: a designator is the name the invocation
+    /// names, with the class in front of it where this frontend established
+    /// one.
     call: []const u8,
+    /// What the frontend must have recorded as the designator. Absent where the
+    /// case speaks about resolution rather than about the name it recorded.
+    designator: ?model.Designator = null,
     expect: union(enum) {
         /// ADR 009 requires this call to name this method.
         fact: StaticTarget,
@@ -2293,7 +2299,9 @@ fn expectStaticCall(snapshot: *const semidx.Snapshot, case: StaticCall) !void {
             // Whatever the reason, the answer is never a fact and never loses
             // the text that was read.
             try testing.expect(!call.resolution.isFact());
-            try testing.expectEqualStrings(case.call, call.claim.relationship.target.designator);
+            if (case.designator) |expected| {
+                try testing.expect(expected.eql(call.claim.relationship.target.designator));
+            }
             try expectExplanation(call, fragment);
         },
     }
@@ -2503,6 +2511,9 @@ test "the static-call matrix pins what each covered and declined case must answe
             .class = "Caller",
             .method = "overloaded",
             .call = "Util.twice()",
+            // The receiver was established as a class and only the method
+            // choice failed, so the class is the qualifier.
+            .designator = .{ .name = "twice", .qualifier = "Util" },
             .expect = .{ .unresolved = "overloads are not resolved" },
         },
         .{
@@ -2510,6 +2521,7 @@ test "the static-call matrix pins what each covered and declined case must answe
             .class = "Caller",
             .method = "notStatic",
             .call = "Util.instance()",
+            .designator = .{ .name = "instance", .qualifier = "Util" },
             .expect = .{ .unresolved = "is not static" },
         },
         .{
@@ -2836,10 +2848,11 @@ test "a receiver that is a value stays unresolved, whatever the static rule admi
 
     const values = "module/src/main/java/lib/Values.java";
     const cases = [_]StaticCall{
-        .{ .path = values, .class = "Values", .method = "byLocal", .call = "value.make()", .expect = .{ .unresolved = "receiver" } },
+        // A receiver read as a value names no scope, so the name stands alone.
+        .{ .path = values, .class = "Values", .method = "byLocal", .call = "value.make()", .designator = .{ .name = "make" }, .expect = .{ .unresolved = "receiver" } },
         .{ .path = values, .class = "Values", .method = "byField", .call = "field.make()", .expect = .{ .unresolved = "receiver" } },
         .{ .path = values, .class = "Values", .method = "byParameter", .call = "value.make()", .expect = .{ .unresolved = "receiver" } },
-        .{ .path = values, .class = "Values", .method = "byCreation", .call = "new Other().make()", .expect = .{ .unresolved = "receiver" } },
+        .{ .path = values, .class = "Values", .method = "byCreation", .call = "new Other().make()", .designator = .{ .name = "make" }, .expect = .{ .unresolved = "receiver" } },
         .{ .path = values, .class = "Values", .method = "byChain", .call = "self().make()", .expect = .{ .unresolved = "receiver" } },
         .{ .path = values, .class = "Values", .method = "byLiteral", .call = "\"text\".length()", .expect = .{ .unresolved = "receiver" } },
         .{ .path = values, .class = "Values", .method = "byClassLiteral", .call = "Other.class.getName()", .expect = .{ .unresolved = "receiver" } },
@@ -3507,7 +3520,7 @@ test "same-unit zig calls are current facts and every other callee stays unresol
 
     // `greeter.greet()` names the container member, not the top-level `greet`,
     // and nothing here resolves members, so it is not retargeted to either.
-    for ([_][]const u8{ "std.debug.print", "greeter.greet", "report" }) |designator| {
+    for ([_][]const u8{ "print", "greet", "report" }) |designator| {
         try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
             .kind = .calls,
             .source = announce.id,
@@ -3855,16 +3868,29 @@ fn callFacts(snapshot: *const semidx.Snapshot, from: model.Entity, to: model.Ent
     return snapshot.countRelationships(.{ .kind = .calls, .source = from.id, .target = to.id, .resolution = .fact });
 }
 
-fn expectUnresolvedCall(snapshot: *const semidx.Snapshot, from: model.Entity, designator: []const u8, fragment: []const u8) !void {
-    var calls = snapshot.relationships(.{ .kind = .calls, .source = from.id, .designator = designator });
-    const call = calls.next() orelse {
-        std.debug.print("no current call `{s}` from `{s}`\n", .{ designator, from.identity.name.? });
+/// `designator` is what the frontend must have recorded: the name the callee
+/// names, and the scope in front of it where the frontend established one. The
+/// query is anchored on the name, because that is what the index is keyed on,
+/// and the qualifier is then checked against what the claim carries.
+fn expectUnresolvedCall(snapshot: *const semidx.Snapshot, from: model.Entity, designator: model.Designator, fragment: []const u8) !void {
+    // One name can be written through several scopes in one function, so the
+    // bucket is walked for the claim that carries this qualifier rather than
+    // taking the first claim of that name.
+    var calls = snapshot.relationships(.{ .kind = .calls, .source = from.id, .designator = designator.name });
+    const call = while (calls.next()) |candidate| {
+        if (designator.eql(candidate.claim.relationship.target.designator)) break candidate;
+    } else {
+        std.debug.print("no current call `{s}/{s}` from `{s}`\n", .{
+            designator.qualifier orelse "-",
+            designator.name,
+            from.identity.name.?,
+        });
         return error.TestExpectedCall;
     };
     try testing.expect(!call.resolution.isFact());
     const explanation = call.resolution.unresolved.explanation;
     if (std.mem.indexOf(u8, explanation, fragment) == null) {
-        std.debug.print("call `{s}`: expected \"{s}\" in \"{s}\"\n", .{ designator, fragment, explanation });
+        std.debug.print("call `{s}`: expected \"{s}\" in \"{s}\"\n", .{ designator.name, fragment, explanation });
         return error.TestUnexpectedExplanation;
     }
 }
@@ -3909,19 +3935,19 @@ test "exact local-import calls are cross-unit facts and every other qualified ca
     try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{ .target = write_string.id, .reference_query = true }));
     try testing.expect(dependsOn(&tree.index, session_path, wire_path));
 
-    try expectUnresolvedCall(&snapshot, send, "self.flush", "qualifier is a parameter or local binding");
-    try expectUnresolvedCall(&snapshot, flush, "reset", "enclosing container declares a member");
-    try expectUnresolvedCall(&snapshot, run, "wire.hidden", "no current top-level `pub fn`");
-    try expectUnresolvedCall(&snapshot, run, "wire.twice", "no current top-level `pub fn`");
-    try expectUnresolvedCall(&snapshot, run, "wire.flushAll", "no current top-level `pub fn`");
-    try expectUnresolvedCall(&snapshot, run, "wire.Frame.encode", "not a bare name or a name qualified by a local import alias");
-    try expectUnresolvedCall(&snapshot, run, "std.debug.print", "not a bare name or a name qualified by a local import alias");
-    try expectUnresolvedCall(&snapshot, run, "outside.run", "the path escapes the indexed root");
-    try expectUnresolvedCall(&snapshot, run, "upper.run", "no indexed Zig source unit has the path `zig/imports/Wire.zig`");
-    try expectUnresolvedCall(&snapshot, run, "absent.run", "no indexed Zig source unit has the path `zig/imports/absent.zig`");
-    try expectUnresolvedCall(&snapshot, run, "twin.run", "declares this name more than once");
-    try expectUnresolvedCall(&snapshot, run, "copy.writeString", "not a top-level `@import` alias");
-    try expectUnresolvedCall(&snapshot, shadowed, "wire.writeString", "qualifier is a parameter or local binding");
+    try expectUnresolvedCall(&snapshot, send, .{ .name = "flush" }, "qualifier is a parameter or local binding");
+    try expectUnresolvedCall(&snapshot, flush, .{ .name = "reset" }, "enclosing container declares a member");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "hidden", .qualifier = "wire" }, "no current top-level `pub fn`");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "twice", .qualifier = "wire" }, "no current top-level `pub fn`");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "flushAll", .qualifier = "wire" }, "no current top-level `pub fn`");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "encode", .qualifier = "wire.Frame" }, "not a bare name or a name qualified by a local import alias");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "print", .qualifier = "std.debug" }, "not a bare name or a name qualified by a local import alias");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "run", .qualifier = "outside" }, "the path escapes the indexed root");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "run", .qualifier = "upper" }, "no indexed Zig source unit has the path `zig/imports/Wire.zig`");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "run", .qualifier = "absent" }, "no indexed Zig source unit has the path `zig/imports/absent.zig`");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "run", .qualifier = "twin" }, "declares this name more than once");
+    try expectUnresolvedCall(&snapshot, run, .{ .name = "writeString" }, "not a top-level `@import` alias");
+    try expectUnresolvedCall(&snapshot, shadowed, .{ .name = "writeString" }, "qualifier is a parameter or local binding");
 
     // Calls in the nested container's member are not recorded, and the
     // nested container is reported instead.
@@ -3979,8 +4005,8 @@ test "provider edits update local-import calls without editing the importer" {
         defer after.deinit();
         try testing.expect(after.entityById(write_string.id) == null);
         try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .target = write_string.id }));
-        try expectUnresolvedCall(&after, run, "wire.writeString", "no current top-level `pub fn`");
-        try expectUnresolvedCall(&after, send, "wire.writeString", "no current top-level `pub fn`");
+        try expectUnresolvedCall(&after, run, .{ .name = "writeString", .qualifier = "wire" }, "no current top-level `pub fn`");
+        try expectUnresolvedCall(&after, send, .{ .name = "writeString", .qualifier = "wire" }, "no current top-level `pub fn`");
     }
 
     // No longer `pub`: not exported, so not a target.
@@ -3992,7 +4018,7 @@ test "provider edits update local-import calls without editing the importer" {
         const private = definitionIn(&after, wire_path, null, "writeString").?;
         try testing.expect(private.extension.get("zig.export") == null);
         try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .kind = .calls, .target = private.id }));
-        try expectUnresolvedCall(&after, run, "wire.writeString", "no current top-level `pub fn`");
+        try expectUnresolvedCall(&after, run, .{ .name = "writeString", .qualifier = "wire" }, "no current top-level `pub fn`");
     }
 
     // Back to the original, then broken: a provider whose analysis is not
@@ -4014,7 +4040,7 @@ test "provider edits update local-import calls without editing the importer" {
         var after = try tree.index.publish();
         defer after.deinit();
         try testing.expectEqual(semidx.core.graph.UnitAnalysis.stale, after.unitByPath(wire_path).?.analysis());
-        try expectUnresolvedCall(&after, run, "wire.writeString", "analysis is not current");
+        try expectUnresolvedCall(&after, run, .{ .name = "writeString", .qualifier = "wire" }, "analysis is not current");
         try testing.expectEqual(@as(usize, 0), after.countRelationships(.{ .kind = .calls, .target = restored.id }));
         // The call into the other provider is untouched.
         try testing.expectEqual(@as(usize, 1), callFacts(&after, run, definitionIn(&after, util_path, null, "clean").?));
@@ -4027,7 +4053,7 @@ test "provider edits update local-import calls without editing the importer" {
     {
         var after = try tree.index.publish();
         defer after.deinit();
-        try expectUnresolvedCall(&after, run, "wire.writeString", "no indexed Zig source unit has the path `zig/imports/wire.zig`");
+        try expectUnresolvedCall(&after, run, .{ .name = "writeString", .qualifier = "wire" }, "no indexed Zig source unit has the path `zig/imports/wire.zig`");
         try testing.expectEqual(@as(usize, 1), callFacts(&after, run, definitionIn(&after, util_path, null, "clean").?));
     }
 }
@@ -4443,4 +4469,223 @@ test "moving a directory costs the units in it and the readers they reach" {
         .call = "A.a()",
         .expect = .{ .unresolved = "source root this unit can see" },
     });
+}
+
+// -- Plan 013 Stage 1: a designator is a structured name ---------------------
+
+/// The claim of `kind` from `source` whose designator holds `name`, or an error
+/// naming what was looked for. It anchors on the name, because that is the key
+/// the designator index holds.
+fn designatedClaim(
+    snapshot: *const semidx.Snapshot,
+    source: model.EntityId,
+    kind: model.RelationshipKind,
+    name: []const u8,
+) !model.Assertion {
+    var found = snapshot.relationships(.{ .kind = kind, .source = source, .designator = name });
+    return found.next() orelse {
+        std.debug.print("no {t} designating `{s}`\n", .{ kind, name });
+        return error.TestExpectedRelationship;
+    };
+}
+
+fn expectDesignator(
+    assertion: model.Assertion,
+    expected: model.Designator,
+    evidence_text: []const u8,
+) !void {
+    const recorded = assertion.claim.relationship.target.designator;
+    try testing.expectEqualStrings(expected.name, recorded.name);
+    if (expected.qualifier) |qualifier| {
+        try testing.expectEqualStrings(qualifier, recorded.qualifier orelse {
+            std.debug.print("`{s}` recorded no qualifier, expected `{s}`\n", .{ recorded.name, qualifier });
+            return error.TestExpectedQualifier;
+        });
+    } else if (recorded.qualifier) |unwanted| {
+        std.debug.print("`{s}` recorded qualifier `{s}`, expected none\n", .{ recorded.name, unwanted });
+        return error.TestUnexpectedQualifier;
+    }
+    // The written form is the evidence, with the range that locates it. Where
+    // the source wrote more than a bare name the two are different strings, and
+    // that difference is what [ADR 010](../docs/adr/010_designator_is_a_structured_name.md)
+    // is: a name in the graph, the text in the evidence.
+    try testing.expectEqualStrings(evidence_text, assertion.evidence.?.text);
+}
+
+test "a java designator is the invoked name, and the receiver expression stays in the evidence" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/Caller.java", .java,
+        \\package demo;
+        \\
+        \\class Caller {
+        \\    Helper helper;
+        \\    void run() {
+        \\        helper.describe(1, 2);
+        \\        missing(1, 2);
+        \\    }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const caller = snapshot.findDefinition("demo/Caller.java", "Caller").?;
+    const run = snapshot.findDefinition("demo/Caller.java", "run").?;
+
+    // A receiver this frontend reads as a value names no scope, so the claim
+    // carries the method name alone.
+    const through_value = try designatedClaim(&snapshot, run.id, .calls, "describe");
+    try expectDesignator(through_value, .{ .name = "describe" }, "helper.describe(1, 2)");
+    try testing.expect(!through_value.resolution.isFact());
+
+    // An unqualified invocation was already a name, and its evidence is now the
+    // invocation rather than a copy of that name.
+    const unqualified = try designatedClaim(&snapshot, run.id, .calls, "missing");
+    try expectDesignator(unqualified, .{ .name = "missing" }, "missing(1, 2)");
+
+    // A type reference is outside this rewrite and keeps the name as written.
+    const field_type = try designatedClaim(&snapshot, caller.id, .references, "Helper");
+    try expectDesignator(field_type, .{ .name = "Helper" }, "Helper");
+}
+
+test "a java designator carries the class where the receiver was established as one" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/Util.java", .java,
+        \\package demo;
+        \\
+        \\public class Util {
+        \\    public static void twice() {}
+        \\    public static void twice(String name) {}
+        \\}
+        \\
+    );
+    _ = try index.addUnit("demo/Caller.java", .java,
+        \\package demo;
+        \\
+        \\class Caller {
+        \\    void run() {
+        \\        Util.twice();
+        \\    }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const run = snapshot.findDefinition("demo/Caller.java", "run").?;
+    const overloaded = try designatedClaim(&snapshot, run.id, .calls, "twice");
+    // The class was established; only the method choice failed. The class is a
+    // name the source wrote, so it is recorded as one.
+    try expectDesignator(overloaded, .{ .name = "twice", .qualifier = "Util" }, "Util.twice()");
+    try expectExplanation(overloaded, "overloads are not resolved");
+}
+
+test "a zig designator is the member name, qualified only by an import path" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/calls.zig", .zig,
+        \\const std = @import("std");
+        \\
+        \\pub fn run(self: *@This()) void {
+        \\    std.debug.print("x", .{});
+        \\    self.bucket();
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const run = snapshot.findDefinition("demo/calls.zig", "run").?;
+
+    const through_import = try designatedClaim(&snapshot, run.id, .calls, "print");
+    try expectDesignator(through_import, .{ .name = "print", .qualifier = "std.debug" }, "std.debug.print");
+
+    // `self` is a parameter, so the path is rooted in a value and names no
+    // scope this frontend may claim the source wrote.
+    const through_value = try designatedClaim(&snapshot, run.id, .calls, "bucket");
+    try expectDesignator(through_value, .{ .name = "bucket" }, "self.bucket");
+}
+
+test "a clojure designator is the symbol's name, qualified by its namespace" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/join.clj", .clojure,
+        \\(ns demo.join)
+        \\(defn run [xs]
+        \\  (str/join "," xs))
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    const run = snapshot.findDefinition("demo/join.clj", "run").?;
+    const qualified = try designatedClaim(&snapshot, run.id, .calls, "join");
+    try expectDesignator(qualified, .{ .name = "join", .qualifier = "str" }, "str/join");
+}
+
+test "two call sites naming one method share one designator key" {
+    var index = try semidx.Index.init(testing.allocator, "tree");
+    defer index.deinit();
+
+    _ = try index.addUnit("demo/Twin.java", .java,
+        \\package demo;
+        \\
+        \\class Twin {
+        \\    Helper one;
+        \\    Helper two;
+        \\    void first() {
+        \\        one.describe(1);
+        \\    }
+        \\    void second() {
+        \\        two.describe(2, 3);
+        \\    }
+        \\}
+        \\
+    );
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    // Two invocations, two receivers, two spans of source text — and one name,
+    // which is what a definition of that name can be asked by. Before ADR 010
+    // these were two keys and this count was 1.
+    try testing.expectEqual(@as(usize, 2), snapshot.countRelationships(.{
+        .kind = .calls,
+        .designator = "describe",
+        .resolution = .unresolved,
+    }));
+}
+
+test "the fixture corpus records the same facts it did before designators became names" {
+    var index = try semidx.Index.init(testing.allocator, build_options.fixtures_dir);
+    defer index.deinit();
+
+    var root = try std.Io.Dir.cwd().openDir(testing.io, build_options.fixtures_dir, .{ .iterate = true, .follow_symlinks = false });
+    defer root.close(testing.io);
+    var found = try semidx.source.discovery.scanDir(testing.allocator, testing.io, root, build_options.fixtures_dir, .{});
+    defer found.deinit();
+    _ = try index.applyScan(found);
+
+    var snapshot = try index.publish();
+    defer snapshot.deinit();
+
+    // Measured on the commit before ADR 010 and required to be identical after
+    // it: this stage changed what a claim says its target is called, and
+    // nothing about what is a fact.
+    try testing.expectEqual(@as(usize, 134), snapshot.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 465), snapshot.assertions.len);
+    try testing.expectEqual(@as(usize, 396), snapshot.countAssertions(.{ .resolution = .fact }));
+    try testing.expectEqual(@as(usize, 69), snapshot.countUnresolvedAssertions());
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+    try testing.expectEqual(@as(usize, 54), snapshot.diagnostics.len);
 }

@@ -323,6 +323,31 @@ boundary.
 4. **Tests and gates** prove the designator contract per language, the bucket
    bound, and that no fact moved.
 
+## Executor Recommendation
+
+A judgement about what each stage demands, not a measurement of any model on
+this repository. Treat it as a default to depart from with a reason.
+
+| Stage | What makes it hard | Recommended |
+| --- | --- | --- |
+| 0 | Numbers only, but every later claim is compared against them | Done |
+| 1 | One field's meaning across three frontends at once, each with its own rule for what names a scope; ADR 010 answering all eight §11 questions without weakening ADR 003; "no fact moved" proven by a test rather than by eye | Strongest available model |
+| 2 | Narrow, but must match Plan 011's work-bound test style and preserve index order | Strongest available, or a mid-tier model pointed at the existing test |
+| 3 | Large but patterned: limit, budget, truncation, hints and cursor all exist beside it in the Plan 009 shape | Mid-tier model |
+| 4 | Mechanical re-measurement; the one risk is explaining a delta away instead of naming it | Mid-tier model |
+| 5 | Not code but canon: term ownership, `GLOSSARY.md`, `MEMORY.md`, roadmap, follow-up statuses, drift control | Mid-tier model, strongest if Stages 1–3 left documents disagreeing |
+
+Two notes that outrank the table:
+
+- **Stage 1 and ADR 010 belong in one session.** An ADR written after the code
+  by someone else becomes a retelling of the diff instead of the reasoning that
+  chose it.
+- **Zig 0.16 is read, never recalled.** `std.Io`, `ArrayList.empty` and
+  `std.process.Init` do not match older or newer releases, so every stage reads
+  the neighbouring source before editing it. That is
+  [RULES.md](../../RULES.md) discipline, not model capability, and no
+  recommendation here relaxes it.
+
 ## Implementation Stages
 
 ### Stage 0: Reproducible Baseline

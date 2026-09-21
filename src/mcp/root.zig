@@ -500,10 +500,16 @@ const Harness = struct {
     out: Writer.Allocating,
 
     fn init(self: *Harness, evidence_text: bool, extra: []const u8) !void {
+        return self.initNamed(evidence_text, "extra.zig", extra);
+    }
+
+    /// The same root with the extra unit under a name of the caller's choosing,
+    /// so a test can put a unit of another language in it.
+    fn initNamed(self: *Harness, evidence_text: bool, extra_path: []const u8, extra: []const u8) !void {
         self.tmp = testing.tmpDir(.{});
         errdefer self.tmp.cleanup();
         try self.tmp.dir.writeFile(test_io, .{ .sub_path = "greeter.zig", .data = greeter_source });
-        if (extra.len != 0) try self.tmp.dir.writeFile(test_io, .{ .sub_path = "extra.zig", .data = extra });
+        if (extra.len != 0) try self.tmp.dir.writeFile(test_io, .{ .sub_path = extra_path, .data = extra });
         self.root = try self.tmp.dir.realPathFileAlloc(test_io, ".", testing.allocator);
         errdefer testing.allocator.free(self.root);
         self.log = .init(testing.allocator);
@@ -856,7 +862,9 @@ test "compact context keeps every claim's resolution, producer, and freshness; f
             // and a designator, never an entity.
             try testing.expect(resolution.get("missing") != null);
             const target = relationship.get("target").?.object;
-            try testing.expectEqualStrings("std.debug.print", target.get("designator").?.string);
+            const designator = target.get("designator").?.object;
+            try testing.expectEqualStrings("print", designator.get("name").?.string);
+            try testing.expectEqualStrings("std.debug", designator.get("qualifier").?.string);
             try testing.expect(target.get("entity") == null);
             compact_unresolved = true;
         }
@@ -982,7 +990,9 @@ test "compact references render each target once and keep every claim's resoluti
         const end = relationship.get("target").?.object;
         if (std.mem.eql(u8, "unresolved", resolution.get("category").?.string)) {
             try testing.expect(resolution.get("missing") != null);
-            try testing.expectEqualStrings("std.debug.print", end.get("designator").?.string);
+            const designator = end.get("designator").?.object;
+            try testing.expectEqualStrings("print", designator.get("name").?.string);
+            try testing.expectEqualStrings("std.debug", designator.get("qualifier").?.string);
             try testing.expect(end.get("entity") == null);
             unresolved_print = true;
         } else {
@@ -1430,7 +1440,9 @@ test "context traversal is explicit, bounded, renders each entity once, and keep
             try testing.expectEqual(@as(usize, 1), edge.get("source").?.object.count());
             const target = edge.get("target").?.object;
             if (std.mem.eql(u8, "unresolved", edge.get("resolution").?.object.get("category").?.string)) {
-                try testing.expectEqualStrings("std.debug.print", target.get("designator").?.string);
+                const designator = target.get("designator").?.object;
+                try testing.expectEqualStrings("print", designator.get("name").?.string);
+                try testing.expectEqualStrings("std.debug", designator.get("qualifier").?.string);
                 try testing.expect(target.get("entity") == null);
                 try testing.expect(edge.get("resolution").?.object.get("missing") != null);
                 unresolved = true;
@@ -1735,6 +1747,51 @@ test "no tool result carries source text unless evidence text was opted into, an
     try testing.expect(off_listed.get("source_text") == null);
 }
 
+test "a designator renders as a name, and the expression around it only with the opt-in" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // A Java instance receiver: the frontend reads `config` as a value, so it
+    // records no qualifier, and the text the source wrote around the name is
+    // evidence rather than part of the claim's target.
+    const java =
+        \\package demo;
+        \\
+        \\class Caller {
+        \\    Helper config;
+        \\    void run() {
+        \\        config.load(secret, 42);
+        \\    }
+        \\}
+        \\
+    ;
+    const expression = "config.load(secret, 42)";
+
+    var off: Harness = undefined;
+    try off.initNamed(false, "Caller.java", java);
+    defer off.deinit();
+    const references = try off.callTool(arena, "semidx_references", "{\"name\":\"run\",\"direction\":\"outgoing\"}");
+    const relationships = references.object.get("structuredContent").?.object.get("relationships").?.array;
+    const designator = for (relationships.items) |item| {
+        const target = item.object.get("target").?.object;
+        if (target.get("designator")) |value| break value.object;
+    } else return error.TestExpectedDesignator;
+    try testing.expectEqualStrings("load", designator.get("name").?.string);
+    try testing.expect(designator.get("qualifier") == null);
+    // The receiver and the argument the source wrote are nowhere in the default
+    // answer: not in the designator, and not as evidence text.
+    try testing.expect(std.mem.indexOf(u8, off.out.written(), expression) == null);
+    try testing.expect(std.mem.indexOf(u8, off.out.written(), "secret") == null);
+    try testing.expect(std.mem.indexOf(u8, off.out.written(), "\"source_text\":{") == null);
+
+    var on: Harness = undefined;
+    try on.initNamed(true, "Caller.java", java);
+    defer on.deinit();
+    _ = try on.callTool(arena, "semidx_references", "{\"name\":\"run\",\"direction\":\"outgoing\"}");
+    try testing.expect(std.mem.indexOf(u8, on.out.written(), expression) != null);
+}
+
 test "refresh publishes a new snapshot that observes edited and added units" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
@@ -1853,7 +1910,10 @@ fn projectSnapshot(gpa: Allocator, snapshot: *const semidx.Snapshot) ![]const u8
         const source = snapshot.entityById(relationship.source).?;
         const target = switch (relationship.target) {
             .entity => |id| if (snapshot.entityById(id)) |found| try std.fmt.allocPrint(gpa, "{s}:{s}", .{ entityPath(snapshot, found), found.identity.name orelse found.identity.role }) else "<withdrawn>",
-            .designator => |designator| designator,
+            .designator => |designator| if (designator.qualifier) |qualifier|
+                try std.fmt.allocPrint(gpa, "{s}/{s}", .{ qualifier, designator.name })
+            else
+                designator.name,
         };
         try lines.append(gpa, try std.fmt.allocPrint(gpa, "relationship {t} {s}:{s} -> {s} {t} {t}", .{
             relationship.kind,
