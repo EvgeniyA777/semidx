@@ -288,15 +288,15 @@ documents that own history, rationale, and evidence.
   mentions, interfaces, declared-supertypes references, closed-chain guard
   relaxation, `this`, and covered simple value receivers.
 - Next large direction: first collect preview adoption and MCP client-output
-  evidence through [Plan 015](docs/plans/015_preview_adoption_measurement.md),
-  especially [010](docs/followups/010_mcp_text_fallback_client_measurement.md);
+  evidence, especially
+  [010](docs/followups/010_mcp_text_fallback_client_measurement.md);
   then choose between Zig dogfood depth, remaining Java gaps, packaging/daemon
   work, semantic-contract work, or persistence by measured pain.
 - Text fallback duplication is kept in `v0.1.0-preview.4` for compatibility.
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
-  remains open until Plan 015 measures maintained stdio plus real MCP clients;
-  proposed [ADR 007](docs/adr/007_text_fallback_migration_flag.md) is an input,
-  not an accepted decision.
+  remains open; proposed
+  [ADR 007](docs/adr/007_text_fallback_migration_flag.md) is an input, not an
+  accepted decision.
 - Source identity needs stronger evidence for move-plus-edit refactors: prefer
   VCS or IDE move events over similarity presented as fact.
 - Storage and snapshot representation remain SPEC-owned unresolved areas: any
@@ -313,8 +313,6 @@ documents that own history, rationale, and evidence.
   [docs/reports/](docs/reports/), with preview notes in
   [docs/releases/](docs/releases/); current preview:
   [v0.1.0-preview.4](docs/releases/v0.1.0-preview.4.md).
-- Plan 015 preview adoption measurement:
-  [docs/reports/015_preview_adoption_measurement_progress.md](docs/reports/015_preview_adoption_measurement_progress.md).
 - Active follow-ups: [docs/followups/README.md](docs/followups/README.md).
 - Product direction: [docs/design/001_project_roadmap.md](docs/design/001_project_roadmap.md),
   [docs/design/002_product_adoption_strategy.md](docs/design/002_product_adoption_strategy.md).
