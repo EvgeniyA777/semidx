@@ -975,12 +975,23 @@ pub fn analyze(
 
         if (std.mem.eql(u8, kind, "package_declaration")) continue;
         if (std.mem.eql(u8, kind, "import_declaration")) {
+            // An import this frontend reads is consumed evidence, not an
+            // unsupported construct: it is recorded in the unit's scope and
+            // changes what a simple name resolves to, exactly as the package
+            // declaration above it does. Only the one form that records
+            // nothing is reported, and it is reported for what it is.
             if (importedName(node, source)) |name| {
                 const into = if (importsStatically(node)) &static_imported else &imported;
                 try into.append(gpa, name);
             } else if (importsStatically(node) and importsOnDemand(node)) {
                 static_on_demand = true;
+            } else {
+                try builder.addDiagnostic(
+                    .unsupported_construct,
+                    "an on-demand type import brings in names this frontend does not enumerate",
+                );
             }
+            continue;
         } else if (isTypeDeclaration(kind)) {
             if (node.childByFieldName("name")) |name_node| {
                 if (!isCoveredTypeDeclaration(kind)) try other_types.append(gpa, name_node.text(source));

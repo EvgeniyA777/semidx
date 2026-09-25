@@ -137,7 +137,10 @@ documents that own history, rationale, and evidence.
   spell its declared package has no source root, resolves nothing beyond itself,
   and is a candidate for nothing. Single-type imports (`import a.b.C;`) resolve
   inside that same boundary and are asked before the unit's own package;
-  on-demand and static imports never resolve. A name declared out of the unit's
+  on-demand and static imports never resolve. An import the frontend records is
+  consumed evidence, not an unsupported construct: only a non-static on-demand
+  import, which records nothing, carries an `unsupported_construct` diagnostic.
+  A name declared out of the unit's
   scope is unresolved for its own stated reason, distinct from a name nothing
   declares. Provider removal, rename, or relevant export change reanalyzes
   dependents, and a package's importers are reanalyzed with its declarers.
@@ -261,10 +264,18 @@ documents that own history, rationale, and evidence.
   unresolved, 118,471 unresolved calls, and 83.6% of their designators are
   expression text rather than names
   ([Plan 013 Stage 0](docs/reports/013_unresolved_mentions_from_the_callee_anchor_progress.md)).
+- A snapshot revision orders one running server's refreshes and identifies no
+  content. It is not evidence that two observations, or two servers, saw the same
+  indexed state; `semidx_health`'s description says so, and
+  [021](docs/followups/021_snapshot_revision_is_not_a_content_identity.md) holds
+  the identity question until snapshot representation is decided.
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java coverage, not its boundary, is what limits it — receiver-qualified and
-  class-name-qualified calls dominate what stays unresolved; definition renames
+  class-name-qualified calls dominate what stays unresolved, and a supertype with
+  no indexed source keeps every simple type name in that class body unresolved
+  ([020](docs/followups/020_java_external_supertype_leaves_the_chain_open.md));
+  definition renames
   are identity loss; a file moved and changed in one rescan loses identity;
   dependency invalidation is intentionally coarse and
   transitive; a Zig importer of a relative file that did not exist when it was

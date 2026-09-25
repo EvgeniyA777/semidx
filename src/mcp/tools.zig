@@ -155,7 +155,9 @@ fn define(comptime tool: Tool, comptime title: []const u8, comptime description:
 
 pub const definitions = [_]Definition{
     define(.semidx_health, "Index health", "Report the configured root, the published snapshot revision, source-unit and graph counts, " ++
-        "per-language frontend coverage and parser availability, diagnostic counts, and the last scan outcome.", &.{}),
+        "per-language frontend coverage and parser availability, diagnostic counts, and the last scan outcome. " ++
+        "The revision orders this server's own snapshots and identifies no content: it does not establish that two " ++
+        "observations, or two servers, saw the same indexed state.", &.{}),
     define(.semidx_outline, "Repository outline", "List the directories and files directly under one directory, each with counts of " ++
         "source units by language and analysis state, diagnostics by kind, and top-level and nested definitions, without " ++
         "listing any definition. Start orientation here, then call semidx_repo_map with a path_prefix. Bounded; results report truncation.", &.{
