@@ -4,7 +4,7 @@ doc_type: "follow_up"
 lifecycle: "active"
 status: "open"
 agent_action: "use_as_input_for_future_plan_only"
-updated: "2026-09-25"
+updated: "2026-09-27"
 ---
 
 # A Snapshot Revision Is Not A Content Identity
@@ -52,6 +52,12 @@ contract.
 
 The cheap half — saying what the number means where a consumer reads it — did
 not need to wait and is done.
+
+[ADR 014](../adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
+and [Plan 016](../plans/016_trustworthy_working_copy_sync.md) now take the
+intermediate source-state identity and working-copy trust boundary as planned
+work. This follow-up remains open until the implementation and cross-process
+identity tests are complete.
 
 ## Acceptance Direction
 

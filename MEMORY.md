@@ -268,7 +268,13 @@ documents that own history, rationale, and evidence.
   content. It is not evidence that two observations, or two servers, saw the same
   indexed state; `semidx_health`'s description says so, and
   [021](docs/followups/021_snapshot_revision_is_not_a_content_identity.md) holds
-  the identity question until snapshot representation is decided.
+  the defect until [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md)
+  delivers a comparable source-state identity.
+- `current` is snapshot-relative analysis state, not evidence that the working
+  copy still has the indexed bytes. The MCP server does not watch files and can
+  return old ranges after an external edit until refresh. Proposed
+  [ADR 014](docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
+  and Plan 016 own the fail-closed synchronization correction.
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java coverage, not its boundary, is what limits it — receiver-qualified and
@@ -303,32 +309,18 @@ documents that own history, rationale, and evidence.
   [010](docs/followups/010_mcp_text_fallback_client_measurement.md);
   then choose between Zig dogfood depth, remaining Java gaps, packaging/daemon
   work, semantic-contract work, or persistence by measured pain.
-- [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) is an adoption
-  experiment in progress: a default-off Jev ranking projection over bounded
-  graph context, with explicit destination/data consent and no graph authority.
-  Stages 0-3 are done: ADR 013 is reviewed and not disputed (still
-  `status: proposed`, pending the live evidence it names); `semidx-mcp`
-  validates `--enable-jev-ranking`/`--jev-endpoint`/`--jev-model`/`--jev-send`
-  plus `TYPESAFE_API_KEY` completely before serving and reports a redacted
-  `outbound_projection` in `semidx_health`; the experimental
-  `semidx_rank_context` tool (`src/mcp/ranking.zig`) selects a bounded
-  candidate set through the same `selectTargets`/traversal primitives
-  `semidx_context` uses and always returns every candidate with graph
-  provenance intact; and `src/mcp/jev.zig` is a real HTTP adapter over Zig's
-  standard-library client (no SDK), wired into `Server` only when consent is
-  complete and a key is present. Required tests stay fully offline (they test
-  JSON building/parsing against the Stage 0 fixtures, never real HTTP); the
-  adapter's live transport path (connect, redirect rejection, retry, and the
-  2,000 ms deadline) was checked once by hand against a locally refused
-  connection, not yet against a real TypeSafe endpoint or a hanging peer —
-  Stage 4's live smoke is the first point that happens. The 2,000 ms deadline
-  is enforced as a retry-eligibility budget from measured elapsed time, not by
-  preemptively aborting an in-flight request; the stdlib's `http.Client` has no
-  built-in way to bound a whole request/response round trip, only its own TCP
-  connect phase, which this adapter does not yet use either. No such tool is
-  advertised as useful until Stage 4's live smoke and its 24-query quality
-  gate pass; a `ranking.status: "ranked"` result today is an unproven
-  ordering.
+- [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) is planned as the
+  next trust-first adoption correction: deterministic source-state identity,
+  idempotent `semidx_sync`, fail-closed read preflight, and compact health.
+  Execute it before expanding ranking claims; better ordering over an obsolete
+  snapshot would amplify false confidence.
+- [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) remains an
+  incomplete adoption experiment. Stages 0-3 implemented default-off consent,
+  bounded graph-only candidate projection, offline fixtures, and the Zig stdlib
+  HTTP adapter. ADR 013 remains proposed and Stage 4 still lacks a real
+  TypeSafe live smoke and the 24-query quality gate. Its 2,000 ms value bounds
+  retry eligibility, not an in-flight round trip; no ranking usefulness claim
+  is justified yet.
 - Text fallback duplication is kept in `v0.1.0-preview.4` for compatibility.
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
   remains open; proposed
