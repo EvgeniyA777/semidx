@@ -306,14 +306,22 @@ documents that own history, rationale, and evidence.
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) is an adoption
   experiment in progress: a default-off Jev ranking projection over bounded
   graph context, with explicit destination/data consent and no graph authority.
-  Stages 0-1 are done: ADR 013 is reviewed and not disputed (still
-  `status: proposed`, pending the offline/live evidence it names), and
-  `semidx-mcp` now accepts `--enable-jev-ranking`/`--jev-endpoint`/
-  `--jev-model`/`--jev-send` plus `TYPESAFE_API_KEY`, validates them completely
-  before serving, and reports a redacted `outbound_projection` in
-  `semidx_health` when enabled. No `semidx_rank_context` tool exists yet and no
-  HTTP adapter exists; those are Stages 2-3. Its live and quality gates must
-  pass before any such tool is advertised as useful.
+  Stages 0-2 are done: ADR 013 is reviewed and not disputed (still
+  `status: proposed`, pending the offline/live evidence it names); `semidx-mcp`
+  validates `--enable-jev-ranking`/`--jev-endpoint`/`--jev-model`/`--jev-send`
+  plus `TYPESAFE_API_KEY` completely before serving and reports a redacted
+  `outbound_projection` in `semidx_health`; and the experimental
+  `semidx_rank_context` tool (new `src/mcp/ranking.zig`) now exists, gated so
+  it is advertised and callable only under complete consent, selects a bounded
+  candidate set through the same `selectTargets`/traversal primitives
+  `semidx_context` uses, and always returns every candidate with graph
+  provenance intact. No HTTP adapter is wired in yet (`Server.rank_provider`
+  is always null in production), so every call today falls back to
+  `ranking.status: "unavailable"` in original graph order — proven both by
+  tests and by hand against this repository, including that graph counts are
+  identical before and after a call. Stage 3 (the Jev HTTP adapter) and Stage 4
+  (live smoke plus the 24-query quality gate) remain; no such tool is
+  advertised as useful until Stage 4's gate passes.
 - Text fallback duplication is kept in `v0.1.0-preview.4` for compatibility.
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
   remains open; proposed

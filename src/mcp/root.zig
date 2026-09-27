@@ -72,6 +72,13 @@ pub const Server = struct {
     /// client changed, does not verify under it.
     cursor_key: tools.CursorKey,
     message_arena: std.heap.ArenaAllocator,
+    /// The Jev ranking provider, or null when no adapter is wired in yet
+    /// (always true before Plan 015 Stage 3) or the operator did not enable
+    /// ranking. `semidx_rank_context` treats a null provider exactly like a
+    /// provider that reported itself unavailable: a visible fallback, never a
+    /// crash or a silent success. Test-only: production code never sets this
+    /// to anything but null before Stage 3 exists.
+    rank_provider: ?tools.ranking.Provider = null,
 
     /// Scans `options.root` and publishes the first snapshot.
     pub fn init(gpa: Allocator, io: Io, options: Options, log: *Writer) !Server {
@@ -253,7 +260,6 @@ pub const Server = struct {
     }
 
     fn listTools(self: *Server, s: *Stringify, request: protocol.Request, era: protocol.Era) !void {
-        _ = self;
         if (request.params) |params| {
             // No list here is paginated, so no cursor was ever issued.
             if (params.get("cursor") != null) {
@@ -262,7 +268,7 @@ pub const Server = struct {
         }
         try protocol.beginResult(s, request.id, era);
         try s.objectField("tools");
-        try tools.writeToolList(s);
+        try tools.writeToolList(s, self.options.jev != null);
         if (era == .modern) try writeCacheFields(s);
         try protocol.endResult(s);
     }
@@ -278,7 +284,7 @@ pub const Server = struct {
             .object => |object| object,
             else => return protocol.writeError(s, request.id, .invalid_params, "tools/call arguments must be an object", null),
         } else null;
-        const tool = tools.byName(name) orelse {
+        const tool = tools.byName(name, self.options.jev != null) orelse {
             const message = try std.fmt.allocPrint(arena, "Unknown tool: {s}", .{name});
             return protocol.writeError(s, request.id, .invalid_params, message, null);
         };
@@ -299,6 +305,11 @@ pub const Server = struct {
             .semidx_references => tools.references(&ctx, &body_stringify, arguments),
             .semidx_context => tools.context(&ctx, &body_stringify, arguments),
             .semidx_refresh => self.refresh(&ctx, &body_stringify, arguments),
+            .semidx_rank_context => tools.rankContext(&ctx, &body_stringify, arguments, .{
+                .provider = self.rank_provider,
+                .destination_origin = if (self.options.jev) |consent| consent.origin else "",
+                .categories = .{ "query-text", "graph-metadata" },
+            }),
         };
 
         try protocol.beginResult(s, request.id, era);
@@ -582,9 +593,13 @@ test "one dispatcher serves modern requests statelessly and legacy requests afte
     try testing.expect(discovered.get("ttlMs") != null and discovered.get("cacheScope") != null);
     try testing.expectEqualStrings("semidx", discovered.get("_meta").?.object.get("io.modelcontextprotocol/serverInfo").?.object.get("name").?.string);
 
+    // This harness never enables Jev ranking, so its one gated tool is never
+    // advertised; every other declared tool always is.
+    const advertised_tools = tools.definitions.len - 1;
+
     // A modern tools/list needs no handshake, and says nothing legacy-shaped.
     const modern_list = (try h.send(arena, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{" ++ modern_meta ++ "}}")).?;
-    try testing.expectEqual(tools.definitions.len, modern_list.object.get("result").?.object.get("tools").?.array.items.len);
+    try testing.expectEqual(advertised_tools, modern_list.object.get("result").?.object.get("tools").?.array.items.len);
     try testing.expect(!h.server.legacy_initialized);
 
     // Without _meta and before initialize, a legacy request is refused.
@@ -600,7 +615,7 @@ test "one dispatcher serves modern requests statelessly and legacy requests afte
     const legacy_list = (try h.send(arena, "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/list\"}")).?;
     const legacy_result = legacy_list.object.get("result").?.object;
     try testing.expect(legacy_result.get("resultType") == null and legacy_result.get("ttlMs") == null);
-    try testing.expectEqual(tools.definitions.len, legacy_result.get("tools").?.array.items.len);
+    try testing.expectEqual(advertised_tools, legacy_result.get("tools").?.array.items.len);
 
     const ping = (try h.send(arena, "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"ping\"}")).?;
     try testing.expectEqual(@as(usize, 0), ping.object.get("result").?.object.count());
@@ -634,6 +649,14 @@ test "every declared argument is validated as its advertised schema says, and an
     var h: Harness = undefined;
     try h.init(false, "");
     defer h.deinit();
+    // Enabled so this generic sweep also covers semidx_rank_context's schema;
+    // no provider is set, so every accepted call still just falls back.
+    h.server.options.jev = .{
+        .endpoint = "https://api.typesafe.ai/v1/systemone",
+        .origin = "https://api.typesafe.ai",
+        .model = "jev-1.13.0",
+        .categories = .{ .query_text = true, .graph_metadata = true },
+    };
 
     const Check = struct {
         fn call(harness: *Harness, a: Allocator, tool: tools.Tool, base: []const u8, argument: []const u8, value: []const u8) !std.json.Value {
@@ -651,14 +674,22 @@ test "every declared argument is validated as its advertised schema says, and an
     };
 
     for (tools.definitions) |definition| {
-        // References and context need a target; the others need nothing.
+        // References and context need a target; rank_context needs a target
+        // and a query; the others need nothing.
         const base: []const u8 = switch (definition.tool) {
             .semidx_references, .semidx_context => "\"name\":\"greet\",",
+            .semidx_rank_context => "\"query\":\"q\",\"name\":\"greet\",",
             else => "",
         };
         try Check.refused(try Check.call(&h, arena, definition.tool, base, "bogus_argument", "1"), "unknown argument \"bogus_argument\"");
         for (definition.params) |param| {
-            const own_base = if (std.mem.eql(u8, param.name, "name") or std.mem.eql(u8, param.name, "entity_id")) "" else base;
+            const is_rank = definition.tool == .semidx_rank_context;
+            const own_base = if (is_rank and std.mem.eql(u8, param.name, "query"))
+                "\"name\":\"greet\","
+            else if (std.mem.eql(u8, param.name, "name") or std.mem.eql(u8, param.name, "entity_id"))
+                (if (is_rank) "\"query\":\"q\"," else "")
+            else
+                base;
             switch (param.type) {
                 .string => try Check.refused(try Check.call(&h, arena, definition.tool, own_base, param.name, "1"), "must be a string"),
                 .entity_id => {
@@ -1643,7 +1674,7 @@ test "narrowing hints name declared arguments of a cut list and are absent from 
             try testing.expect(!result.object.get("isError").?.bool);
             const object = result.object.get("structuredContent").?.object;
             // Every argument a hint names is one the tool declares.
-            const definition = tools.definitions[@intFromEnum(tools.byName(tool).?)];
+            const definition = tools.definitions[@intFromEnum(tools.byName(tool, true).?)];
             if (object.get("narrowing_hints")) |hints| {
                 try testing.expect(hints.array.items.len > 0);
                 for (hints.array.items) |hint| {

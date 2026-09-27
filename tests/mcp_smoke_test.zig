@@ -278,7 +278,7 @@ test "semidx-mcp stays default-off even when the key is present without the enab
     try testing.expect(std.mem.indexOf(u8, stderr_text, "unused-test-key-value") == null);
 }
 
-test "semidx-mcp reports outbound_projection under complete consent, still without the rank tool" {
+test "semidx-mcp advertises and serves semidx_rank_context under complete consent, always falling back" {
     const gpa = testing.allocator;
     var root_dir = testing.tmpDir(.{});
     defer root_dir.cleanup();
@@ -305,10 +305,14 @@ test "semidx-mcp reports outbound_projection under complete consent, still witho
     };
     defer client.destroy();
 
-    // Stage 1 wires consent and health reporting only; the tool itself is
-    // added in Stage 2 together with its capability gate.
     const list = try client.request(1, "tools/list", "{" ++ modern_meta ++ "}");
-    try testing.expectEqual(@as(usize, 7), list.object.get("result").?.object.get("tools").?.array.items.len);
+    const listed = list.object.get("result").?.object.get("tools").?.array.items;
+    try testing.expectEqual(@as(usize, 8), listed.len);
+    var saw_rank_tool = false;
+    for (listed) |tool| {
+        if (std.mem.eql(u8, tool.object.get("name").?.string, "semidx_rank_context")) saw_rank_tool = true;
+    }
+    try testing.expect(saw_rank_tool);
 
     const health = try client.callTool(2, "semidx_health", "{}");
     const projection = health.get("outbound_projection").?.object;
@@ -317,6 +321,17 @@ test "semidx-mcp reports outbound_projection under complete consent, still witho
     const categories = projection.get("categories").?.array.items;
     try testing.expectEqualStrings("query-text", categories[0].string);
     try testing.expectEqualStrings("graph-metadata", categories[1].string);
+
+    // No adapter is wired in before Plan 015 Stage 3, so even fully consented
+    // and advertised, the tool always falls back visibly: every candidate
+    // still comes back, in original graph order, with an honest reason.
+    const ranked = try client.callTool(3, "semidx_rank_context", "{\"query\":\"who calls greet?\",\"name\":\"greet\"}");
+    const ranking = ranked.get("ranking").?.object;
+    try testing.expectEqualStrings("approximate_projection", ranking.get("kind").?.string);
+    try testing.expectEqualStrings("unavailable", ranking.get("status").?.string);
+    try testing.expectEqualStrings("https://api.typesafe.ai", ranking.get("destination_origin").?.string);
+    try testing.expect(ranking.get("reason").?.string.len > 0);
+    try testing.expect(ranked.get("focus").?.array.items.len > 0);
 
     const ended = try client.shutdown();
     try testing.expectEqual(@as(u8, 0), ended.exit_code);

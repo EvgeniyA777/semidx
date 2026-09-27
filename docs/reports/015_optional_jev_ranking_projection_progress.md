@@ -240,11 +240,120 @@ likely files, and DoD are concrete and depend only on artifacts that now exist
 (`Options.jev`, the validated `Consent`, `OutboundProjection` health
 rendering). No decision here needs revisiting before Stage 2 starts.
 
+## Stage 2: Pure Candidate Projection And Deterministic Ranking Policy
+
+**Stage 2 is complete.**
+
+### What shipped
+
+- New `src/mcp/ranking.zig`, deliberately graph-agnostic: `Card` (the exact
+  closed field set from ADR 013 D3: `language`, `role`, `name`,
+  `container_path`, `source_unit_path`, `relationship` (`kind`+`direction`),
+  `resolution`, `freshness`, `producer`, `diagnostics`, keyed by a
+  request-local `candidate_N` ordinal, never a process-local id);
+  `serializeState` (appends whole cards until the next one would cross a
+  caller-supplied byte ceiling, so tests can force truncation without a
+  32,000-byte fixture, while production uses `default_state_ceiling_bytes =
+  32_000`; rejects a too-large query locally, per A3, without ever building a
+  partial request); `Provider` (the narrow `rank(query, cards) ->
+  probabilities + provenance` contract); `FakeProvider` (configurable: fixed
+  scores, simulated unavailability, and four ways to simulate a malformed
+  response); and `decide`, which runs a provider (or reports "no ranking
+  provider is configured" when there is none), validates its answer against
+  every ADR 013 D4 rule (exactly the sent ordinals, no duplicates, finite
+  `[0, 1]`), and sorts validated results descending with a stable tie-break on
+  original order. `request_ceiling_bytes`, `response_ceiling_bytes`, and
+  `provider_deadline_ms` are recorded here as named constants for Stage 3 to
+  enforce; nothing in this stage reads them yet. 11 unit tests, run both
+  standalone (`zig test src/mcp/ranking.zig`) and as part of `test-mcp`.
+- `src/mcp/tools.zig`: `.semidx_rank_context` added to `Tool` and
+  `definitions` (schema: `query` plus `semidx_context`'s focus/traversal
+  controls, `candidate_limit` default 20 max 32); `byName`/`writeToolList` now
+  take a `jev_ranking_enabled: bool` and gate this one tool identically in
+  both places, so a disabled direct call gets the exact same "Unknown tool"
+  text as a name the process never recognized (ADR 013 A1) — proven by
+  comparing the two error strings, not by asserting a different error class
+  exists. `pub fn rankContext` selects candidates using the same
+  `selectTargets`, `relationshipPasses`, and `reach` primitives
+  `semidx_context` already uses (no second resolver), builds one `Card` per
+  candidate, calls `ranking.serializeState`/`ranking.decide`, and renders a
+  result with `focus`, `candidates` (graph fields via the existing
+  `writeEntity`/existence rendering, plus `source_unit_path`, `relationship`,
+  `diagnostics`, and a `ranking` sub-object with `original_position` and
+  `probability`), and a top-level `ranking` block (`kind`,`status`, provider,
+  requested/response model, destination origin, categories, token usage,
+  reason). Candidates beyond the byte ceiling keep their original relative
+  order after the ranked ones; every candidate is always present.
+- `src/mcp/root.zig`: `Server.rank_provider: ?tools.ranking.Provider = null`
+  (doc-commented as production-always-null before Stage 3; tests set it
+  directly, the same pattern the existing `Harness`/fault-injection tests
+  already use for white-box control). `callTool` passes
+  `.{ .provider = self.rank_provider, .destination_origin = ...,
+  .categories = ... }` to `rankContext`; the origin always comes from the
+  already-validated consent, never recomputed.
+- `docs/mcp/local_preview.md` and `MEMORY.md` updated: the tool is documented,
+  and the Stage-1-era "does not yet advertise or serve any tool" sentence is
+  corrected now that it does.
+- Tests: `tests/mcp_smoke_test.zig`'s Stage 1 test asserting "still 7 tools
+  under complete consent" is renamed and extended to assert 8 tools, that
+  `semidx_rank_context` is among them, and that calling it returns a
+  well-formed `unavailable` fallback naming the right destination. Two
+  existing `src/mcp/root.zig` in-module tests that iterate `tools.definitions`
+  or compare list length against it needed updates: the generic dispatcher
+  test now subtracts the one consent-gated tool from its expected count
+  instead of enabling consent it has no other reason to carry, and the
+  generic per-argument-schema fuzz test now enables a fake consent (no
+  provider) so `semidx_rank_context`'s schema is fuzzed like every other
+  tool's, with tool-specific base-argument handling for its two-part focus
+  (`query` plus `name`/`entity_id`/`path`) added to that shared harness.
+
+### Known Stage 2 simplifications, recorded rather than hidden
+
+- The MCP *response* budget (`max_response_bytes`) is accepted and reported in
+  `budget`, but unlike `semidx_context` this tool does not yet truncate its
+  response incrementally against it. `candidate_limit` (max 32) keeps results
+  small enough that this has not been observed to matter, but it is a real gap
+  against full parity with `semidx_context`'s budget discipline and should be
+  named explicitly if a future stage tightens it.
+- `decide`'s tie-break sorts only the cards actually sent (a prefix of the
+  full candidate list); any candidate cut by the 32,000-byte state ceiling
+  (not observed on real data — see the manual check below) keeps its original
+  position appended after the ranked ones rather than being interleaved by a
+  synthetic score. This is a documented policy choice, not an oversight: no
+  probability exists for an unsent candidate, so nothing was available to sort
+  it by.
+
+### Verification run
+
+- `zig test src/mcp/ranking.zig`: 11/11 passed standalone.
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build test-mcp`: passed (fixed two pre-existing in-module tests that
+  hard-coded the tool count/list against the newly consent-gated tool).
+- `zig build test-core`: passed.
+- `zig build test`: passed.
+- `zig build preview-gate`: both the fixture and the dogfood-over-this-repository
+  profiles passed every hard-pass check; no regression in existing tool output.
+- Manual verification against this repository's own snapshot (not part of the
+  committed suite, used to sanity-check real data before trusting the unit
+  tests): `semidx_rank_context` on `health`/`src/mcp/tools.zig` with
+  `candidate_limit: 5` returned `candidates_total: 8`, `candidates_sent: 5`,
+  `candidates_truncated: true`, graph fields identical in shape to
+  `semidx_context`'s, and `ranking.status: "unavailable"` with
+  `reason: "no ranking provider is configured"` and the correct
+  `destination_origin`; no source text, no key, and (checked via
+  `semidx_health` before and after the call) identical entity/assertion
+  counts, proving graph immutability by direct observation, not only by unit
+  test.
+- `mcp__semidx__semidx_refresh` run after the edits; revision 127, no new
+  analysis failures beyond the three pre-existing ones.
+
 ## Next Stage
 
-Stage 2 (pure candidate projection and deterministic ranking policy): add
-`src/mcp/ranking.zig`, the client-owned provider role, a deterministic fake
-provider, the `semidx_rank_context` tool definition and dispatch arm gated by
-`options.jev != null`, the closed candidate-card serializer proved against
-ADR 013 D3's exact field allowlist, and the ordering/tie/truncation/fallback
-behavior — all without any HTTP implementation.
+Stage 3 (Jev HTTP adapter): new `src/mcp/jev.zig` implementing
+`ranking.Provider` over Zig's standard-library HTTP/JSON, using the
+`fixtures/jev/*.json` fixtures from Stage 0, enforcing the named
+`provider_deadline_ms`/`request_ceiling_bytes`/`response_ceiling_bytes`
+constants from `ranking.zig`, rejecting redirects, and never reusing the
+authorization header for another origin. `Server` wires a real
+`JevProvider` into `rank_provider` only when `options.jev` is present; the
+default binary must still make no network attempt.

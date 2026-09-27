@@ -106,14 +106,17 @@ zig build mcp -- --root .                  # same, through the build system
 | `--jev-model <id>` | A versioned model id, e.g. `jev-1.13.0`. Moving aliases such as `jev-latest` are rejected. |
 | `--jev-send <categories>` | Must be exactly `query-text,graph-metadata` (either order); no other value is accepted. |
 
-As of this preview, `--enable-jev-ranking` only accepts complete consent,
-validates it, and reports it (redacted) under `outbound_projection` in
-`semidx_health`; it does not yet advertise or serve any tool. Any missing,
-partial, or invalid item among the four inputs above fails startup before
-indexing, and names the offending item without ever printing the key.
-`TYPESAFE_API_KEY` is read from the environment only when
-`--enable-jev-ranking` is present, and its value is never logged, printed, or
-returned.
+`--enable-jev-ranking` accepts only complete consent: any missing, partial, or
+invalid item among the four inputs above fails startup before indexing, and
+names the offending item without ever printing the key. `TYPESAFE_API_KEY` is
+read from the environment only when `--enable-jev-ranking` is present, and its
+value is never logged, printed, or returned. Complete consent is reported
+(redacted) under `outbound_projection` in `semidx_health` and advertises the
+experimental `semidx_rank_context` tool (see [Tools](#tools)). As of this
+preview no HTTP adapter is wired in yet (Plan 015 Stage 3): every call to
+`semidx_rank_context` falls back to `ranking.status: "unavailable"` and
+returns its candidates in original graph order, exactly as it does when
+ranking is disabled or a real provider fails.
 
 Streams and exit status:
 
@@ -266,6 +269,7 @@ defaults, and maxima the server validates.
 | `semidx_references` | `entity_id`, or `name` with optional `path`/`language`; `direction` (`incoming`), `freshness` (`current`), `resolution` (`any`), `limit` (100, max 1000), `mention_limit` (50, max 500), `detail` (`compact`), `max_response_bytes`, `cursor` | The target definitions (at most 50, on every page), the `REFERENCES`/`CALLS` relationships into them (`incoming`) or out of them (`outgoing`), and `unresolved_mentions` (see below). A call is one occurrence and is listed once. `compact` renders each target once, with its existence claim, and names a relationship end that is a target by `id` alone; `full` renders both ends of every relationship. |
 | `semidx_context` | `entity_id`, `name` (with optional `path`/`language`), or `path` alone for a source unit; `freshness` (`current`), `direction` (`both`), `depth` (1, max 3), `relationship_limit` (50, max 500, per direction), `diagnostic_limit` (50, max 500), `detail` (`compact`), `max_response_bytes` | Up to 10 focus entities, each with its unit's analysis state, incoming and outgoing relationships of every kind (only those `direction` includes), the unit's diagnostics, and the entity's last identity event. `compact` names the focus end of each relationship by `id` alone and renders the other end, resolutions, producers, evidence, and diagnostics without their full fields; `full` renders them all. `depth` 2 or 3 adds a [traversal](#traversal). |
 | `semidx_refresh` | none | The new and previous snapshot revisions, `entity_ids_preserved` (false when this refresh published an index rebuilt after a failure), the scan outcome (unchanged, changed, renamed, added, removed, analyzed, ambiguous renames, invalidated), unit counts, and diagnostic counts. |
+| `semidx_rank_context` (experimental, only when `--enable-jev-ranking` consent is complete) | `query`; `entity_id`, `name` (with optional `path`/`language`), or `path`; `freshness` (`current`), `direction` (`both`), `depth` (1, max 3), `relationship_limit` (50, max 500), `candidate_limit` (20, max 32), `max_response_bytes` | The same focus and candidate selection as `semidx_context`, plus a `ranking` block: `kind: "approximate_projection"`, `status` (`"ranked"` or `"unavailable"`), provider/model/destination/category provenance, and a `ranking.probability`/`ranking.original_position` per candidate. Every selected candidate is always present; only order and the `ranking` block ever depend on the provider. Absent from `tools/list` and rejected as an unknown tool when ranking is not enabled. See [ADR 013](../adr/013_optional_jev_ranking_projection.md) and [Plan 015](../plans/015_optional_jev_ranking_projection.md). |
 
 `freshness` is `current`, `stale`, or `any`. `resolution` is `any`, `fact`,
 `unresolved`, or `approximate`. `language` is `java`, `clojure`, or `zig`.

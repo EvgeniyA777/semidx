@@ -24,6 +24,7 @@ const ObjectMap = std.json.ObjectMap;
 
 const semidx = @import("semidx");
 const protocol = @import("protocol.zig");
+pub const ranking = @import("ranking.zig");
 
 const model = semidx.model;
 const Snapshot = semidx.Snapshot;
@@ -36,6 +37,9 @@ pub const Tool = enum {
     semidx_references,
     semidx_context,
     semidx_refresh,
+    /// Advertised and callable only when the server was started with complete
+    /// Jev ranking consent (ADR 013 D2); see `byName` and `writeToolList`.
+    semidx_rank_context,
 };
 
 pub const Definition = struct {
@@ -229,18 +233,43 @@ pub const definitions = [_]Definition{
     }),
     define(.semidx_refresh, "Refresh index", "Rescan the configured root, reconcile the changes into the graph, and publish the next " ++
         "snapshot. Later calls observe the new snapshot; a failed refresh keeps the previous one.", &.{}),
+    define(.semidx_rank_context, "Rank context candidates (experimental, opt-in)", "Select a bounded semidx_context-shaped candidate " ++
+        "set for `query` and, when Jev ranking is enabled, ask an external TypeSafe Jev model which candidates are most useful for " ++
+        "it. The graph alone selects candidates and never resolves anything for Jev; Jev only proposes an order. Every candidate " ++
+        "is always returned; only its position and an added `ranking` block ever depend on the provider. On any provider failure " ++
+        "this returns the same candidates in their original graph order with `ranking.status = \"unavailable\"`. Only " ++
+        "`query`, bounded graph metadata named in ADR 013 D3, and never source text or evidence, ever leave this process.", &.{
+        .{ .name = "query", .type = .string, .description = "The question this ranking is for. Sent to the provider verbatim." },
+        shared_params.entity_id,
+        shared_params.name,
+        shared_params.path,
+        shared_params.language,
+        shared_params.freshness,
+        choiceParam(DirectionArg, "direction", .both, "Which relationships to traverse for candidates: into the focus, out of it, or both (default)."),
+        countParam("depth", 1, 3, "Steps to follow relationships from each focus entity, as in semidx_context."),
+        countParam("relationship_limit", 50, 500, "Maximum relationships considered per entity per pass."),
+        countParam("candidate_limit", ranking.default_candidates, ranking.max_candidates, "Maximum candidates selected and ranked."),
+        shared_params.max_response_bytes,
+    }),
 };
 
 /// The secret a server generates per process to authenticate its cursors.
 pub const CursorKey = Cursor.Key;
 
-pub fn byName(name: []const u8) ?Tool {
-    return std.meta.stringToEnum(Tool, name);
+/// `jev_ranking_enabled` gates `.semidx_rank_context` the same way for both
+/// this and `writeToolList`, so a tool omitted from discovery can never be
+/// invoked by name (ADR 013 A1): a disabled call gets exactly the same
+/// "unknown tool" answer as any name the process never recognized.
+pub fn byName(name: []const u8, jev_ranking_enabled: bool) ?Tool {
+    const tool = std.meta.stringToEnum(Tool, name) orelse return null;
+    if (tool == .semidx_rank_context and !jev_ranking_enabled) return null;
+    return tool;
 }
 
-pub fn writeToolList(s: *Stringify) Writer.Error!void {
+pub fn writeToolList(s: *Stringify, jev_ranking_enabled: bool) Writer.Error!void {
     try s.beginArray();
     for (definitions) |definition| {
+        if (definition.tool == .semidx_rank_context and !jev_ranking_enabled) continue;
         try s.beginObject();
         try s.objectField("name");
         try s.write(@tagName(definition.tool));
@@ -2092,6 +2121,275 @@ fn reach(
     };
     if ((try visited.getOrPut(ctx.arena, far)).found_existing) return;
     try frontier.append(ctx.arena, far);
+}
+
+// -- semidx_rank_context (Plan 015 Stage 2) ----------------------------------
+
+/// What `rankContext` needs from the server beyond arguments: the provider to
+/// rank with (null falls back exactly like a provider that failed) and the
+/// consent's destination and categories, always present because `byName`
+/// never dispatches this tool without complete consent.
+pub const RankConfig = struct {
+    provider: ?ranking.Provider,
+    destination_origin: []const u8,
+    categories: [2][]const u8,
+};
+
+const ReachedBy = struct { kind: model.RelationshipKind, incoming: bool };
+const CandidateEntry = struct { entity: model.Entity, reached_by: ?ReachedBy };
+
+/// Records `entity` as a candidate the first time it is reached, in arrival
+/// order, and counts every distinct entity reached even past `limit` so the
+/// result can report how many were cut. This is the only place a "candidate"
+/// is decided, and it decides nothing about relevance: order here is
+/// arrival order, not usefulness.
+fn addCandidate(
+    ctx: *Context,
+    candidates: *std.ArrayList(CandidateEntry),
+    seen: *std.AutoHashMapUnmanaged(model.EntityId, void),
+    total: *usize,
+    limit: usize,
+    entity: model.Entity,
+    reached_by: ?ReachedBy,
+) Allocator.Error!void {
+    if ((try seen.getOrPut(ctx.arena, entity.id)).found_existing) return;
+    total.* += 1;
+    if (candidates.items.len >= limit) return;
+    try candidates.append(ctx.arena, .{ .entity = entity, .reached_by = reached_by });
+}
+
+/// The far entity of `assertion`'s relationship as seen from `incoming`, or
+/// null when it is an unresolved designator: a name is never a candidate.
+fn farEntity(snapshot: *const Snapshot, assertion: model.Assertion, incoming: bool) ?model.Entity {
+    const relationship = assertion.relationship().?;
+    const id: model.EntityId = if (incoming) relationship.source else switch (relationship.target) {
+        .entity => |target_id| target_id,
+        .designator => return null,
+    };
+    return snapshot.entityById(id);
+}
+
+fn buildCard(ctx: *Context, ordinal: []const u8, entry: CandidateEntry) Allocator.Error!ranking.Card {
+    const entity = entry.entity;
+    const language: ?[]const u8 = if (entity.identity.language) |l| @tagName(l) else null;
+    const unit_id: ?model.SourceUnitId = switch (entity.identity.scope) {
+        .unit => |id| id,
+        .repository => null,
+    };
+    const source_unit_path: ?[]const u8 = if (unit_id) |id| (if (ctx.snapshot.unit(id)) |view| view.path else null) else null;
+
+    var resolution: ?[]const u8 = null;
+    var freshness: ?[]const u8 = null;
+    var producer: ?[]const u8 = null;
+    if (try ctx.existenceOf(entity.id)) |assertion| {
+        resolution = @tagName(assertion.resolution.category());
+        freshness = @tagName(ctx.snapshot.assertionFreshness(assertion));
+        producer = assertion.producer.name;
+    }
+
+    var diagnostics: std.ArrayList([]const u8) = .empty;
+    if (unit_id) |id| {
+        var diagnostic_seen: std.AutoHashMapUnmanaged(model.DiagnosticKind, void) = .empty;
+        for (ctx.snapshot.diagnostics) |diagnostic| {
+            if (diagnostic.unit != id) continue;
+            if ((try diagnostic_seen.getOrPut(ctx.arena, diagnostic.kind)).found_existing) continue;
+            try diagnostics.append(ctx.arena, @tagName(diagnostic.kind));
+        }
+    }
+
+    return .{
+        .ordinal = ordinal,
+        .language = language,
+        .role = entity.identity.role,
+        .name = entity.identity.name,
+        .container_path = entity.identity.container_path,
+        .source_unit_path = source_unit_path,
+        .relationship_kind = if (entry.reached_by) |r| @tagName(r.kind) else null,
+        .relationship_direction = if (entry.reached_by) |r| (if (r.incoming) "incoming" else "outgoing") else null,
+        .resolution = resolution,
+        .freshness = freshness,
+        .producer = producer,
+        .diagnostics = diagnostics.items,
+    };
+}
+
+/// Selects a bounded candidate set for `query` and, when `config.provider` is
+/// present, asks it to order them. The graph alone determines focus and
+/// candidates through `selectTargets`, `relationshipPasses`, and `reach` —
+/// exactly the primitives `semidx_context` uses, so the same traversal
+/// semantics apply and no second resolver exists. The provider only ever
+/// changes `candidates`' order and the `ranking` block; every selected
+/// candidate is always present, and every failure mode collapses to the same
+/// visible `unavailable` status with the graph's own order restored.
+pub fn rankContext(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, config: RankConfig) Error!void {
+    const args = try Args(.semidx_rank_context).init(ctx, arguments);
+    const query = try args.string("query") orelse return ctx.fail("give a query", .{});
+    if (query.len == 0) return ctx.fail("query must not be empty", .{});
+    const freshness = freshnessFilter(try args.choice(FreshnessArg, "freshness"));
+    const direction = try args.choice(DirectionArg, "direction");
+    const depth = try args.count("depth");
+    const relationship_limit = try args.count("relationship_limit");
+    const candidate_limit = try args.count("candidate_limit");
+    const max_bytes = try args.count("max_response_bytes");
+    ctx.max_response_bytes = max_bytes;
+
+    const targets = try selectTargets(ctx, args, freshness, true);
+    const snapshot = ctx.snapshot;
+    const shown_focus = targets[0..@min(targets.len, max_focus)];
+
+    var seen: std.AutoHashMapUnmanaged(model.EntityId, void) = .empty;
+    var visited: std.AutoHashMapUnmanaged(model.EntityId, void) = .empty;
+    var listed: std.AutoHashMapUnmanaged(model.AssertionId, void) = .empty;
+    var frontier: std.ArrayList(model.EntityId) = .empty;
+    var candidates: std.ArrayList(CandidateEntry) = .empty;
+    var candidates_total: usize = 0;
+
+    for (targets) |entity| {
+        try visited.put(ctx.arena, entity.id, {});
+        try addCandidate(ctx, &candidates, &seen, &candidates_total, candidate_limit, entity, null);
+    }
+    for (targets) |entity| {
+        for (relationshipPasses(entity.id, direction, freshness)) |pass| {
+            if (!pass.enabled) continue;
+            var n: usize = 0;
+            var found = snapshot.relationships(pass.filter);
+            while (found.next()) |assertion| {
+                n += 1;
+                if (n <= relationship_limit) {
+                    if (farEntity(snapshot, assertion, pass.incoming)) |far| {
+                        try addCandidate(ctx, &candidates, &seen, &candidates_total, candidate_limit, far, .{ .kind = assertion.relationship().?.kind, .incoming = pass.incoming });
+                    }
+                }
+                if (depth > 1) try reach(ctx, &visited, &listed, &frontier, assertion, pass.incoming);
+            }
+        }
+    }
+    var distance: u32 = 2;
+    while (distance <= depth and frontier.items.len != 0) : (distance += 1) {
+        const expanding = try frontier.toOwnedSlice(ctx.arena);
+        for (expanding) |node| {
+            for (relationshipPasses(node, direction, freshness)) |pass| {
+                if (!pass.enabled) continue;
+                var found = snapshot.relationships(pass.filter);
+                while (found.next()) |assertion| {
+                    if (listed.contains(assertion.id)) continue;
+                    if (farEntity(snapshot, assertion, pass.incoming)) |far| {
+                        try addCandidate(ctx, &candidates, &seen, &candidates_total, candidate_limit, far, .{ .kind = assertion.relationship().?.kind, .incoming = pass.incoming });
+                    }
+                    try reach(ctx, &visited, &listed, &frontier, assertion, pass.incoming);
+                }
+            }
+        }
+    }
+
+    const cards = try ctx.arena.alloc(ranking.Card, candidates.items.len);
+    for (candidates.items, 0..) |entry, i| {
+        const ordinal = try std.fmt.allocPrint(ctx.arena, "candidate_{d}", .{i});
+        cards[i] = try buildCard(ctx, ordinal, entry);
+    }
+
+    const state = ranking.serializeState(ctx.arena, query, cards, ranking.default_state_ceiling_bytes) catch |err| switch (err) {
+        error.QueryTooLarge => return ctx.fail("query and its graph metadata do not fit the outbound size limit; shorten the query or lower candidate_limit", .{}),
+        else => |e| return e,
+    };
+    const decision = try ranking.decide(ctx.arena, config.provider, query, cards[0..state.sent]);
+
+    const order = try ctx.arena.alloc(usize, cards.len);
+    if (decision.status == .ranked) {
+        for (decision.order, 0..) |original_index, position| order[position] = original_index;
+        var i: usize = state.sent;
+        while (i < cards.len) : (i += 1) order[i] = i;
+    } else {
+        for (order, 0..) |*o, i| o.* = i;
+    }
+
+    try beginStructured(ctx, s);
+    try s.objectField("focus");
+    try s.beginArray();
+    for (shown_focus) |entity| try writeEntity(ctx, s, entity, .focus);
+    try s.endArray();
+    try s.objectField("focus_total");
+    try s.write(targets.len);
+    try s.objectField("focus_truncated");
+    try s.write(targets.len > max_focus);
+
+    try s.objectField("candidates_total");
+    try s.write(candidates_total);
+    try s.objectField("candidates_sent");
+    try s.write(state.sent);
+    try s.objectField("candidates_truncated");
+    try s.write(candidates.items.len < candidates_total or state.truncated);
+    try s.objectField("request_state_bytes");
+    try s.write(state.json.len);
+
+    try s.objectField("candidates");
+    try s.beginArray();
+    for (order) |original_index| {
+        const entry = candidates.items[original_index];
+        const card = cards[original_index];
+        try s.beginObject();
+        try s.objectField("entity");
+        try writeEntity(ctx, s, entry.entity, .focus);
+        try s.objectField("source_unit_path");
+        if (card.source_unit_path) |path| try protocol.writeString(s, path) else try s.write(null);
+        try s.objectField("relationship");
+        if (card.relationship_kind) |kind| {
+            try s.beginObject();
+            try s.objectField("kind");
+            try s.write(kind);
+            try s.objectField("direction");
+            try s.write(card.relationship_direction.?);
+            try s.endObject();
+        } else try s.write(null);
+        try s.objectField("diagnostics");
+        try s.write(card.diagnostics);
+        try s.objectField("ranking");
+        try s.beginObject();
+        try s.objectField("original_position");
+        try s.write(original_index);
+        try s.objectField("probability");
+        if (decision.status == .ranked and original_index < state.sent) {
+            try s.write(decision.probabilities[original_index]);
+        } else try s.write(null);
+        try s.endObject();
+        try s.endObject();
+    }
+    try s.endArray();
+
+    try s.objectField("ranking");
+    try s.beginObject();
+    try s.objectField("kind");
+    try s.write("approximate_projection");
+    try s.objectField("status");
+    try s.write(@tagName(decision.status));
+    try s.objectField("provider");
+    if (decision.provider) |value| try s.write(value) else try s.write(null);
+    try s.objectField("requested_model");
+    if (decision.requested_model) |value| try s.write(value) else try s.write(null);
+    try s.objectField("response_model");
+    if (decision.response_model) |value| try s.write(value) else try s.write(null);
+    try s.objectField("destination_origin");
+    try s.write(config.destination_origin);
+    try s.objectField("categories");
+    try s.write(config.categories);
+    try s.objectField("input_tokens");
+    if (decision.input_tokens) |value| try s.write(value) else try s.write(null);
+    try s.objectField("output_tokens");
+    if (decision.output_tokens) |value| try s.write(value) else try s.write(null);
+    try s.objectField("reason");
+    if (decision.reason) |value| try protocol.writeString(s, value) else try s.write(null);
+    try s.endObject();
+
+    try s.objectField("budget");
+    try s.write(.{
+        .direction = direction,
+        .depth = depth,
+        .relationship_limit = relationship_limit,
+        .candidate_limit = candidate_limit,
+        .focus_limit = max_focus,
+        .max_response_bytes = max_bytes,
+    });
+    try s.endObject();
 }
 
 test "every tool schema is one line of valid JSON naming exactly the declared arguments" {
