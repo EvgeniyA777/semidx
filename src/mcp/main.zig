@@ -86,22 +86,26 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
+    // Read the secret only when the enable flag is present. Its value is
+    // never logged or printed; it is used only to construct the Jev adapter
+    // `Server.init` owns, never copied anywhere else.
+    var jev_api_key: ?[]const u8 = null;
     if (enable_jev_ranking) {
-        // Read the secret only now: never when the enable flag is absent, and
-        // never logged, printed, or stored past this presence check.
         const key = init.environ_map.get("TYPESAFE_API_KEY");
         const key_present = if (key) |value| value.len > 0 else false;
         options.jev = mcp.jev_consent.validate(jev_endpoint, jev_model, jev_send, key_present) catch |err| {
             return fail(log, mcp.jev_consent.describe(err));
         };
+        jev_api_key = key;
     }
 
-    var server = mcp.Server.init(gpa, io, options, log) catch |err| {
+    var server = mcp.Server.init(gpa, io, options, log, jev_api_key) catch |err| {
         try log.print("semidx-mcp: could not index {s}: {t}\n", .{ options.root, err });
         try log.flush();
         std.process.exit(1);
     };
     defer server.deinit();
+    server.wireJevProvider();
     if (options.evidence_text) {
         try log.print("semidx-mcp: evidence text is enabled for {s}\n", .{options.root});
         try log.flush();

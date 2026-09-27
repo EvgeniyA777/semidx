@@ -347,13 +347,154 @@ rendering). No decision here needs revisiting before Stage 2 starts.
 - `mcp__semidx__semidx_refresh` run after the edits; revision 127, no new
   analysis failures beyond the three pre-existing ones.
 
+## Stage 3: Jev HTTP Adapter
+
+**Stage 3 is complete, with one deliberate, documented scope reduction on the
+deadline guarantee — see below.**
+
+### What shipped
+
+- New `src/mcp/jev.zig`, implementing `ranking.Provider` with Zig 0.16's
+  standard-library `std.http.Client` only (no SDK, no extra dependency,
+  confirmed by reading `build.zig`: no new package was added). `JevProvider`
+  owns one `http.Client` and the API key; `provider()` returns the vtable
+  `ranking.decide` calls exactly like the fake.
+  - **Request**: `buildRequestBody` embeds `ranking.serializeState`'s output
+    verbatim under `"state"`, plus `"model"` and one `"noul"` question per
+    sent candidate under `"questions"`, using the exact fixed English rubric
+    from `fixtures/jev/request_two_candidates.json` (`instructions`,
+    `criteria.true`, `criteria.false` are the same string constants, tested
+    against that fixture's shape). Refuses locally (no outbound attempt) when
+    the built request would exceed `ranking.request_ceiling_bytes` (64 KiB).
+  - **Transport**: `client.request(.POST, uri, .{ .redirect_behavior =
+    .not_allowed, ... })` — a redirect is a rejected error, never followed,
+    so the bearer header can never reach a second origin. The bearer key is
+    added as a per-request `extra_headers` entry and never touches `Options`,
+    a log line, or a diagnostic.
+  - **Response**: `429`/`529` are read for a numeric `Retry-After` and treated
+    as `retry_after_seconds`; anything else non-`200` is an immediate
+    `unavailable`, no retry. The body is read through
+    `reader.allocRemaining(arena, .limited(ranking.response_ceiling_bytes))`
+    (256 KiB), which errors before a larger body is ever fully buffered.
+  - **Response validation** (`parseResponse`): accepts only a JSON object
+    naming `model` (a string, checked byte-for-byte against the requested
+    model — D4's "exact equality... record both values separately" is
+    satisfied because a match is what lets `ranking.decide` set both
+    `requested_model` and `response_model` on the successful result) and
+    `answers` (an object of `{"type":"noul","noul":<number>}`); anything else
+    at the JSON-shape/type level is a sanitized `unavailable`.
+    Ordinal-uniqueness, completeness, and numeric range/finiteness are left to
+    `ranking.decide`, which every provider (fake or real) already goes
+    through — division of labor confirmed by the fixture tests below, several
+    of which show `parseResponse` accepting a shape that only `decide` (tested
+    separately, Stage 2) actually rejects.
+  - **Retry/deadline**: one bounded retry for `429`/`529`, only when
+    `elapsed_so_far + Retry-After` fits inside `ranking.provider_deadline_ms`
+    (2,000 ms), measured with `Io.Timestamp`/`Clock.Duration`. See the scope
+    note below for exactly what this does and does not guarantee.
+  - **Error sanitization**: `sanitizeTransportError` maps every transport
+    `anyerror` to one of a handful of fixed, non-dynamic strings ("could not
+    reach the provider", "TLS to the provider failed", etc.); no header
+    value, URL, or body fragment can reach a result or a log through this
+    path.
+- `build.zig`: new `semidx_jev_fixtures` options module
+  (`b.pathFromRoot("fixtures/jev")`) imported by the `semidx_mcp` module, so
+  `jev.zig`'s tests read the committed Stage 0 fixtures at runtime (outside
+  `src/mcp/`'s package path, so `@embedFile` does not apply) instead of
+  inlining them.
+- `src/mcp/root.zig`: `Server.jev_adapter: ?jev.JevProvider`, constructed in
+  `init` from `options.jev` and the now-forwarded `jev_api_key` parameter, and
+  `Server.wireJevProvider()`, which points `rank_provider` at it. Split into
+  two steps because `Provider.ptr` captures `&self.jev_adapter.?`, which would
+  dangle if taken before `Server.init`'s return value reaches its final
+  address; `wireJevProvider` must run after the caller's `var server = try
+  Server.init(...)`. `deinit` now closes the adapter's `http.Client`.
+- `src/mcp/main.zig`: the API key, read only when `--enable-jev-ranking` is
+  present, is now forwarded to `Server.init` instead of being discarded after
+  the presence check (Stage 1's original design, superseded now that Stage 3
+  gives the key an owner). `server.wireJevProvider()` is called once, right
+  after `Server.init`, before serving.
+- `docs/mcp/local_preview.md` and `MEMORY.md` updated: a real adapter exists;
+  its usefulness is still unmeasured (Stage 4), so a `"ranked"` result is
+  documented as an unproven ordering, not a recommendation.
+
+### Scope note: what the 2,000 ms deadline actually guarantees today
+
+Investigated `std.http.Client`'s Zig 0.16 API in depth (via the installed
+stdlib source, not from memory) looking for a way to bound an entire
+request/response round trip by a wall-clock deadline. Findings, checked
+against the actual source:
+
+- `Client.fetch` and `Client.request` accept no timeout parameter at all.
+- `Client.connectTcpOptions` accepts a per-connect `Io.Timeout`, but the
+  convenience `request()`/`fetch()` path this adapter uses calls the
+  plain, timeout-less `connect()` internally; using the timeout would require
+  hand-rolling the connection and request construction `request()` normally
+  does, which this stage did not do.
+- `std.Io`'s structured-concurrency primitives (`Io.async`, `Future.await`,
+  `Future.cancel`) provide no "await with a timeout, whichever finishes
+  first" combinator for an arbitrary function; `Batch.awaitConcurrent(io,
+  timeout)` is the only timeout-aware wait, and it operates on raw
+  `Io.Operation`s (socket-level primitives), not on a `Future` wrapping a
+  higher-level call like `Client.fetch`.
+
+Given that, this adapter enforces the deadline as a **retry-eligibility
+budget**, not a preemptive abort: it measures elapsed time and will not start
+a retry that would not fit inside 2,000 ms, but a single in-flight attempt
+against an unresponsive-but-connected peer is not forcibly cut off. This is a
+real, honest gap against "enforce the 2,000 ms total deadline" read as a hard
+wall-clock ceiling on every call. It is recorded here rather than papered over
+because Stage 4's live smoke is the first point this project can observe real
+network latency at all, and because retrofitting the manual
+`connectTcpOptions` + hand-built `Request` path to add real preemptive
+cancellation is a bounded, well-scoped follow-up rather than something to
+guess at without a way to verify it.
+
+### Verification run
+
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build test-mcp`: passed, 80 tests (1 pre-existing intentional skip).
+  `jev.zig`'s own tests cover: `buildRequestBody`'s shape and fixed rubric;
+  `parseResponse` against all eight Stage 0 fixtures (valid, missing answer,
+  duplicate/unknown answer, wrong type, out-of-range, non-finite — rejected
+  earlier than expected, at the JSON-shape level, because `1e400` parses as
+  `std.json.Value.number_string` rather than a float, which this function
+  already treats as untrusted — model mismatch, and `sanitizeTransportError`).
+  All of these run with no network access.
+- `zig build test-core`, `zig build test`, `zig build dogfood`, `zig build
+  preview-gate`: all passed; no regression in existing tool output.
+- Manual, local-only verification (not part of the committed suite, and
+  deliberately never contacts `api.typesafe.ai` or any real third party,
+  consistent with Stage 4 being the only stage authorized to do that): pointed
+  a rebuilt binary's `--jev-endpoint` at `https://127.0.0.1:1/v1/systemone`
+  (a reserved, always-refused local port) with a dummy key. Result:
+  `ranking.status: "unavailable"`, `reason: "could not reach the provider"`,
+  correct `destination_origin`, no hang, exit 0, and the dummy key did not
+  appear anywhere in stdout or stderr. This is the first real (if local-only)
+  exercise of the transport code path outside a unit test.
+- `mcp__semidx__semidx_refresh` run after the edits; revision 135, no new
+  analysis failures beyond the three pre-existing ones.
+
+### Known Stage 3 gaps, recorded rather than hidden
+
+- No automated, offline test exercises `JevProvider.rank`'s full transport
+  path (retry-after handling, redirect rejection, response-size ceiling) end
+  to end; only its pure JSON-building/parsing halves are unit-tested, and the
+  transport path itself was checked once by hand (above). A loopback
+  `std.http.Server`-based test would close this gap and is a reasonable
+  follow-up before leaning on retry/redirect behavior in production.
+- The 2,000 ms deadline is a retry budget, not a hard per-call ceiling — see
+  the scope note above.
+
 ## Next Stage
 
-Stage 3 (Jev HTTP adapter): new `src/mcp/jev.zig` implementing
-`ranking.Provider` over Zig's standard-library HTTP/JSON, using the
-`fixtures/jev/*.json` fixtures from Stage 0, enforcing the named
-`provider_deadline_ms`/`request_ceiling_bytes`/`response_ceiling_bytes`
-constants from `ranking.zig`, rejecting redirects, and never reusing the
-authorization header for another origin. `Server` wires a real
-`JevProvider` into `rank_provider` only when `options.jev` is present; the
-default binary must still make no network attempt.
+Stage 4 (live synthetic smoke and ranking evaluation): requires the operator
+to supply a real `TYPESAFE_API_KEY`, endpoint, model, and categories — no
+agent may infer or recover one. Add the developer-only live-smoke step over a
+synthetic fixture, record live protocol evidence (status, latency, token
+usage, no payload or secret), then run the committed 24-query fixture
+(`fixtures/jev/ranking_eval.json`) against original graph order and Jev order
+and compute top-1/Recall@5/Recall@10/MRR/NDCG@5. The plan's gate: ship the
+opt-in only if NDCG@5 improves without Recall@10 decreasing; otherwise close
+it as measured-and-declined and remove the runtime integration. This stage
+cannot proceed further without the user's explicit action.

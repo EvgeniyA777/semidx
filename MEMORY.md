@@ -306,22 +306,29 @@ documents that own history, rationale, and evidence.
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) is an adoption
   experiment in progress: a default-off Jev ranking projection over bounded
   graph context, with explicit destination/data consent and no graph authority.
-  Stages 0-2 are done: ADR 013 is reviewed and not disputed (still
-  `status: proposed`, pending the offline/live evidence it names); `semidx-mcp`
+  Stages 0-3 are done: ADR 013 is reviewed and not disputed (still
+  `status: proposed`, pending the live evidence it names); `semidx-mcp`
   validates `--enable-jev-ranking`/`--jev-endpoint`/`--jev-model`/`--jev-send`
   plus `TYPESAFE_API_KEY` completely before serving and reports a redacted
-  `outbound_projection` in `semidx_health`; and the experimental
-  `semidx_rank_context` tool (new `src/mcp/ranking.zig`) now exists, gated so
-  it is advertised and callable only under complete consent, selects a bounded
+  `outbound_projection` in `semidx_health`; the experimental
+  `semidx_rank_context` tool (`src/mcp/ranking.zig`) selects a bounded
   candidate set through the same `selectTargets`/traversal primitives
-  `semidx_context` uses, and always returns every candidate with graph
-  provenance intact. No HTTP adapter is wired in yet (`Server.rank_provider`
-  is always null in production), so every call today falls back to
-  `ranking.status: "unavailable"` in original graph order — proven both by
-  tests and by hand against this repository, including that graph counts are
-  identical before and after a call. Stage 3 (the Jev HTTP adapter) and Stage 4
-  (live smoke plus the 24-query quality gate) remain; no such tool is
-  advertised as useful until Stage 4's gate passes.
+  `semidx_context` uses and always returns every candidate with graph
+  provenance intact; and `src/mcp/jev.zig` is a real HTTP adapter over Zig's
+  standard-library client (no SDK), wired into `Server` only when consent is
+  complete and a key is present. Required tests stay fully offline (they test
+  JSON building/parsing against the Stage 0 fixtures, never real HTTP); the
+  adapter's live transport path (connect, redirect rejection, retry, and the
+  2,000 ms deadline) was checked once by hand against a locally refused
+  connection, not yet against a real TypeSafe endpoint or a hanging peer —
+  Stage 4's live smoke is the first point that happens. The 2,000 ms deadline
+  is enforced as a retry-eligibility budget from measured elapsed time, not by
+  preemptively aborting an in-flight request; the stdlib's `http.Client` has no
+  built-in way to bound a whole request/response round trip, only its own TCP
+  connect phase, which this adapter does not yet use either. No such tool is
+  advertised as useful until Stage 4's live smoke and its 24-query quality
+  gate pass; a `ranking.status: "ranked"` result today is an unproven
+  ordering.
 - Text fallback duplication is kept in `v0.1.0-preview.4` for compatibility.
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
   remains open; proposed

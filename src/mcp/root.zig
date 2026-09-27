@@ -22,6 +22,7 @@ pub const protocol = @import("protocol.zig");
 pub const stdio = @import("stdio.zig");
 pub const tools = @import("tools.zig");
 pub const jev_consent = @import("jev_consent.zig");
+pub const jev = @import("jev.zig");
 
 const model = semidx.model;
 
@@ -72,16 +73,24 @@ pub const Server = struct {
     /// client changed, does not verify under it.
     cursor_key: tools.CursorKey,
     message_arena: std.heap.ArenaAllocator,
-    /// The Jev ranking provider, or null when no adapter is wired in yet
-    /// (always true before Plan 015 Stage 3) or the operator did not enable
-    /// ranking. `semidx_rank_context` treats a null provider exactly like a
-    /// provider that reported itself unavailable: a visible fallback, never a
-    /// crash or a silent success. Test-only: production code never sets this
-    /// to anything but null before Stage 3 exists.
+    /// The Jev ranking provider, or null when no adapter is wired in (ranking
+    /// disabled, or the operator's own tests inject a provider directly).
+    /// `semidx_rank_context` treats a null provider exactly like a provider
+    /// that reported itself unavailable: a visible fallback, never a crash or
+    /// a silent success.
     rank_provider: ?tools.ranking.Provider = null,
+    /// Owns the real HTTP client when Jev ranking is enabled; null otherwise.
+    /// `init` constructs it but does not point `rank_provider` at it yet,
+    /// because `self` is not at its final address until the caller's `var
+    /// server = try Server.init(...)` returns it there; the caller finishes
+    /// wiring with `wireJevProvider`.
+    jev_adapter: ?jev.JevProvider = null,
 
-    /// Scans `options.root` and publishes the first snapshot.
-    pub fn init(gpa: Allocator, io: Io, options: Options, log: *Writer) !Server {
+    /// Scans `options.root` and publishes the first snapshot. `jev_api_key`
+    /// is the already-validated secret read from the environment, or null;
+    /// it is never stored anywhere but the adapter this constructs, and never
+    /// appears in `options`, logs, or any result.
+    pub fn init(gpa: Allocator, io: Io, options: Options, log: *Writer, jev_api_key: ?[]const u8) !Server {
         var index = try semidx.Index.init(gpa, options.root);
         errdefer index.deinit();
 
@@ -102,6 +111,11 @@ pub const Server = struct {
         var cursor_key: tools.CursorKey = undefined;
         try io.randomSecure(&cursor_key);
 
+        const jev_adapter: ?jev.JevProvider = if (options.jev) |consent|
+            (if (jev_api_key) |key| jev.JevProvider.init(gpa, io, consent.endpoint, consent.model, key) else null)
+        else
+            null;
+
         return .{
             .gpa = gpa,
             .io = io,
@@ -116,10 +130,20 @@ pub const Server = struct {
             .legacy_initialized = false,
             .cursor_key = cursor_key,
             .message_arena = std.heap.ArenaAllocator.init(gpa),
+            .jev_adapter = jev_adapter,
         };
     }
 
+    /// Points `rank_provider` at `jev_adapter`, when present. Must be called
+    /// once, after `Server.init` returns and `self` is at its final address:
+    /// the provider's `ptr` captures `&self.jev_adapter.?`, which would dangle
+    /// if taken before this value stops moving.
+    pub fn wireJevProvider(self: *Server) void {
+        if (self.jev_adapter) |*adapter| self.rank_provider = adapter.provider();
+    }
+
     pub fn deinit(self: *Server) void {
+        if (self.jev_adapter) |*adapter| adapter.deinit();
         self.message_arena.deinit();
         self.snapshot.deinit();
         if (self.retired) |*retired| retired.deinit();
@@ -542,7 +566,7 @@ const Harness = struct {
         errdefer testing.allocator.free(self.root);
         self.log = .init(testing.allocator);
         errdefer self.log.deinit();
-        self.server = try Server.init(testing.allocator, test_io, .{ .root = self.root, .evidence_text = evidence_text }, &self.log.writer);
+        self.server = try Server.init(testing.allocator, test_io, .{ .root = self.root, .evidence_text = evidence_text }, &self.log.writer, null);
         self.out = .init(testing.allocator);
     }
 
@@ -2226,7 +2250,7 @@ const SmallTree = struct {
 fn oracleProjection(arena: Allocator, dir: std.Io.Dir, root: []const u8, tree: anytype, version: TreeVersion) ![]const u8 {
     try tree.write(dir, version);
     var log: Writer.Allocating = .init(arena);
-    var server = try Server.init(std.heap.c_allocator, test_io, .{ .root = root }, &log.writer);
+    var server = try Server.init(std.heap.c_allocator, test_io, .{ .root = root }, &log.writer, null);
     defer server.deinit();
     return projectSnapshot(arena, &server.snapshot);
 }
@@ -2310,7 +2334,7 @@ fn refreshAllocations(arena: Allocator, dir: std.Io.Dir, root: []const u8, tree:
     var failures: InjectedFailures = .{ .child = std.heap.c_allocator };
     try tree.write(dir, .before);
     var log: Writer.Allocating = .init(arena);
-    var server = try Server.init(failures.allocator(), test_io, .{ .root = root }, &log.writer);
+    var server = try Server.init(failures.allocator(), test_io, .{ .root = root }, &log.writer, null);
     defer server.deinit();
     try tree.write(dir, .after);
     const start = failures.count;
@@ -2337,7 +2361,7 @@ fn expectRecoveryAt(
     var failures: InjectedFailures = .{ .child = std.heap.c_allocator };
     try tree.write(dir, .before);
     var log: Writer.Allocating = .init(arena);
-    var server = try Server.init(failures.allocator(), test_io, .{ .root = root }, &log.writer);
+    var server = try Server.init(failures.allocator(), test_io, .{ .root = root }, &log.writer, null);
     defer server.deinit();
     const before = server.snapshot;
     const before_projection = try projectSnapshot(arena, &before);
@@ -2523,7 +2547,7 @@ test "the java class-shape and modifier labels reach a tool result" {
 
     var log: Writer.Allocating = .init(testing.allocator);
     defer log.deinit();
-    var server = try Server.init(testing.allocator, test_io, .{ .root = root }, &log.writer);
+    var server = try Server.init(testing.allocator, test_io, .{ .root = root }, &log.writer, null);
     defer server.deinit();
 
     var out: Writer.Allocating = .init(testing.allocator);

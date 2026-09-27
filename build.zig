@@ -244,6 +244,11 @@ pub fn build(b: *std.Build) void {
     const no_dogfood_options = b.addOptions();
     no_dogfood_options.addOption(?[]const u8, "repo_root", null);
     no_dogfood_options.addOption(usize, "failure_points", dogfood_failure_points);
+    // Plan 015 Stage 3: the Jev adapter's fixture-driven tests read the
+    // committed protocol fixtures from the repository rather than
+    // `@embedFile`, since they live outside `src/mcp/`'s package path.
+    const jev_fixtures_options = b.addOptions();
+    jev_fixtures_options.addOption([]const u8, "dir", b.pathFromRoot("fixtures/jev"));
     const mcp = b.addModule("semidx_mcp", .{
         .root_source_file = b.path("src/mcp/root.zig"),
         .target = target,
@@ -253,6 +258,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "semidx", .module = semidx },
             .{ .name = "semidx_version", .module = version_options.createModule() },
             .{ .name = "semidx_dogfood", .module = no_dogfood_options.createModule() },
+            .{ .name = "semidx_jev_fixtures", .module = jev_fixtures_options.createModule() },
         },
     });
     const mcp_tests = b.addTest(.{ .root_module = mcp });

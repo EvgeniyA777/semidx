@@ -112,11 +112,16 @@ names the offending item without ever printing the key. `TYPESAFE_API_KEY` is
 read from the environment only when `--enable-jev-ranking` is present, and its
 value is never logged, printed, or returned. Complete consent is reported
 (redacted) under `outbound_projection` in `semidx_health` and advertises the
-experimental `semidx_rank_context` tool (see [Tools](#tools)). As of this
-preview no HTTP adapter is wired in yet (Plan 015 Stage 3): every call to
-`semidx_rank_context` falls back to `ranking.status: "unavailable"` and
-returns its candidates in original graph order, exactly as it does when
-ranking is disabled or a real provider fails.
+experimental `semidx_rank_context` tool (see [Tools](#tools)). A real Jev HTTP
+adapter is wired in (Plan 015 Stage 3), using Zig's standard-library HTTP
+client only: it rejects redirects, retries at most once for a `429`/`529`
+that names a `Retry-After` fitting the remaining deadline, and never logs or
+returns the raw provider response or the API key. Its usefulness is not yet
+measured (Plan 015 Stage 4): until a labelled evaluation shows the ranking
+helps, treat any `ranking.status: "ranked"` result as an unproven ordering, not
+a recommendation. Every provider or transport failure, and any consent that is
+absent or incomplete, falls back to `ranking.status: "unavailable"` with the
+candidates in original graph order.
 
 Streams and exit status:
 
