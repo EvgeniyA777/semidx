@@ -1,0 +1,50 @@
+{
+  "state": {
+    "query": "Who calls OrderService.createOrder?",
+    "candidates": {
+      "candidate_0": {
+        "language": "java",
+        "role": "method",
+        "name": "OrderController.submitOrder",
+        "container_path": "com.storefront.web.OrderController",
+        "source_unit_path": "src/main/java/com/storefront/web/OrderController.java",
+        "relationship": { "kind": "calls", "direction": "outgoing" },
+        "resolution": "fact",
+        "freshness": "current",
+        "producer": "java.call.same_unit",
+        "diagnostics": []
+      },
+      "candidate_1": {
+        "language": "java",
+        "role": "class",
+        "name": "OrderValidator",
+        "container_path": "com.storefront.order.OrderValidator",
+        "source_unit_path": "src/main/java/com/storefront/order/OrderValidator.java",
+        "relationship": { "kind": "references", "direction": "incoming" },
+        "resolution": "unresolved",
+        "freshness": "current",
+        "producer": "java.reference.same_package",
+        "diagnostics": ["ambiguous_overload_candidate"]
+      }
+    }
+  },
+  "model": "jev-1.13.0",
+  "questions": {
+    "candidate_0": {
+      "type": "noul",
+      "instructions": "Is this candidate useful context for answering the query about the state's \"query\" field?",
+      "criteria": {
+        "true": "The candidate directly helps answer the query",
+        "false": "The candidate is unrelated or only incidentally connected"
+      }
+    },
+    "candidate_1": {
+      "type": "noul",
+      "instructions": "Is this candidate useful context for answering the query about the state's \"query\" field?",
+      "criteria": {
+        "true": "The candidate directly helps answer the query",
+        "false": "The candidate is unrelated or only incidentally connected"
+      }
+    }
+  }
+}
