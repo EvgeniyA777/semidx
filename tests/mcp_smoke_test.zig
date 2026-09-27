@@ -174,3 +174,155 @@ test "semidx-mcp serves both protocol eras over stdio with nothing but protocol 
     }
     try testing.expect(std.unicode.utf8ValidateSlice(client.transcript.items));
 }
+
+// -- Plan 015 Stage 1: default-off Jev ranking consent -----------------------
+
+fn envWithKey(gpa: std.mem.Allocator, key_value: ?[]const u8) !std.process.Environ.Map {
+    var map = std.process.Environ.Map.init(gpa);
+    errdefer map.deinit();
+    if (key_value) |value| try map.put("TYPESAFE_API_KEY", value);
+    return map;
+}
+
+test "semidx-mcp fails before serving when --enable-jev-ranking is given alone" {
+    const gpa = testing.allocator;
+    const result = try std.process.run(gpa, io, .{
+        .argv = &.{ build_options.mcp_exe, "--root", ".", "--enable-jev-ranking" },
+        .timeout = .{ .duration = .{ .raw = .fromSeconds(30), .clock = .awake } },
+    });
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+    try testing.expectEqual(std.process.Child.Term{ .exited = 2 }, result.term);
+    try testing.expectEqualStrings("", result.stdout);
+    try testing.expect(std.mem.indexOf(u8, result.stderr, "--jev-endpoint is required") != null);
+}
+
+test "semidx-mcp rejects incomplete Jev consent naming the missing item, not the key" {
+    const gpa = testing.allocator;
+    var env = try envWithKey(gpa, null);
+    defer env.deinit();
+    const result = try std.process.run(gpa, io, .{
+        .argv = &.{
+            build_options.mcp_exe,  "--root",         ".",
+            "--enable-jev-ranking", "--jev-endpoint", "https://api.typesafe.ai/v1/systemone",
+            "--jev-model",          "jev-1.13.0",
+        },
+        .environ_map = &env,
+        .timeout = .{ .duration = .{ .raw = .fromSeconds(30), .clock = .awake } },
+    });
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+    try testing.expectEqual(std.process.Child.Term{ .exited = 2 }, result.term);
+    // Endpoint and model are both valid, so --jev-send, the next item the
+    // fixed check order looks at, is the named violation.
+    try testing.expect(std.mem.indexOf(u8, result.stderr, "--jev-send is required") != null);
+}
+
+test "semidx-mcp rejects a moving model alias even with a complete consent set and a key" {
+    const gpa = testing.allocator;
+    var env = try envWithKey(gpa, "unused-test-key-value");
+    defer env.deinit();
+    const result = try std.process.run(gpa, io, .{
+        .argv = &.{
+            build_options.mcp_exe,       "--root",         ".",
+            "--enable-jev-ranking",      "--jev-endpoint", "https://api.typesafe.ai/v1/systemone",
+            "--jev-model",               "jev-latest",     "--jev-send",
+            "query-text,graph-metadata",
+        },
+        .environ_map = &env,
+        .timeout = .{ .duration = .{ .raw = .fromSeconds(30), .clock = .awake } },
+    });
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+    try testing.expectEqual(std.process.Child.Term{ .exited = 2 }, result.term);
+    try testing.expect(std.mem.indexOf(u8, result.stderr, "moving alias") != null);
+    try testing.expect(std.mem.indexOf(u8, result.stderr, "unused-test-key-value") == null);
+}
+
+test "semidx-mcp stays default-off even when the key is present without the enable flag" {
+    const gpa = testing.allocator;
+    var root_dir = testing.tmpDir(.{});
+    defer root_dir.cleanup();
+    var log_dir = testing.tmpDir(.{});
+    defer log_dir.cleanup();
+    try root_dir.dir.writeFile(io, .{ .sub_path = "greeter.zig", .data = "pub fn greet() void {}\n" });
+    const root = try root_dir.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(root);
+
+    var env = try envWithKey(gpa, "unused-test-key-value");
+    defer env.deinit();
+    const stderr_file = try log_dir.dir.createFile(io, "stderr.log", .{});
+    const client = client: {
+        defer stderr_file.close(io);
+        break :client try stdio_client.Client.startWithEnviron(gpa, build_options.mcp_exe, root, &.{}, log_dir.dir, stderr_file, &env);
+    };
+    defer client.destroy();
+
+    const list = try client.request(1, "tools/list", "{" ++ modern_meta ++ "}");
+    const listed = list.object.get("result").?.object.get("tools").?.array.items;
+    try testing.expectEqual(@as(usize, 7), listed.len);
+
+    const health = try client.callTool(2, "semidx_health", "{}");
+    try testing.expect(health.get("outbound_projection") == null);
+
+    const rank_call = try client.request(3, "tools/call", "{" ++ modern_meta ++ ",\"name\":\"semidx_rank_context\",\"arguments\":{}}");
+    try testing.expectEqual(@as(i64, -32602), errorCode(rank_call));
+    try testing.expect(std.mem.indexOf(u8, rank_call.object.get("error").?.object.get("message").?.string, "Unknown tool") != null);
+
+    const ended = try client.shutdown();
+    try testing.expectEqual(@as(u8, 0), ended.exit_code);
+
+    const stderr_text = try log_dir.dir.readFileAlloc(io, "stderr.log", gpa, .limited(1 << 20));
+    defer gpa.free(stderr_text);
+    try testing.expect(std.mem.indexOf(u8, stderr_text, "Jev") == null);
+    try testing.expect(std.mem.indexOf(u8, stderr_text, "unused-test-key-value") == null);
+}
+
+test "semidx-mcp reports outbound_projection under complete consent, still without the rank tool" {
+    const gpa = testing.allocator;
+    var root_dir = testing.tmpDir(.{});
+    defer root_dir.cleanup();
+    var log_dir = testing.tmpDir(.{});
+    defer log_dir.cleanup();
+    try root_dir.dir.writeFile(io, .{ .sub_path = "greeter.zig", .data = "pub fn greet() void {}\n" });
+    const root = try root_dir.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(root);
+
+    var env = try envWithKey(gpa, "unused-test-key-value");
+    defer env.deinit();
+    const stderr_file = try log_dir.dir.createFile(io, "stderr.log", .{});
+    const client = client: {
+        defer stderr_file.close(io);
+        break :client try stdio_client.Client.startWithEnviron(gpa, build_options.mcp_exe, root, &.{
+            "--enable-jev-ranking",
+            "--jev-endpoint",
+            "https://api.typesafe.ai/v1/systemone",
+            "--jev-model",
+            "jev-1.13.0",
+            "--jev-send",
+            "graph-metadata,query-text",
+        }, log_dir.dir, stderr_file, &env);
+    };
+    defer client.destroy();
+
+    // Stage 1 wires consent and health reporting only; the tool itself is
+    // added in Stage 2 together with its capability gate.
+    const list = try client.request(1, "tools/list", "{" ++ modern_meta ++ "}");
+    try testing.expectEqual(@as(usize, 7), list.object.get("result").?.object.get("tools").?.array.items.len);
+
+    const health = try client.callTool(2, "semidx_health", "{}");
+    const projection = health.get("outbound_projection").?.object;
+    try testing.expectEqualStrings("https://api.typesafe.ai", projection.get("destination_origin").?.string);
+    try testing.expectEqualStrings("jev-1.13.0", projection.get("model").?.string);
+    const categories = projection.get("categories").?.array.items;
+    try testing.expectEqualStrings("query-text", categories[0].string);
+    try testing.expectEqualStrings("graph-metadata", categories[1].string);
+
+    const ended = try client.shutdown();
+    try testing.expectEqual(@as(u8, 0), ended.exit_code);
+
+    const stderr_text = try log_dir.dir.readFileAlloc(io, "stderr.log", gpa, .limited(1 << 20));
+    defer gpa.free(stderr_text);
+    try testing.expect(std.mem.indexOf(u8, stderr_text, "Jev ranking is enabled") != null);
+    try testing.expect(std.mem.indexOf(u8, stderr_text, "unused-test-key-value") == null);
+}

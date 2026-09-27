@@ -50,6 +50,22 @@ pub const Client = struct {
         log_dir: std.Io.Dir,
         stderr_file: std.Io.File,
     ) !*Client {
+        return startWithEnviron(gpa, exe, root, extra_args, log_dir, stderr_file, null);
+    }
+
+    /// Same as `start`, but replaces the child's environment with
+    /// `environ_map` when given, instead of inheriting this process's
+    /// environment. Used by tests that must control which environment
+    /// variables (such as `TYPESAFE_API_KEY`) the server observes.
+    pub fn startWithEnviron(
+        gpa: std.mem.Allocator,
+        exe: []const u8,
+        root: []const u8,
+        extra_args: []const []const u8,
+        log_dir: std.Io.Dir,
+        stderr_file: std.Io.File,
+        environ_map: ?*const std.process.Environ.Map,
+    ) !*Client {
         const self = try gpa.create(Client);
         errdefer gpa.destroy(self);
         self.gpa = gpa;
@@ -60,6 +76,7 @@ pub const Client = struct {
         const argv = try std.mem.concat(self.arena.allocator(), []const u8, &.{ &.{ exe, "--root", root }, extra_args });
         self.child = try std.process.spawn(io, .{
             .argv = argv,
+            .environ_map = environ_map,
             .stdin = .pipe,
             .stdout = .pipe,
             .stderr = .{ .file = stderr_file },

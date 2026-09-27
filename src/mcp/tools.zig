@@ -292,6 +292,18 @@ pub const Status = struct {
     languages: []const LanguageStatus,
     last_scan: semidx.Index.ScanOutcome,
     recovery: Recovery,
+    /// Present only when the server was started with complete Jev ranking
+    /// consent (ADR 013 D2). Never carries the API key.
+    outbound_projection: ?OutboundProjection = null,
+};
+
+/// A redacted summary of accepted outbound ranking consent: destination,
+/// versioned model, and consented data categories, in their documented order.
+/// Never the secret, the query, or any candidate data.
+pub const OutboundProjection = struct {
+    destination_origin: []const u8,
+    model: []const u8,
+    categories: [2][]const u8 = .{ "query-text", "graph-metadata" },
 };
 
 pub const Recovery = struct {
@@ -1303,6 +1315,17 @@ pub fn health(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, status: Statu
     try s.write(status.last_scan);
     try s.objectField("recovery");
     try s.write(status.recovery);
+    if (status.outbound_projection) |projection| {
+        try s.objectField("outbound_projection");
+        try s.beginObject();
+        try s.objectField("destination_origin");
+        try protocol.writeString(s, projection.destination_origin);
+        try s.objectField("model");
+        try protocol.writeString(s, projection.model);
+        try s.objectField("categories");
+        try s.write(projection.categories);
+        try s.endObject();
+    }
     try s.endObject();
 }
 

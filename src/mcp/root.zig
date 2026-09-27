@@ -21,6 +21,7 @@ const semidx = @import("semidx");
 pub const protocol = @import("protocol.zig");
 pub const stdio = @import("stdio.zig");
 pub const tools = @import("tools.zig");
+pub const jev_consent = @import("jev_consent.zig");
 
 const model = semidx.model;
 
@@ -30,6 +31,11 @@ pub const Options = struct {
     /// Opt-in: tool results may carry the source text producers recorded as
     /// evidence for each claim, bounded per claim.
     evidence_text: bool = false,
+    /// Validated Jev ranking outbound consent (ADR 013 D2), or null when
+    /// `--enable-jev-ranking` was absent or consent was incomplete. Never
+    /// carries the API key: its value is read and checked for presence in
+    /// `main.zig` and then discarded, never stored here or anywhere else.
+    jev: ?jev_consent.Consent = null,
 };
 
 const instructions = "semidx answers from an in-memory semantic graph of the configured root. " ++
@@ -351,6 +357,10 @@ pub const Server = struct {
                 .rebuilt_index_unpublished = self.retired != null,
                 .needs_rebuild = self.poisoned,
             },
+            .outbound_projection = if (self.options.jev) |consent| .{
+                .destination_origin = consent.origin,
+                .model = consent.model,
+            } else null,
         };
     }
 

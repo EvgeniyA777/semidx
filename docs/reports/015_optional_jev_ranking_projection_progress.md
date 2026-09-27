@@ -146,10 +146,105 @@ fixtures):
 `status: proposed` until Stages 1-4 supply the evidence it names; that is
 expected, not a blocker to starting Stage 1's structurally-offline work.
 
+## Stage 1: Default-Off Consent And Capability Plumbing
+
+**Stage 1 is complete.**
+
+### What shipped
+
+- New `src/mcp/jev_consent.zig`: a pure, allocation-free validator
+  (`validate(endpoint_raw, model_raw, send_raw, key_present)`) with a fixed
+  check order (endpoint, then model, then send, then key presence) and a
+  `describe(err)` that names the offending item without ever touching a secret
+  value. 21 unit tests cover the accept path, category-order normalization,
+  and every rejection: missing endpoint/model/send/key, non-HTTPS, userinfo,
+  query, fragment, malformed URL, `jev-latest`/`jev-preview` aliases, a bare or
+  two-part model id, an unknown category, a duplicated category, and a partial
+  category set.
+- `src/mcp/root.zig`: `Options.jev: ?jev_consent.Consent`. Never stores the
+  secret; `main.zig` checks its presence and discards the value. `status()`
+  populates a new optional `outbound_projection` field only when consent is
+  present.
+- `src/mcp/tools.zig`: `Status.outbound_projection` and `OutboundProjection`
+  (`destination_origin`, `model`, `categories` in the documented
+  `query-text,graph-metadata` order). `health()` renders the block only when
+  present; the disabled shape is unchanged.
+- `src/mcp/main.zig`: parses `--enable-jev-ranking`, `--jev-endpoint`,
+  `--jev-model`, `--jev-send`; reads `TYPESAFE_API_KEY` only when the enable
+  flag was seen; validates before `Server.init` (before any indexing); fails
+  with `jev_consent.describe(err)` on the first violation; logs destination and
+  model (never the key) once enabled; usage text documents all four inputs.
+- `docs/mcp/local_preview.md`: documents the four flags, the current
+  Stage-1-only behavior (validated and reported, no tool advertised yet), and
+  the read-only-when-enabled key handling.
+- `MEMORY.md`: Plan 015 entry updated from "planned" to "Stages 0-1 done,
+  Stages 2-3 pending".
+- Tests: `tests/mcp_stdio_client.zig` gained
+  `Client.startWithEnviron(..., environ_map)` (refactored out of `start`) so a
+  test can control which environment the child sees, needed to exercise
+  `TYPESAFE_API_KEY` deterministically instead of depending on the host
+  environment. `tests/mcp_smoke_test.zig` gained five tests:
+  - enable flag alone fails before serving (no stdout, exit 2);
+  - a complete-but-for-`--jev-send` consent fails naming `--jev-send`, proving
+    the fixed check order;
+  - an invalid model alias fails even with the key present, and the key value
+    never appears in stderr;
+  - with the key present but no enable flag: still exactly 7 tools, no
+    `outbound_projection` in health, a direct `semidx_rank_context` call
+    returns the same "Unknown tool" class as any unrecognized name, and stderr
+    never mentions Jev or the key;
+  - with complete consent and the key present: still exactly 7 tools (the tool
+    itself is Stage 2's job), `outbound_projection` reports the right origin,
+    model, and category order, and stderr logs the enabled destination/model
+    but never the key.
+
+### Why `semidx_rank_context` still does not exist
+
+Stage 1's own file list (`main.zig`, `root.zig`, `tools.zig`, tests) does not
+include `ranking.zig`, and Stage 2 is titled "Pure Candidate Projection And
+Deterministic Ranking Policy." Reading those together: Stage 1 builds and
+proves the consent/capability *plumbing*; Stage 2 is where
+`semidx_rank_context` is added to the `Tool` enum, `tools.definitions`, and
+`callTool`'s dispatch, together with the capability gate that decides whether
+`byName`/`writeToolList` expose it. Building a stub tool now, only to give it
+real behavior in Stage 2, would mean touching the same dispatch switch twice
+and risking exactly the kind of accidental exposure gap A1 exists to prevent.
+Until Stage 2, "disabled direct call to `semidx_rank_context`" and "enabled
+direct call to `semidx_rank_context`" are indistinguishable and both correctly
+return "Unknown tool" — which is what the five tests above prove.
+
+### Verification run
+
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build test-mcp`: 59 tests, 57 passed, 1 pre-existing intentional skip,
+  0 failed (after fixing two test bugs found while writing them: a
+  `--jev-send`-order assumption that didn't match the validator's actual fixed
+  order, and a `tools/call` request missing `_meta` that hit the legacy-era
+  path instead of the unknown-tool path).
+- `zig build test-core`: passed.
+- `zig fmt --check` and `test-core`/`test-mcp` re-run clean after the doc and
+  `MEMORY.md` edits.
+- Manual stdio checks (not part of the committed suite, used only to shape the
+  automated tests before writing them): enable-alone fails with
+  "--jev-endpoint is required"; full consent plus a real-shaped dummy key logs
+  "Jev ranking is enabled; destination https://api.typesafe.ai, model
+  jev-1.13.0" and never the key; default profile has no `outbound_projection`
+  key at all.
+- `mcp__semidx__semidx_refresh` run after the edits; revision 118, no new
+  analysis failures beyond the three pre-existing ones.
+
+### Stage 1 Plan Readiness re-check
+
+No hard-fail condition applies going into Stage 2. Stage 2's required behavior,
+likely files, and DoD are concrete and depend only on artifacts that now exist
+(`Options.jev`, the validated `Consent`, `OutboundProjection` health
+rendering). No decision here needs revisiting before Stage 2 starts.
+
 ## Next Stage
 
-Stage 1 (default-off consent and capability plumbing) is next: parse the four
-`--enable-jev-ranking` / `--jev-endpoint` / `--jev-model` / `--jev-send`
-startup flags plus `TYPESAFE_API_KEY`, validate them, store a redacted
-configuration on `Server`, and make tool discovery and call authorization read
-the same capability bit, all without adding an HTTP adapter yet.
+Stage 2 (pure candidate projection and deterministic ranking policy): add
+`src/mcp/ranking.zig`, the client-owned provider role, a deterministic fake
+provider, the `semidx_rank_context` tool definition and dispatch arm gated by
+`options.jev != null`, the closed candidate-card serializer proved against
+ADR 013 D3's exact field allowlist, and the ordering/tie/truncation/fallback
+behavior — all without any HTTP implementation.

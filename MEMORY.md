@@ -303,10 +303,17 @@ documents that own history, rationale, and evidence.
   [010](docs/followups/010_mcp_text_fallback_client_measurement.md);
   then choose between Zig dogfood depth, remaining Java gaps, packaging/daemon
   work, semantic-contract work, or persistence by measured pain.
-- [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) is planned as
-  an adoption experiment: a default-off Jev ranking projection over bounded
+- [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) is an adoption
+  experiment in progress: a default-off Jev ranking projection over bounded
   graph context, with explicit destination/data consent and no graph authority.
-  Its live and quality gates must pass before the tool is advertised.
+  Stages 0-1 are done: ADR 013 is reviewed and not disputed (still
+  `status: proposed`, pending the offline/live evidence it names), and
+  `semidx-mcp` now accepts `--enable-jev-ranking`/`--jev-endpoint`/
+  `--jev-model`/`--jev-send` plus `TYPESAFE_API_KEY`, validates them completely
+  before serving, and reports a redacted `outbound_projection` in
+  `semidx_health` when enabled. No `semidx_rank_context` tool exists yet and no
+  HTTP adapter exists; those are Stages 2-3. Its live and quality gates must
+  pass before any such tool is advertised as useful.
 - Text fallback duplication is kept in `v0.1.0-preview.4` for compatibility.
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
   remains open; proposed

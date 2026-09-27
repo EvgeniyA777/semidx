@@ -101,6 +101,19 @@ zig build mcp -- --root .                  # same, through the build system
 | `--allow-evidence-text` | Opt-in: include the source text producers recorded as evidence for each claim, at most 400 bytes per claim. Off by default. See [Source Text](#source-text). |
 | `--version` | Print `semidx-mcp <product version>` to stdout and exit. |
 | `--help` | Print usage to stderr and exit. |
+| `--enable-jev-ranking` | Opt-in: accept complete outbound consent for the experimental Jev ranking projection ([ADR 013](../adr/013_optional_jev_ranking_projection.md), [Plan 015](../plans/015_optional_jev_ranking_projection.md)). Off by default; requires the three flags below and `TYPESAFE_API_KEY` together. |
+| `--jev-endpoint <url>` | The exact consented HTTPS destination, e.g. `https://api.typesafe.ai/v1/systemone`. No userinfo, query, or fragment. |
+| `--jev-model <id>` | A versioned model id, e.g. `jev-1.13.0`. Moving aliases such as `jev-latest` are rejected. |
+| `--jev-send <categories>` | Must be exactly `query-text,graph-metadata` (either order); no other value is accepted. |
+
+As of this preview, `--enable-jev-ranking` only accepts complete consent,
+validates it, and reports it (redacted) under `outbound_projection` in
+`semidx_health`; it does not yet advertise or serve any tool. Any missing,
+partial, or invalid item among the four inputs above fails startup before
+indexing, and names the offending item without ever printing the key.
+`TYPESAFE_API_KEY` is read from the environment only when
+`--enable-jev-ranking` is present, and its value is never logged, printed, or
+returned.
 
 Streams and exit status:
 
