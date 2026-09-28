@@ -747,3 +747,53 @@ rule.
 No stop condition triggered in this stage: no release was published, no
 stable MCP/semantic contract was claimed, and the one residual item was
 disclosed rather than hidden.
+
+## Post-Closure Review (external, 2026-09-27)
+
+An independent review after the Stage 6 commit found 3 defects, none
+architectural or fail-closed-breaking. All 3 fixed in the same session:
+
+1. **P2 — `semidx-source-state-v1` had no pinned reference hash.** Stage 1's
+   vectors proved only equality/inequality between values this implementation
+   itself computed, which cannot catch an encoding change (field order,
+   endianness, a changed separator) that both sides of such a test would
+   still agree on. Fixed: `src/source/identity.zig` now pins the literal
+   64-hex output for the empty and one-unit vectors
+   (`pinned_empty_vector`/`pinned_one_unit_vector`) and a test asserts
+   `calculate()` still produces them exactly.
+   `fixtures/working_copy_sync/identity_vectors.md` updated to describe this
+   two-tier proof (two cases pinned to a literal value; the other five stay
+   relational because their point is the relationship between two scans, not
+   one value).
+2. **P2 — the sync-first habit loop was not updated on every surface.** Found
+   stale in: the MCP server's own `instructions` string sent to every client
+   in `server/discover`/`initialize` (`src/mcp/root.zig`, never touched
+   across Stages 2-4 despite updating the skill, README, and MCP reference);
+   `docs/agent-policy/tooling.md`, the always-loaded MCP-first workflow
+   policy (RULES.md points to it, and it still said start with health and
+   never named `semidx_sync` at all); `docs/mcp/local_preview.md`'s "Limits"
+   section ("Edits are observed only after `semidx_refresh`", not mentioning
+   `semidx_sync` or the fail-closed behavior); and `semidx_refresh`'s own
+   tool description ("publish the next snapshot", which reads as always
+   publishing, contradicting its actual idempotent behavior). All four fixed
+   to say `semidx_sync` first, `semidx_refresh` as the compatible alias, and
+   (where relevant) the fail-closed consequence of skipping it.
+   `docs/agent-policy/tooling.md` was the most consequential of the four: it
+   is the policy this agent itself follows every session, so its staleness
+   was a live drift-control miss, not just an external-facing doc gap.
+3. **P3 — the Jev-zero-calls proof did not cover `scan_failed`.** The Stage 3
+   counting-provider test only exercised `out_of_date` (an added file, no
+   sync). Fixed: the same test now also deletes the root entirely after the
+   in-sync case and confirms `semidx_rank_context` fails with
+   `semidx_preflight_scan_failed:` and the provider's call count stays at 1
+   (unchanged from the in-sync call), not 2.
+
+None of the three affected runtime correctness — the fail-closed dispatch
+order already made findings 2 and 3 true in practice, and the identity
+encoding had not actually drifted — but findings 1 and 3 were real gaps in
+what the committed evidence could have caught, and finding 2 was a real
+drift-control miss this stage's own review should have caught before
+declaring drift control clean. Re-ran the full verification lane after all
+three fixes: `zig fmt --check`, `test-core` (109/110, 1 pre-existing skip),
+`test-mcp` (85/86, 1 pre-existing skip), `test` (343/345, 2 pre-existing
+skips), `preview-gate` (three profiles, all pass).

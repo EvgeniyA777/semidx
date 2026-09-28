@@ -702,8 +702,10 @@ Notifications, including malformed ones, are never answered.
   configuration changes that. Expect it to be most of what Java leaves
   unresolved.
 - The graph lives in memory and is rebuilt on every start. Edits are observed
-  only after `semidx_refresh`. A refresh with no source changes publishes the
-  same revision.
+  only after `semidx_sync` (or its compatible alias `semidx_refresh`). A sync
+  over unchanged source publishes the same revision, unchanged (idempotent);
+  every other graph-reading tool fails closed instead of answering when a
+  fresh scan does not match the published snapshot.
 - List results stop at the response budget, 32000 structured bytes by
   default, plus the few hundred bytes of fields that close a result. Every
   tool result also repeats its structured object as JSON text for clients
@@ -711,8 +713,8 @@ Notifications, including malformed ones, are never answered.
   65 KB on the wire. Whether a client shows the model one copy or both, and
   where it starts warning or spilling to a file, depends on the client. An
   explicit `max_response_bytes` up to 2000000 returns larger results, and
-  `semidx_health` and `semidx_refresh` are not budgeted (their size does not
-  grow with the number of definitions).
+  `semidx_health`, `semidx_sync`, and `semidx_refresh` are not budgeted (their
+  size does not grow with the number of definitions).
 - A refresh that fails after reconciliation started (for example, out of
   memory) never publishes a partly updated graph. The server discards that index
   and rebuilds a fresh one from the same scan; the published snapshot stays the

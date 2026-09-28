@@ -11,14 +11,25 @@ to convenient code.
 below are proven as unit tests there, built directly against small in-memory
 `ScannedUnit`/`ScanDiagnostic` values with the same shape as this file
 describes, rather than against `units/unit_01.zig`..`unit_09.zig` file by
-file — the nine-unit fixture stays the shared input for the Stage 3 gate
+file — the nine-unit fixture stays the shared input for the Stage 5 gate
 regression test and is not duplicated here. The two-independent-processes
-property (case matters most for) is proven separately by scanning the same
-temporary tree twice and comparing identities. Committed hashes are not
-pinned in this document: the identity is proven by equality/inequality
-between computed values in the test file, per the plan's Stage 1 "Done when"
-(fixed vectors pass; two independently built equivalent scans match), not by
-a third-party reference hash.
+property is proven at two levels: `discovery.scanDir` called twice over the
+same temporary tree (Stage 1), and two real `semidx-mcp` subprocesses over
+the same content reporting the same `source_state_id` (Stage 6,
+`tests/mcp_smoke_test.zig`).
+
+**Stage 6 update (review finding):** two of the seven cases now also pin the
+literal 64-hex output, not only equality/inequality between computed values —
+`pinned_empty_vector` and `pinned_one_unit_vector` in `identity.zig`. Proving
+only that two computed values agree or disagree cannot catch an encoding
+change that both a test's "before" and "after" run would still agree on
+internally (a reordered field, a flipped endianness, a changed separator) but
+that silently changes what every other process computes against the same
+tree. The remaining five cases (reordered, byte-change, path-change,
+diagnostic-change, policy-change) are still proven by equality/inequality
+only, since their point is specifically the *relationship* between two scans
+(same input in a different order; one input changed against a baseline), not
+one output value in isolation.
 
 Every case names: the discovery budgets and exclusion policy in force, the
 scanned units (path, language, content), and the scan diagnostics (kind, path,

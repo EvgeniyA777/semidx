@@ -182,6 +182,25 @@ fn scanWith(
     };
 }
 
+/// Pinned outputs of `semidx-source-state-v1` over two of the fixed vectors
+/// `fixtures/working_copy_sync/identity_vectors.md` names (empty, one-unit).
+/// Computed once from this implementation and committed so a change to field
+/// order, endianness, or any other encoding detail — not just a change that
+/// happens to make two computed values disagree with each other — fails a
+/// test, per the plan's requirement to commit fixed vectors rather than only
+/// prove internal equality/inequality.
+const pinned_empty_vector = "e1d2baed93cfae204c909e54278de4148edb11165535d14dd34ab584ac9a786c";
+const pinned_one_unit_vector = "88f8644312e4fdd0d08f6a6b27bc12e5e618915542fb49d9bb538f94abcf44b2";
+
+test "the encoding matches its pinned fixed vectors" {
+    const empty = try calculate(testing.allocator, scanWith(&.{}, &.{}, &.{}));
+    try testing.expectEqualStrings(pinned_empty_vector, &toHex(empty));
+
+    const one = [_]scan_mod.ScannedUnit{unit("a.zig", .zig, "pub fn a() void {}\n")};
+    const one_unit_id = try calculate(testing.allocator, scanWith(&one, &.{}, &.{}));
+    try testing.expectEqualStrings(pinned_one_unit_vector, &toHex(one_unit_id));
+}
+
 test "the empty scan has a stable identity distinct from a one-unit scan" {
     const empty = try calculate(testing.allocator, scanWith(&.{}, &.{}, &.{}));
     const empty_again = try calculate(testing.allocator, scanWith(&.{}, &.{}, &.{}));

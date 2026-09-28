@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-20"
+updated: "2026-09-27"
 ---
 
 # Tooling Policy
@@ -31,13 +31,22 @@ which is an open requirement owned by [SPEC.md](../../SPEC.md).
 - Use MCP before manual file crawling. When implementation work requires reading
   code before edits, use semidx retrieval first.
 - First-pass flow is strict:
-  1. `semidx_health`
-  2. `semidx_outline` (repeat with a directory `path_prefix` to descend)
-  3. `semidx_repo_map` with the `path_prefix` of one directory or file
-  4. `semidx_find_definitions`
-  5. `semidx_references` or `semidx_context`
-  6. `semidx_refresh` after edits
-- A successful `semidx_health` is not a reason to switch to filesystem browsing.
+  1. `semidx_sync`, first, every session and after every edit — every other
+     graph-reading tool below fails closed (`isError: true`, no graph data)
+     instead of answering when the working copy does not match the published
+     snapshot, so skipping this call does not skip the check, it only means
+     finding out from a tool error instead
+     ([ADR 014](../adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)).
+     `semidx_sync` and every call after it are dependent calls: never launch
+     them in parallel.
+  2. `semidx_health`, only when a diagnostic summary is useful
+  3. `semidx_outline` (repeat with a directory `path_prefix` to descend)
+  4. `semidx_repo_map` with the `path_prefix` of one directory or file
+  5. `semidx_find_definitions`
+  6. `semidx_references` or `semidx_context`
+  7. `semidx_sync` again after edits (`semidx_refresh` remains a compatible
+     alias over the same operation)
+- A successful `semidx_sync` is not a reason to switch to filesystem browsing.
   Continue with `semidx_outline`, a scoped `semidx_repo_map`, and graph-backed
   lookup.
 - When a result is cut, follow its `narrowing_hints` before raising limits or
@@ -53,9 +62,10 @@ which is an open requirement owned by [SPEC.md](../../SPEC.md).
 ## MCP Query And Wire Shape
 
 - The configured server is `semidx` and exposes:
-  `semidx_health`, `semidx_outline`, `semidx_repo_map`,
-  `semidx_find_definitions`, `semidx_references`, `semidx_context`, and
-  `semidx_refresh`.
+  `semidx_sync` (the recommended first call), `semidx_health`,
+  `semidx_outline`, `semidx_repo_map`, `semidx_find_definitions`,
+  `semidx_references`, `semidx_context`, and `semidx_refresh` (a
+  compatibility alias sharing `semidx_sync`'s coordinator and result shape).
 - The server indexes one root at startup. In this repository `.mcp.json` passes
   the repository root explicitly. For other repositories, register
   `/Users/ae/workspaces/semidx/scripts/semidx-mcp.sh` with that repository's
@@ -74,7 +84,8 @@ which is an open requirement owned by [SPEC.md](../../SPEC.md).
   `semidx_context` as part of the answer, not as noise to hide.
 - Treat missing, unresolved, unsupported, stale, approximate, and unavailable
   results as distinct outcomes. Do not convert one into another in prose.
-- Use `semidx_refresh` after edits before trusting later graph answers.
+- Use `semidx_sync` after edits before trusting later graph answers
+  (`semidx_refresh` remains a compatible alias).
 - If MCP returns an error or timeout after two attempts, say
   `SCI MCP unavailable, switching to manual` and proceed with filesystem tools.
 

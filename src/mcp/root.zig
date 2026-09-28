@@ -43,8 +43,10 @@ pub const Options = struct {
 const instructions = "semidx answers from an in-memory semantic graph of the configured root. " ++
     "Every relationship carries its resolution (fact, unresolved, approximate), freshness, and producer; " ++
     "an unresolved designator is a name the graph could not resolve, not a relationship to a definition of that name. " ++
-    "Results carry paths and ranges, not source text. Start orientation with semidx_outline, then semidx_repo_map for one path_prefix; " ++
-    "when a result is cut, follow its narrowing_hints. Call semidx_refresh after editing files.";
+    "Results carry paths and ranges, not source text. Call semidx_sync first, every session and after every edit: every " ++
+    "other graph-reading tool fails closed instead of answering when the working copy does not match the published " ++
+    "snapshot. Then start orientation with semidx_outline, then semidx_repo_map for one path_prefix; " ++
+    "when a result is cut, follow its narrowing_hints. semidx_refresh remains a compatible alias for semidx_sync.";
 
 /// How long a client may cache the tool list and discovery result. The tool
 /// set is fixed for the lifetime of the binary.
@@ -2230,7 +2232,7 @@ test "a graph read fails closed on an external edit and returns corrected ranges
     try testing.expectEqual(original_start_line + 3, focus.get("evidence").?.object.get("range").?.object.get("start_line").?.integer);
 }
 
-test "semidx_rank_context calls no provider when the working copy is out of date" {
+test "semidx_rank_context calls no provider when the working copy is out of date or unscannable" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -2267,6 +2269,15 @@ test "semidx_rank_context calls no provider when the working copy is out of date
     _ = try h.callTool(arena, "semidx_sync", "{}");
     const ranked = try h.callTool(arena, "semidx_rank_context", "{\"query\":\"q\",\"name\":\"greet\"}");
     try testing.expect(!ranked.object.get("isError").?.bool);
+    try testing.expectEqual(@as(usize, 1), counting.calls);
+
+    // scan_failed is the other non-in_sync preflight status (ADR 014 D4); it
+    // must block the provider exactly like out_of_date does.
+    try h.tmp.parent_dir.deleteTree(test_io, &h.tmp.sub_path);
+    const scan_failed = try h.callTool(arena, "semidx_rank_context", "{\"query\":\"q\",\"name\":\"greet\"}");
+    try testing.expect(scan_failed.object.get("isError").?.bool);
+    const scan_failed_text = scan_failed.object.get("content").?.array.items[0].object.get("text").?.string;
+    try testing.expect(std.mem.startsWith(u8, scan_failed_text, "semidx_preflight_scan_failed:"));
     try testing.expectEqual(@as(usize, 1), counting.calls);
 }
 

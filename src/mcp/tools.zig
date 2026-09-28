@@ -238,9 +238,10 @@ pub const definitions = [_]Definition{
         shared_params.detail,
         shared_params.max_response_bytes,
     }),
-    define(.semidx_refresh, "Refresh index", "Rescan the configured root, reconcile the changes into the graph, and publish the next " ++
-        "snapshot. Later calls observe the new snapshot; a failed refresh keeps the previous one. A compatibility alias for " ++
-        "semidx_sync over the same idempotent operation.", &.{}),
+    define(.semidx_refresh, "Refresh index", "A compatibility alias for semidx_sync over the same idempotent operation: scan the " ++
+        "configured root and compare it with the published snapshot's source-state identity. An unchanged identity keeps the " ++
+        "current snapshot, revision, and entity ids untouched; a changed one reconciles and publishes the next snapshot exactly " ++
+        "once. A failed refresh keeps the previous snapshot published.", &.{}),
     define(.semidx_sync, "Synchronize with the working copy", "Scan the configured root and compare it with the published snapshot's " ++
         "source-state identity. An unchanged identity keeps the current snapshot, revision, and entity ids untouched " ++
         "(idempotent); a changed one reconciles through the same incremental path as semidx_refresh and publishes the next " ++
