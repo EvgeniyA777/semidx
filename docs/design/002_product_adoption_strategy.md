@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-17"
+updated: "2026-09-28"
 ---
 
 # Product Adoption Strategy
@@ -67,15 +67,21 @@ file exploration.
 
 The intended habit loop:
 
-1. Start with `semidx_health` to learn whether the graph is current enough.
-2. Use `semidx_outline`, then a scoped `semidx_repo_map`, for repository
-   orientation instead of broad file reads.
-3. Use `semidx_find_definitions` before opening likely definition files.
-4. Use `semidx_references` for impact checks before editing.
-5. Use `semidx_context` as the default focused-context tool around a symbol,
-   path, or entity id.
-6. Use `semidx_refresh` after edits instead of assuming the old graph still
-   describes the working copy.
+1. Start with idempotent `semidx_sync` to establish the working-copy state;
+   use `semidx_health` when diagnostics are needed.
+2. For unfamiliar repository structure, use `semidx_outline`, then a scoped
+   `semidx_repo_map`. Known targets can go directly to focused lookup.
+3. Use `semidx_find_definitions` to locate a named target before source reads.
+4. Use `semidx_references` for incoming/outgoing impact or `semidx_context` for
+   a bounded neighborhood, choosing the call that answers the task.
+5. After edits, call `semidx_sync` before relying on graph answers;
+   `semidx_refresh` remains its compatible alias. A rejected read requires sync
+   and retry, not reliance on the retained snapshot.
+
+The exact working-copy boundary is owned by
+[ADR 014](../adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md).
+This is a task-directed workflow, not a requirement to issue every discovery
+call for every question. Tool latency includes the read preflight.
 
 The strongest adoption signal is an agent choosing `semidx_context` before
 manual grep/read on cold start or impact analysis.
@@ -137,6 +143,14 @@ Do not use test count, line count, or language count as product success metrics
 by themselves.
 
 ## Conversion Into Work
+
+Current priority levels are owned by the
+[roadmap](001_project_roadmap.md#adoption-levels).
+[Plan 017](../plans/017_adoption_baseline_and_priority_selection.md) prepares
+an external task baseline and selects one successor intervention. Success is
+correct task completion with less work, not mandatory tool usage or more facts.
+
+The original preview delivery sequence below is historical context:
 
 Product strategy becomes implementation work only through smaller artifacts:
 

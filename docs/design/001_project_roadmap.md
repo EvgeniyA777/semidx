@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-21"
+updated: "2026-09-28"
 ---
 
 # Project Roadmap
@@ -35,10 +35,17 @@ semantic truth.
 
 ## Current Position
 
-As of 2026-09-21, the Zig dogfood frontend, its Plan 006 widening, and the
+As of 2026-09-28, the Zig dogfood frontend, its Plan 006 widening, and the
 local MCP preview are implemented and reviewed. The local MCP previews
 `v0.1.0-preview.1` through `v0.1.0-preview.4` are tagged and pushed to `origin`.
 `v0.1.0-preview.4` is the current source-built preview.
+
+On `dev`, [Plan 016](../plans/016_trustworthy_working_copy_sync.md) additionally
+delivered content-derived source-state identity, idempotent `semidx_sync`, and
+fail-closed read preflight. Every graph read now pays for source discovery;
+earlier graph-query timings do not establish current end-to-end MCP latency.
+[Plan 015](../plans/015_optional_jev_ranking_projection.md) remains a blocked,
+default-off ranking experiment, with no demonstrated ranking usefulness.
 
 Since preview.3, the adoption track advanced through
 [Plan 010](../plans/010_java_resolution_boundaries.md) (external Java evidence
@@ -121,6 +128,10 @@ Not yet present:
 
 ## Milestone Ladder
 
+These milestones describe product capabilities, not a mandatory execution order.
+The adoption levels below own the current priority order; selected semantic
+coverage and memory work need not wait for a stable product or persistence.
+
 | Milestone | Status | Purpose | Exit signal |
 | --- | --- | --- | --- |
 | M0: Architecture and governance | Done | Freeze product identity and put docs, ADRs, plans, reports, and policies under clear ownership. | Constitution ratified; rules and policy documents active. |
@@ -134,82 +145,54 @@ Not yet present:
 | M8: Deeper semantic coverage | Later | Expand exact graph value without collapsing unsupported or unresolved states. | New language or relationship coverage lands through focused plans, ADRs where needed, and conformance evidence. |
 | M9: Persistence and continuous operation | Later | Support long-running local use without changing graph authority. | Storage, snapshot representation, refresh/watch behavior, and recovery semantics are specified and tested. |
 
-## Near-Term Direction
+## Adoption Levels
 
-**The adoption track was entered and the first probe is done.**
-[Plan 010](../plans/010_java_resolution_boundaries.md) pointed semidx at a Java
-repository it does not own — apache/dubbo at `df9c5e1`, 119 Maven modules, 4,050
-Java source units — and that is now the project's first non-fixture evidence.
-What it showed, in
-[its report](../reports/010_java_resolution_boundaries_progress.md):
+Levels are an order for investing effort, not release promises or new semantic
+contracts. Java is the first external evaluation language because Plans 010-014
+already provide a baseline; this does not widen the supported-language roster.
+The procedure and numerical evaluation gates belong to
+[Plan 017](../plans/017_adoption_baseline_and_priority_selection.md).
 
-- Ingestion and incrementality hold at 60 times this repository's size: 4,050
-  units in 17.5 s and 290 MB, no unit left unanalyzed, and one edited file
-  reanalyzing exactly one unit while preserving entity ids.
-- Orientation, definition lookup, and freshness answer their questions well.
-- **The impact question does not.** The graph held 336 cross-unit reference
-  facts across 26,509 definitions, no cross-unit call facts exist by design, and
-  widely used types report no incoming references at all. The adoption strategy
-  names that question the strongest adoption signal.
-- The false fact Plan 010 was written to remove occurred **zero** times on real
-  source. It was latent, not active: ADR 004's other preconditions decline far
-  more often than they fire.
-- `semidx_context` at `depth=2` cost 90 s on that repository.
+| Level | User outcome | Planned work | Exit evidence |
+| --- | --- | --- | --- |
+| L0: Demonstrate task value | A developer can see when semidx helps and when it does not. | Compare three real tasks with and without semidx on two named external Java repositories; observe two actual MCP clients; run an early memory screen. Plan 017 is the next planned work. | Reproducible task outcomes, complete MCP timings, client-visible output observations, memory history, and one selected next intervention. A negative result is valid evidence. |
+| L1: Reduce the cost of obtaining context | Useful current context takes fewer unnecessary calls, reads, and waits. | Fix the largest measured cost in preflight, query work, navigation, or output handling. Measure fallback compatibility before changing it. | Repeat the L0 tasks and demonstrate the improvement chosen in the successor plan, with correctness, freshness, and client compatibility preserved. |
+| L2: Recover useful semantic relationships | Ordinary impact questions have useful answers within a clearly stated language boundary. | Select one Java unresolved-reason family by blocked tasks and measured conversion potential; evaluate external-supertype and visibility gaps before admitting new evidence. | Previously blocked task answers become established relationships, with negative cases and provenance verified; raw fact count alone does not pass. |
+| L3: Make installation repeatable | A developer gets a first useful answer without knowing the build internals. | Choose initial platforms from evaluation participants; prepare an installation path, actionable diagnostics, and artifacts where justified. | A developer other than the author follows the published path in a clean environment; elapsed time, manual interventions, supported platforms, and failures are recorded. Target: first useful answer within ten minutes, a future acceptance target rather than an observed result. |
+| L4: Sustain local sessions | Edits and repository churn do not make a session progressively unusable. | Bound retained memory, verify snapshot lifetimes and recovery; consider continuous operation only from measured need. | Repeated edit/remove/rename histories at bounded live graph size satisfy an explicit memory budget and preserve snapshot validity and identity rules. |
 
-The next useful sequence follows from that, not from the plan that preceded it:
+### Ordering And Promotion
 
-1. **Make the habit loop interactive at Java-adoption scale. Done.**
-   [Plan 011](../plans/011_external_scale_graph_query_indexes.md) is executed and
-   Follow-up 012 is closed: snapshot identity lookups are constant time, anchored
-   relationship queries inspect exactly what they return under a committed work
-   bound, and `semidx_context depth=2` on apache/dubbo fell from 90.71 s to
-   0.019 s in the same build mode.
-2. **Make the impact answer reachable before widening Java further. Done.**
-   [Plan 013](../plans/013_unresolved_mentions_from_the_callee_anchor.md) is
-   executed and converted nothing: the 118,471 unresolved calls on apache/dubbo
-   are the same claims with the same reasons, and 91,087 of them can now be
-   found by asking about the definition they name, against 10,141 before.
-   [Plan 014](../plans/014_java_receiver_coverage.md) then executed the priced
-   Java coverage step: interfaces and declared supertypes are graph claims, the
-   closed-chain guard conversion landed, and covered value receivers converted
-   3,294 calls on the same clone. Java remains the enterprise stress test for
-   whether semidx helps on serious local codebases. That work is now published
-   in `v0.1.0-preview.4`.
-3. **Defer SQLite and persistence until the in-memory projection contract is
-   proven.** Storage can help cold start, memory pressure, and long-running
-   local use later, but it should back the same graph-authoritative snapshot and
-   query-index contract rather than becoming the first fix for query latency.
-4. Use `v0.1.0-preview.4` while developing semidx itself and collect evidence
-   for the next semantic or product expansion, including how real clients show
-   tool results to models
-   ([Follow-up 010](../followups/010_mcp_text_fallback_client_measurement.md)).
+- Run L0 first. The memory screen belongs to L0 even though the eventual
+  lifecycle work sits in L4.
+- Default successor order is L1, L2, L3, then L4. Promote a level when L0
+  demonstrates that it blocks completion or adoption more directly than the
+  earlier level. Record the evidence and the changed order in `MEMORY.md`.
+- A false fact, stale answer presented as synchronized, crash, or reproducible
+  memory exhaustion interrupts ordinary feature priority. Capture the smallest
+  reproduction and prepare the corrective task before expanding coverage.
+- Each implementation successor needs its own ready plan and any required ADR.
+  No watcher, metadata shortcut, package manager migration, external type source,
+  persistence layer, or new transport is selected by this roadmap.
+- Plan 017 ends with a scoped successor plan or an explicit decision that the
+  sample shows no justified intervention. It does not silently launch source
+  changes or become an indefinite measurement program.
 
-Current follow-ups should be picked up where they naturally fit:
+### Inputs And Deferred Work
 
-| Timing | Follow-up | Why then |
-| --- | --- | --- |
-| Whenever someone re-derives a sample by hand | [017: Plan 012 external numbers are not reproducible](../followups/017_plan_012_external_evidence_reproducibility.md) | Narrowed by Plan 013 Stage 0, which recorded a new baseline on a named clone and reproduced Plan 012's whole-graph families to the unit. What is left is one check nobody has run: drawing the sample from the written selection rule without the program. |
-| Before changing MCP fallback output; useful during or after preview.4 adoption | [010: MCP text fallback client measurement](../followups/010_mcp_text_fallback_client_measurement.md) | The Plan 009 response budget controls structured output, but every result still carries the JSON text fallback. Measure real clients before shortening or configuring it. |
-| After Java-adoption latency and the next Java coverage decision | [006: Zig cross-unit and member call resolution](../followups/006_zig_cross_unit_and_member_calls.md) | This remains the highest-value open semantic gap for semidx's own development, but dogfood-only coverage is no longer ahead of proving the adoption-track habit loop. |
-| When the next Zig frontend plan touches callee parsing or call-shape normalization | [001: Zig logical negation calls](../followups/001_zig_logical_negation_calls.md) | Keep it small and parser-evidenced. It is a correctness improvement, but not worth a standalone plan unless the Zig call walker is already open. |
-| Parser maintenance or grammar upgrade pass | [002: Zig empty container grammar](../followups/002_zig_empty_container_grammar.md) | First check whether a newer pinned grammar fixes the tree. Until then, the current analysis failure is honest and safer than guessing declarations from an erroneous parse tree. |
-| Only with a second language asking a comparable question | [011: Java cross-module visibility](../followups/011_java_cross_module_visibility.md) | Follow-up 003 is closed by [ADR 008](../adr/008_java_visibility_boundaries.md); what remains is recovering cross-module references a build descriptor would permit, worth 1.5% of cross-unit facts on the probed repository. Reading build descriptors badly reintroduces the false fact that was just removed, so this waits for evidence, not appetite. |
-| When Clojure becomes an active coverage target | [008: Clojure lexical scope coverage](../followups/008_clojure_lexical_scope_coverage.md) | The current conservative unresolved behavior is correct. Exact lexical scope and known `clojure.core` binding forms are valuable, but only when Clojure coverage is being deliberately expanded. |
+| Input | Where it enters |
+| --- | --- |
+| [Plan 016 evidence](../reports/016_trustworthy_working_copy_sync_progress.md) | L0 measures the current complete read path; older query-only timings are historical and not a post-preflight baseline. |
+| [010: MCP client output](../followups/010_mcp_text_fallback_client_measurement.md) | L0 observes maintained stdio plus two real clients; L1 may change output only with compatibility evidence. Wire duplication does not prove model-visible duplication. |
+| [020: External Java supertype](../followups/020_java_external_supertype_leaves_the_chain_open.md) and [011: Visibility](../followups/011_java_cross_module_visibility.md) | L2 measures the blocked questions and follows each finding's admission requirements; unknown external members are never assumed absent. |
+| [017: Reproducible sampling](../followups/017_plan_012_external_evidence_reproducibility.md) | L0 records exact inputs, selection rules, and commands; old aggregate numbers are not silently reused. |
+| [006: Zig depth](../followups/006_zig_cross_unit_and_member_calls.md), [001: Negated calls](../followups/001_zig_logical_negation_calls.md), [002: Grammar](../followups/002_zig_empty_container_grammar.md), [008: Clojure scope](../followups/008_clojure_lexical_scope_coverage.md) | Focused follow-ups when observed tasks justify those language investments; no general language expansion in Plan 017. |
+| Move-plus-edit identity and snapshot borrowing | L4 and any earlier correctness reproduction; preserve observable identity loss and valid snapshot lifetimes. |
 
-After `v0.1.0-preview.4`, keep the next large-work decision evidence-led:
-
-- MCP client-output and habit-loop evidence, especially the text fallback
-  behavior named by Follow-up 010, before changing what preview users see.
-- The remaining Java gaps only when new evidence reprices them: non-simple
-  receivers, inherited targets, overloads, build/classpath boundaries, and
-  unsupported declarations are not silently part of Plan 014.
-- Zig frontend depth where dogfood shows the highest pain, after the adoption
-  track's Java-scale latency and coverage priorities are not being displaced.
-- Source identity evidence for move-plus-edit refactors.
-- Capability matrix and public contract lifecycle before promising stable
-  consumer semantics.
-- Persistence only after the in-memory snapshot/query-index contract and stable
-  consumer contract story are clear.
+Jev remains blocked under Plan 015's own resume conditions. Ranking, new
+languages, HTTP, persistence, and a stable semantic contract are later directions,
+not prerequisites for evaluating the current local tool. L4 memory improvements
+do not require persistence. Stable contract work remains owned by SPEC/CORE.
 
 ## Direction Checks
 

@@ -27,35 +27,19 @@ documents that own history, rationale, and evidence.
 
 ## Current Decisions
 
-- [ADR 001](docs/adr/001_choose_zig_implementation_language.md) chooses Zig for
-  the rebuild. The target toolchain is exactly Zig 0.16.0; run
-  `./scripts/check-zig-version.sh` before Zig or build changes.
-- [ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md) fixes parser
-  integration: local tree-sitter C sources behind one adapter. Use
-  `./scripts/setup-tree-sitter-grammars.sh` and a local tree-sitter runtime;
-  build and index steps do not fetch from the network.
-- [ADR 003](docs/adr/003_reject_name_match_assertions.md) rejects
-  repository-wide unique-name matching as graph authority. Unresolved
-  designators stay unresolved unless a frontend can prove a language-correct
-  target.
-- [ADR 004](docs/adr/004_allow_java_same_package_type_resolution.md) admits the
-  narrow Java same-package top-level type rule. It does not admit `module`,
-  `IMPORTS`, Java imports, classpath modeling, inheritance, nested classes, or
-  broader Java semantics.
+- [ADR 001](docs/adr/001_choose_zig_implementation_language.md) chooses Zig
+  0.16.0 exactly; run `./scripts/check-zig-version.sh` before source/build work.
+- [ADR 002](docs/adr/002_local_tree_sitter_parser_dependency.md) owns the local
+  tree-sitter C adapter and pinned grammar setup; build/index never fetch.
+- [ADR 003](docs/adr/003_reject_name_match_assertions.md) forbids unique-name
+  matching as semantic authority. [ADR 004](docs/adr/004_allow_java_same_package_type_resolution.md)
+  admits narrow same-package Java type resolution, bounded by
+  [ADR 008](docs/adr/008_java_visibility_boundaries.md)'s derived source roots.
 - [ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md) admits the
-  narrow Zig frontend and the local MCP stdio preview as a consumer, not a
-  semantic contract.
-- [ADR 006](docs/adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md)
-  admits the Zig dogfood extension Plan 006 implemented: direct member functions
-  inside covered top-level containers are definitions whose bodies use the same
-  exact narrow call rules, and exact-case relative local `@import` aliases
-  declare provider dependencies and support exact `alias.foo(...)` `CALLS`
-  facts, without admitting `module`, `IMPORTS`, dispatch, arbitrary member
-  lookup, or package imports.
-- [ADR 008](docs/adr/008_java_visibility_boundaries.md) bounds Java resolution
-  to a derived source root, with a test source root reading its module's main
-  source root and nothing else crossing. It reads no build descriptor and admits
-  no core kind.
+  Zig frontend and experimental MCP consumer.
+  [ADR 006](docs/adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md)
+  admits direct container-member definitions and exact relative-import calls,
+  not general member lookup, dispatch, package imports, or shared-core imports.
 
 ## Implementation Reality
 
@@ -187,28 +171,15 @@ documents that own history, rationale, and evidence.
   a mismatch or scan failure, naming `semidx_sync` as the next step;
   `semidx_health` runs it too but always answers, reporting whichever status
   it found instead of failing.
-- Tool arguments are declared once in `src/mcp/tools.zig`; the advertised
-  schema and the validator both derive from them. `semidx_repo_map`,
-  `semidx_references`, `semidx_context`, and `semidx_health` default to
-  `detail: "compact"` and take `detail: "full"`. Compact context and
-  references keep each claim's resolution category, producer name, freshness,
-  and location; the repository map carries freshness and location but no
-  existence provenance at either level; compact health keeps root,
-  product/server identity, unit and diagnostic counts, parser availability,
-  recovery state, and redacted outbound capability status, moving graph
-  counts and per-language producer/coverage detail to full (25% of full's
-  size on the repository-copy profile). List tools report `budget`
-  ([detail levels](docs/mcp/local_preview.md#detail-levels-and-budgets)).
-- Plan 009 made discovery progressive: `semidx_outline` gives per-directory
-  counts without definitions as the first orientation call; every list tool
-  stops at `max_response_bytes` (32000 structured bytes by default, whole
-  items only) and reports `budget_exhausted`; cut lists carry
-  `narrowing_hints`; outline, map, definitions, and references return
-  `next_cursor`, which carries the call's canonical arguments under a tag
-  keyed by a per-process secret and is valid only for the same tool, arguments,
-  and snapshot revision; `semidx_context` takes `direction` and `depth` (max 3) for a
-  traversal that renders each entity once. All are projection mechanics, not
-  graph semantics.
+- Tool schemas and validation share declarations in `src/mcp/tools.zig`.
+  Map, references, context, and health default to compact with explicit full
+  detail. Claim categories and freshness remain visible; map does not include
+  existence provenance. Full health adds graph counts and coverage details.
+- Plan 009 provides progressive outline/map discovery, whole-item response
+  budgets (32000 structured bytes by default), narrowing hints, authenticated
+  snapshot-bound cursors, and context traversal to depth 3. These are consumer
+  mechanics, not graph semantics; exact fields and limits belong to the
+  [MCP reference](docs/mcp/local_preview.md#detail-levels-and-budgets).
 - `semidx_sync`/`semidx_refresh` keep the previous snapshot and source-state
   identity paired on failure. If reconciliation starts and fails, the server
   discards that index and rebuilds from the same scan to avoid publishing
@@ -219,13 +190,8 @@ documents that own history, rationale, and evidence.
 - `scripts/semidx-mcp.sh` is the stable local launcher for agents. The older
   `scripts/start-mcp-server.sh` and `scripts/mcp-stdio.sh` remain compatibility
   aliases.
-- The product version is `0.1.0-preview.4` (`build.zig.zon`): the preview.3
-  surface plus Java visibility, query-scale, designator, unresolved-mention, and
-  receiver coverage work
-  ([release notes](docs/releases/v0.1.0-preview.4.md)). Annotated tags pushed
-  to `origin`: `v0.1.0-preview.1` at `e36693a`, `v0.1.0-preview.2` at
-  `8818bb6`, `v0.1.0-preview.3` at `58af737`, and `v0.1.0-preview.4` at
-  `e095d95`; no GitHub release was created.
+- Product `0.1.0-preview.4` is tagged and pushed at `e095d95`, without a GitHub
+  release; history belongs to the [release notes](docs/releases/v0.1.0-preview.4.md).
 
 ## What Does Not Exist
 
@@ -330,39 +296,23 @@ documents that own history, rationale, and evidence.
   Java-scale indexes, class-qualified static calls, structured unresolved
   mentions, interfaces, declared-supertypes references, closed-chain guard
   relaxation, `this`, and covered simple value receivers.
-- Next large direction: first collect preview adoption and MCP client-output
-  evidence, especially
-  [010](docs/followups/010_mcp_text_fallback_client_measurement.md);
-  then choose between Zig dogfood depth, remaining Java gaps, packaging/daemon
-  work, semantic-contract work, or persistence by measured pain.
-- [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) delivered the
-  trust-first correction described in the tool-list bullets above:
-  deterministic `source_state_id`, idempotent `semidx_sync`, fail-closed read
-  preflight, and compact health, evidenced by the three-profile
-  `preview-gate` (including the dedicated `sync-trust` profile reproducing
-  the original ADR 014 regression end to end). Full history, every stage's
-  evidence, and residual items live in its
-  [progress log](docs/reports/016_trustworthy_working_copy_sync_progress.md).
-  Cost: every graph read now pays for one full discovery scan as its
-  preflight (repository-copy profile: ~8-10 ms/call observed locally on 93
-  units, up from ~1 ms before). Two things the stdio gate does not itself
-  prove, both documented rather than silently skipped: "zero Jev calls on
-  mismatch" is proven at the Zig unit level only (live TypeSafe credentials
-  or a local mock HTTP endpoint would be needed to prove it over stdio, and
-  both are out of scope), and the plan's external-repository real-task
-  evaluation was not run (no external repository was available in-session).
-  Two post-closure review rounds found and fixed four gaps: the source-state
-  identity now pins two literal 64-hex reference vectors (`identity.zig`'s
-  `pinned_empty_vector`/`pinned_one_unit_vector`), computed from
-  `fixtures/working_copy_sync/identity_vectors.md`'s actual cases 1-2 (default
-  exclusion policy, `units/unit_01.zig`'s real bytes read through a
-  `semidx_working_copy_sync_fixtures` build-option module) after a first
-  attempt pinned values for the wrong inputs and a second review round caught
-  it; the sync-first habit loop is now consistent on every surface, including
-  two places the first review round missed (the MCP server's own
-  `instructions` string, and `docs/agent-policy/tooling.md`, the
-  always-loaded MCP-first policy this agent itself follows); and the
-  Jev-zero-calls proof now covers `scan_failed`, not only `out_of_date`.
+- The [roadmap adoption levels](docs/design/001_project_roadmap.md#adoption-levels)
+  now prioritize task value, context cost, useful Java relationships, installation,
+  and sustained local sessions. Memory screening happens early; measured blockers
+  can promote later levels.
+- Next planned work is
+  [Plan 017](docs/plans/017_adoption_baseline_and_priority_selection.md): three
+  tasks on two external Java repositories, complete MCP latency and client output,
+  an early memory screen, and one evidence-backed successor plan. It is planned,
+  not executed; no new measurements or optimization claims exist yet.
+- [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) delivered source-state
+  identity, idempotent sync, fail-closed read preflight, and compact health.
+  Every graph read scans the source state (~8-10 ms/call on 93 units in the local
+  repository-copy profile); older query-only benchmarks do not establish current
+  end-to-end latency. The external real-task evaluation was not run. Stdio does
+  not prove zero Jev calls on mismatch; Zig tests cover mismatch and scan failure.
+  Pinned identity vectors, post-closure corrections, and complete gate evidence
+  live in the [progress log](docs/reports/016_trustworthy_working_copy_sync_progress.md).
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) remains an
   incomplete, blocked adoption experiment. Stages 0-3 implemented default-off
   consent, bounded graph-only candidate projection, offline fixtures, and the
