@@ -316,12 +316,17 @@ documents that own history, rationale, and evidence.
 - [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) is the current
   trust-first adoption correction: deterministic source-state identity,
   idempotent `semidx_sync`, fail-closed read preflight, and compact health.
-  Stage 0 (ADR 014 accepted) and Stage 1 (`src/source/identity.zig`, the
-  `semidx-source-state-v1` SHA-256 encoding over scan policy, units, and
-  diagnostics) are complete; no MCP-visible behavior has changed yet — the
-  identity is computed nowhere outside its own tests. Stages 2-6 remain.
-  Execute it before expanding ranking claims; better ordering over an
-  obsolete snapshot would amplify false confidence.
+  Stage 0 (ADR 014 accepted), Stage 1 (`src/source/identity.zig`, the
+  `semidx-source-state-v1` SHA-256 encoding), and Stage 2 (`src/mcp/sync.zig`,
+  the idempotent scan/compare/apply/publish coordinator behind the new
+  `semidx_sync` tool and the now-shared `semidx_refresh` alias) are complete.
+  `semidx_sync`/`semidx_refresh` now report `snapshot.source_state_id` and
+  `working_copy.status`; no other tool result carries them yet, and no tool
+  performs a fail-closed preflight yet — a stale `semidx_context`/
+  `semidx_repo_map`/etc. call after an external edit still answers from the
+  unrefreshed snapshot until Stage 3. Stages 3-6 remain. Execute it before
+  expanding ranking claims; better ordering over an obsolete snapshot would
+  amplify false confidence.
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) remains an
   incomplete, blocked adoption experiment. Stages 0-3 implemented default-off
   consent, bounded graph-only candidate projection, offline fixtures, and the

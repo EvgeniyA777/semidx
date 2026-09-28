@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-18"
+updated: "2026-09-27"
 ---
 
 # Local MCP Preview
@@ -273,7 +273,8 @@ defaults, and maxima the server validates.
 | `semidx_find_definitions` | `name`, `path`, `language`, `role`, `freshness` (`current`), `resolution` (`any`), `limit` (50, max 500), `max_response_bytes`, `cursor` | Definitions matching every given filter, each with its existence claim's resolution, producer, and freshness. |
 | `semidx_references` | `entity_id`, or `name` with optional `path`/`language`; `direction` (`incoming`), `freshness` (`current`), `resolution` (`any`), `limit` (100, max 1000), `mention_limit` (50, max 500), `detail` (`compact`), `max_response_bytes`, `cursor` | The target definitions (at most 50, on every page), the `REFERENCES`/`CALLS` relationships into them (`incoming`) or out of them (`outgoing`), and `unresolved_mentions` (see below). A call is one occurrence and is listed once. `compact` renders each target once, with its existence claim, and names a relationship end that is a target by `id` alone; `full` renders both ends of every relationship. |
 | `semidx_context` | `entity_id`, `name` (with optional `path`/`language`), or `path` alone for a source unit; `freshness` (`current`), `direction` (`both`), `depth` (1, max 3), `relationship_limit` (50, max 500, per direction), `diagnostic_limit` (50, max 500), `detail` (`compact`), `max_response_bytes` | Up to 10 focus entities, each with its unit's analysis state, incoming and outgoing relationships of every kind (only those `direction` includes), the unit's diagnostics, and the entity's last identity event. `compact` names the focus end of each relationship by `id` alone and renders the other end, resolutions, producers, evidence, and diagnostics without their full fields; `full` renders them all. `depth` 2 or 3 adds a [traversal](#traversal). |
-| `semidx_refresh` | none | The new and previous snapshot revisions, `entity_ids_preserved` (false when this refresh published an index rebuilt after a failure), the scan outcome (unchanged, changed, renamed, added, removed, analyzed, ambiguous renames, invalidated), unit counts, and diagnostic counts. |
+| `semidx_sync` | none | Idempotent scan/compare/publish ([ADR 014](../adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md) D3): scans the root, compares its source-state identity with the published snapshot's, and either leaves the snapshot untouched (`changed: false`) or reconciles and publishes once (`changed: true`). Same result shape as `semidx_refresh`. |
+| `semidx_refresh` | none | A compatibility alias for `semidx_sync` over the same operation, keeping its historical field names: `previous_revision`, `entity_ids_preserved` (false when this call published an index rebuilt after a failure), the scan outcome (unchanged, changed, renamed, added, removed, analyzed, ambiguous renames, invalidated), unit counts, and diagnostic counts — plus `changed`, `snapshot.source_state_id`, and `working_copy` (see below). |
 | `semidx_rank_context` (experimental, only when `--enable-jev-ranking` consent is complete) | `query`; `entity_id`, `name` (with optional `path`/`language`), or `path`; `freshness` (`current`), `direction` (`both`), `depth` (1, max 3), `relationship_limit` (50, max 500), `candidate_limit` (20, max 32), `max_response_bytes` | The same focus and candidate selection as `semidx_context`, plus a `ranking` block: `kind: "approximate_projection"`, `status` (`"ranked"` or `"unavailable"`), provider/model/destination/category provenance, and a `ranking.probability`/`ranking.original_position` per candidate. Every selected candidate is always present; only order and the `ranking` block ever depend on the provider. Absent from `tools/list` and rejected as an unknown tool when ranking is not enabled. See [ADR 013](../adr/013_optional_jev_ranking_projection.md) and [Plan 015](../plans/015_optional_jev_ranking_projection.md). |
 
 `freshness` is `current`, `stale`, or `any`. `resolution` is `any`, `fact`,
@@ -292,6 +293,16 @@ Every structured result carries:
 | --- | --- |
 | `snapshot.revision` | The graph revision every value in this result was read from. |
 | `semantic_contract_version` | Always `null`: no semantic contract is published. |
+
+`semidx_sync` and `semidx_refresh` additionally carry `snapshot.source_state_id`
+(64 lowercase hex characters, a deterministic identity over what the scan just
+behind that result saw — [ADR 014](../adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
+D2) and `working_copy: {status, observed_source_state_id}`, always
+`status: "in_sync"` on these two tools since a completed sync is itself the
+comparison. No other tool result carries these fields yet, and no tool
+performs a fail-closed preflight against them yet: a stale read after an
+external edit still answers from the unrefreshed snapshot until a later stage
+wires the same envelope and preflight into every graph-reading tool.
 
 The product version (`0.1.0-preview.4`) is reported by `--version`, in
 `serverInfo.version`, and as `product_version` in `semidx_health`. It versions

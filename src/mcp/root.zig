@@ -23,6 +23,7 @@ pub const stdio = @import("stdio.zig");
 pub const tools = @import("tools.zig");
 pub const jev_consent = @import("jev_consent.zig");
 pub const jev = @import("jev.zig");
+pub const sync = @import("sync.zig");
 
 const model = semidx.model;
 
@@ -66,6 +67,11 @@ pub const Server = struct {
     /// How many times the index was rebuilt after a failed refresh.
     rebuilds: u32,
     last_scan: semidx.Index.ScanOutcome,
+    /// The source-state identity paired with `snapshot`
+    /// ([ADR 014](../../docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
+    /// D2-D3): the identity of the scan that last actually reconciled into the
+    /// index, kept unchanged by an idempotent sync.
+    source_state_id: sync.SourceStateId,
     /// Set by a legacy `initialize`. Modern requests never read it.
     legacy_initialized: bool,
     /// Secret per process, authenticating the cursors it issues: a cursor
@@ -99,6 +105,7 @@ pub const Server = struct {
         const outcome = try index.applyScan(found);
         var snapshot = try index.publish();
         errdefer snapshot.deinit();
+        const source_state_id = try semidx.source.identity.calculate(gpa, found);
 
         try log.print("semidx-mcp: indexed {d} source units under {s}; snapshot revision {d}; {d} scan diagnostics\n", .{
             snapshot.units.len,
@@ -127,6 +134,7 @@ pub const Server = struct {
             .poisoned = false,
             .rebuilds = 0,
             .last_scan = outcome,
+            .source_state_id = source_state_id,
             .legacy_initialized = false,
             .cursor_key = cursor_key,
             .message_arena = std.heap.ArenaAllocator.init(gpa),
@@ -328,7 +336,8 @@ pub const Server = struct {
             .semidx_find_definitions => tools.findDefinitions(&ctx, &body_stringify, arguments),
             .semidx_references => tools.references(&ctx, &body_stringify, arguments),
             .semidx_context => tools.context(&ctx, &body_stringify, arguments),
-            .semidx_refresh => self.refresh(&ctx, &body_stringify, arguments),
+            .semidx_refresh => self.performSync(&ctx, &body_stringify, arguments),
+            .semidx_sync => self.performSync(&ctx, &body_stringify, arguments),
             .semidx_rank_context => tools.rankContext(&ctx, &body_stringify, arguments, .{
                 .provider = self.rank_provider,
                 .destination_origin = if (self.options.jev) |consent| consent.origin else "",
@@ -399,7 +408,9 @@ pub const Server = struct {
         };
     }
 
-    /// Rescans the root and publishes the next snapshot.
+    /// Answers `semidx_sync` and its `semidx_refresh` compatibility alias:
+    /// runs one scan/compare/apply/publish cycle through `sync.run` and
+    /// renders its outcome.
     ///
     /// On any failure the published snapshot stays the one every earlier call
     /// observed. A failure after reconciliation started can leave the index
@@ -407,94 +418,82 @@ pub const Server = struct {
     /// replaced by an index rebuilt from the same scan. The rebuilt index
     /// issues none of the old index's ids, so an id from an earlier snapshot
     /// names nothing in it rather than a different entity.
-    fn refresh(self: *Server, ctx: *tools.Context, s: *Stringify, arguments: ?std.json.ObjectMap) tools.Error!void {
+    fn performSync(self: *Server, ctx: *tools.Context, s: *Stringify, arguments: ?std.json.ObjectMap) tools.Error!void {
         try tools.expectNoArguments(ctx, arguments);
         const previous = self.snapshot.revision;
 
-        var found = semidx.source.discovery.scan(self.gpa, self.io, self.options.root, .{}) catch |err| {
-            try self.logf("refresh: scanning {s} failed: {t}", .{ self.options.root, err });
-            return ctx.fail("refresh could not scan the root: {t}; the index was not changed and snapshot revision {d} is still published", .{ err, previous });
-        };
-        defer found.deinit();
-
-        if (self.poisoned and !try self.rebuild(found)) {
-            return ctx.fail("an earlier refresh failed and rebuilding the index failed again; snapshot revision {d} is still published, and the next refresh retries the rebuild", .{previous});
+        const outcome = try sync.run(.{
+            .gpa = self.gpa,
+            .io = self.io,
+            .root = self.options.root,
+            .log = self.log,
+            .index = &self.index,
+            .snapshot = &self.snapshot,
+            .retired = &self.retired,
+            .poisoned = &self.poisoned,
+            .rebuilds = &self.rebuilds,
+            .last_scan = &self.last_scan,
+            .source_state_id = &self.source_state_id,
+        });
+        switch (outcome) {
+            .scan_failed => |err| return ctx.fail("refresh could not scan the root: {t}; the index was not changed and snapshot revision {d} is still published", .{ err, previous }),
+            .rebuild_retry_failed => return ctx.fail("an earlier refresh failed and rebuilding the index failed again; snapshot revision {d} is still published, and the next refresh retries the rebuild", .{previous}),
+            .reconcile_failed => |failure| {
+                if (failure.rebuilt) {
+                    return ctx.fail("refresh failed while {s}: {t}. The index was rebuilt from a fresh scan; snapshot revision {d} " ++
+                        "is still published, and the next refresh publishes the rebuilt index, in which entity ids from " ++
+                        "earlier snapshots name nothing", .{ failure.stage, failure.err, previous });
+                }
+                return ctx.fail("refresh failed while {s}: {t}, and rebuilding the index failed too; snapshot revision {d} " ++
+                    "is still published, and the next refresh retries the rebuild", .{ failure.stage, failure.err, previous });
+            },
+            .unchanged, .changed => {},
         }
-        const outcome = self.index.applyScan(found) catch |err| return self.recoverFrom(ctx, found, "applying the scan", err, previous);
-        const next = self.index.publish() catch |err| return self.recoverFrom(ctx, found, "publishing", err, previous);
 
-        const rebuilt = self.retired != null;
-        self.snapshot.deinit();
-        self.snapshot = next;
-        if (self.retired) |*retired| {
-            retired.deinit();
-            self.retired = null;
-        }
-        self.last_scan = outcome;
         ctx.snapshot = &self.snapshot;
         ctx.existence = null;
+        try self.writeSyncResult(ctx, s, previous, outcome);
+    }
 
-        try tools.beginStructured(ctx, s);
+    /// Renders a sync/refresh outcome: the shared envelope
+    /// (`snapshot.source_state_id`, `working_copy`, always `in_sync` here
+    /// since this is the post-operation state a completed sync itself just
+    /// established) plus `semidx_refresh`'s original fields, which
+    /// `semidx_sync` shares rather than duplicating under another shape.
+    fn writeSyncResult(self: *Server, ctx: *tools.Context, s: *Stringify, previous: u64, outcome: sync.Outcome) tools.Error!void {
+        const rendered = semidx.source.identity.toHex(self.source_state_id);
+
+        try s.beginObject();
+        try s.objectField("snapshot");
+        try s.beginObject();
+        try s.objectField("revision");
+        try s.write(ctx.snapshot.revision);
+        try s.objectField("source_state_id");
+        try protocol.writeString(s, &rendered);
+        try s.endObject();
+        try s.objectField("semantic_contract_version");
+        try s.write(null);
+        try s.objectField("working_copy");
+        try s.beginObject();
+        try s.objectField("status");
+        try s.write("in_sync");
+        try s.objectField("observed_source_state_id");
+        try protocol.writeString(s, &rendered);
+        try s.endObject();
+
         try s.objectField("previous_revision");
         try s.write(previous);
+        try s.objectField("changed");
+        try s.write(outcome == .changed);
         try s.objectField("entity_ids_preserved");
-        try s.write(!rebuilt);
+        try s.write(if (outcome == .changed) outcome.changed.entity_ids_preserved else true);
         try s.objectField("scan");
-        try s.write(outcome);
+        try s.write(if (outcome == .changed) outcome.changed.outcome else self.last_scan);
         try s.objectField("units");
         try tools.writeUnitCounts(ctx, s);
         try s.objectField("diagnostics");
         try tools.writeDiagnosticCounts(ctx, s, null);
         try s.endObject();
-    }
-
-    /// Replaces a failed refresh's index with one rebuilt from the same scan,
-    /// and reports the failure with whether that recovery completed.
-    fn recoverFrom(
-        self: *Server,
-        ctx: *tools.Context,
-        found: semidx.source.SourceScan,
-        stage: []const u8,
-        err: anyerror,
-        previous: u64,
-    ) tools.Error {
-        try self.logf("refresh: {s} failed: {t}; rebuilding the index", .{ stage, err });
-        self.poisoned = true;
-        if (try self.rebuild(found)) {
-            return ctx.fail("refresh failed while {s}: {t}. The index was rebuilt from a fresh scan; snapshot revision {d} " ++
-                "is still published, and the next refresh publishes the rebuilt index, in which entity ids from " ++
-                "earlier snapshots name nothing", .{ stage, err, previous });
-        }
-        return ctx.fail("refresh failed while {s}: {t}, and rebuilding the index failed too; snapshot revision {d} " ++
-            "is still published, and the next refresh retries the rebuild", .{ stage, err, previous });
-    }
-
-    /// Builds a fresh index from `found` above the current index's ids. On
-    /// success it becomes the index; the index the published snapshot borrows
-    /// from stays alive until a snapshot of the new one replaces it.
-    fn rebuild(self: *Server, found: semidx.source.SourceScan) Writer.Error!bool {
-        const floor = self.index.graph.idFloor();
-        var fresh = semidx.Index.initAfter(self.gpa, self.options.root, floor) catch |err| {
-            try self.logf("recovery: creating a fresh index failed: {t}", .{err});
-            self.poisoned = true;
-            return false;
-        };
-        _ = fresh.applyScan(found) catch |err| {
-            try self.logf("recovery: indexing the scan into a fresh index failed: {t}", .{err});
-            fresh.deinit();
-            self.poisoned = true;
-            return false;
-        };
-        if (self.retired == null) {
-            self.retired = self.index;
-        } else {
-            self.index.deinit();
-        }
-        self.index = fresh;
-        self.poisoned = false;
-        self.rebuilds += 1;
-        try self.logf("recovery: rebuilt the index ({d} rebuilds so far)", .{self.rebuilds});
-        return true;
     }
 };
 
@@ -743,11 +742,12 @@ test "every declared argument is validated as its advertised schema says, and an
     const list = (try h.send(arena, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{" ++ modern_meta ++ "}}")).?;
     for (list.object.get("result").?.object.get("tools").?.array.items) |tool| {
         const annotations = tool.object.get("annotations").?.object;
-        const is_refresh = std.mem.eql(u8, "semidx_refresh", tool.object.get("name").?.string);
-        try testing.expectEqual(!is_refresh, annotations.get("readOnlyHint").?.bool);
+        const name = tool.object.get("name").?.string;
+        const publishes = std.mem.eql(u8, "semidx_refresh", name) or std.mem.eql(u8, "semidx_sync", name);
+        try testing.expectEqual(!publishes, annotations.get("readOnlyHint").?.bool);
         try testing.expect(!annotations.get("openWorldHint").?.bool);
-        // Refresh rebuilds the server's own index and touches no file.
-        if (is_refresh) try testing.expect(!annotations.get("destructiveHint").?.bool);
+        // Sync and refresh rebuild the server's own index and touch no file.
+        if (publishes) try testing.expect(!annotations.get("destructiveHint").?.bool);
     }
 }
 
@@ -2098,6 +2098,55 @@ test "refresh publishes a new snapshot that observes edited and added units" {
     try testing.expectEqual(@as(u64, @intCast(after)), h.server.snapshot.revision);
     const still = try h.callTool(arena, "semidx_find_definitions", "{\"name\":\"added\"}");
     try testing.expectEqual(@as(i64, 1), still.object.get("structuredContent").?.object.get("total").?.integer);
+}
+
+test "semidx_sync is idempotent on an unchanged working copy and semidx_refresh shares its result shape" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.init(false, "");
+    defer h.deinit();
+
+    const before_revision = h.server.snapshot.revision;
+    const before_id = h.server.source_state_id;
+    const before_entity = h.server.snapshot.entities[0].id;
+
+    // Nothing on disk changed: sync must not touch the published snapshot,
+    // its revision, or entity ids (ADR 014 D3).
+    const unchanged = (try h.callTool(arena, "semidx_sync", "{}")).object.get("structuredContent").?.object;
+    try testing.expectEqual(false, unchanged.get("changed").?.bool);
+    try testing.expectEqual(true, unchanged.get("entity_ids_preserved").?.bool);
+    try testing.expectEqual(@as(i64, @intCast(before_revision)), unchanged.get("snapshot").?.object.get("revision").?.integer);
+    try testing.expectEqual(@as(i64, @intCast(before_revision)), unchanged.get("previous_revision").?.integer);
+    try testing.expectEqualStrings("in_sync", unchanged.get("working_copy").?.object.get("status").?.string);
+    const rendered_before = semidx.source.identity.toHex(before_id);
+    try testing.expectEqualStrings(&rendered_before, unchanged.get("snapshot").?.object.get("source_state_id").?.string);
+    try testing.expectEqualStrings(&rendered_before, unchanged.get("working_copy").?.object.get("observed_source_state_id").?.string);
+    try testing.expectEqual(before_revision, h.server.snapshot.revision);
+    try testing.expectEqual(before_entity, h.server.snapshot.entities[0].id);
+
+    // A real change: both sync and the identity must reflect it.
+    try h.tmp.dir.writeFile(test_io, .{ .sub_path = "added.zig", .data = "pub fn added() void {}\n" });
+    const changed = (try h.callTool(arena, "semidx_sync", "{}")).object.get("structuredContent").?.object;
+    try testing.expectEqual(true, changed.get("changed").?.bool);
+    try testing.expect(changed.get("snapshot").?.object.get("revision").?.integer > @as(i64, @intCast(before_revision)));
+    try testing.expectEqualStrings("in_sync", changed.get("working_copy").?.object.get("status").?.string);
+    try testing.expect(!std.mem.eql(u8, &rendered_before, changed.get("snapshot").?.object.get("source_state_id").?.string));
+    const after_revision = h.server.snapshot.revision;
+
+    // Nothing changed again: a second sync stays idempotent at the new state.
+    const still_unchanged = (try h.callTool(arena, "semidx_sync", "{}")).object.get("structuredContent").?.object;
+    try testing.expectEqual(false, still_unchanged.get("changed").?.bool);
+    try testing.expectEqual(after_revision, h.server.snapshot.revision);
+
+    // semidx_refresh shares the same coordinator and result shape.
+    try h.tmp.dir.writeFile(test_io, .{ .sub_path = "added.zig", .data = "pub fn added() void {\n    return;\n}\n" });
+    const via_refresh = (try h.callTool(arena, "semidx_refresh", "{}")).object.get("structuredContent").?.object;
+    try testing.expectEqual(true, via_refresh.get("changed").?.bool);
+    try testing.expect(via_refresh.get("snapshot").?.object.get("source_state_id") != null);
+    try testing.expect(via_refresh.get("working_copy") != null);
+    try testing.expectEqual(@as(i64, @intCast(after_revision)), via_refresh.get("previous_revision").?.integer);
 }
 
 /// Fails exactly one allocation, or every allocation from one onwards, so a

@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-**Stages 0-1 complete.**
+**Stages 0-2 complete.**
 
 ## Start Rule: Readiness Evidence
 
@@ -247,3 +247,82 @@ graph assertions or entities.
 **Done when:** fixed vectors pass (done); two independently built equivalent
 scans match (done); source discovery behavior otherwise unchanged (done —
 existing discovery tests still pass unmodified). Stage 1 complete.
+
+## Stage 2: Idempotent Sync Coordinator
+
+### What shipped
+
+- `src/mcp/sync.zig` (new): `run(target: Target) Error!Outcome` performs one
+  scan, computes its source-state identity, and compares it against
+  `target.source_state_id.*`. Unchanged and not poisoned: returns `.unchanged`
+  without touching the index, snapshot, or entity ids. Otherwise: rebuilds a
+  poisoned index first if needed (same fresh-index-above-the-id-floor
+  recovery a plain refresh always used), then reconciles through
+  `Index.applyScan`/`publish`, retires the old index, and pairs the newly
+  published snapshot with the newly observed identity. `Target` holds pointers
+  into the caller's fields (`index`, `snapshot`, `retired`, `poisoned`,
+  `rebuilds`, `last_scan`, `source_state_id`) rather than owning them, so
+  `Server` stays the single owner of that state and existing tests that reach
+  into `server.poisoned`/`server.retired`/`server.snapshot` directly keep
+  working unmodified. `Outcome` is a plain value (`unchanged`, `changed`,
+  `scan_failed`, `rebuild_retry_failed`, `reconcile_failed`) — this module
+  writes no tool JSON or error text, matching the plan's architecture
+  boundary.
+- `src/mcp/root.zig`: `Server` gained `source_state_id`, computed once in
+  `init` from the same initial scan that seeds the index. The old
+  `refresh`/`recoverFrom`/`rebuild` trio is replaced by `performSync` (calls
+  `sync.run`, then renders exactly the same four failure messages the old
+  `refresh` produced word for word, so no behavioral or wording change reaches
+  a client) and `writeSyncResult` (the shared success envelope). Both
+  `semidx_sync` and `semidx_refresh` dispatch to `performSync`.
+- `src/mcp/tools.zig`: added `Tool.semidx_sync` (zero arguments, like
+  `semidx_refresh`) with its own description; generalized the
+  `readOnlyHint`/`destructiveHint`/`idempotentHint` annotation logic (was
+  `tool == .semidx_refresh`) to cover both tools; reworded `semidx_refresh`'s
+  description to name the alias relationship.
+- Result shape (both tools identically): the existing `previous_revision`,
+  `entity_ids_preserved`, `scan`, `units`, `diagnostics` fields, plus new
+  `snapshot.source_state_id`, `working_copy.status` (always `"in_sync"` here
+  — a completed sync's own post-condition), `working_copy.observed_source_state_id`,
+  and a new top-level `changed: bool`. This matches the plan's Fixed Runtime
+  Contract "Result Envelope" shape for these two tools now, ahead of Stage 3
+  wiring the same envelope into every other tool's result — `beginStructured`
+  itself is untouched in this stage, so this envelope is currently
+  hand-written in `writeSyncResult` rather than shared; Stage 3 folds it back
+  into `beginStructured` once every tool needs it.
+- `tests/mcp_smoke_test.zig`: updated the three hardcoded tool-list-length
+  assertions (7→8, 8→9) and the ordered tool-name list to include
+  `semidx_sync` right after `semidx_refresh`.
+
+### Verification run
+
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build test-mcp --summary all`: 80/81 passed (1 pre-existing skip),
+  including a new test proving: an unchanged working copy leaves revision,
+  entity ids, and the identity untouched through `semidx_sync`; a real change
+  is detected and published exactly once; a second sync after that stays
+  idempotent at the new state; and `semidx_refresh` produces the same
+  envelope fields (`snapshot.source_state_id`, `working_copy`, `changed`)
+  through the same coordinator.
+- `zig build test --summary all`: 337/339 passed (2 pre-existing skips). This
+  includes the pre-existing exhaustive allocation-failure-injection recovery
+  tests (`expectRecoveryAt`, run at every allocation point of the sync path,
+  once with one-shot failures and once with sticky failures) — they still
+  converge with the coordinator moved into `sync.zig`, proving the refactor
+  did not change the recovery guarantees, only where the code that provides
+  them lives.
+- `zig build preview-gate --summary all`: 15/15 steps, 6/6 tests, both
+  profiles pass; dogfood recovery over 92 units still finds 32 failure points
+  and rebuilds correctly under both one-shot and sticky injected failures.
+
+### Stop-rule check
+
+No stop condition triggered: `sync.zig` never writes tool JSON or schema text
+(root.zig still owns every rendered message and field name), and dispatch
+stayed strictly sequential — no evidence of overlapping calls was found, so no
+serialization boundary beyond the existing stdio loop was needed.
+
+**Done when:** sync is idempotent on unchanged input (done); changed input
+publishes once (done); every existing refresh recovery injection still
+converges (done, verified at every allocation point under both failure
+modes). Stage 2 complete.

@@ -37,6 +37,9 @@ pub const Tool = enum {
     semidx_references,
     semidx_context,
     semidx_refresh,
+    /// The recommended first call (ADR 014 D3): idempotent scan/compare/apply/
+    /// publish, sharing its handler and result shape with `semidx_refresh`.
+    semidx_sync,
     /// Advertised and callable only when the server was started with complete
     /// Jev ranking consent (ADR 013 D2); see `byName` and `writeToolList`.
     semidx_rank_context,
@@ -232,7 +235,12 @@ pub const definitions = [_]Definition{
         shared_params.max_response_bytes,
     }),
     define(.semidx_refresh, "Refresh index", "Rescan the configured root, reconcile the changes into the graph, and publish the next " ++
-        "snapshot. Later calls observe the new snapshot; a failed refresh keeps the previous one.", &.{}),
+        "snapshot. Later calls observe the new snapshot; a failed refresh keeps the previous one. A compatibility alias for " ++
+        "semidx_sync over the same idempotent operation.", &.{}),
+    define(.semidx_sync, "Synchronize with the working copy", "Scan the configured root and compare it with the published snapshot's " ++
+        "source-state identity. An unchanged identity keeps the current snapshot, revision, and entity ids untouched " ++
+        "(idempotent); a changed one reconciles through the same incremental path as semidx_refresh and publishes the next " ++
+        "snapshot exactly once.", &.{}),
     define(.semidx_rank_context, "Rank context candidates (experimental, opt-in)", "Select a bounded semidx_context-shaped candidate " ++
         "set for `query` and, when Jev ranking is enabled, ask an external TypeSafe Jev model which candidates are most useful for " ++
         "it. The graph alone selects candidates and never resolves anything for Jev; Jev only proposes an order. Every candidate " ++
@@ -283,9 +291,10 @@ pub fn writeToolList(s: *Stringify, jev_ranking_enabled: bool) Writer.Error!void
         s.endWriteRaw();
         try s.objectField("annotations");
         try s.beginObject();
+        const publishes = definition.tool == .semidx_refresh or definition.tool == .semidx_sync;
         try s.objectField("readOnlyHint");
-        try s.write(definition.tool != .semidx_refresh);
-        if (definition.tool == .semidx_refresh) {
+        try s.write(!publishes);
+        if (publishes) {
             // It rebuilds the server's own index and touches no file;
             // repeating it over unchanged files changes nothing.
             try s.objectField("destructiveHint");

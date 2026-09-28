@@ -73,7 +73,7 @@ test "semidx-mcp serves both protocol eras over stdio with nothing but protocol 
 
     const list = try client.request(2, "tools/list", "{" ++ modern_meta ++ "}");
     const listed = list.object.get("result").?.object.get("tools").?.array.items;
-    const expected_tools = [_][]const u8{ "semidx_health", "semidx_outline", "semidx_repo_map", "semidx_find_definitions", "semidx_references", "semidx_context", "semidx_refresh" };
+    const expected_tools = [_][]const u8{ "semidx_health", "semidx_outline", "semidx_repo_map", "semidx_find_definitions", "semidx_references", "semidx_context", "semidx_refresh", "semidx_sync" };
     try testing.expectEqual(expected_tools.len, listed.len);
     for (expected_tools, listed) |name, tool| try testing.expectEqualStrings(name, tool.object.get("name").?.string);
 
@@ -260,7 +260,7 @@ test "semidx-mcp stays default-off even when the key is present without the enab
 
     const list = try client.request(1, "tools/list", "{" ++ modern_meta ++ "}");
     const listed = list.object.get("result").?.object.get("tools").?.array.items;
-    try testing.expectEqual(@as(usize, 7), listed.len);
+    try testing.expectEqual(@as(usize, 8), listed.len);
 
     const health = try client.callTool(2, "semidx_health", "{}");
     try testing.expect(health.get("outbound_projection") == null);
@@ -307,7 +307,7 @@ test "semidx-mcp advertises and serves semidx_rank_context under complete consen
 
     const list = try client.request(1, "tools/list", "{" ++ modern_meta ++ "}");
     const listed = list.object.get("result").?.object.get("tools").?.array.items;
-    try testing.expectEqual(@as(usize, 8), listed.len);
+    try testing.expectEqual(@as(usize, 9), listed.len);
     var saw_rank_tool = false;
     for (listed) |tool| {
         if (std.mem.eql(u8, tool.object.get("name").?.string, "semidx_rank_context")) saw_rank_tool = true;
