@@ -2,9 +2,9 @@
 title: "Optional Jev ranking projection progress"
 doc_type: "progress_log"
 lifecycle: "active"
-status: "in_progress"
+status: "blocked"
 agent_action: "reference_for_context"
-updated: "2026-09-26"
+updated: "2026-09-27"
 ---
 
 # 015: Optional Jev Ranking Projection Progress
@@ -14,7 +14,9 @@ Companion log for
 
 ## Current Status
 
-**Stage 0 is in progress.**
+**Stages 0-3 are complete. Stage 4 is blocked by direct TypeSafe vendor
+onboarding.** The plan remains incomplete, Jev remains default-off, and no
+ranking usefulness claim is justified.
 
 ## Stage 0: Accept The Boundary And Freeze The Testable Contract
 
@@ -486,15 +488,32 @@ guess at without a way to verify it.
 - The 2,000 ms deadline is a retry budget, not a hard per-call ceiling — see
   the scope note above.
 
-## Next Stage
+## Stage 4 Blocker And Handoff
 
-Stage 4 (live synthetic smoke and ranking evaluation): requires the operator
-to supply a real `TYPESAFE_API_KEY`, endpoint, model, and categories — no
-agent may infer or recover one. Add the developer-only live-smoke step over a
-synthetic fixture, record live protocol evidence (status, latency, token
-usage, no payload or secret), then run the committed 24-query fixture
-(`fixtures/jev/ranking_eval.json`) against original graph order and Jev order
-and compute top-1/Recall@5/Recall@10/MRR/NDCG@5. The plan's gate: ship the
-opt-in only if NDCG@5 improves without Recall@10 decreasing; otherwise close
-it as measured-and-declined and remove the runtime integration. This stage
-cannot proceed further without the user's explicit action.
+On 2026-09-27 the operator recorded that direct TypeSafe registration did not
+yield an account or API key and chose not to add Vercel, OpenRouter, another
+gateway, a proxy, or another credential surface as a workaround. This keeps the
+experiment's consented destination and evidence standard unchanged instead of
+silently changing the provider boundary to finish a checklist.
+
+Current disposition:
+
+- Stage 4 is blocked, not skipped, completed, or measured-and-declined.
+- Jev stays disabled by default. The runtime integration is not advertised as
+  useful, and a `ranking.status: "ranked"` result remains an unproven ordering.
+- Existing `FakeProvider` tests and committed fixtures remain the required
+  provider evidence; all required lanes remain credential-free and offline.
+- No gateway, proxy, alternate model, or live-smoke code is planned while this
+  blocker remains.
+- [Plan 016](../plans/016_trustworthy_working_copy_sync.md) is the next active
+  implementation priority. A later graph-native decision-model proposal must
+  receive its own authority analysis, ADR, plan, labels, and calibration gates.
+
+Resume rule: Stage 4 resumes only after direct TypeSafe onboarding provides a
+credential, the operator explicitly supplies the endpoint/model/categories and
+authorizes the live synthetic smoke, and the primary API/model sources still
+match the frozen fixtures. Then run the committed 24-query fixture against
+original graph order and Jev order and compute top-1, Recall@5, Recall@10, MRR,
+and NDCG@5. If the operator cancels instead, use Plan 015's existing removal
+path and record the experiment as measured-and-declined only if the required
+measurement actually occurred.

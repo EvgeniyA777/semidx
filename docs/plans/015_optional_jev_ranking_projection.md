@@ -2,9 +2,9 @@
 title: "Optional Jev ranking projection"
 doc_type: "plan"
 lifecycle: "active"
-status: "planned"
+status: "blocked"
 agent_action: "reference_for_context"
-updated: "2026-09-26"
+updated: "2026-09-27"
 ---
 
 # 015: Optional Jev Ranking Projection
@@ -35,6 +35,28 @@ When a choice appears during execution, decide in this order:
 4. A versioned, measured model beats a moving alias.
 5. Existing MCP tools stay exact and network-free; optional behavior gets a
    separate surface.
+
+## Execution State
+
+Stages 0-3 are complete. Stage 4 is blocked as of 2026-09-27 because no direct
+TypeSafe account or API credential is available through the vendor onboarding
+path. The operator chose not to add a gateway, proxy, alternate provider route,
+or new credential surface merely to finish this experiment.
+
+While blocked:
+
+- Jev remains disabled by default and no ranking usefulness claim is permitted;
+- `FakeProvider` and the committed fixtures remain the only required provider
+  evidence, so every required build and gate stays offline;
+- [Plan 016](016_trustworthy_working_copy_sync.md) is the next execution
+  priority; and
+- any future graph-native decision-model work requires its own decision and
+  plan after Plan 016 rather than being folded into this vendor experiment.
+
+Resume Stage 4 only when direct TypeSafe onboarding yields an explicitly
+supplied credential and the operator explicitly resumes the experiment. If the
+operator instead cancels it, revise this plan and remove the default-off runtime
+integration without claiming a measured quality verdict that never occurred.
 
 ## Start Rule
 
@@ -454,6 +476,11 @@ Verification: `zig fmt --check build.zig src tests`, `zig build test-mcp`,
 
 Purpose: distinguish protocol correctness from demonstrated usefulness.
 
+**Status: blocked by direct vendor onboarding.** No direct TypeSafe credential
+is available, and gateway or proxy integration is deliberately outside this
+plan. This is an external execution blocker, not permission to weaken the live
+evidence gate or substitute another destination silently.
+
 Depends on: an operator explicitly supplies a TypeSafe key, endpoint, model,
 and the two data categories. No agent may infer or recover a credential.
 
@@ -482,8 +509,10 @@ Gate:
   integration code.
 - If no credential is available, stop before claiming live interoperability or
   ranking improvement. The implementation may be committed as default-off, but
-  this stage and the plan remain incomplete until explicit live evidence exists
-  or the user cancels the experiment.
+  this stage and the plan remain blocked and incomplete until direct onboarding
+  provides a credential and the operator explicitly resumes, or the operator
+  cancels the experiment. Do not add a gateway or proxy as a workaround inside
+  this plan.
 
 Done when: live protocol evidence and before/after quality measurements are in
 the progress log, with an explicit gate verdict.

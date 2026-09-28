@@ -315,12 +315,14 @@ documents that own history, rationale, and evidence.
   Execute it before expanding ranking claims; better ordering over an obsolete
   snapshot would amplify false confidence.
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) remains an
-  incomplete adoption experiment. Stages 0-3 implemented default-off consent,
-  bounded graph-only candidate projection, offline fixtures, and the Zig stdlib
-  HTTP adapter. ADR 013 remains proposed and Stage 4 still lacks a real
-  TypeSafe live smoke and the 24-query quality gate. Its 2,000 ms value bounds
-  retry eligibility, not an in-flight round trip; no ranking usefulness claim
-  is justified yet.
+  incomplete, blocked adoption experiment. Stages 0-3 implemented default-off
+  consent, bounded graph-only candidate projection, offline fixtures, and the
+  Zig stdlib HTTP adapter. Stage 4 is blocked because direct TypeSafe onboarding
+  yielded no account or API key; the operator chose not to add a gateway or
+  proxy workaround. `FakeProvider` and fixtures remain the required offline
+  evidence, ADR 013 remains proposed, and no ranking usefulness claim is
+  justified. Resume only with explicit direct-access authorization after Plan
+  016; a future graph-native decision-model direction needs its own ADR and plan.
 - Text fallback duplication is kept in `v0.1.0-preview.4` for compatibility.
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
   remains open; proposed
