@@ -62,13 +62,45 @@ source-derived data to be explicitly authorized; public source is not consent.
 
 ## Stage 0: Freeze Inputs And Expected Answers
 
-Select two locally available external Java repositories: one small enough to
-inspect manually and one with at least 1,000 discovered Java units. Prefer the
-previous apache/dubbo baseline for the larger repository when available, but
-record the actual commit and do not treat old numbers as a new measurement.
+Use the selected pair below: Dubbo as the previous-scale baseline and Camel as
+the larger stress profile. This replaces the initial small/large selection;
+manual answer checking is bounded to each task, not the whole repository.
+Index the whole root in both profiles and report discovery exclusions.
+
+| Repository | Pinned commit | Tracked Java files | Java bytes | `pom.xml` files |
+| --- | --- | --- | --- | --- |
+| [apache/dubbo](https://github.com/apache/dubbo/tree/df9c5e13bc014ef492ec20824f8623a5e092a5b1) | `df9c5e13bc014ef492ec20824f8623a5e092a5b1` | 4,050 | 18,446,742 | 119 |
+| [apache/camel](https://github.com/apache/camel/tree/3ebbf2fd4b7d3a2231f36afc45d831e9c75953d8) | `3ebbf2fd4b7d3a2231f36afc45d831e9c75953d8` | 27,326 | 165,655,631 | 716 |
+
+Selection evidence collected on 2026-09-28 from GitHub's Git Trees API, not a
+semidx index run. Resolve `GET /repos/{owner}/{repo}/commits/{commit}` to its
+`commit.tree.sha`, then read `GET /repos/{owner}/{repo}/git/trees/{tree}?recursive=1`.
+When `truncated` is true (as for Camel's root), discard that partial response,
+list that tree non-recursively, and recursively collect each child tree instead.
+Continue splitting until every collected response is complete. Count blob paths
+ending in `.java`, sum their `size`, and count paths whose basename is `pom.xml`.
+Git submodule contents and generated files absent from Git are not traversed.
+
+Camel has 10,515 files under `src/main/java` and 13,902 under `src/test/java`;
+Dubbo has 2,469 and 1,581 respectively. Other Java paths remain in the totals.
+`pom.xml` count is a descriptor count, not a resolved Maven reactor/module count.
+The selection is approximately 6.7 times larger by Java files, 9.0 by Java bytes,
+and 6.0 by POM descriptors. Actual semidx-discovered units, analysis coverage,
+latency, and memory remain unmeasured. Local clone availability is unverified.
+
+Camel is an integration framework with many connectors and external APIs, so
+it exercises scan size and modularity as well as the current Java visibility
+and external-supertype limitations. Those unresolved answers stay visible;
+the evaluation does not assume full Camel semantics are supported. Hadoop was
+also checked (12,624 tracked Java files and 121 POM descriptors at
+`8545d5e3a949746f5f23a9587d5cad8e72d2e741`); Camel provides the larger increase
+on both selected dimensions.
+
 For each record upstream identity, full commit, local modifications, source-unit
-and byte counts, scan exclusions, and parser diagnostics. Do not add synthetic
-duplicates to meet the size floor.
+and byte counts, scan exclusions, and parser diagnostics. Recheck the pinned
+trees after obtaining the clones; do not substitute branch heads or synthetic
+duplicates. If a pinned input is unavailable, record the blocker before choosing
+a replacement and update this manifest explicitly.
 
 Before timed sessions, prepare three task cards per repository:
 
@@ -149,7 +181,7 @@ documented bounds to probe a threshold; if none is observed, report the largest
 tested result rather than inventing a threshold. Wire duplication does not
 establish duplicate model context. Keep compatibility behavior unchanged.
 
-**Memory.** On a disposable copy of the small root, fix the live source size and
+**Memory.** On a disposable copy of the Dubbo root, fix the live source size and
 run 1,000 edit/sync cycles in one server: alternate a body edit, create/remove a
 temporary unit, and rename/restore a file in a written deterministic sequence.
 Use fresh fixed-width names and equal-length edits across cycles, restoring
@@ -239,9 +271,10 @@ GLOSSARY retain their current meanings. L0-L4 are roadmap-local priority labels,
 not new model vocabulary. ADR 014 and proposed ADR 007 keep their statuses.
 
 The roadmap, adoption strategy, and `MEMORY.md` are aligned in this preparation
-change, including sync-first guidance. Plan 015 remains blocked under its own
-resume conditions; Plan 016 remains completed. No measurement has run under
-Plan 017 yet. External-root and client availability are execution prerequisites
+change, including sync-first guidance. The selected external pair is now Dubbo
+and larger Camel; tree counts are selection evidence only. Plan 015 remains
+blocked under its own resume conditions; Plan 016 remains completed. No runtime
+measurement has run under Plan 017 yet. External-root and client availability are execution prerequisites
 with the stop/resume rules above, not evidence presumed present.
 
 Preparation review: no unresolved hard failure in the plan's scope, order,
