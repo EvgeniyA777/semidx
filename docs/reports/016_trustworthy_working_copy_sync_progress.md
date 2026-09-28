@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-**Stage 0 in progress.**
+**Stages 0-1 complete.**
 
 ## Start Rule: Readiness Evidence
 
@@ -174,3 +174,76 @@ input, never semantic assertions.
 **Done when:** ADR 014 accepted (done); `SPEC.md`/`GLOSSARY.md` own the
 contract vocabulary (done); fixtures/examples committed (done); this progress
 log records a passing readiness review (done). Stage 0 complete.
+
+## Stage 1: Deterministic Source-State Identity
+
+### What shipped
+
+- `src/source/scan.zig`: `SourceScan` gained `excluded_directories: []const
+  []const u8` — the effective exclusion policy, owned by the scan's arena and
+  sorted, captured at scan time so nothing later reads mutable
+  caller-owned `Options` memory.
+- `src/source/discovery.zig`: `scanDir` now dupes and sorts
+  `options.excluded_directories` into the new field via
+  `ownedSortedExclusions`. No other discovery behavior changed; the existing
+  unit/diagnostic scan and sort behavior is untouched.
+- `src/source/identity.zig` (new): implements `semidx-source-state-v1`.
+  `calculate(gpa, scan)` sorts its own scratch copies of `scan.units` (by
+  path), `scan.diagnostics` (by path, then kind, then message — the plan's
+  required canonicalization, since the existing discovery-facing comparator
+  only orders by path then message and cannot separate two diagnostics of
+  different kinds sharing both), and `scan.excluded_directories` (byte order)
+  before hashing, so the identity does not depend on the order the caller
+  happened to hold them in. The encoding is version marker, then budgets
+  (`max_file_bytes` u64 BE, `max_units`/`max_depth` u32 BE), then the sorted
+  exclusion list (u32 BE count, each a length-prefixed string), then the
+  sorted units (u32 BE count, each a length-prefixed path, length-prefixed
+  language tag, and the raw 32-byte content digest), then the sorted
+  diagnostics (u32 BE count, each a length-prefixed kind tag, path, and
+  message). Every variable-length string is `u32` big-endian length then
+  bytes, so no adjacent fields can be split at the wrong boundary. `toHex`/
+  `fromHex` render and parse exactly 64 lowercase hex characters; `fromHex`
+  rejects uppercase, since this module never produces it.
+- `src/source/root.zig`: exports `identity`, `SourceStateId`, and
+  `sourceStateId` (= `identity.calculate`).
+- No per-unit `ContentId`, registry correspondence, graph identity, or
+  analyzer behavior changed. `grep -rn "SourceScan{" src tests` before this
+  change found no hand-built `SourceScan` literal outside `discovery.zig`, so
+  adding the required field could not silently break another constructor.
+
+### Verification run
+
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build test-core --summary all`: 108/109 passed (1 pre-existing skip),
+  including 11 new `identity.zig` tests: empty-vs-one-unit distinctness,
+  input-order independence across units/diagnostics/exclusions, and one
+  identity change each for byte, path, language, added diagnostic,
+  diagnostic-kind-only difference, exclusion-policy, and budget — plus hex
+  round-trip/rejection and two independent `discovery.scanDir` calls over the
+  same temporary tree agreeing.
+- `zig build test-core -Dgrammars-dir=/nonexistent --summary all`: 108/109
+  passed, confirming `src/core/` (and this identity code, which lives in
+  `src/source/` beside it in the same test binary) stays parser-free.
+- `zig build test --summary all`: 336/338 passed (2 pre-existing skips),
+  confirming the frontends, MCP server, and dogfood/gate lanes are unaffected.
+
+### Fixture note
+
+`fixtures/working_copy_sync/identity_vectors.md` updated to record that Stage
+1's seven vectors are proven as unit tests directly against small in-memory
+scan values (matching the cases the file already described), not by
+duplicating `units/unit_01.zig`..`unit_09.zig` file-by-file into each vector;
+that fixture set remains reserved for the Stage 3 gate regression test. No
+third-party reference hash is pinned — Stage 1's "Done when" is fixed vectors
+passing and two independently built equivalent scans matching, both of which
+the test file proves by equality/inequality between computed values.
+
+### Stop-rule check
+
+No stop condition triggered: the identity input stayed source discovery data
+(paths, languages, content digests, diagnostics, policy) and never touched
+graph assertions or entities.
+
+**Done when:** fixed vectors pass (done); two independently built equivalent
+scans match (done); source discovery behavior otherwise unchanged (done —
+existing discovery tests still pass unmodified). Stage 1 complete.

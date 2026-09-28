@@ -87,6 +87,12 @@ pub const SourceScan = struct {
     units: []const ScannedUnit,
     diagnostics: []const ScanDiagnostic,
     budgets: Budgets,
+    /// The effective exclusion policy this scan used, as owned byte-sorted
+    /// strings captured from `Options.excluded_directories` at scan time. Owned
+    /// so a source-state identity computed later never reads mutable
+    /// caller-owned option memory, and sorted so the identity does not depend on
+    /// the order a caller happened to list them in.
+    excluded_directories: []const []const u8,
 
     pub fn deinit(self: *SourceScan) void {
         self.arena.deinit();

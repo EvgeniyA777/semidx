@@ -2,11 +2,23 @@
 
 Frozen by [Plan 016](../../docs/plans/016_trustworthy_working_copy_sync.md)
 Stage 0, for [ADR 014](../../docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
-D2 and Plan 016's "Source-State Identity Encoding" contract. Stage 1
-implements `semidx-source-state-v1` and commits the resulting hash beside each
-case below as an executable test; this file fixes the *inputs* first, so the
-encoding is built to match a frozen case rather than a case invented next to
-convenient code.
+D2 and Plan 016's "Source-State Identity Encoding" contract, ahead of Stage 1
+implementing `semidx-source-state-v1`; this file fixes the *inputs* first, so
+the encoding is built to match a frozen case rather than a case invented next
+to convenient code.
+
+**Stage 1 update:** implemented in `src/source/identity.zig`. The seven cases
+below are proven as unit tests there, built directly against small in-memory
+`ScannedUnit`/`ScanDiagnostic` values with the same shape as this file
+describes, rather than against `units/unit_01.zig`..`unit_09.zig` file by
+file — the nine-unit fixture stays the shared input for the Stage 3 gate
+regression test and is not duplicated here. The two-independent-processes
+property (case matters most for) is proven separately by scanning the same
+temporary tree twice and comparing identities. Committed hashes are not
+pinned in this document: the identity is proven by equality/inequality
+between computed values in the test file, per the plan's Stage 1 "Done when"
+(fixed vectors pass; two independently built equivalent scans match), not by
+a third-party reference hash.
 
 Every case names: the discovery budgets and exclusion policy in force, the
 scanned units (path, language, content), and the scan diagnostics (kind, path,

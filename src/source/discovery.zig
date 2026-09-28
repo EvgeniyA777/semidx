@@ -83,13 +83,30 @@ pub fn scanDir(
     std.mem.sort(ScannedUnit, units, {}, lessByPath);
     std.mem.sort(ScanDiagnostic, diagnostics, {}, lessDiagnosticByPath);
 
+    const excluded_directories = try ownedSortedExclusions(arena.allocator(), options.excluded_directories);
+
     return .{
         .arena = arena,
         .root = owned_root,
         .units = units,
         .diagnostics = diagnostics,
         .budgets = options.budgets,
+        .excluded_directories = excluded_directories,
     };
+}
+
+/// Copies every excluded-directory name into the scan's own arena and sorts
+/// them, so the returned scan owns its exclusion policy independent of
+/// `options.excluded_directories`'s lifetime or order.
+fn ownedSortedExclusions(arena: Allocator, excluded_directories: []const []const u8) Allocator.Error![]const []const u8 {
+    const owned = try arena.alloc([]const u8, excluded_directories.len);
+    for (excluded_directories, owned) |name, *dest| dest.* = try arena.dupe(u8, name);
+    std.mem.sort([]const u8, owned, {}, lessBytes);
+    return owned;
+}
+
+fn lessBytes(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.lessThan(u8, a, b);
 }
 
 fn lessByPath(_: void, a: ScannedUnit, b: ScannedUnit) bool {

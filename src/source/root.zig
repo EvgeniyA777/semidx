@@ -9,6 +9,7 @@ pub const languages = @import("languages.zig");
 pub const scan = @import("scan.zig");
 pub const discovery = @import("discovery.zig");
 pub const registry = @import("registry.zig");
+pub const identity = @import("identity.zig");
 
 pub const SourceScan = scan.SourceScan;
 pub const ScannedUnit = scan.ScannedUnit;
@@ -18,10 +19,13 @@ pub const Options = scan.Options;
 pub const ContentId = scan.ContentId;
 pub const contentId = scan.contentId;
 pub const languageForPath = languages.forPath;
+pub const SourceStateId = identity.SourceStateId;
+pub const sourceStateId = identity.calculate;
 
 test {
     _ = languages;
     _ = scan;
     _ = discovery;
     _ = registry;
+    _ = identity;
 }
