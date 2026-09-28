@@ -272,9 +272,13 @@ documents that own history, rationale, and evidence.
   delivers a comparable source-state identity.
 - `current` is snapshot-relative analysis state, not evidence that the working
   copy still has the indexed bytes. The MCP server does not watch files and can
-  return old ranges after an external edit until refresh. Proposed
+  return old ranges after an external edit until refresh. Accepted
   [ADR 014](docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
-  and Plan 016 own the fail-closed synchronization correction.
+  and Plan 016 (Stage 0 complete: contract accepted, `SPEC.md`/`GLOSSARY.md`
+  own the vocabulary, regression fixtures and identity/health-shape vectors
+  frozen under `fixtures/working_copy_sync/`; no source-state identity, sync
+  tool, or fail-closed preflight is implemented yet) own the fail-closed
+  synchronization correction.
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java coverage, not its boundary, is what limits it — receiver-qualified and
@@ -309,11 +313,12 @@ documents that own history, rationale, and evidence.
   [010](docs/followups/010_mcp_text_fallback_client_measurement.md);
   then choose between Zig dogfood depth, remaining Java gaps, packaging/daemon
   work, semantic-contract work, or persistence by measured pain.
-- [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) is planned as the
-  next trust-first adoption correction: deterministic source-state identity,
+- [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) is the current
+  trust-first adoption correction: deterministic source-state identity,
   idempotent `semidx_sync`, fail-closed read preflight, and compact health.
-  Execute it before expanding ranking claims; better ordering over an obsolete
-  snapshot would amplify false confidence.
+  Stage 0 is complete (ADR 014 accepted); Stages 1-6 remain. Execute it before
+  expanding ranking claims; better ordering over an obsolete snapshot would
+  amplify false confidence.
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) remains an
   incomplete, blocked adoption experiment. Stages 0-3 implemented default-off
   consent, bounded graph-only candidate projection, offline fixtures, and the

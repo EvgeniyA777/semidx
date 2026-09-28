@@ -1,8 +1,8 @@
 ---
 title: "Distinguish snapshot analysis from working-copy synchronization"
 doc_type: "adr"
-lifecycle: "active"
-status: "proposed"
+lifecycle: "accepted"
+status: "accepted"
 agent_action: "reference_for_context"
 updated: "2026-09-27"
 ---
@@ -206,10 +206,10 @@ consumers a value they can compare across processes.
 
 ## Terminology Ownership
 
-This ADR owns the proposed preview terms **source-state identity**,
-**working-copy status**, and **sync preflight** until Stage 0 of Plan 016 accepts
-the decision and moves stable user-facing vocabulary into `GLOSSARY.md` and
-`SPEC.md`.
+Stage 0 of Plan 016 accepted this decision and moved the stable user-facing
+terms **source-state identity**, **working-copy status**, and **sync
+preflight** into `GLOSSARY.md`, with the changing requirement itself owned by
+`SPEC.md`. This ADR remains the design record for why they exist.
 
 ## Planned Verification
 

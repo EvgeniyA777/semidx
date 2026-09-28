@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-19"
+updated: "2026-09-27"
 ---
 
 # semidx Glossary
@@ -241,6 +241,18 @@ destination and consent boundary.
 source-organization facts such as repository/file entities and containment. It
 does not by itself establish program relationships.
 
+**source-state identity** — A deterministic value over one complete source
+discovery scan's visible input: its scan policy, every scanned unit's path,
+language, and content identity, and every scan diagnostic, in a fixed
+normalized order. It identifies what discovery observed, not graph semantics:
+two processes scanning the same visible source state under the same policy
+produce the same identity, and the same identity under another producer
+version may still yield different assertions. It is not a semantic identity
+and never replaces *snapshot* revision, which keeps its own process-local
+ordering meaning
+([Follow-up 021](docs/followups/021_snapshot_revision_is_not_a_content_identity.md),
+[ADR 014](docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)).
+
 **source text** — The literal contents of source files or snippets from them.
 Source text is distinct from source-derived graph values and from bounded
 evidence text.
@@ -263,6 +275,14 @@ and stop answering queries that did not ask for them.
 **symbol** — A named entity, one a frontend can address by a stable name. A
 symbol is a subset of entities: anonymous constructs are entities but not
 symbols.
+
+**sync preflight** — The source discovery scan and source-state identity
+comparison a local MCP consumer runs immediately before answering a
+graph-reading tool call or performing synchronization. A match permits the
+read; a mismatch or scan failure fails the call closed and names
+synchronization as the next action, rather than answering from a snapshot the
+preflight could not confirm still matches the working copy
+([ADR 014](docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)).
 
 **tool schema** — A consumer-interface schema that advertises the accepted
 arguments for an experimental tool surface such as MCP. Tool schemas describe
@@ -291,6 +311,14 @@ rather than as a wall-clock threshold. It is chosen because it fails under the
 access path it replaced and stays reliable on any machine, which a timing
 threshold does not. Wall-clock measurements remain useful as observations of
 what users feel; they are not the committed bound.
+
+**working-copy status** — Whether a source discovery scan run immediately
+before an MCP result matches the source-state identity paired with the
+published snapshot: `in_sync`, `out_of_date`, or `scan_failed`. It is a
+separate axis from snapshot-relative *freshness* (`pending`/`current`/`stale`):
+a unit reported `current` still describes only what the published snapshot
+holds, not whether the configured root still has those bytes
+([ADR 014](docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)).
 
 ## Document Ownership
 
