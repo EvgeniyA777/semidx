@@ -353,11 +353,28 @@ pub const Recovery = struct {
     needs_rebuild: bool,
 };
 
+/// Working-copy synchronization state
+/// ([ADR 014](../../docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
+/// D1): whether a source discovery scan run immediately before this result
+/// matched the source-state identity paired with the published snapshot. It
+/// is a separate axis from snapshot-relative freshness (`current`/`stale`).
+pub const WorkingCopyStatus = enum { in_sync, out_of_date, scan_failed };
+
 pub const Context = struct {
     arena: Allocator,
     snapshot: *const Snapshot,
     /// Whether evidence text may be rendered.
     evidence_text: bool,
+    /// The source-state identity paired with `snapshot`, rendered as 64
+    /// lowercase hex characters, and the outcome of comparing it with a scan
+    /// run immediately before this call. The caller sets these from a real
+    /// preflight before invoking a tool; every graph-reading tool other than
+    /// `semidx_health` is only ever invoked after a preflight that found
+    /// `in_sync`, so `working_copy_status` is `out_of_date` or `scan_failed`
+    /// only in a health result.
+    source_state_id: []const u8 = "0" ** 64,
+    working_copy_status: WorkingCopyStatus = .in_sync,
+    observed_source_state_id: ?[]const u8 = "0" ** 64,
     /// Authenticates the cursors this process issues. Revision numbers start
     /// again in a new process, and a client may hand back anything, so a
     /// cursor is honored only when it verifies under this key.
@@ -845,11 +862,24 @@ pub fn beginStructured(ctx: *Context, s: *Stringify) Error!void {
     try s.beginObject();
     try s.objectField("revision");
     try s.write(ctx.snapshot.revision);
+    try s.objectField("source_state_id");
+    try protocol.writeString(s, ctx.source_state_id);
     try s.endObject();
     // The preview publishes no semantic contract; saying so explicitly keeps a
     // client from assuming one.
     try s.objectField("semantic_contract_version");
     try s.write(null);
+    try s.objectField("working_copy");
+    try s.beginObject();
+    try s.objectField("status");
+    try s.write(@tagName(ctx.working_copy_status));
+    try s.objectField("observed_source_state_id");
+    if (ctx.observed_source_state_id) |observed| {
+        try protocol.writeString(s, observed);
+    } else {
+        try s.write(null);
+    }
+    try s.endObject();
 }
 
 /// Lines are 1-based; columns and bytes, rendered only in full, are 0-based.

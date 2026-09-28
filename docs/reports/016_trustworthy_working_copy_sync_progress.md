@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-**Stages 0-2 complete.**
+**Stages 0-3 complete.**
 
 ## Start Rule: Readiness Evidence
 
@@ -326,3 +326,83 @@ serialization boundary beyond the existing stdio loop was needed.
 publishes once (done); every existing refresh recovery injection still
 converges (done, verified at every allocation point under both failure
 modes). Stage 2 complete.
+
+## Stage 3: Fail-Closed Read Preflight
+
+### What shipped
+
+- `src/mcp/sync.zig`: added `preflight(gpa, io, root, retained) ->
+  Allocator.Error!Preflight`, a read-only counterpart to `run`: one discovery
+  scan, compared against `retained`, returning `.in_sync`/`.out_of_date`/
+  `.scan_failed` plus the observed identity (null on scan failure). It never
+  touches the index or snapshot, unlike `run`.
+- `src/mcp/tools.zig`: `Context` gained `source_state_id: []const u8`,
+  `working_copy_status: WorkingCopyStatus`, and `observed_source_state_id:
+  ?[]const u8`, all set by the caller before a tool runs. `beginStructured`
+  (shared by all seven tools that call it) now renders
+  `snapshot.source_state_id` and `working_copy{status,
+  observed_source_state_id}` from these fields — the same envelope
+  `writeSyncResult` hand-wrote in Stage 2, now generalized and folded back
+  in, so `writeSyncResult` was simplified to just call `beginStructured`.
+- `src/mcp/root.zig`: `callTool` now runs `self.preflight()` before dispatch
+  for `semidx_outline`, `semidx_repo_map`, `semidx_find_definitions`,
+  `semidx_references`, `semidx_context`, `semidx_rank_context` (the ADR 014
+  D4 list), and separately for `semidx_health` (D5). For the six D4 tools, a
+  non-`in_sync` preflight short-circuits before the tool's own handler ever
+  runs, via `ctx.fail(...)` producing the plan's exact stable-prefixed text:
+  `semidx_preflight_out_of_date: ...` or `semidx_preflight_scan_failed: ...`,
+  each followed by the retained snapshot revision and source-state identity.
+  Because the handler never runs, `semidx_rank_context`'s ranking provider is
+  structurally never invoked on a mismatch — not a separate check, a
+  consequence of the dispatch order. `semidx_health` always runs its own
+  handler regardless of preflight status; it just reports whichever status
+  the comparison found.
+- `tests/mcp_fixture_gate_test.zig`: added an assertion that the post-sync
+  `semidx_context` call (which already existed, to check the repaired unit's
+  `stale` analysis) also reports `working_copy.status: "in_sync"` in the same
+  result — ADR 014 D1's two axes proven side by side in one call, not just
+  separately.
+- `src/mcp/root.zig` tests: rewrote the two assertions in "refresh publishes a
+  new snapshot..." that depended on the old stale-answer behavior (an
+  unrefreshed read after an external edit used to return `structuredContent`
+  with stale data; it now fails closed) to assert the new fail-closed
+  behavior instead, and added three new tests: idempotent
+  `semidx_sync`/`semidx_refresh` behavior (Stage 2, described above), a test
+  proving a blocked read leaves revision and graph entity count untouched and
+  that a sync-then-retry returns the corrected range (using the exact
+  three-line shift the external edit introduces, computed from the
+  before-edit range rather than a hardcoded line number), and a test proving
+  a counting fake `ranking.Provider` receives zero calls while the working
+  copy is out of date and exactly one call once synced.
+- `docs/mcp/local_preview.md`: updated the "What It Does" bullet, the Result
+  Fields section (now describes the fail-closed contract for all six D4
+  tools plus health's report-not-repair behavior), and the Errors table
+  (two new rows for the preflight failure shapes). The "First Calls" section
+  is deliberately left as Stage 4's scope (recommending `semidx_sync` first)
+  per the plan's own stage boundary.
+
+### Verification run
+
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build test-mcp --summary all`: 82/83 passed (1 pre-existing skip).
+- `zig build test --summary all`: 339/341 passed (2 pre-existing skips),
+  including the exhaustive allocation-failure-injection recovery tests
+  (unaffected — they exercise `semidx_refresh` specifically, whose own
+  internal scan is `sync.run`'s, not a separate preflight scan).
+- `zig build preview-gate --summary all`: 15/15 steps, 6/6 tests, both
+  profiles pass. Per-call latency in the evidence summary rose from ~0-3ms to
+  ~8ms per call on the repository-copy profile (92 units) — the cost of one
+  full discovery scan added before every graph-reading tool call. Recorded
+  here as the first real (not combined-with-startup) preflight-cost
+  observation; Stage 5 formalizes this measurement.
+
+### Stop-rule check
+
+No stop condition triggered: no `allow_stale_snapshot` bypass was added, and
+the fail-closed behavior is unconditional for the six D4 tools (no flag or
+argument weakens it).
+
+**Done when:** the synthetic external-edit regression fails closed before
+stale ranges can be rendered and succeeds only after sync (done — proven both
+in the new root.zig test and reproduced structurally by the rewritten
+"refresh publishes a new snapshot..." test). Stage 3 complete.

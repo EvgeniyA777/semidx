@@ -74,6 +74,36 @@ pub const Outcome = union(enum) {
     reconcile_failed: ReconcileFailure,
 };
 
+/// Working-copy synchronization state: whether a scan run immediately before
+/// a result matched the source-state identity paired with the published
+/// snapshot ([ADR 014](../../docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
+/// D1).
+pub const Status = enum { in_sync, out_of_date, scan_failed };
+
+pub const Preflight = struct {
+    status: Status,
+    /// The identity `discovery.scan` observed, or null when the scan itself
+    /// failed (`status == .scan_failed`).
+    observed: ?SourceStateId,
+};
+
+/// The read-only comparison `semidx_health` and every graph-reading tool
+/// perform before answering (ADR 014 D4-D5): one discovery scan, compared
+/// against `retained`. Never mutates the index or the published snapshot —
+/// unlike `run`, this never applies or publishes, even on a mismatch.
+pub fn preflight(gpa: Allocator, io: Io, root: []const u8, retained: SourceStateId) Allocator.Error!Preflight {
+    var found = semidx.source.discovery.scan(gpa, io, root, .{}) catch {
+        return .{ .status = .scan_failed, .observed = null };
+    };
+    defer found.deinit();
+
+    const observed = try identity.calculate(gpa, found);
+    return .{
+        .status = if (identity.same(retained, observed)) .in_sync else .out_of_date,
+        .observed = observed,
+    };
+}
+
 /// Runs one scan/compare/apply/publish cycle against `target`.
 pub fn run(target: Target) Error!Outcome {
     var found = semidx.source.discovery.scan(target.gpa, target.io, target.root, .{}) catch |err| {

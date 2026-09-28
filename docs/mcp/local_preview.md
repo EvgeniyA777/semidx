@@ -22,7 +22,10 @@ It does:
 
 - index one local directory (`--root`) into an in-memory graph at startup and
   publish one snapshot;
-- answer every tool call from the snapshot published when the call arrives;
+- answer every tool call from the snapshot published when the call arrives,
+  after confirming with a fresh scan that the configured root still matches it
+  (`semidx_health`, `semidx_sync`, and `semidx_refresh` excepted — see
+  [Result Fields](#result-fields));
 - report, for every claim it returns, the claim's resolution (`fact`,
   `unresolved`, `approximate`), freshness (`current`, `stale`), and producer;
 - rescan the root and publish the next snapshot when `semidx_refresh` is called.
@@ -294,15 +297,23 @@ Every structured result carries:
 | `snapshot.revision` | The graph revision every value in this result was read from. |
 | `semantic_contract_version` | Always `null`: no semantic contract is published. |
 
-`semidx_sync` and `semidx_refresh` additionally carry `snapshot.source_state_id`
-(64 lowercase hex characters, a deterministic identity over what the scan just
-behind that result saw — [ADR 014](../adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
-D2) and `working_copy: {status, observed_source_state_id}`, always
-`status: "in_sync"` on these two tools since a completed sync is itself the
-comparison. No other tool result carries these fields yet, and no tool
-performs a fail-closed preflight against them yet: a stale read after an
-external edit still answers from the unrefreshed snapshot until a later stage
-wires the same envelope and preflight into every graph-reading tool.
+Every successful result additionally carries `snapshot.source_state_id`
+(64 lowercase hex characters, a deterministic identity over what the scan
+immediately before that result saw — [ADR 014](../adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
+D2) and `working_copy: {status, observed_source_state_id}`. `semidx_outline`,
+`semidx_repo_map`, `semidx_find_definitions`, `semidx_references`,
+`semidx_context`, and `semidx_rank_context` run this comparison as a
+fail-closed preflight (ADR 014 D4) immediately before answering: a match
+(`status: "in_sync"`) is the only way to reach a successful result from one of
+them, so `working_copy.status` in a successful result from these six is
+always `"in_sync"`; a mismatch or scan failure returns a tool error naming
+`semidx_sync` as the next step instead (see [Errors](#errors)) and renders no
+graph data. `semidx_health` runs the same comparison but never fails closed:
+it reports whichever status the comparison found — `in_sync`, `out_of_date`,
+or `scan_failed` — alongside its usual counts, so it stays callable to
+diagnose a mismatch rather than being blocked by one. `semidx_sync` and
+`semidx_refresh` report the post-operation state, always `"in_sync"`, since a
+completed sync is itself the comparison.
 
 The product version (`0.1.0-preview.4`) is reported by `--version`, in
 `serverInfo.version`, and as `product_version` in `semidx_health`. It versions
@@ -610,6 +621,8 @@ and `from`, the entity it was found from. In a traversal result:
 | `cursor` altered after it was issued, issued by another server process, or issued by another tool, at another snapshot revision, or for other arguments | Tool result with `isError: true` saying which, and to repeat the call without `cursor` after a refresh |
 | Refresh cannot scan the root | Tool result with `isError: true`; the index is unchanged and the previous snapshot stays published |
 | Refresh fails while reconciling or publishing | Tool result with `isError: true` saying whether the index was rebuilt; the previous snapshot stays published, and the next refresh publishes the rebuilt index or retries the rebuild |
+| A graph-reading tool's preflight scan finds the working copy out of date | Tool result with `isError: true`, text starting `semidx_preflight_out_of_date:`, naming `semidx_sync` as the next step; no `structuredContent`, no graph data, and no change to the published snapshot, revision, or graph counts |
+| A graph-reading tool's preflight scan fails | Tool result with `isError: true`, text starting `semidx_preflight_scan_failed:`, naming `semidx_sync` as the next step; no `structuredContent`, no graph data, and no change to the published snapshot |
 
 Notifications, including malformed ones, are never answered.
 

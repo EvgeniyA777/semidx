@@ -176,7 +176,11 @@ test "habit loop gate: fixture profile degrades honestly over a controlled root"
     const stale_context = try gate.call(10, "semidx_context", "{\"path\":\"greeter.zig\",\"relationship_limit\":1}");
     const stale_unit = stale_context.get("focus").?.array.items[0].object.get("unit").?.object;
     try gate.require(std.mem.eql(u8, "stale", stale_unit.get("analysis").?.string), "honest_degradation", "greeter.zig's unit reports analysis {s}, not stale", .{stale_unit.get("analysis").?.string});
-    try gate.pass("honest_degradation", "failing unit pending, unindexed file no unit, unparsable edit leaves greet stale under the same id", .{});
+    // ADR 014 D1: snapshot-relative analysis freshness and working-copy sync
+    // are separate axes. Right after a successful sync, the working copy is
+    // in_sync even though this unit's own analysis is stale.
+    try gate.require(std.mem.eql(u8, "in_sync", stale_context.get("working_copy").?.object.get("status").?.string), "honest_degradation", "a stale unit's context result does not report working_copy in_sync separately from its analysis state", .{});
+    try gate.pass("honest_degradation", "failing unit pending, unindexed file no unit, unparsable edit leaves greet stale under the same id, working copy in_sync throughout", .{});
 
     const repaired = try gate.call(11, "semidx_find_definitions", "{\"name\":\"greet\",\"path\":\"broken.zig\"}");
     const repaired_greet = topLevel(repaired.get("definitions").?.array.items);

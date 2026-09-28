@@ -317,16 +317,23 @@ documents that own history, rationale, and evidence.
   trust-first adoption correction: deterministic source-state identity,
   idempotent `semidx_sync`, fail-closed read preflight, and compact health.
   Stage 0 (ADR 014 accepted), Stage 1 (`src/source/identity.zig`, the
-  `semidx-source-state-v1` SHA-256 encoding), and Stage 2 (`src/mcp/sync.zig`,
-  the idempotent scan/compare/apply/publish coordinator behind the new
-  `semidx_sync` tool and the now-shared `semidx_refresh` alias) are complete.
-  `semidx_sync`/`semidx_refresh` now report `snapshot.source_state_id` and
-  `working_copy.status`; no other tool result carries them yet, and no tool
-  performs a fail-closed preflight yet — a stale `semidx_context`/
-  `semidx_repo_map`/etc. call after an external edit still answers from the
-  unrefreshed snapshot until Stage 3. Stages 3-6 remain. Execute it before
-  expanding ranking claims; better ordering over an obsolete snapshot would
-  amplify false confidence.
+  `semidx-source-state-v1` SHA-256 encoding), Stage 2 (`src/mcp/sync.zig`,
+  the idempotent scan/compare/apply/publish coordinator behind `semidx_sync`
+  and the now-shared `semidx_refresh` alias), and Stage 3 (fail-closed read
+  preflight) are complete. Every result from `semidx_outline`,
+  `semidx_repo_map`, `semidx_find_definitions`, `semidx_references`,
+  `semidx_context`, `semidx_rank_context`, `semidx_health`, `semidx_sync`, and
+  `semidx_refresh` now carries `snapshot.source_state_id` and `working_copy`;
+  the first six fail closed (`isError: true`, no graph data, no state change)
+  on a working-copy mismatch or scan failure instead of answering from an
+  unconfirmed snapshot, `semidx_rank_context` included (so Jev is never
+  called on a mismatch), and `semidx_health` reports the mismatch instead of
+  failing. Cost: every read now pays for one full discovery scan
+  (repository-copy profile: ~8ms/call observed locally, up from ~1ms before
+  Stage 3, on 92 units) — an explicit trade the plan accepts and Stage 5 must
+  measure formally. Stage 4 (compact/full health detail, sync-first habit-loop
+  docs) and Stages 5-6 remain. Execute it before expanding ranking claims;
+  better ordering over an obsolete snapshot would amplify false confidence.
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) remains an
   incomplete, blocked adoption experiment. Stages 0-3 implemented default-off
   consent, bounded graph-only candidate projection, offline fixtures, and the

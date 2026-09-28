@@ -329,7 +329,44 @@ pub const Server = struct {
             .evidence_text = self.options.evidence_text,
             .cursor_key = self.cursor_key,
         };
-        const outcome = switch (tool) {
+
+        // ADR 014 D4-D5: every graph-reading tool and semidx_health run a
+        // read-only source-state comparison immediately before answering.
+        // D4's tools fail closed on a mismatch or scan failure; health always
+        // reports what the comparison found instead.
+        var rendered_retained: [semidx.source.identity.hex_len]u8 = undefined;
+        var rendered_observed: [semidx.source.identity.hex_len]u8 = undefined;
+        const fails_closed = switch (tool) {
+            .semidx_outline, .semidx_repo_map, .semidx_find_definitions, .semidx_references, .semidx_context, .semidx_rank_context => true,
+            else => false,
+        };
+        var preflight_failure: ?tools.Error = null;
+        if (fails_closed or tool == .semidx_health) {
+            const observed_state = try self.preflight();
+            rendered_retained = semidx.source.identity.toHex(self.source_state_id);
+            ctx.source_state_id = &rendered_retained;
+            ctx.working_copy_status = switch (observed_state.status) {
+                .in_sync => .in_sync,
+                .out_of_date => .out_of_date,
+                .scan_failed => .scan_failed,
+            };
+            if (observed_state.observed) |observed| {
+                rendered_observed = semidx.source.identity.toHex(observed);
+                ctx.observed_source_state_id = &rendered_observed;
+            } else {
+                ctx.observed_source_state_id = null;
+            }
+            if (fails_closed and observed_state.status != .in_sync) {
+                const previous = self.snapshot.revision;
+                preflight_failure = switch (observed_state.status) {
+                    .out_of_date => ctx.fail("semidx_preflight_out_of_date: working copy differs from the published snapshot; call semidx_sync and retry (retained snapshot revision {d}, source_state_id {s})", .{ previous, rendered_retained }),
+                    .scan_failed => ctx.fail("semidx_preflight_scan_failed: working-copy scan failed; fix root access, then call semidx_sync and retry (retained snapshot revision {d}, source_state_id {s})", .{ previous, rendered_retained }),
+                    .in_sync => unreachable,
+                };
+            }
+        }
+
+        const outcome: tools.Error!void = if (preflight_failure) |failure| failure else switch (tool) {
             .semidx_health => tools.health(&ctx, &body_stringify, arguments, try self.status(arena)),
             .semidx_outline => tools.outline(&ctx, &body_stringify, arguments),
             .semidx_repo_map => tools.repoMap(&ctx, &body_stringify, arguments),
@@ -462,25 +499,11 @@ pub const Server = struct {
     /// `semidx_sync` shares rather than duplicating under another shape.
     fn writeSyncResult(self: *Server, ctx: *tools.Context, s: *Stringify, previous: u64, outcome: sync.Outcome) tools.Error!void {
         const rendered = semidx.source.identity.toHex(self.source_state_id);
+        ctx.source_state_id = &rendered;
+        ctx.working_copy_status = .in_sync;
+        ctx.observed_source_state_id = &rendered;
 
-        try s.beginObject();
-        try s.objectField("snapshot");
-        try s.beginObject();
-        try s.objectField("revision");
-        try s.write(ctx.snapshot.revision);
-        try s.objectField("source_state_id");
-        try protocol.writeString(s, &rendered);
-        try s.endObject();
-        try s.objectField("semantic_contract_version");
-        try s.write(null);
-        try s.objectField("working_copy");
-        try s.beginObject();
-        try s.objectField("status");
-        try s.write("in_sync");
-        try s.objectField("observed_source_state_id");
-        try protocol.writeString(s, &rendered);
-        try s.endObject();
-
+        try tools.beginStructured(ctx, s);
         try s.objectField("previous_revision");
         try s.write(previous);
         try s.objectField("changed");
@@ -494,6 +517,14 @@ pub const Server = struct {
         try s.objectField("diagnostics");
         try tools.writeDiagnosticCounts(ctx, s, null);
         try s.endObject();
+    }
+
+    /// Runs the read-only source-state comparison every graph-reading tool and
+    /// `semidx_health` perform immediately before answering
+    /// ([ADR 014](../../docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
+    /// D4-D5). Never mutates the index, snapshot, or `source_state_id`.
+    fn preflight(self: *Server) Allocator.Error!sync.Preflight {
+        return sync.preflight(self.gpa, self.io, self.options.root, self.source_state_id);
     }
 };
 
@@ -2071,9 +2102,14 @@ test "refresh publishes a new snapshot that observes edited and added units" {
     try h.tmp.dir.writeFile(test_io, .{ .sub_path = "greeter.zig", .data = greeter_source ++ "pub fn farewell() void {}\n" });
     try h.tmp.dir.writeFile(test_io, .{ .sub_path = "added.zig", .data = "pub fn added() void {}\n" });
 
-    // Until the refresh, calls still observe the published snapshot.
-    const stale_view = try h.callTool(arena, "semidx_find_definitions", "{\"name\":\"added\"}");
-    try testing.expectEqual(@as(i64, 0), stale_view.object.get("structuredContent").?.object.get("total").?.integer);
+    // Before the sync, the working copy differs from the published snapshot:
+    // the read fails closed (ADR 014 D4) instead of answering from the old
+    // snapshot's now-stale idea of what added.zig holds.
+    const out_of_date = try h.callTool(arena, "semidx_find_definitions", "{\"name\":\"added\"}");
+    try testing.expect(out_of_date.object.get("isError").?.bool);
+    try testing.expect(std.mem.startsWith(u8, out_of_date.object.get("content").?.array.items[0].object.get("text").?.string, "semidx_preflight_out_of_date:"));
+    try testing.expect(out_of_date.object.get("structuredContent") == null);
+    try testing.expectEqual(before, h.server.snapshot.revision);
 
     const refreshed = try h.callTool(arena, "semidx_refresh", "{}");
     const result = refreshed.object.get("structuredContent").?.object;
@@ -2091,13 +2127,17 @@ test "refresh publishes a new snapshot that observes edited and added units" {
         try testing.expectEqual(@as(i64, 1), structured.get("total").?.integer);
     }
 
-    // A refresh that cannot scan the root keeps the published snapshot.
+    // A refresh that cannot scan the root keeps the published snapshot, and a
+    // later read fails closed on the scan failure rather than answering from
+    // that retained snapshot (ADR 014 D4).
     try h.tmp.parent_dir.deleteTree(test_io, &h.tmp.sub_path);
     const failed = try h.callTool(arena, "semidx_refresh", "{}");
     try testing.expect(failed.object.get("isError").?.bool);
     try testing.expectEqual(@as(u64, @intCast(after)), h.server.snapshot.revision);
     const still = try h.callTool(arena, "semidx_find_definitions", "{\"name\":\"added\"}");
-    try testing.expectEqual(@as(i64, 1), still.object.get("structuredContent").?.object.get("total").?.integer);
+    try testing.expect(still.object.get("isError").?.bool);
+    try testing.expect(std.mem.startsWith(u8, still.object.get("content").?.array.items[0].object.get("text").?.string, "semidx_preflight_scan_failed:"));
+    try testing.expectEqual(@as(u64, @intCast(after)), h.server.snapshot.revision);
 }
 
 test "semidx_sync is idempotent on an unchanged working copy and semidx_refresh shares its result shape" {
@@ -2147,6 +2187,87 @@ test "semidx_sync is idempotent on an unchanged working copy and semidx_refresh 
     try testing.expect(via_refresh.get("snapshot").?.object.get("source_state_id") != null);
     try testing.expect(via_refresh.get("working_copy") != null);
     try testing.expectEqual(@as(i64, @intCast(after_revision)), via_refresh.get("previous_revision").?.integer);
+}
+
+test "a graph read fails closed on an external edit and returns corrected ranges only after sync" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.init(false, "");
+    defer h.deinit();
+
+    const before_revision = h.server.snapshot.revision;
+    const before_graph = h.server.snapshot.entities.len;
+    const original = try h.callTool(arena, "semidx_context", "{\"name\":\"greet\",\"path\":\"greeter.zig\"}");
+    const original_focus = original.object.get("structuredContent").?.object.get("focus").?.array.items[0].object.get("entity").?.object;
+    const original_start_line = original_focus.get("evidence").?.object.get("range").?.object.get("start_line").?.integer;
+
+    // An edit from outside the server moves greet's range three lines down.
+    try h.tmp.dir.writeFile(test_io, .{ .sub_path = "greeter.zig", .data = "\n\n\n" ++ greeter_source });
+
+    const blocked = try h.callTool(arena, "semidx_context", "{\"name\":\"greet\",\"path\":\"greeter.zig\"}");
+    try testing.expect(blocked.object.get("isError").?.bool);
+    try testing.expect(blocked.object.get("structuredContent") == null);
+    const blocked_text = blocked.object.get("content").?.array.items[0].object.get("text").?.string;
+    try testing.expect(std.mem.startsWith(u8, blocked_text, "semidx_preflight_out_of_date:"));
+    try testing.expect(std.mem.indexOf(u8, blocked_text, "call semidx_sync and retry") != null);
+
+    // The failed preflight touched nothing: same revision, same graph size,
+    // and (structurally, since the tool body that would call it never ran)
+    // no ranking provider call would follow either.
+    try testing.expectEqual(before_revision, h.server.snapshot.revision);
+    try testing.expectEqual(before_graph, h.server.snapshot.entities.len);
+
+    _ = try h.callTool(arena, "semidx_sync", "{}");
+    try testing.expect(h.server.snapshot.revision > before_revision);
+
+    const after = try h.callTool(arena, "semidx_context", "{\"name\":\"greet\",\"path\":\"greeter.zig\"}");
+    try testing.expect(!after.object.get("isError").?.bool);
+    const structured = after.object.get("structuredContent").?.object;
+    try testing.expectEqualStrings("in_sync", structured.get("working_copy").?.object.get("status").?.string);
+    const focus = structured.get("focus").?.array.items[0].object.get("entity").?.object;
+    try testing.expectEqual(original_start_line + 3, focus.get("evidence").?.object.get("range").?.object.get("start_line").?.integer);
+}
+
+test "semidx_rank_context calls no provider when the working copy is out of date" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var h: Harness = undefined;
+    try h.init(false, "");
+    defer h.deinit();
+    h.server.options.jev = .{
+        .endpoint = "https://api.typesafe.ai/v1/systemone",
+        .origin = "https://api.typesafe.ai",
+        .model = "jev-1.13.0",
+        .categories = .{ .query_text = true, .graph_metadata = true },
+    };
+    const CountingProvider = struct {
+        calls: usize = 0,
+
+        fn rankImpl(ptr: *anyopaque, _: Allocator, _: []const u8, _: []const tools.ranking.Card) anyerror!tools.ranking.RankOutcome {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.calls += 1;
+            return .{ .unavailable = .{ .reason = "test provider should never be reached" } };
+        }
+
+        fn provider(self: *@This()) tools.ranking.Provider {
+            return .{ .name = "counting", .requested_model = "counting-1.0.0", .ptr = self, .rankFn = rankImpl };
+        }
+    };
+    var counting: CountingProvider = .{};
+    h.server.rank_provider = counting.provider();
+
+    try h.tmp.dir.writeFile(test_io, .{ .sub_path = "added.zig", .data = "pub fn added() void {}\n" });
+    const blocked = try h.callTool(arena, "semidx_rank_context", "{\"query\":\"q\",\"name\":\"greet\"}");
+    try testing.expect(blocked.object.get("isError").?.bool);
+    try testing.expectEqual(@as(usize, 0), counting.calls);
+
+    _ = try h.callTool(arena, "semidx_sync", "{}");
+    const ranked = try h.callTool(arena, "semidx_rank_context", "{\"query\":\"q\",\"name\":\"greet\"}");
+    try testing.expect(!ranked.object.get("isError").?.bool);
+    try testing.expectEqual(@as(usize, 1), counting.calls);
 }
 
 /// Fails exactly one allocation, or every allocation from one onwards, so a
