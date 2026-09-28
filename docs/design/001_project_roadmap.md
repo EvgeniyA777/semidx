@@ -155,7 +155,7 @@ The procedure and numerical evaluation gates belong to
 
 | Level | User outcome | Planned work | Exit evidence |
 | --- | --- | --- | --- |
-| L0: Demonstrate task value | A developer can see when semidx helps and when it does not. | Compare three real tasks with and without semidx on two named external Java repositories; observe two actual MCP clients; run an early memory screen. Plan 017 is the next planned work. | Reproducible task outcomes, complete MCP timings, client-visible output observations, memory history, and one selected next intervention. A negative result is valid evidence. |
+| L0: Demonstrate task value | A developer can see when semidx helps and when it does not. | Compare three real tasks with and without semidx on Petclinic and Dubbo; use Dubbo/Camel for scale replay, existing fixtures for correctness, and two actual MCP clients for output; run an early memory screen. Plan 017 is the next planned work. | Reproducible task outcomes, complete MCP timings, client-visible output observations, memory history, and one selected next intervention. A negative result is valid evidence. |
 | L1: Reduce the cost of obtaining context | Useful current context takes fewer unnecessary calls, reads, and waits. | Fix the largest measured cost in preflight, query work, navigation, or output handling. Measure fallback compatibility before changing it. | Repeat the L0 tasks and demonstrate the improvement chosen in the successor plan, with correctness, freshness, and client compatibility preserved. |
 | L2: Recover useful semantic relationships | Ordinary impact questions have useful answers within a clearly stated language boundary. | Select one Java unresolved-reason family by blocked tasks and measured conversion potential; evaluate external-supertype and visibility gaps before admitting new evidence. | Previously blocked task answers become established relationships, with negative cases and provenance verified; raw fact count alone does not pass. |
 | L3: Make installation repeatable | A developer gets a first useful answer without knowing the build internals. | Choose initial platforms from evaluation participants; prepare an installation path, actionable diagnostics, and artifacts where justified. | A developer other than the author follows the published path in a clean environment; elapsed time, manual interventions, supported platforms, and failures are recorded. Target: first useful answer within ten minutes, a future acceptance target rather than an observed result. |
@@ -179,6 +179,22 @@ The procedure and numerical evaluation gates belong to
   changes or become an indefinite measurement program.
 
 ### Inputs And Deferred Work
+
+Corpora have roles, not an obligatory size ladder. Plan 017 owns the pinned
+commits, task counts, and measurement procedure. L1 repeats those tasks after
+optimization. L2 takes one observed gap through a minimal fixture with required,
+forbidden, and unresolved outcomes, an explicit semantic decision, implementation,
+and replay on the originating corpus plus scale checks. L3 can reuse Petclinic
+for first-install validation. L4 combines small edit-history fixtures with
+external-scale lifecycle evidence.
+
+JUnit and Spring Framework enter only when a named semantic question needs an
+additional corpus; JabRef needs a distinct task to justify inclusion. Each new
+corpus requires a pinned revision, bounded questions, expected answers, and exit
+criteria in its successor plan. Existing fixtures remain the controlled oracle;
+large source trees do not substitute for negative cases. Small deterministic
+regressions run in normal test lanes, while large external runs provide stage
+evidence without adding network access to ordinary builds.
 
 | Input | Where it enters |
 | --- | --- |

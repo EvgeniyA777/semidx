@@ -302,7 +302,7 @@ documents that own history, rationale, and evidence.
   can promote later levels.
 - Next planned work is
   [Plan 017](docs/plans/017_adoption_baseline_and_priority_selection.md): three
-  tasks on pinned Dubbo and larger Camel, complete MCP latency and client output,
+  paired tasks on Petclinic/Dubbo, scale replay on Dubbo/Camel, client output,
   an early memory screen, and one evidence-backed successor plan. It is planned,
   not executed; Git tree sizes are recorded, but no runtime measurements exist yet.
 - [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) delivered source-state
