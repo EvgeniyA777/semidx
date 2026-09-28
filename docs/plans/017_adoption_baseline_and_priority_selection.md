@@ -9,72 +9,50 @@ updated: "2026-09-28"
 
 # 017: Adoption Baseline And Priority Selection
 
-## Goal And Boundary
+## Goal, Scope, And Authority
 
-Determine whether the current semidx preview reduces the work needed to answer
-real code questions, identify the largest obstacle, and prepare one bounded
-successor intervention. This implements L0 of the
-[roadmap](../design/001_project_roadmap.md#adoption-levels), not L1-L4.
+Measure whether semidx helps with bounded code tasks, separate correctness from
+coverage and operational cost, and prepare one justified successor intervention.
+This is L0 of the [roadmap](../design/001_project_roadmap.md#adoption-levels).
+A complete negative result is evidence; a missing prerequisite is not a result.
 
-Deliverables are a reproducible measurement record and a successor plan, or an
-evidence-backed decision that this sample justifies no intervention. This plan
-does not promise a speedup or treat increased tool use as success.
+Scope: six paired task cards (three each on Petclinic and Dubbo), six additional
+scripted cards (three each on Camel and the semidx control), a required local Zig
+measurement driver, two actual MCP clients, and bounded memory history. There
+are 24 agent sessions: six cards x two variants x two repetitions. Camel adds
+no agent sessions. Existing fixtures check current semantic guarantees.
 
-In scope: paired manual/semidx-assisted sessions on Petclinic and Dubbo,
-scripted scale measurements on Dubbo and Camel, existing semantic fixtures,
-actual client output, a bounded memory screen, and prioritization. semidx's own
-repository is a replay control only. Java is an evaluation choice, not a new
-coverage promise. Camel does not add paired agent sessions.
+Non-scope: production optimizations, changing discovery budgets or exclusions,
+semantic expansion, parser upgrades, installation artifacts, ranking, watchers,
+persistence, new transports, or public contracts. The developer driver may add
+an opt-in build step; it must not change server behavior or ordinary lane inputs.
 
-Out of scope: runtime optimization, frontend expansion, parser upgrades,
-installation artifacts, watchers, persistence, public contracts, ranking, new
-services, and changing response compatibility. Do not remove the text fallback,
-weaken preflight, or change a resolution rule during baseline collection.
-
-## Authority And Start Conditions
-
-Read `RULES.md`, the constitution, `MEMORY.md`, the adoption strategy,
+Read RULES, the frozen constitution, MEMORY, SPEC, capability matrix,
+[tooling policy](../agent-policy/tooling.md),
+[testing policy](../agent-policy/testing.md),
 [ADR 002](../adr/002_local_tree_sitter_parser_dependency.md),
 [ADR 014](../adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md),
-the [capability matrix](../spec/capability_matrix.md),
-[MCP reference](../mcp/local_preview.md),
-[gate specification](../mcp/habit_loop_gate.md), and Follow-ups
-[010](../followups/010_mcp_text_fallback_client_measurement.md) and
+[MCP reference](../mcp/local_preview.md), and Follow-ups
+[010](../followups/010_mcp_text_fallback_client_measurement.md),
+[017](../followups/017_plan_012_external_evidence_reproducibility.md), and
 [020](../followups/020_java_external_supertype_leaves_the_chain_open.md).
+Apply the Plan Readiness Gate before execution and after a scope revision.
 
-Before execution, apply the Plan Readiness Gate and record the semidx commit,
-clean/dirty state, product version, OS, CPU, RAM, build mode, exact Zig 0.16.0,
-parser prerequisites, client versions, and available external roots. Run
-`./scripts/check-zig-version.sh`, `zig build -Doptimize=ReleaseFast`,
-`zig build test -Doptimize=ReleaseFast`, and
-`zig build preview-gate -Doptimize=ReleaseFast`. Capture full output and exits.
-Keep this build mode fixed across baseline runs.
+Here only, a **card** is a frozen question with a bounded source scope;
+**variant** (or arm) means manual or semidx-assisted; **source oracle** is the
+independently checked answer; **tool expectation** is the current preview's
+expected output; **replay** is a fixed local call/edit sequence. These are
+plan-local measurement terms, not additions to graph vocabulary.
 
-Create `docs/reports/017_adoption_baseline_and_priority_selection_progress.md`
-at the start of execution, not at plan preparation. It owns the manifest,
-procedure, measurements, stage status, exact replay commands, exclusions,
-readiness assessment, limitations, and handoff. Never commit private paths,
-credentials, source bodies, or raw session transcripts.
+## Corpus Manifest And Roles
 
-All edits used as probes happen on disposable repository copies. Do not switch
-the working repository's branch or modify an external user's checkout.
-Build/index/query remain local and require no service. Source text stays off;
-Jev stays disabled. Hosted-client transmission requires the destination and
-source-derived data to be explicitly authorized; public source is not consent.
-
-## Stage 0: Freeze Inputs And Expected Answers
-
-Use three external roots with separate roles. Petclinic and Dubbo provide six
-bounded task cards for paired agent sessions. Dubbo and Camel provide the scale
-comparison; Camel needs only scripted replay cards. Index each whole root and
-report discovery exclusions; manual answer checking remains task-bounded.
-
-| Corpus | Required role in Plan 017 | Later use |
+| Corpus | Required role | Later use |
 | --- | --- | --- |
-| Existing Java fixtures | Verify current positive, negative, unresolved, and edit-history guarantees; map relevant tests to each task's semantic assumptions. | Minimal regression cases for selected semantic extensions. |
-| Petclinic | Small application tasks and client-output observations. | First-install example in L3; no packaging work in this plan. |
-| Dubbo | Paired tasks, previous-scale baseline, and retained-memory screen. | Replay for L1/L2/L4 changes. |
-| Camel | Larger whole-root latency/startup profile with scripted lookup, impact, and edit/sync replay. | Scale regression profile; no extra paired agent sessions. |
+| Existing Java fixtures | Inventory positive, negative, unresolved, and edit-history checks; run their current test lane. | Minimal regressions for a selected extension. |
+| Petclinic | Three paired tasks, replay, and initial client-output samples. | L3 installation example, not installation evidence here. |
+| Dubbo | Three paired tasks, replay, previous-scale comparison, memory screen. | L1/L2/L4 regression evidence. |
+| Camel | Whole-root capacity probe, then three scripted replay cards only if the index is complete. | Larger scale profile; no partial-index speed claims. |
+| semidx | Frozen source copy for three Zig replay cards only. | Detect transport/driver regressions; not a matched Java-quality comparison. |
 
 | Repository | Pinned commit | Tracked Java files | Java bytes | `pom.xml` files |
 | --- | --- | --- | --- | --- |
@@ -106,230 +84,519 @@ also checked (12,624 tracked Java files and 121 POM descriptors at
 `8545d5e3a949746f5f23a9587d5cad8e72d2e741`); Camel provides the larger increase
 on both selected dimensions.
 
-For each record upstream identity, full commit, local modifications, source-unit
-and byte counts, scan exclusions, and parser diagnostics. Recheck the pinned
-trees after obtaining the clones; do not substitute branch heads or synthetic
-duplicates. If a pinned input is unavailable, record the blocker before choosing
-a replacement and update this manifest explicitly.
+## Stages And Durable Artifacts
 
-Before timed sessions, prepare three task cards each for Petclinic and Dubbo:
+Execute in order: Stage 0 prerequisites/cards -> Stage 1 driver -> Stage 2
+paired tasks and replay -> Stage 4 decision. Stage 3 client/memory evidence can
+run after Stage 1, independently of Stage 2. Every stage has its own status.
+Do not mix results across changed manifests or binaries.
 
-1. Locate the implementation of a behavior named in a repository test or issue;
-   identify the relevant definition and source location.
-2. Identify callers/references relevant to changing a named definition; separate
-   established relationships, unresolved candidates, and uncovered constructs.
-3. Make one prescribed body edit in a disposable copy, then identify the current
-   location and relevant neighborhood after synchronization; check retained
-   identity and distinguish it from a definition rename whose correspondence
-   the current implementation cannot establish.
+At execution start create
+`docs/reports/017_adoption_baseline_and_priority_selection_progress.md` and
+`docs/reports/017_adoption_baseline/README.md`. The report owns results and
+review dispositions; the artifact directory owns reproducible inputs:
 
-Choose targets from actual task needs, before checking whether semidx resolves
-them. Include at least one known coverage limitation; never discard a card
-because semidx fails it. Record rationale, edit instructions, and patch digests;
-keep exact patches in local replay artifacts outside version control. Independently
-read the source to record expected entities, locations, and relationships for
-each bounded question. Do not use semidx output as its own correctness oracle
-or claim complete repository-wide impact from this bounded assessment.
+- `manifest.json`: corpus commits, build commit/hash, platform, budgets, model,
+  client versions, protocol era, configuration hashes, and lane readiness;
+- `cards.json`: selection seed, candidates/rejections, scopes, required answers,
+  forbidden targets, unresolved expectations, and complete replay parameters;
+- `edits.json`: root-relative file, initial SHA-256, byte offset and delete length,
+  replacement UTF-8 bytes or an exact deterministic generation recipe, final
+  SHA-256, and inverse operation for every edit;
+- `prompts.md`, `client_profiles.md`: exact shared/task/variant prompts, launch
+  commands, instruction discovery, tool lists, hooks, and verified isolation;
+- `runs.jsonl`, `scores.csv`, `summary.md`: sanitized per-run evidence,
+  classifications, aggregates, exclusions, and decision.
 
-For each oracle list required established relationships, forbidden targets,
-and expected unresolved/unsupported outcomes under the current capability
-matrix. Distinguish a declared interface relationship, a statically selected
-method, and runtime dispatch or DI selection. An annotation or the only visible
-implementation does not establish a runtime target. Do not introduce a new
-`IMPLEMENTS` kind, Spring DI model, or overload resolver through the oracle.
+Commit these inputs before timed runs. Hashes alone are insufficient: another
+executor must reconstruct edits and calls from the pinned repositories plus
+committed artifacts. Keep full source trees, credentials, raw session logs,
+and private host paths outside version control; public names, paths, answer
+locations, and minimal edit literals are allowed. Preserve relevant upstream
+licensing for copied snippets. Local root substitutions belong in an untracked
+mapping; record placeholders in committed commands. Reports never need secrets.
 
-Inventory the existing Java fixtures through semidx and record the relevant
-paths/test names and gaps in the report. The initial full test lane establishes
-their baseline. This stage does not add a comprehensive synthetic application
-or expand fixture semantics; new reproductions belong to the selected successor.
+## Stage 0: Establish An Executable Experiment
 
-Choose three analogous replay-only cards each on Camel and the semidx control,
-with their own paths, expected bounded results, and edit instructions. Do not
-apply another repository's patches to either root.
+### Build, Roots, And Consent
 
-DoD: six paired-task cards plus six replay-only cards, source-grounded expected
-answers, the fixture inventory, three pinned external roots, and environment
-metadata in the report. Missing roots block this stage; record
-the missing input and request an accessible root or permission to obtain a
-specific public clone. A smaller control cannot satisfy the external-size lane.
-If fresh isolated sessions or matching model settings cannot be provided, record
-that prerequisite as blocked and resume when they are available; scripted MCP
-replay can continue but cannot substitute for the paired task sessions.
+Record the clean source commit to measure, product version, exact Zig 0.16.0,
+OS/architecture, RAM, parser inputs, and client versions. Product version is
+informational: preview.4 also labels post-Plan-016 source. The build identity is
+full source commit + SHA-256 of the executable + build mode + parser inputs.
 
-## Stage 1: Paired Tasks And Complete MCP Cost
+Run `./scripts/check-zig-version.sh`, `zig build -Doptimize=ReleaseFast`,
+`zig build test -Doptimize=ReleaseFast`, and
+`zig build preview-gate -Doptimize=ReleaseFast`; capture full output and exits.
+Copy that `zig-out/bin/semidx-mcp` to an immutable local artifact path. Both agent
+sessions and replay use this exact binary with explicit `--root`. Do not point
+the experiment at a mutable `scripts/semidx-mcp.sh`: it resolves the current
+`zig-out/bin/semidx-mcp`, which a later build can replace. Recheck the binary
+hash before each run; a mismatch invalidates the run before timing starts.
 
-For each of the six Petclinic/Dubbo task cards run a manual-search session and
-a semidx-assisted session with the same task, source state, model/settings,
-time allowance, and available
-source-reading tools. The manual arm omits semidx; the assisted arm may fall
-back to manual tools and counts that work. Use fresh sessions without the oracle
-or the other arm's answers. Alternate arm order across cards. Repeat each pair
-once: 24 task sessions total. This is a small comparative sample, not a claim
-of statistical significance. Stop each session at 15 minutes and record timeout
-as an outcome, not as a fast completion.
+Create disposable corpus copies from the pinned commits, without executing their
+build scripts. Freeze the semidx control once from the measured source commit,
+before writing logs or adding the driver. Inventory source bytes/exclusions and
+verify copy hashes. Documentation-only commits made during execution do not
+change that copy. A new measured binary starts a new dataset.
 
-Record correctness against the frozen oracle, elapsed task time, manual search
-and file-read counts, semidx call sequence, failed/retried calls, output bytes,
-and the first useful answer. Record model-visible token counts only when the
-client exposes them; bytes are not tokens. List each missing relationship that
-forced manual work with its recorded resolution reason.
+The user operating this evaluation supplies any needed transmission consent.
+Before either paired variant or a real hosted-client probe, record an explicit
+user authorization reference naming provider/destination, model, corpora, and
+allowed data: source excerpts from manual reads, graph values, and prompts/tool
+results. Authorization for graph metadata alone does not authorize source reads.
+Public repositories and prior planning approval do not imply consent. Local
+models need no outbound consent, but both paired variants must use the same
+model and settings; never compare local versus hosted as the treatment.
 
-Separately replay the three cards for each of Petclinic, Dubbo, Camel, and the
-semidx control without model reasoning: five warmups, then 30 measured repetitions.
-Report per-call and sequence p50/p95, sample count, errors, and total wire bytes.
-Include `semidx_sync`, preflight, serialization, and transport in the measured
-boundary. For the edit card restore the initial disposable state before every
-repetition and apply the same patch; keep unchanged and changed sync separate.
-Record startup/indexing in three fresh-process runs, separately from warm calls;
-do not claim an OS-cold filesystem cache unless actually controlled.
+If consent, model access, corpus access, or an isolated runner is missing, mark
+only dependent lanes blocked, request the exact missing input, and resume them
+when supplied. Local driver/replay work may continue. Never provision paid
+services or alter global client policy as an implicit setup step.
 
-Use the sync-first, task-directed workflow in the adoption strategy. Record
-whether direct focused lookup or progressive discovery was needed. Never hide
-preflight behind old in-process query-only timings. Attribute a sub-cost only
-if profiling measures it; do not subtract unrelated benchmark medians.
+### Isolation And Frozen Prompts
 
-DoD: all six Petclinic/Dubbo cards have paired outcomes; all twelve cards have
-replay measurements, with results and failures separated by corpus and role.
-Improvement means a correct answer with reduced
-time or manual work; a correctness loss cannot be offset by speed.
+Use the same client/model for all paired sessions. Default paired client is
+Claude Code; Stage 3 compares Claude Code and Codex CLI. Presence checked during
+plan review: `claude --version` returned 2.1.267 and `codex --version` returned
+0.154.0. This proves executables exist, not authentication, isolation, or model
+visibility. Freeze actual versions/settings at execution, including model id,
+reasoning effort, temperature where exposed, and cache/session settings.
 
-## Stage 2: Client Output And Early Memory Screen
+Run in disposable client profiles under a dedicated evaluation account or an
+already isolated runner. Do not redefine HOME/CODEX_HOME in the active session,
+edit user/global instructions, or disable the user's hooks in place. Before
+measurement, export effective configuration and loaded instruction/tool lists
+from the chosen runner. If the client cannot exclude inherited semidx mandates
+and blocking hooks, that runner is ineligible; dependent sessions stay blocked
+until a genuinely isolated runner is available. Do not silently override rules.
 
-These independent evidence lanes may be collected after Stage 0; Stage 3 needs
-both plus Stage 1.
+Both variants get identical base instructions, task text, shell/file tools,
+working-copy bytes, and 15-minute time allowance. No other code-index, web,
+network, or cross-session memory tools are available. Corpus instruction files
+are source data, not loaded experimental instructions, in both variants. Record
+exact launcher/configuration proving this; do not assume that a new chat alone
+achieves isolation. Leave source bytes unchanged in the indexed copy.
 
-**Client output.** Observe the maintained stdio client and two real MCP clients
-at recorded versions against pinned Petclinic. Use compact definition lookup,
-a bounded context result,
-and a deliberately budget-limited map. Record which text/structured copies are
-on the wire, which reach the model when observable, and any warning, truncation,
-spill, or follow-up read. Increase the existing response budget within its
-documented bounds to probe a threshold; if none is observed, report the largest
-tested result rather than inventing a threshold. Wire duplication does not
-establish duplicate model context. Keep compatibility behavior unchanged.
-If Petclinic exhausts its available results before reaching a client-size
-boundary, use the pinned Dubbo replay result in all clients for that size probe
-and record the change of corpus. This adds no paired agent sessions.
+Shared prompt, followed by the committed task question:
 
-**Memory.** On a disposable copy of the Dubbo root, fix the live source size and
-run 1,000 edit/sync cycles in one server: alternate a body edit, create/remove a
-temporary unit, and rename/restore a file in a written deterministic sequence.
-Use fresh fixed-width names and equal-length edits across cycles, restoring
-the original bytes after each cycle, so live input stays bounded while the
-history introduces new internable values. Verify with full health that live
-graph counts return to their baseline; report retained records separately when
-they do not. Pin the sequence and replay commands before the first run.
-Record RSS, live units/entities/assertions, and source-state identity at baseline
-and every 100 cycles, plus after restoring the starting bytes and after a fresh
-server indexes those same bytes. Repeat once; include a 1,000 unchanged-sync
-control. Normalize growth against live graph size. RSS alone is a screening
-signal, not proof of a leak or of which allocation owns retained bytes.
+> Answer the bounded source question using the available local tools. Return a
+> list of conclusions with root-relative path and current line evidence. Label
+> uncertain candidates separately; do not infer runtime targets without evidence.
+> Stay within the named answer scope. Do not modify files except as the task says.
 
-For process safety stop at 25% of host RAM or 2 GiB RSS, whichever is lower, or
-on crash. Record the last successful cycle and label the run censored; do not
-remove it from the report. Escalate a reproduced crash, exhaustion, or growth
-that reaches the cap at bounded live size ahead of normal feature work.
-If RSS trends upward without hitting the cap, price a focused allocation study
-as a candidate instead of prescribing restarts or selecting reclamation design.
+Manual suffix:
 
-DoD: client observations meet Follow-up 010's client count, and memory history
-has both repeated churn runs and the unchanged control. Unavailable clients,
-unobservable model input, or missing consent remain named evidence gaps. Do not
-claim model-token savings from transport inspection. Independent lanes may
-continue; a blocked required lane prevents whole-plan completion.
+> Use the available text-search and file-reading tools. No semantic index tool
+> is available in this session.
 
-## Stage 3: Select One Intervention And Close
+Assisted suffix:
 
-Classify each failed or expensive task by measured dominant cause: obtaining
-current context, missing semantic relationships, installation/client setup, or
-session lifecycle. Rank candidates by correct task completions recovered first,
-then repeated time/manual-work savings, then estimated implementation effort.
-State uncertainty; when no cause dominates, choose the smallest focused
-experiment that can distinguish the leading candidates, with one falsifiable
-question and a stop rule. Do not expand the baseline indefinitely.
+> semidx is available. Start with semidx_sync. For unfamiliar structure use
+> semidx_outline then a scoped semidx_repo_map; locate named definitions and use
+> semidx_references or semidx_context as appropriate. After edits sync again.
+> Unresolved results are candidates, not facts. Use source reads when needed.
 
-When an intervention is justified, prepare exactly one successor plan using
-the next available number. Name its
-affected files/modules, accepted ADR or required new decision, behavior,
-non-scope, before/after replay cases, tests, and numerical improvement target
-chosen from this baseline. Read the relevant source through semidx before
-fixing the implementation scope. Apply the Plan Readiness Gate. A draft awaiting
-an architectural decision must say so and cannot be reported executable.
+This measures an instructed workflow, not spontaneous tool adoption. Record
+non-use and misuse separately as workflow/discoverability evidence. The suffix
+and additional MCP tool set are the only intended treatment differences.
 
-For Java candidates use Follow-up 020's measurement and admission rules before
-adding external shape evidence. For preflight candidates preserve ADR 014 or
-explicitly prepare an admissible new decision before changing its mechanism.
-For output candidates satisfy Follow-up 010 before proposing compatibility
-changes. Memory remedies must account for existing snapshots borrowing strings.
+Before each variant's first session, run an untimed disposable probe: a Java
+file read and text search both succeed; manual tool inventory has no semidx and
+no hook requests it; assisted sync/context succeed; neither profile loads global
+semidx policy or an earlier answer. Archive sanitized traces/config hashes. A
+failed probe blocks that variant. Fresh sessions never see source oracles,
+other answers, preselected tool ids, or review notes. Alternate manual-first and
+assisted-first by card ordinal; reverse that order on the second repetition.
 
-DoD: ranked evidence, one bounded successor with its readiness state, and updated
-roadmap/`MEMORY.md`; alternatively an explicit no-intervention decision supported
-by all six paired-task cards and the required scale, client, and memory evidence.
-Mark this plan completed only when required evidence exists.
-An unavailable input yields blocked status with an exact resume condition, not
-a success claim. Implementing the successor is outside this plan.
+### Deterministic Task Selection And Scope
 
-For a semantic successor, carry one observed missing relationship through a
-minimal fixture, explicit required/forbidden/unknown outcomes, an accepted
-decision where needed, narrow implementation, replay of the original task,
-and scale regression checks. Extend existing `fixtures/` instead of introducing
-a separate all-features application. Include identity and invalidation cases
-when the new rule changes dependency tracking.
+Select without consulting semidx results. For each external corpus enumerate
+tracked Java files under `src/main/java`, lexicographically sorted; for the
+semidx control use `src/**/*.zig`. Order candidate paths by
+`(sha256("017-v1\n" + repo + "\n" + path), path)`. Inspect candidates in that
+order and declarations in increasing source-byte order. Stop after 50 files per
+corpus if no eligible target is found: record selection blocked and revise the
+selection rule explicitly, not by hand-picking a favorable example.
 
-JUnit or Spring Framework may enter that successor only for a named semantic
-question not adequately exercised by the current corpora. JabRef remains a
-candidate only if it contributes a distinct task. Before use, pin the commit,
-state the role, freeze expected answers, and specify admission/exit checks.
-These candidates are not prerequisites or extra work in Plan 017. Small
-deterministic checks belong in normal test lanes; large external replay remains
-stage evidence and does not become a mandatory build/network dependency.
+Within a candidate file choose the first named, concrete top-level-class method
+(or top-level Zig function) with a body and at least one direct source caller in
+the same parent-directory subtree. The answer scope is that subtree's first 20
+Java/Zig files in lexical path order; include the target file or reject the
+candidate. Accept only 1-10 independently provable direct call/reference
+occurrences inside that scope. Cap its combined source at 64 KiB; reject larger
+scopes, ambiguous overload targets, and unprovable runtime dispatch for the main
+card, recording why. Search outside scope is allowed for disambiguation but
+answers are scored only inside scope. This is a bounded task sample, not random
+coverage of the repository. Freeze candidates, rejection reasons, chosen scope,
+and source proof; a human choice is not hidden behind the hash seed.
 
-## Verification And Tooling Boundaries
+Use the selected target to define each corpus's three cards:
 
-Apply `semidx-test-design` to any measurement code. Prefer existing developer
-tools and MCP clients. A needed new reusable measurement tool must be Zig, must
-have its procedure recorded in the report, and must not become a build, hook,
-CI, or runtime prerequisite. No production instrumentation in this plan. Before
-adding a helper, record its smallest interface and checks in the report.
+1. Locate the method implementing a described behavior. Derive the description
+   from that method and a test when one exists; omit its path and symbol name
+   from the question. Required answer: definition and correct current location.
+2. Given the definition, list direct source calls/references inside the frozen
+   scope. Required answer: every in-scope occurrence and its declared target;
+   do not require the runtime implementation selected by DI or dispatch.
+3. Given the definition and scope, report its current location and the same
+   relevant neighborhood after an externally applied body-only edit. Insert the
+   fixed line `// semidx evaluation body edit` immediately inside its body,
+   preserving its signature. The runner applies the committed edit after the
+   initial untimed server sync and before releasing the question to either
+   variant. Both variants see the same edited bytes. No rename is in this card.
 
-| Risk | Sufficient evidence / verification |
+Freeze a second, tool-only boundary probe per Java corpus if source inspection
+finds an unsupported construct in the first 50 candidate files: choose the first
+by the same ordering and cite the capability-matrix rule. Its expected decline
+is not an agent score and is not one of the six paired cards. If absent, record
+absence and use the existing negative fixtures; do not pretend a known limitation
+requires observing semidx output before selection.
+
+Record two separate oracles: source truth for both agents, and expected tool
+behavior under the measured producer/capability matrix. Honest unresolved output
+can pass the tool check while the agent still has an incomplete task answer.
+Inventory existing fixture/test paths for required, forbidden, and unresolved
+outcomes. Definition-rename identity loss and retained body-edit identity are
+checked only in existing fixtures or the tool-only replay, never in manual scores.
+
+DoD: pinned roots, consent/isolation status, six paired cards and six scripted
+cards with reconstructible edits/calls, source and tool oracles, frozen prompts,
+and fixture inventory committed. Maintain sub-statuses for local inputs and
+agent/client readiness: Stage 1 needs local inputs and may proceed while only
+hosted consent or client readiness is blocked. Missing inputs block dependent work.
+
+## Stage 1: Build The Required Local Driver
+
+The current `tests/mcp_stdio_client.zig` uses `std.testing.io`, a fixed 30-second
+response deadline, and retains transcript allocations. It has no external-root
+CLI. It is evidence for protocol behavior, not the long-run measurement driver.
+
+Implement `src/adoption_measure.zig` (CLI), `src/adoption/stdio.zig` (bounded
+subprocess I/O), and `src/adoption/measure.zig` (replay, edit validation, counters,
+RSS sampling, and summaries). Add opt-in `adoption-measure` and
+`test-adoption-measure` steps to `build.zig`; neither default install, ordinary
+tests, hooks, nor MCP launchers may depend on them. The driver uses Zig 0.16.0
+and existing OS interfaces only. First measurement target is macOS; RSS comes
+from process information for the child pid, in bytes, sampled every 250 ms.
+Unsupported platforms or unavailable RSS fail the memory lane explicitly; do
+not introduce another runtime or external command dependency silently.
+
+The driver owns local process observation, not graph meaning. Keep production
+core/frontends/MCP untouched. Reuse protocol knowledge from the test client,
+but do not import `std.testing.io` into the executable or retain unbounded
+transcripts. Stream raw local evidence to files and release each parsed response.
+Monitor driver and server memory separately; sample the server for product RSS.
+Stop if driver RSS grows 256 MiB beyond its post-initialization baseline, and
+classify that as a measurement-tool failure rather than a semidx memory result.
+If implementation would require production instrumentation, stop and revise
+this scope before adding it. This is an existing consumer pattern under ADRs
+005/014, not a new graph or public-interface decision.
+
+Required interface (planned, not an existing command):
+
+```text
+zig build adoption-measure -Doptimize=ReleaseFast -- \
+  --manifest <manifest.json> --roots <local-roots.json> \
+  --server <immutable-semidx-mcp> --mode probe|replay|memory --output <directory>
+zig build test-adoption-measure -Doptimize=ReleaseFast
+```
+
+Manifest v1 must supply corpus ids/hashes, card parameters, edits, binary hash,
+protocol era, and the fixed budgets below. Reject missing fields, unknown mode,
+out-of-root paths, wrong initial/final hashes, non-disposable writable roots,
+or a different binary before a mutation. Use canonical MCP templates below,
+not transcripts captured from successful agent sessions. Resolve entity ids
+fresh by `(path, name)` in each process; reject ambiguity. Scripts never feed
+an agent's answer into the tool oracle.
+
+Output one record per operation: corpus/card/block/repetition, initial/final
+source state, monotonic duration in ns, request/response wire bytes, tool error
+category, sampled server/driver RSS, process exit, and complete/censored reason.
+No source body is returned by MCP. Keep complete local stdout/stderr, validate
+protocol and consume both streams through exit, with a five-second shutdown
+deadline then kill and reap. Summary uses nearest-rank quantiles on sorted
+successful durations: index `ceil(p*n)-1`; report n and all failures beside them.
+Never replace timeouts by their limit in latency percentiles.
+
+Verify malformed JSON, unexpected EOF, late crash, hung child, wrong edit hash,
+root escape, missing RSS, binary mismatch, and bounded transcript retention with
+small synthetic subprocess inputs. Pin p50/p95 expected values on known numeric
+samples. Then replay a real fixture root, including edit/mismatch/sync, over
+both supported MCP eras. Run `zig fmt --check build.zig src tests`, driver tests,
+`zig build test -Doptimize=ReleaseFast`, and the preview gate after build edits.
+Record that ordinary lanes do not depend on the driver. Freeze driver commit
+and executable hash; its build must not overwrite the measured server artifact.
+
+DoD: committed driver and tests, interface/format v1 implemented, exact commands
+and passing checks in the report. No external timed runs before this stage passes.
+
+## Stage 2: Paired Sessions, Capacity Probe, And Replay
+
+### Common Resource Limits
+
+Budgets are measurement safety limits, not product guarantees. Run one server
+profile at a time. For every root, including Camel: startup/first response at
+most 180 seconds; each later request at most 30 seconds; shutdown at most five
+seconds; each replay card at most 20 minutes including resets/startup; all replay
+cards at most four hours. Each agent session has 15 minutes total including tool
+waits. Initial RSS ceiling is `H = min(25% of physical RAM, 8 GiB)` for a server;
+record physical RAM and H before launch. Stop/reap on limit, crash, protocol
+failure, or unmeasurable RSS. Preserve the last result and label censored.
+
+Probe each root before full replay: initialize, sync, full health, and inspect
+source diagnostics. The current `src/source/scan.zig` defaults include 20,000
+units, 4 MiB per file, and depth 64. Camel's 27,326 tracked Java files exceed the
+unit budget before exclusions; completeness must be measured, not assumed.
+Compare discovered paths/counts and diagnostics with the frozen Git inventory
+and default exclusions. `in_sync` alone does not prove an untruncated repository.
+Enumerate admitted paths through paged repo_map results during the untimed probe,
+keeping scan diagnostics separate from frontend analysis diagnostics.
+
+A capacity limit or incomplete Camel index is a valid capacity result. Stop its
+normal replay and report `capacity_limited` with admitted/omitted counts and
+reason, not full-root timings or a smaller replacement root. Do not raise server
+limits here. Repeat a failure once on the same input to confirm it, then stop
+that profile; do not repeat 35 failed initializations. A missing dependency or
+input is instead `environment_blocked`, not a product failure. Independent roots
+continue. A reproducible product limit can complete the attempted capacity lane
+but forbids the final no-intervention verdict. Incomplete Petclinic/Dubbo tool
+results stay labeled; paired sessions may fall back to manual work.
+
+### Canonical Replay
+
+Freeze protocol era, compact detail, `max_response_bytes=32000`, and all path/name
+arguments in cards.json before timing. Initialize outside each warm sequence.
+Use these three templates for each root, binding its own target and scope:
+
+| Card | Timed operations in order |
 | --- | --- |
-| Biased tasks or incorrect oracle | Six Petclinic/Dubbo cards, separate Camel/control replays, source-based required/forbidden/unknown outcomes, fresh paired sessions, retained failures. |
-| Mistaking unsupported semantics for false facts | Existing Java fixture baseline and capability matrix; explicit distinction between source declarations, static targets, and runtime dispatch/DI. |
-| Hidden preflight cost | Full stdio request/response timing, fixed build, unchanged/changed and startup/warm results separated. |
-| Stale or false facts | Existing `zig build preview-gate -Doptimize=ReleaseFast` plus source-oracle assessment; any new reproduction gets a focused correctness follow-up before optimization. |
-| Client compatibility/privacy | Two actual clients plus maintained stdio observations; explicit consent boundary; no source bodies, credentials, or private transcripts in artifacts. |
-| Retained memory mistaken for live data or allocator noise | Repeated bounded-size churn, unchanged control, fresh-process comparison, visible cap and censored runs. |
-| Faulty measurement helper | Small deterministic input with known counts/timing aggregation; malformed/timeout handling; `zig fmt --check build.zig src tests` and `zig build test` if source/build/fixtures change. |
-| Documentation drift | `git diff --check`, relative-link target check, frontmatter review, Plan Readiness Gate, and staged attribution/constitution guards. |
+| Locate | sync; outline(scope); repo_map(target file); find_definitions(path, name). |
+| Impact | sync; find_definitions(path, name); references(entity_id, incoming, limit=100, mention_limit=50); context(entity_id, depth=2, relationship_limit=50). |
+| Edit | Apply the card's edit outside timing after baseline sync; context(old entity_id) must refuse mismatched state; sync; find_definitions(path, name); context(newly resolved entity_id, depth=2, relationship_limit=50). |
 
-If no source changes, do not add tests solely for documentation. Initial runtime
-gates prove the measured build; repeat only after source changes or a relevant
-failure. Record exact commands, complete exits, omissions, and environmental
-limits. Follow git policy for explicit staging and coherent commits; no push is
-part of this plan.
+Perform an untimed baseline sync and target lookup before each edit block so
+the old entity id is defined. An expected mismatched-state tool rejection is a
+successful negative check whose duration is retained. An unexpected tool/RPC
+error makes that sequence incomplete and is excluded from success percentiles.
+All results include errors and truncation. A truncated result is not complete
+impact evidence; report its flags rather than adding unplanned pages. Scope
+filtering for source scores is done by the evaluator, never by silently changing
+the server's visibility rules. Tool-only edit checks compare body-edit entity
+identity and source state; these do not enter manual-versus-assisted scores.
 
-## Readiness And Ownership Review At Preparation
+Per card run two independent server blocks. Each block has five warmups then
+15 measured repetitions (30 measured, ten warmups total). Before every edit
+repetition, restore original bytes and sync in the same server outside timing;
+verify the baseline source identity, then apply the same fixed edit. Use no new
+names in latency replay. Restart only between blocks; report RSS and the first
+and last five timings so accumulated state is visible. Do not claim repeats are
+independent fresh indexes. Three separate fresh processes per root measure
+startup alone. Startup includes spawn through first successful full health.
+OS-cold cache is not claimed. Report per-call/sequence p50/p95 and wall time,
+with reset/startup overhead separately and a censoring reason where needed.
 
-Scope is measurement and planning; no new core kind, semantic contract, frontend
-rule, transport, runtime dependency, outbound destination, or persistence choice
-is admitted. Constitution, SPEC, CORE, CONFORMANCE, capability matrix, and
-GLOSSARY retain their current meanings. L0-L4 are roadmap-local priority labels,
-not new model vocabulary. ADR 014 and proposed ADR 007 keep their statuses.
+### Agent Scoring And Symmetric Accounting
 
-The roadmap, adoption strategy, and `MEMORY.md` are aligned in this preparation
-change, including sync-first guidance. Petclinic/Dubbo own paired task evidence;
-Dubbo/Camel own the scale comparison. Tree counts are selection evidence only.
-Plan 015 remains
-blocked under its own resume conditions; Plan 016 remains completed. No runtime
-measurement has run under Plan 017 yet. External-root and client availability
-are execution prerequisites
-with the stop/resume rules above, not evidence presumed present.
+Run the six cards x two variants x two repetitions, using Stage 0's isolated
+profiles. No hindsight changes to prompts, target, time allowance, or oracle.
+After a terminal answer, the evaluator marks every required source item present,
+missing, or wrong. Deduplicate by `(source path, occurrence byte range, declared
+target)` for calls; report TP, FP, FN, precision, and recall for card 2. Forbidden
+or unproven targets asserted as facts count as FP; a clearly labeled uncertain
+candidate is not FP and does not satisfy a required fact. Out-of-scope facts do
+not earn credit and count toward bytes. Empty-result metrics use explicit n/a.
 
-Preparation review: no unresolved hard failure in the plan's scope, order,
-authority, or acceptance conditions. Review clarified the control's own replay
-cards, isolated-session prerequisites, definition-rename limits, and memory
-inputs that introduce new values at bounded live size. Runtime gates and task
-measurements are intentionally pending execution, not reported as passed.
-The corpus-role revision preserves 24 paired sessions, specifies twelve replay
-cards across four roots, and keeps future semantic corpora outside this plan.
+A fully correct answer contains all required items, correct current locations,
+and no false definite claim. An incomplete but honest answer is `partial`;
+any false definite claim is `incorrect`, even with high recall. Timeout is its
+own outcome. Source-oracle uncertainty blocks scoring, rather than crediting the
+tool. Label tool expectation separately: correct fact, honest decline, false
+fact, stale-as-synchronized, or unobserved. An agent's wrong claim is not
+attributed to semidx unless the recorded tool response actually made it.
+
+First useful answer is the earliest user-visible answer containing one required
+item with valid location evidence and no false definite claim in that answer;
+raw search/tool output is not an answer. Record its timestamp or absent.
+Final task completion time ends at the fully correct terminal answer; retain
+elapsed-to-stop for partial/incorrect/timeouts without calling it completion.
+
+For BOTH variants count search operations, file-read operations, source bytes
+returned to the model including repeated reads, all tool-result bytes, and
+actual input/output tokens when exposed. Keep wire bytes separate from
+model-visible bytes. If model visibility is unavailable, mark that metric unknown
+and do not use it to claim context savings. Assisted records additionally include
+MCP calls, retries, manual fallbacks, and no-use/misuse episodes. Compare per card
+and per corpus; never combine byte counts with token counts or hide task failures
+behind a mean. This sample cannot establish statistical significance or universal
+adoption benefit. A manual win on Petclinic is a valid corpus-specific result,
+not evidence that semidx has no value everywhere.
+
+DoD: all 24 sessions scored or explicitly blocked; completed/censored replay
+records for all eligible roots and capacity outcomes for ineligible roots. A
+blocked required lane prevents whole-plan completion; an observed product failure
+does not disappear from the denominator.
+
+## Stage 3: Client Visibility And Bounded Memory History
+
+These lanes require Stage 1 and applicable Stage 0 inputs, not Stage 2 completion.
+
+**Clients.** Use the maintained stdio fixture client as transport control and
+Claude Code plus Codex CLI at frozen versions as the real clients. For each,
+record effective protocol/tool configuration and show whether the model receives
+text, structured content, or both using a sanitized model-input trace where
+available. UI display or a model's assertion is not proof of its input. Record
+unobservable separately; it does not satisfy Follow-up 010's visibility question.
+Unavailable clients or consent block that lane; do not substitute a mock.
+
+Use the same pinned Petclinic lookup/context/map calls for all clients; if its
+results are too small use the same Dubbo call for size probes. Test response
+budgets 4,000, 16,000, and 32,000 bytes within existing schema bounds. Record actual
+wire/visible sizes, warnings, truncation, spill and follow-up reads. If no threshold
+is hit report the largest observed size. Lack of model-input visibility prevents
+fallback changes and leaves Follow-up 010 open. It may be reported as a completed
+observation of the limit of observability for this plan, but no-intervention and
+model-context-savings claims remain unavailable. Installing a second client or
+changing authentication requires its own explicit authorization if not already
+provided; current binary presence does not prove readiness.
+
+**Memory.** Use Dubbo in a fresh server for each of two churn runs and one control
+run. After startup and five unchanged syncs, take five 250-ms RSS samples; their
+median is B. Record live and retained counts as exposed by full health, separately
+from RSS; if health cannot distinguish them do not invent a live-only count.
+Memory run cap is `min(H, B + max(B, 512 MiB))`. If headroom under H is below
+128 MiB, mark the run capacity-limited before churn. An absolute host safety cap
+remains necessary even though the growth allowance is baseline-relative.
+
+One cycle has exactly six syncs, each after one mutation: (1) apply a fixed-size
+body edit; (2) restore; (3) create a temporary unit with a fresh six-digit name;
+(4) remove it; (5) move an existing file to a fresh equal-length name unchanged;
+(6) move it back. The manifest supplies valid source/path generation recipes and
+all pre/post hashes. End every cycle at the initial byte/path state. Fresh names
+exercise retained history at bounded live size. Control runs six unchanged syncs
+per cycle, using the same observation schedule and no mutations.
+
+Run at most 1,000 cycles per run, 45 minutes per run and 135 minutes for the lane;
+all request/RSS limits still apply. Full health at baseline and every 100 cycles
+is outside the six-sync count; record its own cost. Restore before shutdown and
+compare with a fresh server on the identical starting tree. Stop on cap/crash or
+time limit, preserve counts, and mark censored; do not restart to hide growth.
+Compare churn growth with control and fresh-process RSS. Repeated excess growth
+above `max(25% of B, 128 MiB)` in both churn runs, after subtracting the control's
+end-minus-baseline growth from each churn run's end-minus-baseline growth,
+triggers an allocation-study candidate, not a claim that RSS proves a leak.
+
+DoD: per-client wire and model-visibility evidence or explicit unobservable status;
+all three memory runs complete or documented product censoring; environment
+blockers stay open. Never claim a long-session pass from an early censored run.
+
+## Stage 4: Numerical Decision Rules And Closure
+
+The following are predeclared practical selection rules, not statistically
+significant effects, product SLOs, or measured facts. Do not tune thresholds after
+seeing results; a changed threshold starts a separately labeled experiment.
+
+1. A source-proven false tool fact, stale answer labeled synchronized, or
+   reproducible crash interrupts normal ranking. Preserve the reproduction,
+   stop relying on affected answers, and select correctness/recovery first.
+   Do not confuse an agent FP with a false graph fact.
+2. A repeated capacity limit, failed complete Camel probe, or memory cap selects
+   capacity/lifecycle investigation ahead of ordinary semantic expansion.
+3. For a card, a task-level gain/loss is repeatable when BOTH repetitions show
+   the same direction and either: full completion is gained/lost; completion
+   time differs by at least 20% AND 30 seconds; or visible source/tool bytes
+   differ by at least 25% AND 16 KiB without worse completion. Never mix metrics
+   to satisfy a threshold. Unknown bytes cannot earn byte savings. Count avoided
+   searches/reads as secondary evidence, not a hidden alternate success rule.
+4. Prioritize missing source relationships by repeated completion failures or
+   fallback cost; distinguish coverage, latency/output, and workflow misuse.
+   Installation is not measured here and cannot be selected on claimed install
+   improvement. Setup blockers may motivate a provisional setup experiment only.
+5. Operational investigation is eligible when any complete root has startup
+   over 60 s, a graph-read p95 over 1 s, an unchanged sequence p95 over 3 s, or
+   changed-sync p95 over 3 s. The repeated memory-growth rule is in Stage 3.
+   Attribution requires actual profile evidence; without it select a bounded
+   diagnostic experiment, not a guessed watcher or string-pool rewrite.
+
+Rank qualifying candidates by reproduced correctness/capacity severity, then
+number of cards whose completion is recovered, then repeated time/byte savings,
+then estimated effort. Ties or contradictory repetitions produce one bounded
+experiment with an explicit competing hypothesis and stop rule, not an indefinite
+baseline extension. Repeated lack of semidx use is workflow evidence even if the
+agent solved the question manually.
+
+A no-intervention decision is allowed ONLY when all required lanes have evidence,
+all six assisted cards are fully correct in both repetitions, there is no
+repeatable regression, at least two cards show repeatable gains under rule 3,
+all eligible roots meet rule 5's budgets, Camel is complete, the memory runs
+complete without the growth trigger, and client visibility has no unresolved
+compatibility issue. Otherwise select a corrective/diagnostic successor, or
+report blocked/inconclusive rather than declaring that nothing needs work.
+
+Prepare one successor with affected files, authority/ADR needs, required and
+forbidden behavior, replay cases, numerical target, verification, and readiness
+state. A provisional draft may be prepared from completed lanes while others
+are blocked, but it cannot authorize fallback changes, launch implementation,
+or close this plan without the missing evidence. With an observed product
+capacity failure the plan can close with that corrective successor; with missing
+inputs it remains blocked. Unobservable client input can close only with a
+bounded visibility experiment, not with a fallback change or no-intervention.
+
+For a semantic successor use: observed task gap -> minimal fixture -> required,
+forbidden, and unknown outcomes -> accepted decision if needed -> narrow change
+-> original task replay -> scale regression. Follow-up 020 still governs external
+shape admission. JUnit/Spring enter only for a named question current corpora do
+not exercise; JabRef needs a distinct task. Pin their commits and expected
+answers before use. They are not extra work in this plan. Large external runs
+remain stage evidence, not mandatory network-dependent build gates.
+
+Closure: update report, roadmap and MEMORY with one supported next action; mark
+plan completed/historical only when its evidence lanes have valid outcomes.
+Record exact command exits, censored runs, missing metrics, remaining follow-ups,
+and coherent commits. No push is part of execution. No source runtime work or
+measurement has been performed by this plan revision.
+
+## Review Disposition And Verification Of This Revision
+
+The previous readiness claim was withdrawn: it omitted executable procedures.
+The following dispositions address the external review, not completed runtime
+measurements. Plan readiness now covers the procedure; environment readiness
+and the new driver's implementation remain Stage 0/1 outputs.
+
+| Review item | Disposition and correction |
+| --- | --- |
+| 1: No thresholds | Accepted. Stage 4 fixes practical gain/loss, resource, and no-intervention rules; two repeats never imply statistical significance. |
+| 2: No scoring / mixed oracles | Accepted. Source truth scores both agents; tool expectations are separate, with FP/FN, partial, and first-useful definitions. |
+| 3: Asymmetric edit | Accepted. One body-only external edit for both agents; identity and rename checks are tool-only. |
+| 4: Consent | Accepted gap. Applies before both variants and client probes. Hosted execution is not mandatory; local matching models remain possible. |
+| 5: Isolation | Accepted. Frozen prompts/configs, disposable profiles, effective-policy probes, and a blocked state if inherited policy cannot be excluded. No global settings edited. |
+| 6: Camel limits | Accepted, with additional discovered 20,000-unit budget. Probe completeness first; capacity failures cannot masquerade as full-root timings. |
+| 7: Driver | Accepted. Required Stage 1, named Zig files/build steps, interface, replay templates, RSS, output schema and tests. |
+| 8: Three/six | Accepted. Three card types on each of two task corpora = six paired cards = 24 sessions; six more cards are replay-only. |
+| 9: Lost artifacts | Accepted. Commit reconstruction recipes and exact calls/prompts, not just digests; keep raw/private logs local. |
+| 10: Selection | Accepted. Fixed candidate ordering, finite search, explicit rejection rules; separate tool-only coverage probe. |
+| 11: Impact scope | Accepted. 20 files, 64 KiB, 1-10 proven in-scope occurrences; no completeness claim beyond that scope. |
+| 12: Unmeasured installation / misuse | Accepted. Remove installation from measured benefit categories; record workflow non-use/misuse. |
+| 13: Correctness escalation | Accepted. First rule of Stage 4, distinguished from agent hallucination. |
+| 14: RSS / cycles | Accepted in part. Baseline-relative growth plus host safety cap; six syncs per cycle and a lane time cap. An absolute safety limit is still required. |
+| 15: Edit process lifetime | Accepted. Same server within blocks, two fresh blocks, fixed edits, explicit reset/RSS/drift records. |
+| 16: Build identity | Accepted. Full commit, parser inputs, mode and executable hash; immutable binary shared across variants. |
+| 17: Control snapshot | Accepted. One frozen starting source copy, transport/driver control only, no Java-quality equivalence claim. |
+| Client visibility, byte asymmetry, provisional successor | Accepted. Named clients, observed versus unobservable model input, symmetric bytes, and explicit partial-evidence drafting rules. |
+| Plan vocabulary and launcher | Accepted. Plan-local terms; bypass mutable launcher via the pinned artifact path. |
+| Petclinic will almost certainly favor manual | Not established. Keep either outcome; report by corpus without predicting the winner. |
+
+Source checks in preparation: semidx located the test client and scan budget;
+exact reads confirmed test-only I/O, retained transcripts, fixed timeout, mutable
+launcher resolution, and discovery defaults. Global semidx-first instructions
+were observed; the reviewer's two hook rejections were not independently replayed.
+They are not needed to justify an explicit isolation preflight. Client version
+commands proved binary presence only. No hosted session or external indexing ran.
+
+Review verification: relative links/frontmatter, arithmetic and lane/stop-state
+consistency, `git diff --check`, staged guards, and source-of-truth alignment.
+SPEC/CORE/CONFORMANCE/capability matrix keep their existing semantics; no new kind,
+contract, coverage, persistence, or outbound permission is admitted. The developer
+driver remains an opt-in consumer. At implementation use `semidx-test-design`
+for its lifecycle, malformed-input, timeout, edit and quantile checks, then the
+Stage 1 commands. Follow-up 010/017 are not closed by writing this plan.

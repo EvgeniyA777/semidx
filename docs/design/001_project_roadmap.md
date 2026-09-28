@@ -150,12 +150,14 @@ coverage and memory work need not wait for a stable product or persistence.
 Levels are an order for investing effort, not release promises or new semantic
 contracts. Java is the first external evaluation language because Plans 010-014
 already provide a baseline; this does not widen the supported-language roster.
-The procedure and numerical evaluation gates belong to
+The procedure and predeclared numerical decision rules belong to
 [Plan 017](../plans/017_adoption_baseline_and_priority_selection.md).
+They select the next experiment or intervention; they are not statistical
+significance claims or product latency guarantees.
 
 | Level | User outcome | Planned work | Exit evidence |
 | --- | --- | --- | --- |
-| L0: Demonstrate task value | A developer can see when semidx helps and when it does not. | Compare three real tasks with and without semidx on Petclinic and Dubbo; use Dubbo/Camel for scale replay, existing fixtures for correctness, and two actual MCP clients for output; run an early memory screen. Plan 017 is the next planned work. | Reproducible task outcomes, complete MCP timings, client-visible output observations, memory history, and one selected next intervention. A negative result is valid evidence. |
+| L0: Demonstrate task value | A developer can see when semidx helps and when it does not. | Build the local measurement driver; compare three task types on each of Petclinic and Dubbo (six paired cards, 24 sessions); probe Dubbo/Camel capacity before scale replay; use existing fixtures, two real MCP clients, and a bounded memory screen. Plan 017 is the next planned work. | Reproducible scored tasks, complete or explicitly capacity-limited MCP measurements, observed or unobservable client-input evidence, memory history, and one justified successor or the plan's gated no-intervention decision. Missing inputs remain blocked. |
 | L1: Reduce the cost of obtaining context | Useful current context takes fewer unnecessary calls, reads, and waits. | Fix the largest measured cost in preflight, query work, navigation, or output handling. Measure fallback compatibility before changing it. | Repeat the L0 tasks and demonstrate the improvement chosen in the successor plan, with correctness, freshness, and client compatibility preserved. |
 | L2: Recover useful semantic relationships | Ordinary impact questions have useful answers within a clearly stated language boundary. | Select one Java unresolved-reason family by blocked tasks and measured conversion potential; evaluate external-supertype and visibility gaps before admitting new evidence. | Previously blocked task answers become established relationships, with negative cases and provenance verified; raw fact count alone does not pass. |
 | L3: Make installation repeatable | A developer gets a first useful answer without knowing the build internals. | Choose initial platforms from evaluation participants; prepare an installation path, actionable diagnostics, and artifacts where justified. | A developer other than the author follows the published path in a clean environment; elapsed time, manual interventions, supported platforms, and failures are recorded. Target: first useful answer within ten minutes, a future acceptance target rather than an observed result. |
@@ -181,7 +183,9 @@ The procedure and numerical evaluation gates belong to
 ### Inputs And Deferred Work
 
 Corpora have roles, not an obligatory size ladder. Plan 017 owns the pinned
-commits, task counts, and measurement procedure. L1 repeats those tasks after
+commits, task counts, and measurement procedure. Its review found a 20,000-unit
+default discovery limit against Camel's 27,326 tracked Java files: completeness
+must be checked before any whole-root performance claim. L1 repeats tasks after
 optimization. L2 takes one observed gap through a minimal fixture with required,
 forbidden, and unresolved outcomes, an explicit semantic decision, implementation,
 and replay on the originating corpus plus scale checks. L3 can reuse Petclinic

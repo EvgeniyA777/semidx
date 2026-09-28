@@ -301,10 +301,10 @@ documents that own history, rationale, and evidence.
   and sustained local sessions. Memory screening happens early; measured blockers
   can promote later levels.
 - Next planned work is
-  [Plan 017](docs/plans/017_adoption_baseline_and_priority_selection.md): three
-  paired tasks on Petclinic/Dubbo, scale replay on Dubbo/Camel, client output,
-  an early memory screen, and one evidence-backed successor plan. It is planned,
-  not executed; Git tree sizes are recorded, but no runtime measurements exist yet.
+  [Plan 017](docs/plans/017_adoption_baseline_and_priority_selection.md): required
+  driver, six paired cards/24 sessions on Petclinic/Dubbo, capacity-first replay
+  (Camel exceeds the default 20,000-unit budget), client visibility, bounded memory,
+  and explicit decision rules. Planned only; no runtime measurements exist yet.
 - [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) delivered source-state
   identity, idempotent sync, fail-closed read preflight, and compact health.
   Every graph read scans the source state (~8-10 ms/call on 93 units in the local
