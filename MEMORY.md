@@ -164,19 +164,40 @@ documents that own history, rationale, and evidence.
 - `semidx-mcp` is the experimental local stdio preview. It scans one local root,
   publishes one snapshot, serves both the current `2026-07-28` stateless MCP
   shape and the legacy initialized `2025-06-18` shape, and exposes
-  `semidx_health`, `semidx_outline`, `semidx_repo_map`,
-  `semidx_find_definitions`, `semidx_references`, `semidx_context`, and
-  `semidx_refresh`.
+  `semidx_sync` (the recommended first call), `semidx_health`,
+  `semidx_outline`, `semidx_repo_map`, `semidx_find_definitions`,
+  `semidx_references`, `semidx_context`, `semidx_refresh` (a compatibility
+  alias sharing `semidx_sync`'s coordinator and result shape), and, only under
+  complete Jev ranking consent, the experimental `semidx_rank_context`
+  ([ADR 013](docs/adr/013_optional_jev_ranking_projection.md),
+  [Plan 015](docs/plans/015_optional_jev_ranking_projection.md)).
 - MCP results return graph values only by default: ids, paths, ranges, kinds,
   relationships, and per-claim resolution, freshness, and producer.
-  `semantic_contract_version` is still `null`.
+  `semantic_contract_version` is still `null`. Every result also carries
+  `snapshot.source_state_id` (a deterministic identity over what a scan run
+  immediately before it saw) and `working_copy.status`
+  (`in_sync`/`out_of_date`/`scan_failed`), a separate axis from
+  snapshot-relative `current`/`stale`/`pending`
+  ([ADR 014](docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md),
+  [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md)). `semidx_sync`
+  and `semidx_refresh` always report `in_sync` (that is their own
+  post-operation state); every other graph-reading tool, including
+  `semidx_rank_context`, runs the same comparison as a fail-closed preflight
+  and refuses to answer (`isError: true`, no graph data, no state change) on
+  a mismatch or scan failure, naming `semidx_sync` as the next step;
+  `semidx_health` runs it too but always answers, reporting whichever status
+  it found instead of failing.
 - Tool arguments are declared once in `src/mcp/tools.zig`; the advertised
   schema and the validator both derive from them. `semidx_repo_map`,
-  `semidx_references`, and `semidx_context` default to `detail: "compact"` and
-  take `detail: "full"`. Compact context and references keep each claim's
-  resolution category, producer name, freshness, and location; the repository
-  map carries freshness and location but no existence provenance at either
-  level. List tools report `budget`
+  `semidx_references`, `semidx_context`, and `semidx_health` default to
+  `detail: "compact"` and take `detail: "full"`. Compact context and
+  references keep each claim's resolution category, producer name, freshness,
+  and location; the repository map carries freshness and location but no
+  existence provenance at either level; compact health keeps root,
+  product/server identity, unit and diagnostic counts, parser availability,
+  recovery state, and redacted outbound capability status, moving graph
+  counts and per-language producer/coverage detail to full (25% of full's
+  size on the repository-copy profile). List tools report `budget`
   ([detail levels](docs/mcp/local_preview.md#detail-levels-and-budgets)).
 - Plan 009 made discovery progressive: `semidx_outline` gives per-directory
   counts without definitions as the first orientation call; every list tool
@@ -188,9 +209,13 @@ documents that own history, rationale, and evidence.
   and snapshot revision; `semidx_context` takes `direction` and `depth` (max 3) for a
   traversal that renders each entity once. All are projection mechanics, not
   graph semantics.
-- `semidx_refresh` keeps the previous snapshot on failure. If a refresh fails
-  after reconciliation starts, the server discards that index and rebuilds from
-  the same scan to avoid publishing partial state.
+- `semidx_sync`/`semidx_refresh` keep the previous snapshot and source-state
+  identity paired on failure. If reconciliation starts and fails, the server
+  discards that index and rebuilds from the same scan to avoid publishing
+  partial state (`src/mcp/sync.zig`). An unchanged identity (and no pending
+  rebuild) skips reconciliation entirely: revision, entity ids, and cursors
+  stay untouched, which is what makes repeating the call at the start of
+  every session and after every edit cheap when nothing changed.
 - `scripts/semidx-mcp.sh` is the stable local launcher for agents. The older
   `scripts/start-mcp-server.sh` and `scripts/mcp-stdio.sh` remain compatibility
   aliases.
@@ -265,20 +290,17 @@ documents that own history, rationale, and evidence.
   expression text rather than names
   ([Plan 013 Stage 0](docs/reports/013_unresolved_mentions_from_the_callee_anchor_progress.md)).
 - A snapshot revision orders one running server's refreshes and identifies no
-  content. It is not evidence that two observations, or two servers, saw the same
-  indexed state; `semidx_health`'s description says so, and
-  [021](docs/followups/021_snapshot_revision_is_not_a_content_identity.md) holds
-  the defect until [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md)
-  delivers a comparable source-state identity.
-- `current` is snapshot-relative analysis state, not evidence that the working
-  copy still has the indexed bytes. The MCP server does not watch files and can
-  return old ranges after an external edit until refresh. Accepted
-  [ADR 014](docs/adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
-  and Plan 016 (Stage 0 complete: contract accepted, `SPEC.md`/`GLOSSARY.md`
-  own the vocabulary, regression fixtures and identity/health-shape vectors
-  frozen under `fixtures/working_copy_sync/`; no source-state identity, sync
-  tool, or fail-closed preflight is implemented yet) own the fail-closed
-  synchronization correction.
+  content by itself; it is not evidence that two observations, or two
+  servers, saw the same indexed state.
+  [Follow-up 021](docs/followups/021_snapshot_revision_is_not_a_content_identity.md)
+  is fixed: `snapshot.source_state_id`, published beside `revision` in every
+  normal MCP result, is the value that is comparable across processes
+  (Plan 016).
+- `current` is snapshot-relative analysis state, not evidence that the
+  working copy still has the indexed bytes; `working_copy.status` is that
+  evidence, and every graph-reading tool fails closed rather than answering
+  from a working copy it has not just confirmed matches (ADR 014, Plan 016 —
+  see the tool list above).
 - Known implementation risks live in progress-log residual-risk sections and
   [docs/followups/README.md](docs/followups/README.md). The load-bearing ones:
   Java coverage, not its boundary, is what limits it — receiver-qualified and
@@ -313,41 +335,22 @@ documents that own history, rationale, and evidence.
   [010](docs/followups/010_mcp_text_fallback_client_measurement.md);
   then choose between Zig dogfood depth, remaining Java gaps, packaging/daemon
   work, semantic-contract work, or persistence by measured pain.
-- [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) is the current
-  trust-first adoption correction: deterministic source-state identity,
-  idempotent `semidx_sync`, fail-closed read preflight, and compact health.
-  Stage 0 (ADR 014 accepted), Stage 1 (`src/source/identity.zig`, the
-  `semidx-source-state-v1` SHA-256 encoding), Stage 2 (`src/mcp/sync.zig`,
-  the idempotent scan/compare/apply/publish coordinator behind `semidx_sync`
-  and the now-shared `semidx_refresh` alias), and Stage 3 (fail-closed read
-  preflight) are complete. Every result from `semidx_outline`,
-  `semidx_repo_map`, `semidx_find_definitions`, `semidx_references`,
-  `semidx_context`, `semidx_rank_context`, `semidx_health`, `semidx_sync`, and
-  `semidx_refresh` now carries `snapshot.source_state_id` and `working_copy`;
-  the first six fail closed (`isError: true`, no graph data, no state change)
-  on a working-copy mismatch or scan failure instead of answering from an
-  unconfirmed snapshot, `semidx_rank_context` included (so Jev is never
-  called on a mismatch), and `semidx_health` reports the mismatch instead of
-  failing. Cost: every read now pays for one full discovery scan
-  (repository-copy profile: ~8ms/call observed locally, up from ~1ms before
-  Stage 3, on 92 units) — an explicit trade the plan accepts and Stage 5 must
-  measure formally. Stage 4 added `semidx_health`'s `detail: "compact" |
-  "full"` (compact is 25% of full on the repository-copy profile) and made
-  `semidx_sync` the documented first call everywhere (README, local MCP
-  reference, code-exploration skill), with `semidx_health` now secondary
-  ("call when a diagnostic summary is useful") and `semidx_refresh` described
-  as the compatible alias throughout. Stage 5 added the `sync-trust` habit-loop
-  gate profile (`fixtures/working_copy_sync/units/`, Stage 0's nine-unit
-  fixture) proving the ADR 014 regression end to end with 8 new named hard
-  gates; `preview-gate` now runs three profiles. Two things are explicitly
-  not proven by the stdio gate: "zero Jev calls on mismatch" is proven at the
-  Zig unit level only (a live-credential or mock-HTTP stdio proof is out of
-  this plan's scope), and Stage 5's external-repository real-task evaluation
-  was not run (no external repository available in-session; ask the operator
-  before Stage 6 closes, though it does not block Stage 6). Stage 6 (canon,
-  security review, closure) remains. Execute it before expanding ranking
-  claims; better ordering over an obsolete snapshot would amplify false
-  confidence.
+- [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) delivered the
+  trust-first correction described in the tool-list bullets above:
+  deterministic `source_state_id`, idempotent `semidx_sync`, fail-closed read
+  preflight, and compact health, evidenced by the three-profile
+  `preview-gate` (including the dedicated `sync-trust` profile reproducing
+  the original ADR 014 regression end to end). Full history, every stage's
+  evidence, and residual items live in its
+  [progress log](docs/reports/016_trustworthy_working_copy_sync_progress.md).
+  Cost: every graph read now pays for one full discovery scan as its
+  preflight (repository-copy profile: ~8-10 ms/call observed locally on 93
+  units, up from ~1 ms before). Two things the stdio gate does not itself
+  prove, both documented rather than silently skipped: "zero Jev calls on
+  mismatch" is proven at the Zig unit level only (live TypeSafe credentials
+  or a local mock HTTP endpoint would be needed to prove it over stdio, and
+  both are out of scope), and the plan's external-repository real-task
+  evaluation was not run (no external repository was available in-session).
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) remains an
   incomplete, blocked adoption experiment. Stages 0-3 implemented default-off
   consent, bounded graph-only candidate projection, offline fixtures, and the

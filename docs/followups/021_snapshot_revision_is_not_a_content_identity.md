@@ -1,9 +1,9 @@
 ---
 title: "A snapshot revision is not a content identity"
 doc_type: "follow_up"
-lifecycle: "active"
-status: "open"
-agent_action: "use_as_input_for_future_plan_only"
+lifecycle: "completed"
+status: "fixed"
+agent_action: "historical_reference_only"
 updated: "2026-09-27"
 ---
 
@@ -54,10 +54,34 @@ The cheap half — saying what the number means where a consumer reads it — di
 not need to wait and is done.
 
 [ADR 014](../adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)
-and [Plan 016](../plans/016_trustworthy_working_copy_sync.md) now take the
-intermediate source-state identity and working-copy trust boundary as planned
-work. This follow-up remains open until the implementation and cross-process
-identity tests are complete.
+and [Plan 016](../plans/016_trustworthy_working_copy_sync.md) delivered the
+intermediate source-state identity and working-copy trust boundary this
+follow-up asked for as an acceptable narrow step before persistence.
+
+## Resolution
+
+`src/source/identity.zig` (Plan 016 Stage 1) implements
+`semidx-source-state-v1`, published beside `snapshot.revision` in every normal
+MCP result since Stage 3 (`src/mcp/tools.zig`'s `beginStructured`, shared by
+all nine tools). Every required test above is proven:
+
+- two servers over different roots can publish the same revision, and a test
+  says so (`tests/mcp_smoke_test.zig`, "two servers over different roots can
+  publish the same revision, distinguished only by source_state_id");
+- a server restarted over unchanged content does not resume the revision it
+  had before (`tests/mcp_smoke_test.zig`, "a server restarted over unchanged
+  content does not resume the revision it had before");
+- the same content indexed by two servers yields the same identity
+  (`tests/mcp_smoke_test.zig`, "two independent server processes over the
+  same content report the same source_state_id"), and a single edited byte
+  changes it (`src/source/identity.zig`'s own unit tests, Plan 016 Stage 1);
+- the identity appears in results alongside the revision, and the revision
+  keeps its ordering meaning (every tool result's `snapshot` object; ADR 014
+  D2, unchanged).
+
+`semidx_health`'s description and `local_preview.md` now describe
+`source_state_id` as the cross-process comparison, with `revision` kept for
+its original process-local ordering role only.
 
 ## Acceptance Direction
 

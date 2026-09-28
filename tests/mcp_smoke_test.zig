@@ -341,3 +341,146 @@ test "semidx-mcp advertises and serves semidx_rank_context under complete consen
     try testing.expect(std.mem.indexOf(u8, stderr_text, "Jev ranking is enabled") != null);
     try testing.expect(std.mem.indexOf(u8, stderr_text, "unused-test-key-value") == null);
 }
+
+test "two independent server processes over the same content report the same source_state_id" {
+    // Follow-up 021 / ADR 014 D2: a source-state identity is comparable across
+    // processes, unlike snapshot.revision. This proves it with two real
+    // semidx-mcp processes, not two scans inside one test process.
+    const gpa = testing.allocator;
+
+    const fixture_path = try std.fs.path.join(gpa, &.{ build_options.fixtures_dir, "zig", "greeter.zig" });
+    defer gpa.free(fixture_path);
+    const fixture = try std.Io.Dir.cwd().readFileAlloc(io, fixture_path, gpa, .limited(1 << 20));
+    defer gpa.free(fixture);
+
+    const Instance = struct {
+        root_dir: testing.TmpDir,
+        root: [:0]u8,
+        log_dir: testing.TmpDir,
+        client: *Client,
+
+        fn start(contents: []const u8) !@This() {
+            var root_dir = testing.tmpDir(.{});
+            errdefer root_dir.cleanup();
+            try root_dir.dir.writeFile(io, .{ .sub_path = "greeter.zig", .data = contents });
+            const root = try root_dir.dir.realPathFileAlloc(io, ".", gpa);
+            errdefer gpa.free(root);
+
+            var log_dir = testing.tmpDir(.{});
+            errdefer log_dir.cleanup();
+            const stderr_file = try log_dir.dir.createFile(io, "stderr.log", .{});
+            const client = client: {
+                defer stderr_file.close(io);
+                break :client try Client.start(gpa, build_options.mcp_exe, root, &.{}, log_dir.dir, stderr_file);
+            };
+            return .{ .root_dir = root_dir, .root = root, .log_dir = log_dir, .client = client };
+        }
+
+        fn deinit(self: *@This()) void {
+            self.client.destroy();
+            self.log_dir.cleanup();
+            gpa.free(self.root);
+            self.root_dir.cleanup();
+        }
+    };
+
+    var a = try Instance.start(fixture);
+    defer a.deinit();
+    var b = try Instance.start(fixture);
+    defer b.deinit();
+
+    const health_a = try a.client.callTool(1, "semidx_health", "{}");
+    const health_b = try b.client.callTool(1, "semidx_health", "{}");
+    const id_a = health_a.get("snapshot").?.object.get("source_state_id").?.string;
+    const id_b = health_b.get("snapshot").?.object.get("source_state_id").?.string;
+    try testing.expectEqual(@as(usize, 64), id_a.len);
+    try testing.expectEqualStrings(id_a, id_b);
+}
+
+test "two servers over different roots can publish the same revision, distinguished only by source_state_id" {
+    // Follow-up 021: a revision alone does not identify content across
+    // processes. Two structurally identical but differently-named single-unit
+    // roots reach the same revision (nothing content-specific drives how many
+    // times a fresh index republishes before its first snapshot), while their
+    // source_state_id values differ because the content differs.
+    const gpa = testing.allocator;
+
+    const Instance = struct {
+        root_dir: testing.TmpDir,
+        root: [:0]u8,
+        log_dir: testing.TmpDir,
+        client: *Client,
+
+        fn start(contents: []const u8) !@This() {
+            var root_dir = testing.tmpDir(.{});
+            errdefer root_dir.cleanup();
+            try root_dir.dir.writeFile(io, .{ .sub_path = "a.zig", .data = contents });
+            const root = try root_dir.dir.realPathFileAlloc(io, ".", gpa);
+            errdefer gpa.free(root);
+
+            var log_dir = testing.tmpDir(.{});
+            errdefer log_dir.cleanup();
+            const stderr_file = try log_dir.dir.createFile(io, "stderr.log", .{});
+            const client = client: {
+                defer stderr_file.close(io);
+                break :client try Client.start(gpa, build_options.mcp_exe, root, &.{}, log_dir.dir, stderr_file);
+            };
+            return .{ .root_dir = root_dir, .root = root, .log_dir = log_dir, .client = client };
+        }
+
+        fn deinit(self: *@This()) void {
+            self.client.destroy();
+            self.log_dir.cleanup();
+            gpa.free(self.root);
+            self.root_dir.cleanup();
+        }
+    };
+
+    var a = try Instance.start("pub fn a() void {}\n");
+    defer a.deinit();
+    var b = try Instance.start("pub fn totallyDifferentName() void {\n    return;\n}\n");
+    defer b.deinit();
+
+    const health_a = try a.client.callTool(1, "semidx_health", "{}");
+    const health_b = try b.client.callTool(1, "semidx_health", "{}");
+    try testing.expectEqual(health_a.get("snapshot").?.object.get("revision").?.integer, health_b.get("snapshot").?.object.get("revision").?.integer);
+    try testing.expect(!std.mem.eql(u8, health_a.get("snapshot").?.object.get("source_state_id").?.string, health_b.get("snapshot").?.object.get("source_state_id").?.string));
+}
+
+test "a server restarted over unchanged content does not resume the revision it had before" {
+    // Follow-up 021: nothing persists the revision counter across restarts.
+    const gpa = testing.allocator;
+
+    var root_dir = testing.tmpDir(.{});
+    defer root_dir.cleanup();
+    try root_dir.dir.writeFile(io, .{ .sub_path = "a.zig", .data = "pub fn a() void {}\n" });
+    const root = try root_dir.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(root);
+
+    var log_dir = testing.tmpDir(.{});
+    defer log_dir.cleanup();
+
+    const first_stderr = try log_dir.dir.createFile(io, "stderr.log", .{});
+    const first_revision = revision: {
+        const client = client: {
+            defer first_stderr.close(io);
+            break :client try Client.start(gpa, build_options.mcp_exe, root, &.{}, log_dir.dir, first_stderr);
+        };
+        defer client.destroy();
+        const health = try client.callTool(1, "semidx_health", "{}");
+        break :revision health.get("snapshot").?.object.get("revision").?.integer;
+    };
+
+    const second_stderr = try log_dir.dir.createFile(io, "stderr.log", .{});
+    const second_revision = revision: {
+        const client = client: {
+            defer second_stderr.close(io);
+            break :client try Client.start(gpa, build_options.mcp_exe, root, &.{}, log_dir.dir, second_stderr);
+        };
+        defer client.destroy();
+        const health = try client.callTool(1, "semidx_health", "{}");
+        break :revision health.get("snapshot").?.object.get("revision").?.integer;
+    };
+
+    try testing.expectEqual(first_revision, second_revision);
+}

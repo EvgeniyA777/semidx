@@ -1,9 +1,9 @@
 ---
 title: "Trustworthy working-copy synchronization progress"
 doc_type: "progress_log"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-09-27"
 ---
 
@@ -14,10 +14,9 @@ Companion log for
 
 ## Current Status
 
-**Stages 0-5 complete, with one residual item: the external-repository
-real-task evaluation Stage 5 asks for was not run (see below) — it needs an
-external repository this session does not have and cannot fabricate evidence
-for.**
+**Plan complete (all six stages). One residual item, explicitly not a
+Definition-of-Done blocker (see Stage 6): the external-repository real-task
+evaluation Stage 5's "Required work" names was not run.**
 
 ## Start Rule: Readiness Evidence
 
@@ -579,3 +578,172 @@ regression shape and proves it now fails closed), and preflight cost is
 recorded honestly (done, including the combined-with-startup caveat carried
 over from Stage 3). Stage 5 complete except the external-repository
 real-task evaluation, recorded above as a residual item.
+
+## Stage 6: Canon, Review, And Closure
+
+### Findings-first review
+
+- **Source-state identity.** Re-read `src/source/identity.zig` end to end
+  against ADR 014 D2's encoding order (version marker, budgets, sorted
+  exclusions, sorted units with path/language/content, sorted diagnostics
+  with kind/path/message). Matches. Strengthened during this stage: the
+  cross-process claim was previously proven only as two scans inside one test
+  process (`identity.zig`'s own test and the Stage 1 `discovery.scanDir`
+  test); added two real two-server-process tests to `tests/mcp_smoke_test.zig`
+  (same content, two processes, same identity; different content, two
+  processes, same revision but different identity) that this stage required
+  before closing Follow-up 021 — see below.
+- **Failure retention.** Re-read `src/mcp/sync.zig`'s `reconcileFailed`/
+  `rebuild` and confirmed against the exhaustive allocation-injection tests
+  (`src/mcp/root.zig`, every allocation point of the sync path, one-shot and
+  sticky) that every failure path leaves the previously published
+  snapshot/identity pair intact and reports which recovery step completed. No
+  finding.
+- **Preflight ordering.** Re-read `callTool` in `src/mcp/root.zig`: preflight
+  runs and `ctx` is populated before the tool switch is even evaluated for
+  the six D4 tools, so a failing preflight structurally cannot reach a
+  handler. No finding.
+- **Cursor behavior.** The `sync-trust` gate profile's `cursor_restart` proof
+  (a cursor issued before a revision-changing sync fails when retried after)
+  relies on pre-existing cursor-revision binding, unmodified by this plan. No
+  finding.
+- **Jev blocking.** Structural, not a separate check: `semidx_rank_context`'s
+  handler is one of the six behind the fails-closed switch, so a mismatch
+  cannot reach `ranking.Provider.rank()`. Proven with a counting fake
+  provider at the unit level (Stage 3); explicitly not proven by the stdio
+  gate (documented in `habit_loop_gate.md`, not silently omitted). No
+  additional finding beyond that documented scope boundary.
+- **Error payloads.** Re-checked every `semidx_preflight_out_of_date`/
+  `semidx_preflight_scan_failed` message against the plan's sanitization
+  rule: neither includes the configured root's absolute path, source
+  contents, or raw OS error text — only the stable prefix, the retained
+  revision, and the retained `source_state_id`. No finding.
+
+One real finding from this review, fixed in this stage: **Follow-up 021's
+cross-process requirement was under-proven.** `identity.zig`'s own tests and
+Stage 1's `discovery.scanDir` test both proved determinism by running two
+scans *inside one test process*, which is sufficient evidence that the
+encoding itself has no process-local input, but is not literally "two
+servers" as Follow-up 021's Required Tests ask. Added, in
+`tests/mcp_smoke_test.zig`: two real `semidx-mcp` subprocesses over the same
+content report the same `source_state_id`; two real subprocesses over
+different content report the same revision (proving revision alone still
+cannot distinguish them) but different `source_state_id`; and one subprocess
+restarted over unchanged content does not resume the revision it had before.
+All three pass. Follow-up 021 is now marked `fixed`, `lifecycle: completed`,
+with its own resolution section listing exactly which test proves which of
+its four required tests.
+
+### Drift control
+
+Checked against the current owners the drift-control procedure names:
+
+- `ARCHITECTURE_CONSTITUTION.md`: re-applied the §11 eight-question test to
+  the delivered implementation, not just to ADR 014's text (Stage 0 checked
+  the ADR's own reasoning; this pass checked the code against it). No
+  deviation: `source_state_id` and `working_copy` are scan/comparison
+  metadata, establish no relationship, and create no node.
+- Accepted ADRs: ADR 014 accepted (Stage 0), text unchanged since. ADR 013
+  cross-referenced (Plan 015's `semidx_rank_context` is one of the six
+  preflight-gated tools) and confirmed still accurate: Plan 015's own
+  progress log and `MEMORY.md` entry already say it remains blocked on Plan
+  015 Stage 4 credentials, unaffected by this plan.
+- `SPEC.md`: the "Working-copy synchronization" row (Stage 0) matches
+  delivered behavior; no correction needed.
+- `CONFORMANCE.md`: checked and intentionally left untouched. Its Required
+  Scenario Families and Current Status section are graph/constitution
+  evidence (entity identity, incrementality, consistent observation, and so
+  on) for the core-slice plans (001-003); MCP-consumer plans such as 004
+  (the MCP preview itself) and 015 (Jev) were never added there either. A
+  working-copy trust boundary is consumer/presentation policy, not new
+  graph-model evidence, so it does not belong in this document under its
+  existing scope. Recorded here so the omission reads as a decision, not an
+  oversight.
+- `GLOSSARY.md`: **source-state identity**, **sync preflight**, and
+  **working-copy status** (Stage 0) match delivered behavior; no correction
+  needed.
+- `MEMORY.md`: rewritten in this stage (see below) — the stage-by-stage
+  narration accumulated across Stages 2-5 was compressed into final-state
+  facts, the MCP tool list was corrected to finally include
+  `semidx_rank_context` (a pre-existing omission from Plan 015, unrelated to
+  this plan, fixed here since this stage's drift pass touched that exact
+  bullet anyway), and the two now-resolved "known defect" bullets about
+  revision-as-identity and `current`-as-sync were rewritten in the past
+  tense with links to what replaced them.
+- MCP docs (`docs/mcp/local_preview.md`, `docs/mcp/habit_loop_gate.md`):
+  updated stage by stage already (Stages 2-5); re-read in full during this
+  pass and found consistent with delivered behavior.
+- Skills (`.agents/skills/semidx-code-exploration/SKILL.md`): updated in
+  Stage 4; re-read and found consistent.
+- Implementation, tests, gates: covered by the verification run below.
+
+### Follow-up 021 closure
+
+Marked `fixed` (see Findings-first review above for what closed it). Its
+Required Tests are each named in its own updated "Resolution" section,
+pointing at the exact test that proves it.
+
+### Plan and progress-log closure
+
+Every Definition of Done bullet re-checked against delivered evidence:
+
+- ADR 014 accepted, `SPEC.md`/`GLOSSARY.md` own the vocabulary — Stage 0.
+- Deterministic source-state identity, stable across equivalent processes —
+  Stage 1, strengthened to real cross-process evidence in this stage.
+- Every normal MCP result carries revision and source-state identity — Stage
+  3 (`beginStructured` is shared by all nine tool result renderers).
+- `semidx_sync` documented first call; unchanged sync preserves
+  revision/ids/cursors; changed sync incremental, publishes once — Stages
+  2 and 4.
+- `semidx_refresh` remains a compatible alias — Stage 2.
+- Health distinguishes `in_sync`/`out_of_date`/`scan_failed`, never mutates —
+  Stages 3-4.
+- Every graph-reading tool fails before rendering graph data on mismatch or
+  failure, names `semidx_sync` — Stage 3.
+- A fake enabled Jev provider receives zero calls when not `in_sync` — Stage
+  3 (unit level; see the documented gate-level scope boundary above).
+- Parser failure after a successful sync stays visible as
+  stale/pending, distinct from working-copy mismatch — Stage 3.
+- The external-edit regression, branch-switch batch, scan failure, no-op
+  sync, changed sync, cursor restart, and recovery paths are hard-gate
+  evidence — Stage 5 (`sync-trust` profile) plus the pre-existing recovery
+  injection tests.
+- Compact health is smaller than full while keeping every trust/parser
+  signal — Stage 4 (25%).
+- Verification stays offline and credential-free; preflight cost is recorded
+  as an observation — every stage.
+- Watchers, persistence, source rendering, stale bypass, release/version
+  work, and public semantic contracts stayed outside scope — true throughout;
+  no stage touched any of them.
+- Implementation, docs, skills, ADR, follow-up status, plan, progress log,
+  and `MEMORY.md` agree, and every coherent stage is committed — this stage.
+
+The plan's Definition of Done does not name the external-repository real-task
+evaluation as a required bullet (it appears only in Stage 5's "Required
+work" list); closing the plan without it is therefore consistent with what
+the plan itself commits to, not a lowered bar. It remains a genuine residual
+item, offered to the operator as a follow-up rather than fabricated.
+
+**Plan 016, this progress log, and ADR 014 are marked historical/completed
+in the same commit as this stage**, per the documentation policy's closure
+rule.
+
+### Verification run
+
+- `./scripts/check-zig-version.sh`: "Zig version 0.16.0 matches semidx
+  target".
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build test-core --summary all`: passed.
+- `zig build test --summary all`: 342/344 passed (2 pre-existing skips),
+  including the two new cross-process tests and the restart test.
+- `zig build test-mcp --summary all`: passed.
+- `zig build dogfood`: passed.
+- `zig build preview-gate --summary all`: all three profiles pass.
+- `./scripts/check-readme-stewardship.sh --all`: passed.
+- `./scripts/check-memory-freshness.sh`: passed.
+
+### Stop-rule check
+
+No stop condition triggered in this stage: no release was published, no
+stable MCP/semantic contract was claimed, and the one residual item was
+disclosed rather than hidden.
