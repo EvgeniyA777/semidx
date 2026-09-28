@@ -138,7 +138,8 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     try gate.observe("root: temporary copy of {s}: {d} source units, {d} bytes", .{ build_options.repo_root, copy.units, copy.bytes });
 
     // -- health ---------------------------------------------------------------
-    const health = try gate.call(1, "semidx_health", "{}");
+    var health_bytes: usize = 0;
+    const health = try gate.sizedCall(1, "semidx_health", "{}", &health_bytes);
     const first_revision = revisionOf(health);
     const diagnostics = try gate.checkHealth(health, build_options.product_version);
     try gate.requireDiagnostic(diagnostics, "unsupported_construct");
@@ -146,6 +147,12 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     const units = health.get("units").?.object;
     try testing.expectEqual(@as(i64, @intCast(copy.units)), units.get("total").?.integer);
     try testing.expect(units.get("current").?.integer > 0);
+    try testing.expect(health.get("graph") == null);
+
+    var full_health_bytes: usize = 0;
+    const full_health = try gate.sizedCall(30, "semidx_health", "{\"detail\":\"full\"}", &full_health_bytes);
+    try testing.expect(full_health.get("graph") != null);
+    try expectAtMostHalf(&gate, "semidx_health", health_bytes, full_health_bytes);
 
     // -- outline: the cold-start orientation call ------------------------------
     var outline_bytes: usize = undefined;

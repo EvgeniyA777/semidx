@@ -331,9 +331,15 @@ documents that own history, rationale, and evidence.
   failing. Cost: every read now pays for one full discovery scan
   (repository-copy profile: ~8ms/call observed locally, up from ~1ms before
   Stage 3, on 92 units) — an explicit trade the plan accepts and Stage 5 must
-  measure formally. Stage 4 (compact/full health detail, sync-first habit-loop
-  docs) and Stages 5-6 remain. Execute it before expanding ranking claims;
-  better ordering over an obsolete snapshot would amplify false confidence.
+  measure formally. Stage 4 added `semidx_health`'s `detail: "compact" |
+  "full"` (compact is 25% of full on the repository-copy profile) and made
+  `semidx_sync` the documented first call everywhere (README, local MCP
+  reference, code-exploration skill), with `semidx_health` now secondary
+  ("call when a diagnostic summary is useful") and `semidx_refresh` described
+  as the compatible alias throughout. Stages 5-6 remain: hard gates for the
+  regression fixtures already committed, and canon/security closure. Execute
+  it before expanding ranking claims; better ordering over an obsolete
+  snapshot would amplify false confidence.
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) remains an
   incomplete, blocked adoption experiment. Stages 0-3 implemented default-off
   consent, bounded graph-only candidate projection, offline fixtures, and the

@@ -195,15 +195,15 @@ pub const Gate = struct {
 
         const diagnostics = health.get("diagnostics");
         try self.require(diagnostics != null and diagnostics.? == .object, "diagnostics_visible", "health reports no diagnostic counts", .{});
+        const working_copy = health.get("working_copy");
+        try self.require(working_copy != null and working_copy.? == .object and working_copy.?.object.get("status") != null, "diagnostics_visible", "health reports no working_copy status", .{});
+        try self.pass("diagnostics_visible", "working_copy.status {s}", .{working_copy.?.object.get("status").?.string});
         const units = health.get("units").?.object;
-        const current = health.get("graph").?.object.get("assertions").?.object.get("current").?.object;
-        try self.observe("health: units total {d}, current {d}, pending {d}, stale {d}; current facts {d}, unresolved {d}", .{
+        try self.observe("health: units total {d}, current {d}, pending {d}, stale {d}", .{
             units.get("total").?.integer,
             units.get("current").?.integer,
             units.get("pending").?.integer,
             units.get("stale").?.integer,
-            current.get("fact").?.integer,
-            current.get("unresolved").?.integer,
         });
         try self.observe("health: diagnostics analysis_unavailable {d}, analysis_failed {d}, unsupported_construct {d}, confirmed_absence {d}", .{
             diagnostics.?.object.get("analysis_unavailable").?.integer,

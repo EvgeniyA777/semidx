@@ -196,21 +196,36 @@ Read this before registering semidx with a client that uses a hosted model.
 
 ### First Calls
 
-Discover progressively: learn where to look, then open a small map, then ask
-focused questions. Every step uses the default compact
-[detail level](#detail-levels-and-budgets) and response budget:
+Call `semidx_sync` first, every session and after every edit: it is what makes
+every later call's `in_sync` trustworthy rather than assumed. Then discover
+progressively: learn where to look, then open a small map, then ask focused
+questions. Every step uses the default compact
+[detail level](#detail-levels-and-budgets) and response budget.
 
-1. `semidx_health`: is every unit `current`, and which languages have parsers?
-2. `semidx_outline`: which directories and files exist under the root, and how
+`semidx_sync` and every call after it are dependent calls, not independent
+ones: never launch them in parallel. A call launched before an in-flight sync
+completes could observe either snapshot, which defeats the point of syncing
+first ([ADR 014](../adr/014_distinguish_snapshot_analysis_from_working_copy_sync.md)).
+
+1. `semidx_sync`: idempotent, so calling it when nothing changed costs one
+   scan and changes nothing. Skipping it does not skip the check — every
+   graph-reading tool below still runs the same comparison and fails closed
+   on a mismatch — it only means finding out from a tool error instead of
+   from this call.
+2. `semidx_health`, only when a diagnostic summary is useful before narrowing
+   further: is every unit `current` (snapshot-relative — see
+   [Result Fields](#result-fields)), and which languages have parsers?
+3. `semidx_outline`: which directories and files exist under the root, and how
    many units, definitions, and diagnostics each holds? Repeat with a
    directory's `path_prefix` to descend. It lists no definitions.
-3. `semidx_repo_map` with the `path_prefix` of one directory (or file): which
+4. `semidx_repo_map` with the `path_prefix` of one directory (or file): which
    top-level definitions exist there, and at which lines?
-4. `semidx_find_definitions` with a `name`: where is a definition introduced?
-5. `semidx_references` or `semidx_context` on it: what calls it, what does it
+5. `semidx_find_definitions` with a `name`: where is a definition introduced?
+6. `semidx_references` or `semidx_context` on it: what calls it, what does it
    call, and which of those claims are facts? For impact beyond one step, give
    `semidx_context` a `direction` and `depth: 2`.
-6. `semidx_refresh` after editing files, before trusting later answers.
+7. `semidx_sync` again after editing files, before trusting later answers
+   (`semidx_refresh` remains a compatible alias over the same operation).
 
 When a result is cut, read its `narrowing_hints` and narrow the next call
 rather than raising every limit; follow `next_cursor` only when you need the

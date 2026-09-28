@@ -161,10 +161,14 @@ fn define(comptime tool: Tool, comptime title: []const u8, comptime description:
 }
 
 pub const definitions = [_]Definition{
-    define(.semidx_health, "Index health", "Report the configured root, the published snapshot revision, source-unit and graph counts, " ++
-        "per-language frontend coverage and parser availability, diagnostic counts, and the last scan outcome. " ++
-        "The revision orders this server's own snapshots and identifies no content: it does not establish that two " ++
-        "observations, or two servers, saw the same indexed state.", &.{}),
+    define(.semidx_health, "Index health", "Report the configured root, the published snapshot's revision and source-state identity, " ++
+        "working-copy status against a fresh scan (in_sync, out_of_date, or scan_failed — reported, never repaired; call " ++
+        "semidx_sync to repair), source-unit and diagnostic counts, per-language parser availability, and recovery state. " ++
+        "compact (default) keeps exactly that; full adds graph entity/assertion counts, per-language producer and " ++
+        "coverage details, and the last scan outcome. The revision orders this server's own snapshots and identifies no " ++
+        "content by itself: source_state_id is what makes two observations of the same source state comparable.", &.{
+        shared_params.detail,
+    }),
     define(.semidx_outline, "Repository outline", "List the directories and files directly under one directory, each with counts of " ++
         "source units by language and analysis state, diagnostics by kind, and top-level and nested definitions, without " ++
         "listing any definition. Start orientation here, then call semidx_repo_map with a path_prefix. Bounded; results report truncation.", &.{
@@ -1298,7 +1302,8 @@ pub fn writeUnitCounts(ctx: *Context, s: *Stringify) Error!void {
 // -- tools ------------------------------------------------------------------
 
 pub fn health(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, status: Status) Error!void {
-    _ = try Args(.semidx_health).init(ctx, arguments);
+    const args = try Args(.semidx_health).init(ctx, arguments);
+    const detail = try args.choice(DetailArg, "detail");
     const snapshot = ctx.snapshot;
 
     try beginStructured(ctx, s);
@@ -1318,32 +1323,34 @@ pub fn health(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, status: Statu
     try s.objectField("units");
     try writeUnitCounts(ctx, s);
 
-    try s.objectField("graph");
-    try s.beginObject();
-    try s.objectField("entities");
-    try s.beginObject();
-    for (std.enums.values(model.EntityKind)) |kind| {
-        try s.objectField(@tagName(kind));
-        try s.write(snapshot.countEntities(.{ .kind = kind }));
+    if (detail == .full) {
+        try s.objectField("graph");
+        try s.beginObject();
+        try s.objectField("entities");
+        try s.beginObject();
+        for (std.enums.values(model.EntityKind)) |kind| {
+            try s.objectField(@tagName(kind));
+            try s.write(snapshot.countEntities(.{ .kind = kind }));
+        }
+        try s.objectField("stale");
+        try s.write(snapshot.countEntities(.{ .freshness = .stale }));
+        try s.endObject();
+        try s.objectField("assertions");
+        try s.beginObject();
+        try s.objectField("recorded");
+        try s.write(snapshot.assertions.len);
+        try s.objectField("current");
+        try s.beginObject();
+        for (std.enums.values(model.ResolutionCategory)) |category| {
+            try s.objectField(@tagName(category));
+            try s.write(snapshot.countAssertions(.{ .resolution = category }));
+        }
+        try s.endObject();
+        try s.objectField("stale");
+        try s.write(snapshot.countAssertions(.{ .freshness = .stale }));
+        try s.endObject();
+        try s.endObject();
     }
-    try s.objectField("stale");
-    try s.write(snapshot.countEntities(.{ .freshness = .stale }));
-    try s.endObject();
-    try s.objectField("assertions");
-    try s.beginObject();
-    try s.objectField("recorded");
-    try s.write(snapshot.assertions.len);
-    try s.objectField("current");
-    try s.beginObject();
-    for (std.enums.values(model.ResolutionCategory)) |category| {
-        try s.objectField(@tagName(category));
-        try s.write(snapshot.countAssertions(.{ .resolution = category }));
-    }
-    try s.endObject();
-    try s.objectField("stale");
-    try s.write(snapshot.countAssertions(.{ .freshness = .stale }));
-    try s.endObject();
-    try s.endObject();
 
     try s.objectField("languages");
     try s.beginArray();
@@ -1352,8 +1359,6 @@ pub fn health(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, status: Statu
         try s.beginObject();
         try s.objectField("language");
         try s.write(@tagName(language.language));
-        try s.objectField("extensions");
-        try s.write(language.extensions);
         try s.objectField("parser");
         try s.beginObject();
         try s.objectField("available");
@@ -1363,24 +1368,30 @@ pub fn health(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, status: Statu
             try protocol.writeString(s, message);
         }
         try s.endObject();
-        try s.objectField("producer");
-        try writeProducer(s, capabilities.producer, .full);
-        try s.objectField("entity_roles");
-        try s.write(capabilities.entity_roles);
-        try s.objectField("relationship_kinds");
-        try s.beginArray();
-        for (capabilities.relationship_kinds) |kind| try s.write(@tagName(kind));
-        try s.endArray();
-        try s.objectField("coverage_note");
-        try s.write(capabilities.coverage_note);
+        if (detail == .full) {
+            try s.objectField("extensions");
+            try s.write(language.extensions);
+            try s.objectField("producer");
+            try writeProducer(s, capabilities.producer, .full);
+            try s.objectField("entity_roles");
+            try s.write(capabilities.entity_roles);
+            try s.objectField("relationship_kinds");
+            try s.beginArray();
+            for (capabilities.relationship_kinds) |kind| try s.write(@tagName(kind));
+            try s.endArray();
+            try s.objectField("coverage_note");
+            try s.write(capabilities.coverage_note);
+        }
         try s.endObject();
     }
     try s.endArray();
 
     try s.objectField("diagnostics");
     try writeDiagnosticCounts(ctx, s, null);
-    try s.objectField("last_scan");
-    try s.write(status.last_scan);
+    if (detail == .full) {
+        try s.objectField("last_scan");
+        try s.write(status.last_scan);
+    }
     try s.objectField("recovery");
     try s.write(status.recovery);
     if (status.outbound_projection) |projection| {
@@ -1394,6 +1405,11 @@ pub fn health(ctx: *Context, s: *Stringify, arguments: ?ObjectMap, status: Statu
         try s.write(projection.categories);
         try s.endObject();
     }
+    try s.objectField("budget");
+    try s.beginObject();
+    try s.objectField("detail");
+    try s.write(@tagName(detail));
+    try s.endObject();
     try s.endObject();
 }
 

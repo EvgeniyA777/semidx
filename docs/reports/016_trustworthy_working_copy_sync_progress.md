@@ -14,7 +14,7 @@ Companion log for
 
 ## Current Status
 
-**Stages 0-3 complete.**
+**Stages 0-4 complete.**
 
 ## Start Rule: Readiness Evidence
 
@@ -406,3 +406,64 @@ argument weakens it).
 stale ranges can be rendered and succeeds only after sync (done — proven both
 in the new root.zig test and reproduced structurally by the rewritten
 "refresh publishes a new snapshot..." test). Stage 3 complete.
+
+## Stage 4: Compact Health And Sequential Habit Loop
+
+### What shipped
+
+- `src/mcp/tools.zig`: `semidx_health` gained a `detail: "compact" | "full"`
+  parameter (default `compact`), matching the pattern `semidx_repo_map`/
+  `semidx_references`/`semidx_context` already use. Compact keeps: root,
+  product/server identity, `snapshot.source_state_id`, `working_copy`, unit
+  and diagnostic counts, per-language parser availability, recovery state,
+  and the already-redacted `outbound_projection`. Full adds: graph
+  entity/assertion counts, per-language `extensions`/`producer`/
+  `entity_roles`/`relationship_kinds`/`coverage_note`, and `last_scan`. A
+  `budget: {detail}` field reports which was rendered, matching the other
+  detail-level tools. `evidence_text` stays in both, since whether the
+  evidence-text opt-in is on is exactly the kind of trust-relevant fact the
+  plan asked compact to keep.
+- Measured on the repository-copy profile: compact health is 2,395 bytes vs.
+  full at 9,376 bytes — 25% of full, well inside the required half.
+- `tests/mcp_gate.zig`: `checkHealth` no longer assumes `graph` is present
+  (it isn't, by default) and now also asserts `working_copy.status` is
+  reported; `tests/mcp_dogfood_test.zig` adds an explicit compact-vs-full
+  `semidx_health` size comparison, reusing the existing `expectAtMostHalf`
+  helper (previously only for `semidx_repo_map`/`semidx_references`/
+  `semidx_context`).
+- `docs/mcp/habit_loop_gate.md`: the `compact_budget` gate row now names
+  `semidx_health` alongside the other three tools it already covered.
+- `docs/mcp/local_preview.md`, `README.md`, and
+  `.agents/skills/semidx-code-exploration/SKILL.md`: the first-call sequence
+  now starts with `semidx_sync`, demotes `semidx_health` to "call when a
+  diagnostic summary is useful" rather than the mandatory first step, and
+  states explicitly that `semidx_sync` and every call after it are dependent
+  calls that must not be launched in parallel (ADR 014's own trust argument
+  depends on this: a call racing an in-flight sync could observe either
+  snapshot). `semidx_refresh` is described everywhere as the compatible
+  alias, not a separate step. `semidx_health`'s tool description and the new
+  `detail` parameter documentation make the compact/full split and the
+  revision-vs-`source_state_id` distinction explicit at the schema level, not
+  only in prose.
+
+### Verification run
+
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build test-mcp --summary all`: 82/83 passed (1 pre-existing skip).
+- `zig build test --summary all`: 339/341 passed (2 pre-existing skips).
+- `zig build preview-gate --summary all`: 15/15 steps, 6/6 tests; the new
+  `compact_budget` evidence line for health: `gate: hard pass compact_budget:
+  semidx_health: 25% of full`.
+- `./scripts/check-readme-stewardship.sh --all`: passed after the `README.md`
+  quickstart update.
+
+### Stop-rule check
+
+No stop condition triggered: no output budget was exceeded, and every change
+is prose/schema/detail-level rendering, not a semantic or contract change.
+
+**Done when:** a fresh agent can follow the documented sequence without
+inferring working-copy state from `current` (done — every doc surface now
+states the two-axis distinction and the sync-first sequence); compact health
+is materially smaller than full health on the repository-copy profile (done,
+25%). Stage 4 complete.

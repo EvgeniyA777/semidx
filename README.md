@@ -105,15 +105,23 @@ repositories by registering one MCP server per root.
 
 For a first agent session, use this habit loop:
 
-1. `semidx_health` to check the root, snapshot revision, languages, parsers,
-   diagnostics, and whether the graph is current enough.
-2. `semidx_outline` to see which directories and files hold units,
+1. `semidx_sync` first, every session and after every edit: it confirms (or
+   makes true) that the published snapshot matches the working copy before
+   anything else answers from it.
+2. `semidx_health`, only when a diagnostic summary is useful, to check the
+   root, snapshot revision, languages, parsers, and diagnostics.
+3. `semidx_outline` to see which directories and files hold units,
    definitions, and diagnostics, without listing every definition.
-3. `semidx_repo_map` with a `path_prefix` to orient by files and top-level
+4. `semidx_repo_map` with a `path_prefix` to orient by files and top-level
    definitions in the part that matters.
-4. `semidx_find_definitions` before opening likely definition files.
-5. `semidx_references` or `semidx_context` before editing a target.
-6. `semidx_refresh` after edits, before trusting later graph answers.
+5. `semidx_find_definitions` before opening likely definition files.
+6. `semidx_references` or `semidx_context` before editing a target.
+7. `semidx_sync` again after edits, before trusting later graph answers.
+
+`semidx_sync` and the calls after it are dependent, not independent: never run
+them in parallel. A graph-reading call made without a prior sync still fails
+closed on a stale working copy rather than answering from it; syncing first
+just means finding that out immediately instead of from a tool error.
 
 By default MCP results contain graph values only: paths, ranges, entity names,
 ids, relationships, resolution, freshness, producers, and diagnostics. semidx
