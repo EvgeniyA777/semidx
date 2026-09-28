@@ -4,7 +4,7 @@ doc_type: "reference"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-17"
+updated: "2026-09-27"
 ---
 
 # Habit Loop Gate
@@ -47,23 +47,25 @@ for the gate.
 | --- | --- | --- |
 | `repository-copy` | Every source unit a scan of this repository finds, copied byte for byte into a temporary directory. | Realistic source: the size, shape, and diagnostics an agent working on semidx sees. Also runs the evidence-text opt-in proof and the refresh failure-injection recovery proof. |
 | `fixture` | A few files from `fixtures/vertical-slice` copied into a temporary directory, plus one file no frontend indexes. | Controlled degradation: known facts, unresolved calls, unsupported constructs, a unit that fails analysis, a unit that becomes stale, and a file outside every frontend's coverage. Fast, and independent of how this repository grows. |
+| `sync-trust` | The nine synthetic units `fixtures/working_copy_sync/units/` froze ([Plan 016](../plans/016_trustworthy_working_copy_sync.md) Stage 0), copied into a temporary directory. | The ADR 014 trust contract end to end: a branch-switch-shaped batch (one unit changed, one removed, one added) applied from outside the server, a graph read that must fail closed before syncing, a sync that publishes the batch in one pass, corrected data after sync, a cursor issued before the sync failing after the revision changes, and a scan failure once the root disappears. Independent of `fixtures/vertical-slice` and of this repository's own size. |
 
 `zig build dogfood` runs the `repository-copy` profile alone. `preview-gate`
-runs both profiles and is the canonical gate.
+runs all three profiles and is the canonical gate.
 
 ## Required Call Sequence
 
 Each profile makes these calls, in this order, over one server process:
 
-1. `semidx_health`
-2. `semidx_outline`
-3. `semidx_repo_map` at the default compact detail
-4. `semidx_find_definitions`
-5. `semidx_references`
-6. `semidx_context`
-7. an edit of a file in the temporary root
-8. `semidx_refresh`
-9. a lookup or context call after the refresh
+1. `semidx_sync`, as the very first call
+2. `semidx_health`
+3. `semidx_outline`
+4. `semidx_repo_map` at the default compact detail
+5. `semidx_find_definitions`
+6. `semidx_references`
+7. `semidx_context`
+8. an edit of a file in the temporary root
+9. `semidx_refresh`
+10. a lookup or context call after the refresh
 
 A profile may make further calls between these (full-detail comparisons,
 bounded list probes). A profile that skips a required call fails the
@@ -89,7 +91,15 @@ Every hard gate fails the profile. Names are the ones printed on failure.
 | `stream_discipline` | After stdin closes, stdout carries nothing but the responses already read, the process exits with status 0, stderr is read to its end and contains the exit line, and stdout is valid UTF-8. |
 | `compact_budget` | `repository-copy` only: the default compact `semidx_repo_map`, `semidx_references`, `semidx_context`, and `semidx_health` transcripts are at most half the same calls with `detail: "full"` over the same snapshot (the Plan 007 budget, extended to references by Plan 009 and to health by Plan 016 Stage 4). |
 | `response_budget` | `repository-copy` only: the default whole-repository `semidx_repo_map` either fits its response budget, or reports `budget_exhausted` and a `next_cursor`, and walking the cursor pages returns every source unit exactly once, each page reading the same snapshot revision and `files_total`. |
-| `honest_degradation` | `fixture` only: the failing unit is reported with analysis `pending` and no definitions, and the outline counts it pending with its analysis failure; after an edit makes a unit unparsable, its definitions are absent from default `current` lookups, present as `stale` (same entity id) under `freshness: "any"`, and its unit reports analysis `stale`; the file outside every frontend's coverage is not a unit. |
+| `honest_degradation` | `fixture` only: the failing unit is reported with analysis `pending` and no definitions, and the outline counts it pending with its analysis failure; after an edit makes a unit unparsable, its definitions are absent from default `current` lookups, present as `stale` (same entity id) under `freshness: "any"`, and its unit reports analysis `stale`; the file outside every frontend's coverage is not a unit. It also asserts `working_copy.status: "in_sync"` on that same stale-unit result, proving the two axes side by side (ADR 014 D1). |
+| `source_state_identity_deterministic` | `sync-trust` only: two `semidx_sync` calls over the same unchanged root report the same `snapshot.source_state_id`. |
+| `unchanged_sync_stable` | `sync-trust` only: a `semidx_sync` call over an unchanged root reports `changed: false` and does not advance `snapshot.revision`. |
+| `external_edit_detected` | `sync-trust` only: a graph-reading call made after an external edit and before a sync fails with text starting `semidx_preflight_out_of_date:`. |
+| `graph_read_refusal` | `sync-trust` only: a preflight-blocked call's result carries no `structuredContent`. |
+| `branch_switch_batch` | `sync-trust` only: one sync over a batch that changed, removed, and added a unit in the same edit reports all three non-zero in one `scan` outcome, and a later lookup confirms the removed unit's definition is gone from a default `current` lookup while the added unit's is present. |
+| `corrected_post_sync_ranges` | `sync-trust` only: a sync's own result and the graph read immediately after it both report `working_copy.status: "in_sync"`, and the read's range reflects the edit. |
+| `cursor_restart` | `sync-trust` only: a cursor issued before a sync that changes the revision fails to verify when retried after it. |
+| `scan_failure_refusal` | `sync-trust` only: once the configured root disappears, a graph-reading call fails with text starting `semidx_preflight_scan_failed:`, and `semidx_health` reports `working_copy.status: "scan_failed"` without dropping its retained counts. |
 
 The profile tests also carry assertions about specific graph content (for
 example Plan 006's member definition and cross-unit call facts). They fail the
@@ -140,7 +150,16 @@ records the first run.
 - A stable semantic contract or stable tool shapes.
 - Persistence, HTTP, or any remote operation: none exists.
 - Behavior of any hosted MCP client, or what such a client transmits onward.
-- Performance on repositories other than the two profile roots.
+- Performance on repositories other than the three profile roots.
+- That the optional Jev ranking projection never calls its provider on a
+  working-copy mismatch. That guarantee holds by construction — a mismatch
+  fails closed before `semidx_rank_context`'s own handler runs, so it never
+  reaches the provider — and is proven with a counting fake provider at the
+  unit level (`src/mcp/root.zig`, [Plan 016](../plans/016_trustworthy_working_copy_sync.md)
+  Stage 3), not by this gate: exercising it over stdio would need either live
+  TypeSafe credentials the operator does not have ([Plan 015](../plans/015_optional_jev_ranking_projection.md)
+  is blocked on exactly that) or a local mock HTTP endpoint, which is outside
+  this plan's scope.
 
 ## Extending The Gate
 

@@ -336,10 +336,18 @@ documents that own history, rationale, and evidence.
   `semidx_sync` the documented first call everywhere (README, local MCP
   reference, code-exploration skill), with `semidx_health` now secondary
   ("call when a diagnostic summary is useful") and `semidx_refresh` described
-  as the compatible alias throughout. Stages 5-6 remain: hard gates for the
-  regression fixtures already committed, and canon/security closure. Execute
-  it before expanding ranking claims; better ordering over an obsolete
-  snapshot would amplify false confidence.
+  as the compatible alias throughout. Stage 5 added the `sync-trust` habit-loop
+  gate profile (`fixtures/working_copy_sync/units/`, Stage 0's nine-unit
+  fixture) proving the ADR 014 regression end to end with 8 new named hard
+  gates; `preview-gate` now runs three profiles. Two things are explicitly
+  not proven by the stdio gate: "zero Jev calls on mismatch" is proven at the
+  Zig unit level only (a live-credential or mock-HTTP stdio proof is out of
+  this plan's scope), and Stage 5's external-repository real-task evaluation
+  was not run (no external repository available in-session; ask the operator
+  before Stage 6 closes, though it does not block Stage 6). Stage 6 (canon,
+  security review, closure) remains. Execute it before expanding ranking
+  claims; better ordering over an obsolete snapshot would amplify false
+  confidence.
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) remains an
   incomplete, blocked adoption experiment. Stages 0-3 implemented default-off
   consent, bounded graph-only candidate projection, offline fixtures, and the

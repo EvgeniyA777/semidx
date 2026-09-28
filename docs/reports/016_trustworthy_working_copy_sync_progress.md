@@ -14,7 +14,10 @@ Companion log for
 
 ## Current Status
 
-**Stages 0-4 complete.**
+**Stages 0-5 complete, with one residual item: the external-repository
+real-task evaluation Stage 5 asks for was not run (see below) — it needs an
+external repository this session does not have and cannot fabricate evidence
+for.**
 
 ## Start Rule: Readiness Evidence
 
@@ -467,3 +470,112 @@ inferring working-copy state from `current` (done — every doc surface now
 states the two-axis distinction and the sync-first sequence); compact health
 is materially smaller than full health on the repository-copy profile (done,
 25%). Stage 4 complete.
+
+## Stage 5: Habit-Loop Gate And External-Cost Evidence
+
+### What shipped
+
+- `tests/mcp_gate.zig`: added `Step.sync` as the new first entry of
+  `required_sequence`, satisfied by whichever tool call is literally the
+  first one a profile makes named `semidx_sync`. Later `semidx_sync` calls
+  (there are several in the new profile) classify like `semidx_refresh`,
+  matching Stage 2's shared coordinator. `checkHealth` now asserts
+  `working_copy.status` is reported (a `diagnostics_visible` pass) instead of
+  assuming `graph` is present.
+- `tests/mcp_dogfood_test.zig` and `tests/mcp_fixture_gate_test.zig`: both now
+  make `semidx_sync` their first call (`changed: false` asserted, since
+  nothing has happened yet); everything else in both profiles is unchanged.
+- `tests/mcp_sync_gate_test.zig` (new): the `sync-trust` profile, over the
+  nine-unit fixture `fixtures/working_copy_sync/units/` Stage 0 froze exactly
+  for this. One server process proves, in order: two `semidx_sync` calls over
+  an unchanged root report the same `source_state_id` and revision
+  (`source_state_identity_deterministic`, `unchanged_sync_stable`); a
+  branch-switch-shaped batch (`unit_03.zig` changed, `unit_09.zig` removed,
+  `unit_10.zig` added, all in one edit) applied from outside the server is
+  detected by a blocked read before syncing
+  (`external_edit_detected`/`graph_read_refusal`); one sync publishes the
+  whole batch and reports `changed`/`removed`/`added` all non-zero in one
+  scan outcome (`branch_switch_batch`); a read right after returns the
+  corrected range and `working_copy.status: "in_sync"`
+  (`corrected_post_sync_ranges`); a cursor issued before the sync fails when
+  retried after the revision changed (`cursor_restart`); and once the root
+  disappears entirely, a graph read fails with
+  `semidx_preflight_scan_failed:` while `semidx_health` keeps answering,
+  reporting `working_copy.status: "scan_failed"` without dropping its
+  retained counts (`scan_failure_refusal`). A small local `rawCallTool`
+  helper (over `Client.request` directly) was needed for the three calls this
+  profile expects to fail: `Gate.call`/`Gate.sizedCall` assert success by
+  design, which is correct for the other two profiles but wrong for a profile
+  whose whole point is proving specific failures.
+- `build.zig`: wired the new test file into `preview-gate` as a third
+  dependency, with its own `fixtures/working_copy_sync` fixtures-dir option,
+  the same pattern the `fixture` profile already uses.
+- `docs/mcp/habit_loop_gate.md`: added the `sync-trust` row to Profiles, the
+  new `Step.sync` entry to Required Call Sequence, eight new named hard-gate
+  rows (`source_state_identity_deterministic`, `unchanged_sync_stable`,
+  `external_edit_detected`, `graph_read_refusal`, `branch_switch_batch`,
+  `corrected_post_sync_ranges`, `cursor_restart`, `scan_failure_refusal`), and
+  an explicit note under "What The Gate Does Not Prove" naming the one Stage
+  5 guarantee this gate does not exercise itself (see below).
+
+### Zero Jev calls on mismatch: proven at the unit level, not by this gate
+
+Stage 5's required list includes "zero Jev calls on mismatch" as a named hard
+gate. This is already proven — a counting fake `ranking.Provider` receives
+zero calls on a mismatch and exactly one once synced
+(`src/mcp/root.zig`, Stage 3's "semidx_rank_context calls no provider when
+the working copy is out of date" test) — but that proof runs at the Zig unit
+level (`Harness`, in-process), not through the stdio gate. Exercising it
+through the built binary over stdio would need either live TypeSafe
+credentials (unavailable — Plan 015 is explicitly blocked on exactly this) or
+a local mock HTTP endpoint, which is new test infrastructure outside this
+plan's scope (Non-Scope: "No Jev quality evaluation, model change, provider
+behavior change, release, version bump, HTTP transport, or new dependency").
+Documented explicitly in `habit_loop_gate.md` rather than silently omitted or
+faked as a stdio-level gate it is not.
+
+### Residual item: external-repository real-task evaluation
+
+Stage 5 also asks to "run one privacy-safe real-task evaluation on an
+external repository and record whether stale graph data escaped, how many
+manual reads remained, and how many extra tool round trips sync required."
+This needs an actual external repository and an interactive session using
+the MCP preview against it — not something this session can fabricate
+evidence for without a repository to point it at. **Not done.** Flagged to
+the operator; if they name a repository (or confirm using a fresh clone of a
+public one, not committing its source or absolute paths), this item can be
+completed as a follow-up to this stage rather than blocking Stage 6, since
+the plan's own Stage 5 "Done when" bar (the canonical gate reproduces and
+prevents the original failure mode, and preflight cost is recorded honestly)
+does not depend on it.
+
+### Verification run
+
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build test --summary all`: 339/341 passed (2 pre-existing skips).
+- `zig build test-mcp --summary all`: 82/83 passed (1 pre-existing skip).
+- `zig build preview-gate --summary all`: 18/18 steps, 7/7 tests, all three
+  profiles pass. Full hard-gate list collected and cross-checked: every
+  gate named in `habit_loop_gate.md`'s table fired at least once, including
+  all eight new ones and `honest_degradation`'s extended
+  `working_copy.status: "in_sync"` assertion from Stage 3.
+- Preflight-cost observations (all three profiles, this run): `fixture`
+  first response 43 ms (7 units), `repository-copy` first response 590 ms
+  (93 units, includes full index build, not just discovery), `sync-trust`
+  first response 22 ms (9 units). Per-call latency after startup on
+  `repository-copy` stays ~8-10 ms per graph-reading call (Stage 3's
+  preflight cost), consistent with the Stage 3 observation.
+
+### Stop-rule check
+
+No stop condition triggered: the fail-closed contract was not weakened to a
+metadata-only comparison anywhere, and preflight cost, while real, did not
+make repeated reads unusable at the scale measured (single-digit to low
+double-digit milliseconds per call).
+
+**Done when:** the canonical preview gate reproduces and prevents the
+original failure mode (done — `sync-trust` reproduces the exact ADR 014
+regression shape and proves it now fails closed), and preflight cost is
+recorded honestly (done, including the combined-with-startup caveat carried
+over from Stage 3). Stage 5 complete except the external-repository
+real-task evaluation, recorded above as a residual item.

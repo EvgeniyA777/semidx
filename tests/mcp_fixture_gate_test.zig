@@ -78,6 +78,10 @@ test "habit loop gate: fixture profile degrades honestly over a controlled root"
     var gate = Gate.init(arena, "fixture", client, started);
     try gate.observe("root: temporary directory of {d} fixtures/vertical-slice files ({d} bytes) and {s}", .{ copied.len, bytes, unindexed_path });
 
+    // -- sync first, as documented ----------------------------------------
+    const first_sync = try gate.call(13, "semidx_sync", "{}");
+    try testing.expectEqual(false, first_sync.get("changed").?.bool);
+
     // -- health: the failing unit is pending, the unindexed file is no unit ----
     const health = try gate.call(1, "semidx_health", "{}");
     const first_revision = mcp_gate.snapshotRevision(health).?;

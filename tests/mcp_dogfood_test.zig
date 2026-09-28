@@ -137,6 +137,10 @@ test "dogfood: the agent habit loop over a copy of this repository, through stdi
     var gate = Gate.init(arena, "repository-copy", client, started);
     try gate.observe("root: temporary copy of {s}: {d} source units, {d} bytes", .{ build_options.repo_root, copy.units, copy.bytes });
 
+    // -- sync first, as documented -----------------------------------------
+    const first_sync = try gate.call(31, "semidx_sync", "{}");
+    try testing.expectEqual(false, first_sync.get("changed").?.bool);
+
     // -- health ---------------------------------------------------------------
     var health_bytes: usize = 0;
     const health = try gate.sizedCall(1, "semidx_health", "{}", &health_bytes);

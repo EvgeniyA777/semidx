@@ -386,6 +386,29 @@ pub fn build(b: *std.Build) void {
     // The fixtures are read at run time.
     run_fixture_gate.has_side_effects = true;
     gate_step.dependOn(&run_fixture_gate.step);
+
+    // The sync-trust profile (Plan 016 Stage 5): the ADR 014 regression
+    // sequence end to end, over the nine-unit fixture Stage 0 froze.
+    const sync_gate_options = b.addOptions();
+    sync_gate_options.addOptionPath("mcp_exe", mcp_exe.getEmittedBin());
+    sync_gate_options.addOption([]const u8, "fixtures_dir", b.pathFromRoot("fixtures/working_copy_sync"));
+    sync_gate_options.addOption([]const u8, "product_version", manifest.version);
+    const sync_gate = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/mcp_sync_gate_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            // The stdio client polls the child's exit with `waitpid`.
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "build_options", .module = sync_gate_options.createModule() },
+            },
+        }),
+    });
+    const run_sync_gate = b.addRunArtifact(sync_gate);
+    // The fixtures are read at run time.
+    run_sync_gate.has_side_effects = true;
+    gate_step.dependOn(&run_sync_gate.step);
 }
 
 fn addParserDeps(b: *std.Build, module: *std.Build.Module, deps: ParserDeps) void {

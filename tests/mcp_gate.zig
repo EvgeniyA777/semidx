@@ -18,9 +18,9 @@ const Value = std.json.Value;
 pub const ObjectMap = std.json.ObjectMap;
 
 /// A step of the habit loop, in the order a profile must make them.
-pub const Step = enum { health, outline, repo_map, find_definitions, references, context, edit, refresh, after_refresh };
+pub const Step = enum { sync, health, outline, repo_map, find_definitions, references, context, edit, refresh, after_refresh };
 
-const required_sequence = [_]Step{ .health, .outline, .repo_map, .find_definitions, .references, .context, .edit, .refresh, .after_refresh };
+const required_sequence = [_]Step{ .sync, .health, .outline, .repo_map, .find_definitions, .references, .context, .edit, .refresh, .after_refresh };
 
 /// Tools whose results are lists and must report the budget they applied.
 const list_tools = [_][]const u8{ "semidx_outline", "semidx_repo_map", "semidx_find_definitions", "semidx_references", "semidx_context" };
@@ -95,9 +95,11 @@ pub const Gate = struct {
             try self.require(budget != null and budget.? == .object, "bounded_lists", "{s} (request {d}) reports no budget object", .{ name, id });
         }
 
-        const step: ?Step = if (std.mem.eql(u8, name, "semidx_health"))
+        const step: ?Step = if (std.mem.eql(u8, name, "semidx_sync") and self.steps.items.len == 0)
+            .sync
+        else if (std.mem.eql(u8, name, "semidx_health"))
             .health
-        else if (std.mem.eql(u8, name, "semidx_refresh"))
+        else if (std.mem.eql(u8, name, "semidx_refresh") or std.mem.eql(u8, name, "semidx_sync"))
             .refresh
         else if (self.refreshed_revision != null)
             .after_refresh
