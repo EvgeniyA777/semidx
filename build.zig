@@ -34,6 +34,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // The identity fixed vectors (Plan 016 Stage 0/6) are read from the
+    // committed fixture directory rather than embedded, so the pinned test
+    // vectors and the frozen fixture documentation can never quietly diverge.
+    const working_copy_sync_fixtures_options = b.addOptions();
+    working_copy_sync_fixtures_options.addOption([]const u8, "dir", b.pathFromRoot("fixtures/working_copy_sync"));
+
     // Source discovery owns the only filesystem access in the ingestion path.
     // It reads `core/model` for value vocabulary and nothing else from the core,
     // and nothing in the core reads it back.
@@ -43,6 +49,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "semidx_core", .module = core },
+            .{ .name = "semidx_working_copy_sync_fixtures", .module = working_copy_sync_fixtures_options.createModule() },
         },
     });
 

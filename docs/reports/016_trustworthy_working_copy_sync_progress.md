@@ -797,3 +797,37 @@ declaring drift control clean. Re-ran the full verification lane after all
 three fixes: `zig fmt --check`, `test-core` (109/110, 1 pre-existing skip),
 `test-mcp` (85/86, 1 pre-existing skip), `test` (343/345, 2 pre-existing
 skips), `preview-gate` (three profiles, all pass).
+
+### Second Review Round: Pinned Vectors Did Not Match Their Own Documentation
+
+A follow-up review caught that fix 1 above, while correctly pinning a literal
+64-hex value, pinned it for the wrong inputs: an empty exclusion policy and a
+synthetic `a.zig` unit, not `identity_vectors.md`'s actual case 1 (default
+policy) and case 2 (`units/unit_01.zig`'s real bytes) — the doc comment
+claimed these were cases 1-2 from the frozen fixture file, which was false.
+The encoding-drift risk the first fix targeted was still closed (any change
+to field order or endianness still fails these two tests), but the pinned
+values did not correspond to what the committed fixture documentation
+actually specifies, so they could not stand in for auditing that specific
+frozen case.
+
+Fixed properly this time: added a `semidx_working_copy_sync_fixtures`
+build-option module (`build.zig`, pointing at `fixtures/working_copy_sync`,
+wired into the `semidx_source` module — the same pattern Plan 015 used for
+Jev fixtures, chosen for the same reason: `@embedFile` cannot cross this
+package boundary). `identity.zig`'s pinned-vector test now reads
+`units/unit_01.zig`'s real bytes at test time through it, and hashes them
+alongside `scan_mod.default_excluded_directories` (passed unsorted — the
+implementation sorts its own copy, so this also incidentally re-proves that
+`calculate` normalizes a caller's order rather than assuming one). Recomputed
+both pinned values against these corrected inputs;
+`identity_vectors.md` updated to describe exactly what is now hashed and to
+record why the first attempt was wrong, rather than quietly replacing the
+values with no trace of the mistake.
+
+Verification re-run: `zig fmt --check`, `zig build test-core` and
+`test-core -Dgrammars-dir=/nonexistent` (both pass, confirming the new
+fixtures-dir option does not pull the source module into any parser
+dependency), `zig build test` (343/345, 2 pre-existing skips),
+`zig build preview-gate --summary all` (19/19 steps, 7/7 tests, all three
+profiles pass), `check-readme-stewardship.sh --all`.

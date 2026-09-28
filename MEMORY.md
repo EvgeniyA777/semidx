@@ -351,14 +351,18 @@ documents that own history, rationale, and evidence.
   or a local mock HTTP endpoint would be needed to prove it over stdio, and
   both are out of scope), and the plan's external-repository real-task
   evaluation was not run (no external repository was available in-session).
-  A post-closure review found and this session fixed three gaps: the
-  source-state identity now pins two literal 64-hex reference vectors, not
-  only relational equality/inequality; the sync-first habit loop is now
-  consistent on every surface, including two places the closure review had
-  missed (the MCP server's own `instructions` string, and
-  `docs/agent-policy/tooling.md`, the always-loaded MCP-first policy this
-  agent itself follows); and the Jev-zero-calls proof now covers
-  `scan_failed`, not only `out_of_date`.
+  Two post-closure review rounds found and fixed four gaps: the source-state
+  identity now pins two literal 64-hex reference vectors (`identity.zig`'s
+  `pinned_empty_vector`/`pinned_one_unit_vector`), computed from
+  `fixtures/working_copy_sync/identity_vectors.md`'s actual cases 1-2 (default
+  exclusion policy, `units/unit_01.zig`'s real bytes read through a
+  `semidx_working_copy_sync_fixtures` build-option module) after a first
+  attempt pinned values for the wrong inputs and a second review round caught
+  it; the sync-first habit loop is now consistent on every surface, including
+  two places the first review round missed (the MCP server's own
+  `instructions` string, and `docs/agent-policy/tooling.md`, the
+  always-loaded MCP-first policy this agent itself follows); and the
+  Jev-zero-calls proof now covers `scan_failed`, not only `out_of_date`.
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) remains an
   incomplete, blocked adoption experiment. Stages 0-3 implemented default-off
   consent, bounded graph-only candidate projection, offline fixtures, and the

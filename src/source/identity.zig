@@ -162,6 +162,15 @@ fn writeString(hasher: *Sha256, bytes: []const u8) void {
 
 const testing = std.testing;
 const model = @import("semidx_core").model;
+const working_copy_sync_fixtures = @import("semidx_working_copy_sync_fixtures");
+
+/// Reads a unit file under `fixtures/working_copy_sync/units/`, so the pinned
+/// vector test computes over the actual committed fixture bytes rather than
+/// an embedded copy that could silently drift from it.
+fn readFixtureUnit(arena: std.mem.Allocator, name: []const u8) ![]const u8 {
+    const full = try std.fs.path.join(arena, &.{ working_copy_sync_fixtures.dir, "units", name });
+    return std.Io.Dir.cwd().readFileAlloc(testing.io, full, arena, .limited(1 << 20));
+}
 
 fn unit(path: []const u8, language: model.Language, bytes: []const u8) scan_mod.ScannedUnit {
     return .{ .path = path, .language = language, .bytes = bytes, .content = scan_mod.contentId(bytes) };
@@ -182,22 +191,28 @@ fn scanWith(
     };
 }
 
-/// Pinned outputs of `semidx-source-state-v1` over two of the fixed vectors
-/// `fixtures/working_copy_sync/identity_vectors.md` names (empty, one-unit).
-/// Computed once from this implementation and committed so a change to field
-/// order, endianness, or any other encoding detail — not just a change that
-/// happens to make two computed values disagree with each other — fails a
-/// test, per the plan's requirement to commit fixed vectors rather than only
-/// prove internal equality/inequality.
-const pinned_empty_vector = "e1d2baed93cfae204c909e54278de4148edb11165535d14dd34ab584ac9a786c";
-const pinned_one_unit_vector = "88f8644312e4fdd0d08f6a6b27bc12e5e618915542fb49d9bb538f94abcf44b2";
+/// Pinned outputs of `semidx-source-state-v1` over exactly cases 1 and 2 of
+/// `fixtures/working_copy_sync/identity_vectors.md` (empty, one-unit: default
+/// policy, `units/unit_01.zig`'s real committed bytes). Computed once from
+/// this implementation and committed so a change to field order, endianness,
+/// or any other encoding detail — not just a change that happens to make two
+/// computed values disagree with each other — fails a test, per the plan's
+/// requirement to commit fixed vectors rather than only prove internal
+/// equality/inequality.
+const pinned_empty_vector = "bd5e16cfa0414d1656c09e59bb82d99fcccf8be0328e94b8f3f7b932251f2f0e";
+const pinned_one_unit_vector = "79fe9b6c25b95bf48a090542daf0e476457027e9059695eed70bc6fd27aed27b";
 
 test "the encoding matches its pinned fixed vectors" {
-    const empty = try calculate(testing.allocator, scanWith(&.{}, &.{}, &.{}));
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const empty = try calculate(testing.allocator, scanWith(&.{}, &.{}, &scan_mod.default_excluded_directories));
     try testing.expectEqualStrings(pinned_empty_vector, &toHex(empty));
 
-    const one = [_]scan_mod.ScannedUnit{unit("a.zig", .zig, "pub fn a() void {}\n")};
-    const one_unit_id = try calculate(testing.allocator, scanWith(&one, &.{}, &.{}));
+    const unit_01_bytes = try readFixtureUnit(arena, "unit_01.zig");
+    const one = [_]scan_mod.ScannedUnit{unit("unit_01.zig", .zig, unit_01_bytes)};
+    const one_unit_id = try calculate(testing.allocator, scanWith(&one, &.{}, &scan_mod.default_excluded_directories));
     try testing.expectEqualStrings(pinned_one_unit_vector, &toHex(one_unit_id));
 }
 

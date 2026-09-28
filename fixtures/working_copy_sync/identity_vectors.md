@@ -18,18 +18,28 @@ same temporary tree (Stage 1), and two real `semidx-mcp` subprocesses over
 the same content reporting the same `source_state_id` (Stage 6,
 `tests/mcp_smoke_test.zig`).
 
-**Stage 6 update (review finding):** two of the seven cases now also pin the
-literal 64-hex output, not only equality/inequality between computed values —
-`pinned_empty_vector` and `pinned_one_unit_vector` in `identity.zig`. Proving
-only that two computed values agree or disagree cannot catch an encoding
-change that both a test's "before" and "after" run would still agree on
-internally (a reordered field, a flipped endianness, a changed separator) but
-that silently changes what every other process computes against the same
-tree. The remaining five cases (reordered, byte-change, path-change,
-diagnostic-change, policy-change) are still proven by equality/inequality
-only, since their point is specifically the *relationship* between two scans
-(same input in a different order; one input changed against a baseline), not
-one output value in isolation.
+**Stage 6 update (review finding):** cases 1 (Empty) and 2 (One Unit) now also
+pin the literal 64-hex output, not only equality/inequality between computed
+values — `pinned_empty_vector` and `pinned_one_unit_vector` in `identity.zig`.
+Proving only that two computed values agree or disagree cannot catch an
+encoding change that both a test's "before" and "after" run would still agree
+on internally (a reordered field, a flipped endianness, a changed separator)
+but that silently changes what every other process computes against the same
+tree. A first version of this fix pinned two values computed from an *empty*
+exclusion policy and a synthetic unit, not from this file's actual "default
+policy" and `units/unit_01.zig`; a follow-up review caught the mismatch
+between what the comment claimed and what was actually hashed. The pinned
+values now are computed from exactly what cases 1 and 2 above specify:
+`scan_mod.default_excluded_directories` (unsorted as declared — `calculate`
+sorts its own copy, so passing it unsorted still proves the real default
+policy hashes correctly) and `units/unit_01.zig`'s real bytes, read at test
+time through a `semidx_working_copy_sync_fixtures` build-option module
+(`build.zig`) rather than embedded, so the pinned test and this committed
+fixture file cannot silently drift apart. The remaining five cases (reordered,
+byte-change, path-change, diagnostic-change, policy-change) are still proven
+by equality/inequality only, since their point is specifically the
+*relationship* between two scans (same input in a different order; one input
+changed against a baseline), not one output value in isolation.
 
 Every case names: the discovery budgets and exclusion policy in force, the
 scanned units (path, language, content), and the scan diagnostics (kind, path,
