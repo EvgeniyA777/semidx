@@ -302,8 +302,8 @@ documents that own history, rationale, and evidence.
   can promote later levels.
 - Next planned work is
   [Plan 017](docs/plans/017_adoption_baseline_and_priority_selection.md): required
-  driver, six paired cards/24 sessions on Petclinic/Dubbo, capacity-first replay
-  (Camel exceeds the default 20,000-unit budget), client visibility, bounded memory,
+  driver, six distinct paired targets/24 sessions on Petclinic/Dubbo, Hadoop replay,
+  one Camel known-boundary probe outside priority ranking, client/memory evidence,
   and explicit decision rules. Planned only; no runtime measurements exist yet.
 - [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) delivered source-state
   identity, idempotent sync, fail-closed read preflight, and compact health.

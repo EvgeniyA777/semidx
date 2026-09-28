@@ -157,7 +157,7 @@ significance claims or product latency guarantees.
 
 | Level | User outcome | Planned work | Exit evidence |
 | --- | --- | --- | --- |
-| L0: Demonstrate task value | A developer can see when semidx helps and when it does not. | Build the local measurement driver; compare three task types on each of Petclinic and Dubbo (six paired cards, 24 sessions); probe Dubbo/Camel capacity before scale replay; use existing fixtures, two real MCP clients, and a bounded memory screen. Plan 017 is the next planned work. | Reproducible scored tasks, complete or explicitly capacity-limited MCP measurements, observed or unobservable client-input evidence, memory history, and one justified successor or the plan's gated no-intervention decision. Missing inputs remain blocked. |
+| L0: Demonstrate task value | A developer can see when semidx helps and when it does not. | Build the local measurement driver; compare three task types on each of Petclinic and Dubbo (six paired cards, 24 sessions); probe Dubbo/Hadoop completeness before scale replay; retain Camel as one known-boundary check; use existing fixtures, two real MCP clients, and a bounded memory screen. Plan 017 is the next planned work. | Reproducible scored tasks, complete or explicitly capacity-limited MCP measurements, observed or unobservable client-input evidence, memory history, and one justified successor or the plan's gated no-intervention decision. Missing inputs remain blocked. |
 | L1: Reduce the cost of obtaining context | Useful current context takes fewer unnecessary calls, reads, and waits. | Fix the largest measured cost in preflight, query work, navigation, or output handling. Measure fallback compatibility before changing it. | Repeat the L0 tasks and demonstrate the improvement chosen in the successor plan, with correctness, freshness, and client compatibility preserved. |
 | L2: Recover useful semantic relationships | Ordinary impact questions have useful answers within a clearly stated language boundary. | Select one Java unresolved-reason family by blocked tasks and measured conversion potential; evaluate external-supertype and visibility gaps before admitting new evidence. | Previously blocked task answers become established relationships, with negative cases and provenance verified; raw fact count alone does not pass. |
 | L3: Make installation repeatable | A developer gets a first useful answer without knowing the build internals. | Choose initial platforms from evaluation participants; prepare an installation path, actionable diagnostics, and artifacts where justified. | A developer other than the author follows the published path in a clean environment; elapsed time, manual interventions, supported platforms, and failures are recorded. Target: first useful answer within ten minutes, a future acceptance target rather than an observed result. |
@@ -183,10 +183,11 @@ significance claims or product latency guarantees.
 ### Inputs And Deferred Work
 
 Corpora have roles, not an obligatory size ladder. Plan 017 owns the pinned
-commits, task counts, and measurement procedure. Its review found a 20,000-unit
-default discovery limit against Camel's 27,326 tracked Java files: completeness
-must be checked before any whole-root performance claim. L1 repeats tasks after
-optimization. L2 takes one observed gap through a minimal fixture with required,
+commits, task counts, and measurement procedure. Hadoop is the larger replay
+candidate below the documented 20,000-unit ceiling; completeness is still checked.
+Camel's 27,326 tracked Java files make it a known-boundary probe, excluded from
+ordinary priority ranking and the no-intervention complete-root condition.
+L1 repeats tasks after optimization. L2 takes one observed gap through a minimal fixture with required,
 forbidden, and unresolved outcomes, an explicit semantic decision, implementation,
 and replay on the originating corpus plus scale checks. L3 can reuse Petclinic
 for first-install validation. L4 combines small edit-history fixtures with

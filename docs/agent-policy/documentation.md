@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-17"
+updated: "2026-09-28"
 ---
 
 # Documentation Policy
@@ -109,6 +109,11 @@ change improves none of those, put it in the owning document instead.
   and no numbered filename: root `README.md`, directory index files such as
   `plans/README.md`, `RULES.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`,
   `intake/*`, and sample `README.md` files.
+- Structured evaluation inputs and evidence (for example JSON, JSONL, and CSV)
+  may use schema-oriented filenames without YAML frontmatter in a report-owned
+  artifact directory. Its README must identify the owning numbered report and
+  the data schemas/provenance. Narrative documents there still follow the normal
+  filename and frontmatter rules; machine-readable data do not own lifecycle.
 - The fields are `title`, `doc_type`, `lifecycle`, `status`, `agent_action`, and
   `updated`.
 - Keep `status` consistent with document type:
