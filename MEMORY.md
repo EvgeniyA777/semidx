@@ -300,7 +300,9 @@ documents that own history, rationale, and evidence.
   now prioritize task value, context cost, useful Java relationships, installation,
   and sustained local sessions. Memory screening happens early; measured blockers
   can promote later levels.
-- Next planned work is
+- Active work: [Plan 015](docs/plans/015_optional_jev_ranking_projection.md)
+  Stages 4A-4C run before Plan 017 by operator decision (2026-09-29).
+- Next planned after that is
   [Plan 017](docs/plans/017_adoption_baseline_and_priority_selection.md): required
   driver, six distinct paired targets/24 sessions on Petclinic/Dubbo, Hadoop replay,
   one Camel known-boundary probe outside priority ranking, client/memory evidence,
@@ -313,15 +315,13 @@ documents that own history, rationale, and evidence.
   not prove zero Jev calls on mismatch; Zig tests cover mismatch and scan failure.
   Pinned identity vectors, post-closure corrections, and complete gate evidence
   live in the [progress log](docs/reports/016_trustworthy_working_copy_sync_progress.md).
-- [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) remains an
-  incomplete, blocked adoption experiment. Stages 0-3 implemented default-off
-  consent, bounded graph-only candidate projection, offline fixtures, and the
-  Zig stdlib HTTP adapter. Stage 4 is blocked because direct TypeSafe onboarding
-  yielded no account or API key; the operator chose not to add a gateway or
-  proxy workaround. `FakeProvider` and fixtures remain the required offline
-  evidence, ADR 013 remains proposed, and no ranking usefulness claim is
-  justified. Resume only with explicit direct-access authorization after Plan
-  016; a future graph-native decision-model direction needs its own ADR and plan.
+- [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) is in progress:
+  Stages 0-3 built default-off consent, graph-only candidates, and the stdlib
+  HTTP adapter. The 2026-09-29 revision adds an IP-literal loopback class for
+  local System One models with attested weight digests (4A; ADR 013 D2 revised,
+  still proposed), rebuilds the fixture that could never show gain (4B), and
+  evaluates up to three local models (4C). Hosted Jev (4D) stays blocked; no
+  usefulness claim yet; graph edges by model stay out ([Idea 003](docs/ideas/003_graph_decision_model.md)).
 - Text fallback duplication is kept in `v0.1.0-preview.4` for compatibility.
   [Follow-up 010](docs/followups/010_mcp_text_fallback_client_measurement.md)
   remains open; proposed

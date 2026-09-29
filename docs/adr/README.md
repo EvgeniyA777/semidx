@@ -27,5 +27,5 @@ ratified constitution.
 - [010: Record A Designator As A Structured Name](010_designator_is_a_structured_name.md)
 - [011: Establish The Java Type Hierarchy From Indexed Source](011_java_hierarchy_from_indexed_source.md)
 - [012: Resolve A Java Call On A Receiver Whose Declared Type Is Known](012_java_value_receiver_calls.md)
-- [013: Add Jev As An Optional Outbound Ranking Projection](013_optional_jev_ranking_projection.md)
+- [013: Add An Optional Decision-Model Ranking Projection](013_optional_jev_ranking_projection.md)
 - [014: Distinguish Snapshot Analysis From Working-Copy Synchronization](014_distinguish_snapshot_analysis_from_working_copy_sync.md)

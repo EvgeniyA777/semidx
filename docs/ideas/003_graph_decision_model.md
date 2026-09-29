@@ -15,8 +15,7 @@ An external conversation, reviewed on 2026-09-29, about TypeSafe Jev and the
 emerging family of "decision models" (models that return typed probabilities for
 a closed set of candidates instead of generating text). The conversation is kept
 as local source intake and is not committed. Its claims about third-party
-projects and benchmark numbers were not verified; see
-[Unverified External Claims](#unverified-external-claims).
+projects were partly checked later; see [External Claims](#external-claims).
 
 This idea records what from that conversation is compatible with semidx, what
 is not, and what would have to be measured first. It is not a plan and
@@ -68,11 +67,11 @@ to this idea, not project vocabulary.
   calibration.** Confidence values from different models are not comparable
   until calibrated on the same task.
 - **A local model runtime.** It avoids outbound transmission (§8) and does not
-  depend on TypeSafe access, which blocks
-  [Plan 015](../plans/015_optional_jev_ranking_projection.md). It is a new
-  provider and a new decision, not a continuation of Plan 015; `MEMORY.md`
-  already states that a graph-native decision-model direction needs its own ADR
-  and plan.
+  depend on TypeSafe access. On 2026-09-29 the operator folded local
+  consumer-side ranking into
+  [Plan 015](../plans/015_optional_jev_ranking_projection.md) (Stages 4A-4C,
+  ADR 013 D2 revised). That covers ranking only; a graph-native decision model
+  still needs its own ADR and plan.
 
 ## Measurement Before Any Model Work
 
@@ -97,31 +96,37 @@ whatever its accuracy.
 
 ## Relation To Current Priorities
 
-- [Plan 017](../plans/017_adoption_baseline_and_priority_selection.md) (L0) is
-  the active priority. This idea does not fit L2 of the
+- By operator decision on 2026-09-29, consumer-side ranking on local open
+  models runs first, as [Plan 015](../plans/015_optional_jev_ranking_projection.md)
+  Stages 4A-4C, ahead of
+  [Plan 017](../plans/017_adoption_baseline_and_priority_selection.md). Its
+  evaluation is also the first evidence of whether local decision models order
+  graph candidates usefully at all.
+- This idea does not fit L2 of the
   [roadmap](../design/001_project_roadmap.md#adoption-levels): L2 exits only
   when previously blocked answers become established relationships, which a
   model output cannot be.
-- The natural entry point is Plan 017 evidence. If paired sessions show that
-  agents spend repeated effort triaging `unresolved_mentions` candidates, a
-  consumer-side ranking of those candidates under ADR 013's projection rules,
-  on a local model, becomes a candidate successor.
-- Until then this stays a concept. Promotion requires the measurement above, an
-  ADR answering constitution §11, and a plan.
+- Plan 017 evidence remains the other entry point: if paired sessions show
+  agents repeatedly triaging `unresolved_mentions` candidates, ranking those
+  candidates under ADR 013's projection rules becomes a candidate successor.
+- Beyond ranking this stays a concept. Promotion requires the measurement
+  above, an ADR answering constitution §11, and a plan.
 
-## Unverified External Claims
+## External Claims
 
-Recorded as they were stated, not verified against primary sources:
+Checked against primary sources on 2026-09-29 (project repositories and
+announcements); benchmark numbers are the projects' own and were not reproduced:
 
-- Jeff 1 (Gestalt Lab): a LoRA adapter on Qwen3-4B-Instruct that scores label
-  token probabilities; reported 81.83% versus Jev 1.13.0 at 82.83% on a
-  9,730-example fact-checking set; a published training recipe.
-- Ollaya: a local runtime exposing a TypeSafe-compatible `/v1/systemone`
-  endpoint for several open decision models (Decision, Decider, Kev, Winnow);
-  reported `winnow:e4b` 0.722 versus Jev 0.738 on its typed-decision test.
-- Decision 1.0 (vLLM Semantic Router): a small backbone with a bilinear
-  endpoint head scoring all options in one forward pass.
-- Jev public launch on 2026-09-15 after two years in stealth.
+- Jeff 1 (Gestalt Lab, [repository](https://github.com/Gestalt-Lab/jeff)):
+  Apache-2.0 code and adapter, a LoRA on `Qwen3-4B-Instruct-2507`, local server
+  on `http://127.0.0.1:8079` with `POST /v1/systemone`; its README reports
+  accuracy 0.8183 versus Jev 1.13.0 at 0.8283 on 9,730 examples.
+- Ollaya ([repository](https://github.com/ollaya-dev/ollaya)): Apache-2.0
+  local daemon serving open decision models by `name:tag` behind a
+  TypeSafe-compatible `/v1/systemone`, default port 11435.
+- Decision 1.0 ([announcement](https://vllm-sr.ai/blog/decision-models/)):
+  six open-weight models (0.6B-9B), Apache-2.0; no ready System One server.
 
-Only the Jev API primitives (`Noul`, `Choice`, `Score`) and the model id
-`jev-1.13.0` match what ADR 013 already records.
+Not checked: the `winnow:e4b` 0.722 versus Jev 0.738 figure, and the Jev launch
+date and "two years in stealth". The Jev API primitives (`Noul`, `Choice`,
+`Score`) and the model id `jev-1.13.0` match what ADR 013 already records.

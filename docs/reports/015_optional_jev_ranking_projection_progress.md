@@ -2,9 +2,9 @@
 title: "Optional Jev ranking projection progress"
 doc_type: "progress_log"
 lifecycle: "active"
-status: "blocked"
+status: "in_progress"
 agent_action: "reference_for_context"
-updated: "2026-09-27"
+updated: "2026-09-29"
 ---
 
 # 015: Optional Jev Ranking Projection Progress
@@ -14,9 +14,10 @@ Companion log for
 
 ## Current Status
 
-**Stages 0-3 are complete. Stage 4 is blocked by direct TypeSafe vendor
-onboarding.** The plan remains incomplete, Jev remains default-off, and no
-ranking usefulness claim is justified.
+**Stages 0-3 are complete. The plan was revised on 2026-09-29 (see
+[Plan Revision 2026-09-29](#plan-revision-2026-09-29)); Stage 4A is next.**
+Hosted Jev (Stage 4D) stays blocked on direct TypeSafe onboarding. The
+integration remains default-off, and no ranking usefulness claim is justified.
 
 ## Stage 0: Accept The Boundary And Freeze The Testable Contract
 
@@ -517,3 +518,30 @@ original graph order and Jev order and compute top-1, Recall@5, Recall@10, MRR,
 and NDCG@5. If the operator cancels instead, use Plan 015's existing removal
 path and record the experiment as measured-and-declined only if the required
 measurement actually occurred.
+
+## Plan Revision 2026-09-29
+
+The operator reversed the 2026-09-27 "no alternate provider" choice for one
+case: open decision models served on the local machine behind the System One
+protocol. Hosted gateways and proxies stay excluded. Recorded changes:
+
+- Plan 015 Stage 4 is replaced by 4A (loopback destination class with an
+  attested weight digest), 4B (evaluation fixture rebuild), 4C (local open-model
+  evaluation), and 4D (hosted Jev, optional and still blocked).
+- ADR 013 D2 is revised while still `proposed`; `SPEC.md`'s optional-outbound
+  row names the loopback class.
+- Priority: Stages 4A-4C run before Plan 017 (`MEMORY.md`, roadmap).
+- Primary sources reviewed for local runtimes: the Ollaya and Jeff repositories
+  and the Decision 1.0 announcement. Ollaya's website failed to load (TLS
+  error) during the review; its GitHub repository was used instead.
+
+**Review finding: the Stage 0 ranking fixture cannot measure improvement.**
+`fixtures/jev/ranking_eval.json` has 24 cases with exactly three candidates
+each, and the first listed candidate is acceptable in all 24. Computed on
+2026-09-29: listed order scores top-1 24/24 and mean NDCG@5 1.000, and
+Recall@10 is 1.0 for any ordering. The original gate ("NDCG@5 improves") could
+not have passed for any model, including Jev, and no `storefront` source exists
+to produce a graph order. The Stage 0 checks verified counts and category split
+but not whether the fixture could discriminate; that gap is why Stage 4B
+rebuilds it from graph-produced candidate sets with labels frozen before any
+model run.

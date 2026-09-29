@@ -1,13 +1,18 @@
 ---
-title: "Add Jev as an optional outbound ranking projection"
+title: "Add an optional decision-model ranking projection"
 doc_type: "adr"
 lifecycle: "active"
 status: "proposed"
 agent_action: "reference_for_context"
-updated: "2026-09-26"
+updated: "2026-09-29"
 ---
 
-# 013: Add Jev As An Optional Outbound Ranking Projection
+# 013: Add An Optional Decision-Model Ranking Projection
+
+Revised on 2026-09-29 while still proposed: D2 admits a second destination
+class, open decision models served on the local machine behind the same System
+One protocol ([Plan 015](../plans/015_optional_jev_ranking_projection.md)
+revision, A7). D1, D3, D4, D5, and the graph-authority boundary are unchanged.
 
 ## Feature Or Dependency
 
@@ -69,7 +74,25 @@ the environment, never from an argument, result, diagnostic, or log.
 
 The configured endpoint is the consented destination. Redirects are rejected;
 the authorization header and source-derived data are never forwarded to a
-second origin. Startup and per-call logs may record endpoint origin, model,
+second origin.
+
+A second destination class, **loopback**, serves open decision models on the
+local machine through the same System One request and response shape:
+
+- the endpoint is `http://127.0.0.1:<port>/<path>` or
+  `http://[::1]:<port>/<path>`; IP literals only, so `localhost` and every
+  other plain-HTTP host are rejected;
+- no API key is read and no `Authorization` header is sent;
+- `--jev-model-sha256` is required: the operator-attested SHA-256 of the served
+  weights (for several files, of their sorted `sha256sum`-style manifest).
+  semidx records it as attested, never as verified, because it cannot read the
+  runtime's files. The flag is rejected for a remote destination;
+- `:latest` tags are rejected like other moving aliases, and the response model
+  must still equal the requested one exactly;
+- the complete category pair stays required: the data does not leave the
+  machine, but it reaches a process semidx does not control.
+
+A remote (HTTPS) destination is unchanged. Startup and per-call logs may record endpoint origin, model,
 category names, byte counts, timing, and status class, but never the key, query,
 entity names, paths, or response body.
 
@@ -145,7 +168,8 @@ changing it later is runtime policy, not a graph-semantic decision.
 ### D6: Ranking Provenance Is Not Graph Provenance
 
 The result identifies itself as an `approximate_projection` and records the
-provider, requested model, response model, destination origin, consented data
+provider, requested model, response model, destination origin, destination
+class, the attested weight digest for a loopback destination, consented data
 categories, provider-reported input/output token usage, probability per
 candidate, truncation, and fallback status. These fields describe a consumer
 decision. They must not reuse graph `resolution` or `producer` fields in a way
@@ -197,7 +221,9 @@ evidence drift without a repository change.
    consumers. A decision cannot create a relationship or alter graph meaning.
 8. **Local operation without mandatory source-data transmission.** Preserved.
    All existing local paths work unchanged and without network. Outbound use is
-   disabled by default and requires explicit destination and data consent.
+   disabled by default and requires explicit destination and data consent. A
+   loopback destination transmits nothing off the machine and still requires
+   the same explicit enablement and categories.
 
 ## Consequences
 
@@ -214,6 +240,9 @@ evidence drift without a repository change.
   `graph-metadata` explicitly consents to sending them to the named endpoint.
 - Jev errors and scores add observability obligations, but no persistent audit
   store or telemetry service is introduced.
+- semidx does not install, start, or supervise a local model runtime or its
+  weights; the operator provides them, and no build, test, or gate depends on
+  them.
 - The first slice is ranking only. Identity matching, unresolved-target
   resolution, test selection, and frontend-work classification remain possible
   later use cases, not permissions granted by this record.
@@ -226,8 +255,11 @@ Before this record moves to `accepted`, Plan 015 must specify and then prove:
   key read, and zero outbound attempts;
 - incomplete or malformed consent fails startup with a message naming the
   missing or invalid item but no secret;
-- redirects, non-HTTPS destinations, moving model aliases, and unknown data
-  categories are rejected;
+- redirects, non-HTTPS non-loopback destinations, `localhost` by name, moving
+  model aliases including `:latest`, and unknown data categories are rejected;
+- a loopback destination requires a well-formed attested digest, never reads
+  the API key, and never sends an `Authorization` header, proven offline by a
+  loopback transport test;
 - the outbound serializer contains only the fields D3 permits, under both
   evidence-text modes;
 - the provider fake proves deterministic ordering, ties, truncation, malformed

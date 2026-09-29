@@ -44,8 +44,10 @@ On `dev`, [Plan 016](../plans/016_trustworthy_working_copy_sync.md) additionally
 delivered content-derived source-state identity, idempotent `semidx_sync`, and
 fail-closed read preflight. Every graph read now pays for source discovery;
 earlier graph-query timings do not establish current end-to-end MCP latency.
-[Plan 015](../plans/015_optional_jev_ranking_projection.md) remains a blocked,
-default-off ranking experiment, with no demonstrated ranking usefulness.
+[Plan 015](../plans/015_optional_jev_ranking_projection.md) is a default-off
+ranking experiment with no demonstrated usefulness. Its 2026-09-29 revision
+resumes it with open decision models served on the local machine; hosted Jev
+stays blocked on a direct credential.
 
 Since preview.3, the adoption track advanced through
 [Plan 010](../plans/010_java_resolution_boundaries.md) (external Java evidence
@@ -167,6 +169,9 @@ significance claims or product latency guarantees.
 
 - Run L0 first. The memory screen belongs to L0 even though the eventual
   lifecycle work sits in L4.
+- Operator exception, 2026-09-29: Plan 015 Stages 4A-4C (local open-model
+  ranking evaluation) run before Plan 017. This does not change the level
+  order; Plan 017 starts after Plan 015 closes or blocks.
 - Default successor order is L1, L2, L3, then L4. Promote a level when L0
   demonstrates that it blocks completion or adoption more directly than the
   earlier level. Record the evidence and the changed order in `MEMORY.md`.
