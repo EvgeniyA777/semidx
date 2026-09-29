@@ -50,3 +50,6 @@ __pycache__/
 .vscode/
 *.swp
 *~
+
+# Local source intake: converted chat exports, not committed
+intake/2026-09-29_jev_project_watch.md
