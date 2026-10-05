@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-18"
+updated: "2026-10-04"
 ---
 
 # Git Workflow Policy
@@ -88,6 +88,8 @@ owns the task procedure for applying this policy.
   `scripts/check-memory-freshness.sh` into `pre-push`.
 - Keep `scripts/check-readme-stewardship.sh` wired into `pre-commit` for staged
   README changes and into `pre-push` for pushed ranges.
+- Keep `scripts/check-plan-status.sh` wired into `pre-push`; it checks the pushed
+  revision, not the working copy.
 
 ## Command Ordering
 

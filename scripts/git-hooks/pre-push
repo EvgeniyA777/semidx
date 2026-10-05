@@ -27,6 +27,9 @@ do
   if ! ./scripts/check-readme-stewardship.sh --pre-push "$local_sha" "$remote_sha"; then
     status=1
   fi
+  if ! ./scripts/check-plan-status.sh --pre-push "$local_sha" "$remote_sha"; then
+    status=1
+  fi
 done
 
 if [ "$input_seen" -eq 0 ]; then
@@ -37,6 +40,9 @@ if [ "$input_seen" -eq 0 ]; then
     status=1
   fi
   if ! ./scripts/check-readme-stewardship.sh --range HEAD; then
+    status=1
+  fi
+  if ! ./scripts/check-plan-status.sh --check HEAD; then
     status=1
   fi
 fi

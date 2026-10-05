@@ -10,6 +10,9 @@ Use this skill for non-trivial staged implementation work in semidx.
 ## Workflow
 
 1. Resolve current sources of truth.
+   - When the task does not name the plan, run `scripts/check-plan-status.sh`
+     to find the unfinished plan and its progress log, and resolve any drift it
+     reports before executing. Take the next stage from that log.
    - Read `RULES.md`, then the active plan, relevant ADRs, `MEMORY.md`, current
      progress log, contracts, fixtures, and handoff notes named by the task.
    - Apply the Plan Readiness Gate from

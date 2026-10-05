@@ -9,10 +9,9 @@ Use this skill when a task executes or updates a documented staged plan.
 
 ## Durable Logs
 
-- Store durable progress logs under root `reports/` unless the plan names
-  another location.
-- Follow `RULES.md` documentation rules for frontmatter, lifecycle, status, and
-  English-only committed text.
+- Follow the Progress Logs and Frontmatter sections of
+  `docs/agent-policy/documentation.md` for location, frontmatter, lifecycle,
+  status, plan/log status agreement, and English-only committed text.
 - Create or update the companion log before or during the first implementation
   stage.
 - Keep log updates in the same coherent commit as the implementation or

@@ -242,8 +242,8 @@ documents that own history, rationale, and evidence.
 - Constitution freeze enforcement is cryptographic via
   `scripts/check-constitution-freeze.sh` and
   `scripts/constitution.freeze.sha256`.
-- Memory freshness is enforced by `scripts/check-memory-freshness.sh` and the
-  pre-push hook for high-signal documentation and policy changes.
+- Pre-push enforces memory freshness (`scripts/check-memory-freshness.sh`) and
+  plan/progress-log status agreement (`scripts/check-plan-status.sh`).
 - External Java measurement has two harnesses, both developer tools no lane
   depends on: `zig build claim-sample` (`src/claim_sample.zig`), which samples by
   `sha256(seed + key)` rank and counts any unclassified reason rather than

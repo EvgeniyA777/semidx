@@ -4,7 +4,7 @@ doc_type: "policy"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-28"
+updated: "2026-10-04"
 ---
 
 # Documentation Policy
@@ -273,9 +273,16 @@ repo-local skill instead of growing this policy section.
 ## Progress Logs
 
 - When executing a documented plan, create or update a companion progress log
-  before or during the first implementation stage. Store it under root
-  `reports/` unless the plan names another location, with the standard
-  frontmatter.
+  before or during the first implementation stage. Store it under
+  `docs/reports/` unless the plan names another location, with the standard
+  frontmatter. The plan links its own log, numbered like the plan.
+- A plan and its progress log agree on status: an `in_progress`, `blocked`, or
+  `completed` plan has a log with the same status, and a `draft` or `planned`
+  plan has no log yet. Change both frontmatters in the same commit.
+  `scripts/check-plan-status.sh` guards this in `pre-push`.
+- To find the active plan and its log, run `scripts/check-plan-status.sh`
+  instead of reading every plan's frontmatter. It lists unfinished plans, their
+  logs, and any status drift in the working copy.
 - If a plan is split into stages, update the log as each stage completes, and
   keep the update in the same commit as the stage implementation when practical.
 - Record stage status, a meaningful summary of what changed, changed files or
