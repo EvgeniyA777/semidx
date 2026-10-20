@@ -15,7 +15,7 @@ implementing [ADR 015](../adr/015_add_minimal_python_frontend.md).
 
 ## Current Status
 
-Stages 1-2 completed; Stage 3 next.
+Stages 1-3 completed; Stage 4 next.
 
 ## Stage Log
 
@@ -23,7 +23,7 @@ Stages 1-2 completed; Stage 3 next.
 | --- | --- | --- |
 | Stage 1: Grammar and Python definitions | Completed | `tree-sitter-python` v0.25.0 pinned and compiled with its external scanner; `.py` units record module-level functions and classes, their direct methods, `DEFINES`, `python.*` labels, and per-kind uncovered diagnostics. Bodies are reported as not analyzed. |
 | Stage 2: Bare call facts | Completed | Every call in a covered body is recorded. A bare callee is a `CALLS` fact only under ADR 015's four rules; every other call is unresolved with its own reason. Binding walks use an explicit stack, so no binding is lost to a depth limit. |
-| Stage 3: Scan policy for Python repositories | Planned | |
+| Stage 3: Scan policy for Python repositories | Completed | `.venv`, `venv`, `.tox`, and `.nox` are excluded by default; the two pinned source-state vectors were recomputed because the policy is hashed. |
 | Stage 4: End-to-end proof, documentation, closure | Planned | |
 
 ## Plan Readiness Gate
@@ -97,3 +97,31 @@ for an unbound name (builtin); for every rule-1 binding form (parameters,
 `del`, comprehension, `lambda`, nested `def`, `match` capture, `:=`); for
 `import *`; an attribute callee keeping its last name with no qualifier; and a
 nested class reported and not walked.
+
+## Stage 3: Scan Policy For Python Repositories
+
+Changed: `src/source/scan.zig` (four exclusions), `src/source/discovery.zig`
+(test), `src/source/identity.zig` (pinned vectors),
+`fixtures/working_copy_sync/identity_vectors.md` (update note).
+
+Pinned vectors, recomputed by running the pinned-vector test against the new
+policy and copying the values it found:
+
+| Case | Before | After |
+| --- | --- | --- |
+| Empty, default policy | `bd5e16cf...251f2f0e` | `31812246...36171c16` |
+| One unit, default policy | `79fe9b6c...27aed27b` | `f28698e9...30fb52f8` |
+
+Every `source_state_id` computed under the default policy changes once with
+this commit; nothing persists one, so the effect is that a running server
+built before it and one built after it report different ids for the same tree.
+No document cited the old values.
+
+Verification:
+
+- `zig build test --summary all`: 22/22 steps, 352/354 passed, 2 skipped.
+- `zig build test-mcp --summary all`: 11/11 steps, 85/86 passed, 1 skipped.
+
+New test: `app/main.py` is a Python unit; `app/types.pyi` is not a unit;
+`.py` files under `.venv/`, `venv/`, `.tox/`, and `.nox/` are not entered, and
+none of this produces a diagnostic.

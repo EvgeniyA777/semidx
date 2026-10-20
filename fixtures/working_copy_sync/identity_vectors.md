@@ -41,6 +41,12 @@ by equality/inequality only, since their point is specifically the
 *relationship* between two scans (same input in a different order; one input
 changed against a baseline), not one output value in isolation.
 
+**Plan 018 update:** the default exclusion policy gained `.venv`, `venv`,
+`.tox`, and `.nox` ([Plan 018](../../docs/plans/018_minimal_python_frontend.md)
+Stage 3). Cases 1 and 2 are "default policy", and the policy is hashed, so both
+pinned values in `identity.zig` were recomputed from the implementation and
+recommitted with that change. The encoding itself did not change.
+
 Every case names: the discovery budgets and exclusion policy in force, the
 scanned units (path, language, content), and the scan diagnostics (kind, path,
 message), in the order Stage 1's `SourceScan` will hold them before

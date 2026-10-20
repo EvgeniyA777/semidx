@@ -70,6 +70,12 @@ pub const default_excluded_directories = [_][]const u8{
     ".lsp-toolchain",
     ".scip-toolchain",
     ".scip-java-toolchain",
+    // Python environments and their test runners' copies hold third-party
+    // packages, not the repository's own source.
+    ".venv",
+    "venv",
+    ".tox",
+    ".nox",
 };
 
 pub const Options = struct {

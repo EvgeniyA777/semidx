@@ -358,6 +358,26 @@ test "a scan finds zig units and skips zig build outputs" {
     try testing.expectEqual(@as(usize, 0), found.diagnostics.len);
 }
 
+test "a scan finds python units and skips virtual environments" {
+    var tree = Tree.init();
+    defer tree.deinit();
+
+    try tree.file("app/main.py", "def main():\n    pass\n");
+    try tree.file("app/types.pyi", "def main() -> None: ...\n");
+    try tree.file(".venv/lib/python3.12/site-packages/dep.py", "def dep():\n    pass\n");
+    try tree.file("venv/lib/dep.py", "def dep():\n    pass\n");
+    try tree.file(".tox/py312/lib/dep.py", "def dep():\n    pass\n");
+    try tree.file(".nox/tests/lib/dep.py", "def dep():\n    pass\n");
+
+    var found = try tree.scan(.{});
+    defer found.deinit();
+
+    try testing.expectEqual(@as(usize, 1), found.units.len);
+    try testing.expectEqualStrings("app/main.py", found.units[0].path);
+    try testing.expectEqual(model.Language.python, found.units[0].language);
+    try testing.expectEqual(@as(usize, 0), found.diagnostics.len);
+}
+
 test "a scan of the same tree twice is identical" {
     var tree = Tree.init();
     defer tree.deinit();

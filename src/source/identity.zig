@@ -199,8 +199,10 @@ fn scanWith(
 /// computed values disagree with each other — fails a test, per the plan's
 /// requirement to commit fixed vectors rather than only prove internal
 /// equality/inequality.
-const pinned_empty_vector = "bd5e16cfa0414d1656c09e59bb82d99fcccf8be0328e94b8f3f7b932251f2f0e";
-const pinned_one_unit_vector = "79fe9b6c25b95bf48a090542daf0e476457027e9059695eed70bc6fd27aed27b";
+/// Recomputed when Plan 018 added the Python environment directories to the
+/// default exclusion policy, which the encoding hashes.
+const pinned_empty_vector = "318122460fa3da1c52fb527ee497f41a548deaebeb461f03b3dc40fa36171c16";
+const pinned_one_unit_vector = "f28698e9d2db5a312c2ee0417e8c07547299f492d5fa3c70be3d0aba30fb52f8";
 
 test "the encoding matches its pinned fixed vectors" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
