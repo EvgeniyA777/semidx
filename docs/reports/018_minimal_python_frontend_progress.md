@@ -15,14 +15,14 @@ implementing [ADR 015](../adr/015_add_minimal_python_frontend.md).
 
 ## Current Status
 
-Stage 1 completed; Stage 2 next.
+Stages 1-2 completed; Stage 3 next.
 
 ## Stage Log
 
 | Stage | Status | Outcome |
 | --- | --- | --- |
 | Stage 1: Grammar and Python definitions | Completed | `tree-sitter-python` v0.25.0 pinned and compiled with its external scanner; `.py` units record module-level functions and classes, their direct methods, `DEFINES`, `python.*` labels, and per-kind uncovered diagnostics. Bodies are reported as not analyzed. |
-| Stage 2: Bare call facts | Planned | |
+| Stage 2: Bare call facts | Completed | Every call in a covered body is recorded. A bare callee is a `CALLS` fact only under ADR 015's four rules; every other call is unresolved with its own reason. Binding walks use an explicit stack, so no binding is lost to a depth limit. |
 | Stage 3: Scan policy for Python repositories | Planned | |
 | Stage 4: End-to-end proof, documentation, closure | Planned | |
 
@@ -63,3 +63,37 @@ does not, definitions/roles/labels/containment/`DEFINES`, uncovered constructs
 by kind with docstrings skipped, confirmed absence, a broken parse leaving the
 previous definition stale, and identity preserved across body and parameter
 edits but lost (with replacements) on a class rename.
+
+## Stage 2: Bare Call Facts
+
+Changed: `src/frontends/python.zig` (binding collection for the module region,
+the enclosing definition, and unit-wide `global`/`:=`/`import *`; the call walk;
+`decideName`; capabilities now declare `CALLS`), `src/frontends/root.zig`
+(tests).
+
+Design note: Zig's binding walk stops at depth 64 because a Zig binding only
+shadows calls in its own block or deeper. A Python binding such as `:=` deep in
+an expression binds for the whole function, so a depth cut-off could hide a
+binding and make a call a false fact. Every Python walk therefore uses an
+explicit stack and reads the whole subtree; there is no depth diagnostic.
+
+Verification:
+
+- `zig build test --summary all`: 22/22 steps, 351/353 passed, 2 skipped.
+- `zig build test-core -Dgrammars-dir=/nonexistent --summary all`: 109/110
+  passed, 1 skipped.
+- `zig fmt --check build.zig src tests`: clean.
+- `zig build run -- demo.py`: the method's `helper()` is now a fact (10 facts,
+  0 unresolved) and the "bodies were not analyzed" diagnostic is gone.
+
+New tests map to ADR 015's checks: the fact for an undecorated module-level
+function and for a class; a recursive call; a method's `helper()` resolving past
+the class's own `helper` method; a default value's call not attributed to the
+body; unresolved for a decorated target, for a second module-level binding by
+assignment, import, `global`, `:=` in another function, `if`-nested `def`,
+`for`, `try`/`import`, `with ... as`, `type`, and `match`; for an imported name;
+for an unbound name (builtin); for every rule-1 binding form (parameters,
+`*args`, `**kw`, assignment, `for`, `with ... as`, `except ... as`, `import`,
+`del`, comprehension, `lambda`, nested `def`, `match` capture, `:=`); for
+`import *`; an attribute callee keeping its last name with no qualifier; and a
+nested class reported and not walked.

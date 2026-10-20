@@ -1656,3 +1656,238 @@ test "python body and parameter edits keep identity, and renames lose it" {
     try testing.expectEqual(@as(usize, 2), renamed.lost);
     try testing.expectEqual(@as(usize, 0), renamed.removed);
 }
+
+fn pythonCall(snapshot: *const core.Snapshot, from: []const u8, role: []const u8, designator: []const u8) ?model.Assertion {
+    const source = pythonDefinition(snapshot, from, role) orelse return null;
+    var calls = snapshot.relationships(.{ .kind = .calls, .source = source.id, .designator = designator });
+    return calls.next();
+}
+
+fn expectPythonCallUnresolved(snapshot: *const core.Snapshot, from: []const u8, designator: []const u8, fragment: []const u8) !void {
+    const call = pythonCall(snapshot, from, "function", designator) orelse return error.TestExpectedCall;
+    try testing.expect(!call.resolution.isFact());
+    if (std.mem.indexOf(u8, call.resolution.unresolved.explanation, fragment) == null) {
+        std.debug.print("call {s}: unexpected explanation: {s}\n", .{ designator, call.resolution.unresolved.explanation });
+        return error.TestUnexpectedExplanation;
+    }
+}
+
+fn countPythonCallFacts(snapshot: *const core.Snapshot, from: model.Entity, to: model.Entity) usize {
+    return snapshot.countRelationships(.{ .kind = .calls, .source = from.id, .target = to.id, .resolution = .fact });
+}
+
+test "a bare python call resolves only when scoping leaves one covered definition" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const outcome = try indexPython(&analyzer, &graph,
+        \\import os
+        \\from pkg import imported
+        \\from other import twice_imported
+        \\
+        \\def helper():
+        \\    return 1
+        \\
+        \\@cache
+        \\def cached():
+        \\    return 2
+        \\
+        \\class Widget:
+        \\    def helper(self):
+        \\        return helper()
+        \\    def build(self):
+        \\        return Widget()
+        \\
+        \\def twice():
+        \\    pass
+        \\
+        \\twice = wrap(twice)
+        \\
+        \\def twice_imported():
+        \\    pass
+        \\
+        \\def rebound_global():
+        \\    pass
+        \\
+        \\def setter():
+        \\    global rebound_global
+        \\    rebound_global = None
+        \\
+        \\def walrus_target():
+        \\    pass
+        \\
+        \\def uses_walrus():
+        \\    if (walrus_target := 3):
+        \\        pass
+        \\
+        \\def recurse(n):
+        \\    return recurse(n - 1)
+        \\
+        \\def main(param, *rest, key=helper(), **kw):
+        \\    helper()
+        \\    cached()
+        \\    twice()
+        \\    twice_imported()
+        \\    rebound_global()
+        \\    walrus_target()
+        \\    imported()
+        \\    print()
+        \\    param()
+        \\    rest()
+        \\    kw()
+        \\    os.path.join()
+        \\    make()()
+        \\    local_assigned = 1
+        \\    local_assigned()
+        \\    for loop_var in []:
+        \\        loop_var()
+        \\    with ctx() as managed:
+        \\        managed()
+        \\    try:
+        \\        pass
+        \\    except Exception as caught:
+        \\        caught()
+        \\    import inner_import
+        \\    inner_import()
+        \\    del deleted
+        \\    deleted()
+        \\    [comp() for comp in []]
+        \\    sorted([], key=lambda lam: lam())
+        \\    def nested():
+        \\        return nested_target()
+        \\    nested()
+        \\    class Local:
+        \\        def m(self):
+        \\            return ignored_in_nested_class()
+        \\    match param:
+        \\        case [captured]:
+        \\            captured()
+        \\    if (walrus_local := 1):
+        \\        walrus_local()
+        \\    return Widget()
+        \\
+    );
+    try testing.expect(outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+
+    const main = pythonDefinition(&snapshot, "main", "function").?;
+    const helper = pythonDefinition(&snapshot, "helper", "function").?;
+    const widget = pythonDefinition(&snapshot, "Widget", "class").?;
+
+    // Rule 4: the one undecorated covered definition. The default
+    // `key=helper()` runs at module level and is not this body's call.
+    try testing.expectEqual(@as(usize, 1), countPythonCallFacts(&snapshot, main, helper));
+    try testing.expectEqual(@as(usize, 1), countPythonCallFacts(&snapshot, main, widget));
+
+    // A class's own names are invisible to its methods: `helper()` in
+    // `Widget.helper` is the module's `helper`, and `Widget()` the class.
+    const method = pythonDefinition(&snapshot, "helper", "method").?;
+    try testing.expectEqual(@as(usize, 1), countPythonCallFacts(&snapshot, method, helper));
+    try testing.expectEqual(@as(usize, 1), countPythonCallFacts(&snapshot, pythonDefinition(&snapshot, "build", "method").?, widget));
+
+    // A recursive call means the module's binding, not a local of the body.
+    const recurse = pythonDefinition(&snapshot, "recurse", "function").?;
+    try testing.expectEqual(@as(usize, 1), countPythonCallFacts(&snapshot, recurse, recurse));
+
+    try expectPythonCallUnresolved(&snapshot, "main", "cached", "decorated definition");
+    // Rule 3: a second module-level binding of any kind.
+    try expectPythonCallUnresolved(&snapshot, "main", "twice", "more than once");
+    try expectPythonCallUnresolved(&snapshot, "main", "twice_imported", "more than once");
+    try expectPythonCallUnresolved(&snapshot, "main", "rebound_global", "more than once");
+    try expectPythonCallUnresolved(&snapshot, "main", "walrus_target", "more than once");
+    try expectPythonCallUnresolved(&snapshot, "main", "imported", "not a covered definition");
+    try expectPythonCallUnresolved(&snapshot, "main", "print", "may be a builtin");
+    try expectPythonCallUnresolved(&snapshot, "main", "make", "may be a builtin");
+    try expectPythonCallUnresolved(&snapshot, "main", "nested_target", "may be a builtin");
+
+    // Rule 1: every binding form in the enclosing definition, nested scopes
+    // included.
+    for ([_][]const u8{
+        "param",        "rest",    "kw",   "local_assigned", "loop_var", "managed",  "caught",
+        "inner_import", "deleted", "comp", "lam",            "nested",   "captured", "walrus_local",
+    }) |name| {
+        try expectPythonCallUnresolved(&snapshot, "main", name, "binding in the enclosing definition");
+    }
+
+    // An attribute callee keeps the name it calls and no qualifier.
+    const join = pythonCall(&snapshot, "main", "function", "join").?;
+    try testing.expect(std.mem.indexOf(u8, join.resolution.unresolved.explanation, "attribute access") != null);
+    try testing.expect(join.claim.relationship.target.designator.qualifier == null);
+
+    // The nested class is reported, and nothing inside it is recorded.
+    try testing.expect(pythonCall(&snapshot, "main", "function", "ignored_in_nested_class") == null);
+    try testing.expect(hasDiagnostic(&snapshot, "1 `class_definition` inside a function or method body"));
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+}
+
+test "a python call's other module-level binding forms all count against it" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const outcome = try indexPython(&analyzer, &graph,
+        \\def a(): pass
+        \\def b(): pass
+        \\def c(): pass
+        \\def d(): pass
+        \\def e(): pass
+        \\def f(): pass
+        \\def g(): pass
+        \\if FLAG:
+        \\    def a(): pass
+        \\for b in []:
+        \\    pass
+        \\try:
+        \\    import c
+        \\except ImportError:
+        \\    c = None
+        \\with open() as d:
+        \\    pass
+        \\type e = int
+        \\match x:
+        \\    case f:
+        \\        pass
+        \\def caller():
+        \\    a(); b(); c(); d(); e(); f(); g()
+        \\
+    );
+    try testing.expect(outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+
+    for ([_][]const u8{ "a", "b", "c", "d", "e", "f" }) |name| {
+        try expectPythonCallUnresolved(&snapshot, "caller", name, "more than once");
+    }
+    const caller = pythonDefinition(&snapshot, "caller", "function").?;
+    try testing.expectEqual(@as(usize, 1), countPythonCallFacts(&snapshot, caller, pythonDefinition(&snapshot, "g", "function").?));
+}
+
+test "a python unit with import star resolves no bare call" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const outcome = try indexPython(&analyzer, &graph,
+        \\def helper():
+        \\    pass
+        \\
+        \\def main():
+        \\    helper()
+        \\
+        \\from tools import *
+        \\
+    );
+    try testing.expect(outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try expectPythonCallUnresolved(&snapshot, "main", "helper", "import *");
+    try testing.expectEqual(@as(usize, 0), snapshot.countRelationships(.{ .kind = .calls, .resolution = .fact }));
+}
