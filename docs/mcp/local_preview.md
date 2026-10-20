@@ -296,7 +296,7 @@ defaults, and maxima the server validates.
 | `semidx_rank_context` (experimental, only when `--enable-jev-ranking` consent is complete) | `query`; `entity_id`, `name` (with optional `path`/`language`), or `path`; `freshness` (`current`), `direction` (`both`), `depth` (1, max 3), `relationship_limit` (50, max 500), `candidate_limit` (20, max 32), `max_response_bytes` | The same focus and candidate selection as `semidx_context`, plus a `ranking` block: `kind: "approximate_projection"`, `status` (`"ranked"` or `"unavailable"`), provider/model/destination/category provenance, and a `ranking.probability`/`ranking.original_position` per candidate. Every selected candidate is always present; only order and the `ranking` block ever depend on the provider. Absent from `tools/list` and rejected as an unknown tool when ranking is not enabled. See [ADR 013](../adr/013_optional_jev_ranking_projection.md) and [Plan 015](../plans/015_optional_jev_ranking_projection.md). |
 
 `freshness` is `current`, `stale`, or `any`. `resolution` is `any`, `fact`,
-`unresolved`, or `approximate`. `language` is `java`, `clojure`, or `zig`.
+`unresolved`, or `approximate`. `language` is `java`, `clojure`, `zig`, or `python`.
 `detail` is `compact` or `full`. `direction` is `incoming`, `outgoing`, or
 `both`. `max_response_bytes` defaults to 32000 (max 2000000).
 `role` is the frontend's role for a definition: for Zig `function` or

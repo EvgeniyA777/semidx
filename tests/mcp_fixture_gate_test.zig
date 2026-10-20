@@ -30,7 +30,7 @@ const copied = [_][2][]const u8{
 };
 
 /// A file in the root with an extension no frontend declares.
-const unindexed_path = "tool.py";
+const unindexed_path = "tool.rb";
 
 /// Body text of the copied source. No result may contain it.
 const body_texts = [_][]const u8{ "hello", "self.name", "text.len", "self.sent" };
@@ -67,7 +67,7 @@ test "habit loop gate: fixture profile degrades honestly over a controlled root"
         try root_dir.dir.writeFile(io, .{ .sub_path = file[1], .data = contents });
         bytes += contents.len;
     }
-    try root_dir.dir.writeFile(io, .{ .sub_path = unindexed_path, .data = "print(\"not indexed\")\n" });
+    try root_dir.dir.writeFile(io, .{ .sub_path = unindexed_path, .data = "puts \"not indexed\"\n" });
     const root = try root_dir.dir.realPathFileAlloc(io, ".", arena);
 
     var log_dir = testing.tmpDir(.{});

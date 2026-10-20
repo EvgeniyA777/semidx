@@ -5960,3 +5960,65 @@ test "the fixture corpus records the same facts it did before designators became
     try testing.expectEqual(@as(usize, 2), visited.items.len);
     try testing.expectEqual(snapshot.findDefinition("java/Circle.java", "Drawable").?.id, visited.items[1]);
 }
+
+test "a python tree is indexed per unit, edited incrementally, and never resolved across units by name" {
+    var tree = try Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.write("app/main.py",
+        \\from app.util import shared
+        \\
+        \\def run():
+        \\    local()
+        \\    return shared()
+        \\
+        \\def local():
+        \\    pass
+        \\
+    );
+    try tree.write("app/util.py", "def shared():\n    return 1\n");
+    try tree.write("app/other.py", "class Other:\n    def go(self):\n        return 2\n");
+    try tree.write(".venv/lib/site.py", "def shared():\n    return 3\n");
+
+    const first = try tree.rescan();
+    try testing.expectEqual(@as(usize, 3), first.added);
+    const baseline = tree.invocations();
+    try testing.expectEqual(@as(usize, 3), baseline);
+
+    var before = try tree.index.publish();
+    defer before.deinit();
+    const run = before.findDefinition("app/main.py", "run").?;
+    const local = before.findDefinition("app/main.py", "local").?;
+    const shared = before.findDefinition("app/util.py", "shared").?;
+    const other = before.findDefinition("app/other.py", "Other").?;
+    try testing.expectEqual(@as(usize, 1), before.countRelationships(.{ .kind = .calls, .source = run.id, .target = local.id, .resolution = .fact }));
+
+    // `shared` is defined in another indexed unit, and the import names it,
+    // but this slice resolves no import: the call stays unresolved rather than
+    // matched by name ([ADR 003](../docs/adr/003_reject_name_match_assertions.md)).
+    try testing.expectEqual(@as(usize, 0), before.countRelationships(.{ .kind = .calls, .target = shared.id }));
+    var calls = before.relationships(.{ .kind = .calls, .source = run.id, .designator = "shared" });
+    const call = calls.next().?;
+    try testing.expect(!call.resolution.isFact());
+    try testing.expectEqual(@as(usize, 0), before.countApproximateAssertions());
+
+    // One edited unit is one frontend invocation, and everything keeps its id.
+    try tree.write("app/util.py", "def shared():\n    return 1 + 1\n");
+    const second = try tree.rescan();
+    try testing.expectEqual(@as(usize, 1), second.changed);
+    try testing.expectEqual(@as(usize, 2), second.unchanged);
+    try testing.expectEqual(baseline + 1, tree.invocations());
+
+    var after = try tree.index.publish();
+    defer after.deinit();
+    try testing.expectEqual(shared.id, after.findDefinition("app/util.py", "shared").?.id);
+    try testing.expectEqual(run.id, after.findDefinition("app/main.py", "run").?.id);
+
+    // A unit that stops parsing keeps its claims, stale rather than withdrawn.
+    try tree.write("app/other.py", "class Other(:\n");
+    _ = try tree.rescan();
+    var broken = try tree.index.publish();
+    defer broken.deinit();
+    try testing.expectEqual(@as(usize, 1), broken.countDiagnostics(.analysis_failed));
+    try testing.expect(broken.findDefinition("app/other.py", "Other") == null);
+    try testing.expectEqual(model.Freshness.stale, broken.entityFreshness(broken.entityById(other.id).?));
+}

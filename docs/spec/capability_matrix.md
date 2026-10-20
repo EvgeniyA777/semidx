@@ -4,7 +4,7 @@ doc_type: "specification"
 lifecycle: "active"
 status: "active"
 agent_action: "reference_for_context"
-updated: "2026-09-21"
+updated: "2026-10-20"
 ---
 
 # Preview Capability Matrix
@@ -43,9 +43,9 @@ Producer `source-ingestion`.
 
 | Aspect | Current behavior |
 | --- | --- |
-| Source units | Files under `--root` ending in `.java`, `.clj`, `.cljc`, or `.zig`. Other files are not source units and produce no diagnostic. |
+| Source units | Files under `--root` ending in `.java`, `.clj`, `.cljc`, `.zig`, or `.py`. Python stubs (`.pyi`) are not source units. Other files are not source units and produce no diagnostic. |
 | Facts | The repository entity, one `file` entity per unit, and `repository CONTAINS file`. |
-| Excluded directories (policy, no diagnostic) | `.git`, `.zig-cache`, `zig-out`, `.cache`, `.cpcache`, `node_modules`, `target`, `.tree-sitter-grammars`, `.jdtls-toolchain`, `.lsp-toolchain`, `.scip-toolchain`, `.scip-java-toolchain`. Ignore files such as `.gitignore` are not read. |
+| Excluded directories (policy, no diagnostic) | `.git`, `.zig-cache`, `zig-out`, `.cache`, `.cpcache`, `node_modules`, `target`, `.tree-sitter-grammars`, `.jdtls-toolchain`, `.lsp-toolchain`, `.scip-toolchain`, `.scip-java-toolchain`, and the Python environment directories `.venv`, `venv`, `.tox`, `.nox`. Ignore files such as `.gitignore` are not read. |
 | Unsupported | Symbolic links are reported and never followed. |
 | Unavailable | A file at or above 4 MiB, a directory deeper than 64 levels, units beyond 20,000, and unreadable files or directories are reported and not ingested. |
 | Identity | A unit's identity is not its path. A path present in two scans is the same unit; a unit that disappeared corresponds to exactly one new unit with identical content and language (a move). A file that moved and changed in one rescan is a removal plus an addition; ambiguous moves are reported, not resolved. |
@@ -98,6 +98,24 @@ claim.
 | Not recorded | Builtin calls (`@as(...)`) themselves (their arguments are walked); calls inside `test` blocks, `comptime` blocks, and nested containers; `@import` graph semantics. |
 | Identity | No signature in identity: a parameter edit keeps the definition; a rename is identity loss. A member's identity includes its container's name: renaming the container is identity loss for the container and for each member, reported with the renamed member as replacement. |
 | Known false negatives | Cross-unit calls are recorded only through a local relative `@import` alias; calls through receivers (`self.x()`), values, package imports, nested namespaces (`alias.Container.foo()`), and container members stay unresolved, so `semidx_references` still misses those callers ([follow-up 006](../followups/006_zig_cross_unit_and_member_calls.md)). **Missing provider file:** if a unit imports a relative file that does not exist yet (or is not at that exact path), no dependency is declared, so adding or moving the file there later does not reanalyze the importer until the importer changes or is otherwise reanalyzed; its calls through that alias stay unresolved meanwhile, never false facts. Adding units one at a time outside a scan (the developer command given individual files) has the same effect when an importer is added before its provider. |
+
+## Python
+
+Producer `frontend.python`. The minimal slice of
+[ADR 015](../adr/015_add_minimal_python_frontend.md), not a Python support
+claim.
+
+| Aspect | Current behavior |
+| --- | --- |
+| Definitions (facts) | `def` and `async def` statements directly in the module (role `function`), `class` statements directly in the module (role `class`), and `def`/`async def` statements directly in such a class's body (role `method`, `container_path` naming the class); decorated or not. Labels `python.construct` (`function`/`class`), `python.async = true`, `python.decorated = true`. |
+| Relationships (facts) | `file DEFINES function|class`, `class DEFINES method`. In the body of every covered function and method, a bare call `name(...)` is a `CALLS` fact only when: no binding anywhere in the enclosing definition (parameters, assignment targets, `for`/comprehension targets, `with`/`except ... as`, `:=`, `import`, `del`, `global`, `nonlocal`, `match` patterns, `type`, nested `def`/`class`/`lambda`) has that name; the unit has no `from ... import *`; the module binds the name exactly once — counting every binding at module level, including inside module-level `if`/`try`/`for`/`with`/`match` blocks, and every `global` declaration and `:=` of it anywhere in the unit; and that binding is an undecorated covered `def` or `class`. A class's own names are never consulted, as Python does not make them visible inside its methods. Calls in nested `def` and `lambda` bodies belong to the enclosing covered definition. No `REFERENCES` are emitted. |
+| Unresolved | Bare calls whose name is a parameter or local binding, is bound more than once at module level, is bound only by an import or other non-definition statement, names a decorated definition, is bound by nothing in the unit (builtins such as `print`), or sits in a unit with `import *`; every attribute call (`self.m()`, `os.path.join()`, `obj.a.b()`), recorded with its last name and no qualifier; every computed callee (`make()()`, `table[k]()`), recorded with an empty name. Each keeps its own reason. |
+| Unsupported | Every module-level statement other than a covered definition (imports, assignments, expression statements, `if __name__ == "__main__":` and every other block, definitions nested inside blocks), every class body statement other than a method (attributes, nested classes), and classes nested inside covered bodies, each reported per kind per unit. Docstrings, `pass`, and comments are skipped without a diagnostic. |
+| Analysis failed | A unit that does not parse cleanly. |
+| Confirmed absence | A unit that parses and declares no module-level function or class. |
+| Not recorded | Calls in module-level code and class bodies, and in the decorators, default values, and base-class lists of covered definitions, which run at module level; imports and every cross-unit name; inheritance and dispatch. |
+| Identity | No signature in identity: a parameter edit keeps the definition; a rename is identity loss. A method's identity includes its class's name. Two definitions with the same identity (a property getter and setter) correspond in source order. |
+| Known false negatives | Every call to another module (`from x import f; f()` and `x.f()`), every method call through `self` or a value, every call to a decorated function, and everything at module level. **Run-time rebinding boundary:** a fact means the analyzed unit's source binds the name once; another module's `mod.name = ...`, `globals()[...]`, `exec`, or `setattr` on the module can rebind it at run time, and no static reading of one unit observes that. |
 
 ## MCP Output (`semidx-mcp`)
 

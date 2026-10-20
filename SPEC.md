@@ -4,7 +4,7 @@ doc_type: "specification"
 lifecycle: "active"
 status: "draft"
 agent_action: "reference_for_context"
-updated: "2026-09-27"
+updated: "2026-10-20"
 ---
 
 # semidx Requirements
@@ -175,6 +175,17 @@ consumer over published snapshots
 ([reference](docs/mcp/local_preview.md)). Its tool schemas are not a public
 contract, its results report `semantic_contract_version: null`, and source text
 is excluded unless the server is started with an explicit evidence-text opt-in.
+
+A minimal Python frontend exists
+([ADR 015](docs/adr/015_add_minimal_python_frontend.md),
+[plan](docs/plans/018_minimal_python_frontend.md),
+[evidence](docs/reports/018_minimal_python_frontend_progress.md)). It records
+module-level functions and classes and the methods directly in those classes,
+and a bare call in their bodies only where Python's scoping leaves the name one
+meaning: no binding in the enclosing definition, no `import *`, and exactly one
+module-level binding, an undecorated covered definition. Imports, attribute and
+receiver calls, module-level code, and every cross-unit name stay unresolved or
+unsupported; this is a first slice, not a Python coverage claim.
 
 ## Requirements Still To Specify
 

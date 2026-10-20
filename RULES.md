@@ -70,7 +70,7 @@
   prerequisites for everything except `test-core`. No local service is required,
   and no build or index step uses the network.
 - What exists is the first vertical slice: an in-memory graph over Java,
-  Clojure, and Zig source, under `src/`, `tests/`, and `fixtures/`, plus an
+  Clojure, Zig, and Python source, under `src/`, `tests/`, and `fixtures/`, plus an
   experimental local MCP stdio preview in `src/mcp/`
   ([ADR 005](docs/adr/005_add_zig_frontend_and_local_mcp_preview.md)) that is a
   consumer, not a contract. There is no persistence, no public contract, no

@@ -129,7 +129,7 @@ Each passing profile prints lines prefixed `gate:`:
 gate: profile fixture: first response <ms> ms after start
 gate: hard pass refresh_revision: <before> -> <after>
 ...
-gate: observation root: temporary directory of <n> fixtures/vertical-slice files (<bytes> bytes) and tool.py
+gate: observation root: temporary directory of <n> fixtures/vertical-slice files (<bytes> bytes) and tool.rb
 gate: observation semidx_health {}: <ms> ms, <bytes> bytes
 ...
 gate: observation refresh: revision <a> -> <b>, changed <n>, added <n>, removed <n>, analyzed <n>, entity ids preserved <bool>

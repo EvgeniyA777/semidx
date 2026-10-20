@@ -37,7 +37,7 @@ honest semantic context that is local, queryable, and explicit about its limits.
 
 **Status: first vertical slice, `0.1.0-preview.4`.** semidx currently ships as a
 source-built local MCP stdio preview called `semidx-mcp`. It indexes Java,
-Clojure, and Zig source narrowly enough to support the agent habit loop, while
+Clojure, Zig, and Python source narrowly enough to support the agent habit loop, while
 keeping unsupported and unresolved cases visible.
 
 This preview does not publish a stable semantic contract, broad language-support

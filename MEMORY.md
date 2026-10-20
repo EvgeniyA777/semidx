@@ -40,11 +40,13 @@ documents that own history, rationale, and evidence.
   [ADR 006](docs/adr/006_allow_narrow_zig_member_definitions_and_local_import_calls.md)
   admits direct container-member definitions and exact relative-import calls,
   not general member lookup, dispatch, package imports, or shared-core imports.
+- [ADR 015](docs/adr/015_add_minimal_python_frontend.md) admits a minimal Python
+  frontend (Plan 018) and excludes `.venv`, `venv`, `.tox`, `.nox` from scans.
 
 ## Implementation Reality
 
 - The source tree contains the rebuilt first vertical slice: an in-memory graph
-  over Java, Clojure, and Zig source units under `src/`, `tests/`, and
+  over Java, Clojure, Zig, and Python source units under `src/`, `tests/`, and
   `fixtures/`.
 - Main commands: `zig build test-core`, `zig build test`,
   `zig fmt --check build.zig src tests`, `zig build run -- <files>`,
@@ -69,7 +71,7 @@ documents that own history, rationale, and evidence.
   frontend contract, graph, dependencies, reconcile, and index orchestration.
   `zig build test-core` must pass with `-Dgrammars-dir=/nonexistent`.
 - `src/frontend/tree_sitter.zig` is the only C ABI adapter.
-  `src/frontends/{java,clojure,zig}.zig` translate language syntax into shared
+  `src/frontends/{java,clojure,zig,python}.zig` translate language syntax into shared
   core assertions plus extension payloads.
 - `src/root.zig` assembles the `Index`; `src/main.zig` is a developer inspection
   command whose output is not a contract.
@@ -137,6 +139,9 @@ documents that own history, rationale, and evidence.
   names, with a provider dependency. Receivers, values, package imports, nested
   namespaces, and container-member targets stay unresolved
   ([capability matrix](docs/spec/capability_matrix.md#zig)).
+- Python covers module-level `def`/`class` and their direct methods; a bare call
+  is a fact only under ADR 015's four scoping rules, with bindings
+  over-approximated ([capability matrix](docs/spec/capability_matrix.md#python)).
 - `Index.applyScan` registers every added unit before analyzing any, and
   `Upkeep` reanalyzes a unit that read a provider analyzed later in the same
   batch; scan renames and `Index.renameUnit` seed dependency propagation. So a
@@ -202,8 +207,10 @@ documents that own history, rationale, and evidence.
 - No published semantic contract version. Current core admissions are
   unversioned implementation guidance only.
 - No admitted shared-core `module` or `IMPORTS`.
-- No complete language support. Java, Clojure, and Zig fixtures prove current
-  slice behavior; they are not a supported-language roster.
+- No complete language support. Java, Clojure, Zig, and Python fixtures prove
+  current slice behavior; they are not a supported-language roster.
+- No Python imports, cross-unit names, attribute or `self` calls, decorator
+  semantics, or module-level call analysis ([Follow-up 022](docs/followups/022_python_cross_unit_and_attribute_calls.md)).
 - No Java on-demand or static import resolution, qualified names, nested classes,
   inherited target selection, classpath symbols, enum/record/annotation targets,
   interface constants, or build descriptors: cross-module visibility a build
@@ -291,11 +298,10 @@ documents that own history, rationale, and evidence.
   [the adoption strategy](docs/design/002_product_adoption_strategy.md), not
   because it improves semidx's view of itself. Dogfood-only coverage such as
   [006](docs/followups/006_zig_cross_unit_and_member_calls.md) sits behind that.
-- Plans 010-014 are executed and published in preview.4. Durable evidence lives
-  in their progress logs; the short version is Java visibility boundaries,
-  Java-scale indexes, class-qualified static calls, structured unresolved
-  mentions, interfaces, declared-supertypes references, closed-chain guard
-  relaxation, `this`, and covered simple value receivers.
+- Plans 010-014 are published in preview.4; their progress logs hold the
+  evidence.
+- [Plan 018](docs/plans/018_minimal_python_frontend.md) (minimal Python
+  frontend) was run on 2026-10-20 by operator decision, ahead of Plan 017.
 - The [roadmap adoption levels](docs/design/001_project_roadmap.md#adoption-levels)
   now prioritize task value, context cost, useful Java relationships, installation,
   and sustained local sessions. Memory screening happens early; measured blockers
@@ -307,14 +313,9 @@ documents that own history, rationale, and evidence.
   driver, six distinct paired targets/24 sessions on Petclinic/Dubbo, Hadoop replay,
   one Camel known-boundary probe outside priority ranking, client/memory evidence,
   and explicit decision rules. Planned only; no runtime measurements exist yet.
-- [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) delivered source-state
-  identity, idempotent sync, fail-closed read preflight, and compact health.
-  Every graph read scans the source state (~8-10 ms/call on 93 units in the local
-  repository-copy profile); older query-only benchmarks do not establish current
-  end-to-end latency. The external real-task evaluation was not run. Stdio does
-  not prove zero Jev calls on mismatch; Zig tests cover mismatch and scan failure.
-  Pinned identity vectors, post-closure corrections, and complete gate evidence
-  live in the [progress log](docs/reports/016_trustworthy_working_copy_sync_progress.md).
+- [Plan 016](docs/plans/016_trustworthy_working_copy_sync.md) delivered fail-closed
+  sync; every graph read scans the source state (~8-10 ms/call on 93 units); no
+  external real-task evaluation ([log](docs/reports/016_trustworthy_working_copy_sync_progress.md)).
 - [Plan 015](docs/plans/015_optional_jev_ranking_projection.md) is in progress:
   Stages 0-3 built default-off consent, graph-only candidates, and the stdlib
   HTTP adapter. The 2026-09-29 revision adds an IP-literal loopback class for

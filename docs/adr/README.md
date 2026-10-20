@@ -29,3 +29,4 @@ ratified constitution.
 - [012: Resolve A Java Call On A Receiver Whose Declared Type Is Known](012_java_value_receiver_calls.md)
 - [013: Add An Optional Decision-Model Ranking Projection](013_optional_jev_ranking_projection.md)
 - [014: Distinguish Snapshot Analysis From Working-Copy Synchronization](014_distinguish_snapshot_analysis_from_working_copy_sync.md)
+- [015: Add A Minimal Python Frontend](015_add_minimal_python_frontend.md)

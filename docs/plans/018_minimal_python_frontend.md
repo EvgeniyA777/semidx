@@ -1,9 +1,9 @@
 ---
 title: "Minimal Python frontend"
 doc_type: "plan"
-lifecycle: "active"
-status: "in_progress"
-agent_action: "reference_for_context"
+lifecycle: "completed"
+status: "completed"
+agent_action: "historical_reference_only"
 updated: "2026-10-20"
 ---
 
