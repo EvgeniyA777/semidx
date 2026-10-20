@@ -41,6 +41,7 @@ pub const Language = enum {
     java,
     clojure,
     zig,
+    python,
 
     pub fn tag(self: Language) []const u8 {
         return @tagName(self);

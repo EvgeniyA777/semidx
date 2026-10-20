@@ -66,21 +66,21 @@ const Shape = enum {
 
 fn separatorFor(language: model.Language) u8 {
     return switch (language) {
-        .java, .zig => '.',
+        .java, .zig, .python => '.',
         .clojure => '/',
     };
 }
 
 /// Whether `byte` may occur inside a name in `language`.
 ///
-/// Every byte at or above 0x80 counts as a name byte: all three languages admit
+/// Every byte at or above 0x80 counts as a name byte: every covered language admits
 /// non-ASCII identifiers, and decoding UTF-8 here would answer a question no
 /// count in this report asks.
 fn nameByte(language: model.Language, byte: u8) bool {
     if (byte >= 0x80) return true;
     return switch (language) {
         .java => std.ascii.isAlphanumeric(byte) or byte == '_' or byte == '$',
-        .zig => std.ascii.isAlphanumeric(byte) or byte == '_',
+        .zig, .python => std.ascii.isAlphanumeric(byte) or byte == '_',
         // A Clojure symbol carries more than an identifier does, and `.` is one
         // of them: `str/join` is qualified by `/`, while `clojure.string` is a
         // single name.

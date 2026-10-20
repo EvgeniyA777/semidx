@@ -109,7 +109,7 @@ fn familiesFor(language: model.Language) []const Family {
         // No other frontend has had its reasons decomposed yet. Its claims all
         // land in `unclassified` with their explanations printed, which is the
         // honest answer and a readable starting point for writing the families.
-        .clojure, .zig => &.{},
+        .clojure, .zig, .python => &.{},
     };
 }
 

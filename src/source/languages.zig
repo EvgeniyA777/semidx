@@ -21,6 +21,7 @@ pub const mappings = [_]Mapping{
     .{ .extension = ".clj", .language = .clojure },
     .{ .extension = ".cljc", .language = .clojure },
     .{ .extension = ".zig", .language = .zig },
+    .{ .extension = ".py", .language = .python },
 };
 
 /// The language a path is presented to analysis as, or null when no frontend in
@@ -40,6 +41,7 @@ test "a path maps to the language its frontend covers" {
     try testing.expectEqual(model.Language.clojure, forPath("src/demo/greeter.cljc").?);
     try testing.expectEqual(model.Language.zig, forPath("src/core/graph.zig").?);
     try testing.expectEqual(model.Language.zig, forPath("build.zig").?);
+    try testing.expectEqual(model.Language.python, forPath("src/demo/greeter.py").?);
 }
 
 test "an uncovered path is not a source unit" {
@@ -47,4 +49,6 @@ test "an uncovered path is not a source unit" {
     try testing.expect(forPath("build.zig.zon") == null);
     try testing.expect(forPath("Greeter.java.bak") == null);
     try testing.expect(forPath("noextension") == null);
+    // Stub files are not source units of this slice.
+    try testing.expect(forPath("greeter.pyi") == null);
 }

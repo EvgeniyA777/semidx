@@ -19,7 +19,7 @@ const ParserDeps = struct {
 /// Grammar checkouts compiled into the full lane, by directory name under the
 /// grammars directory. Each one is a pinned checkout from
 /// `scripts/setup-tree-sitter-grammars.sh`.
-const grammar_checkouts = [_][]const u8{ "tree-sitter-java", "tree-sitter-clojure", "tree-sitter-zig" };
+const grammar_checkouts = [_][]const u8{ "tree-sitter-java", "tree-sitter-clojure", "tree-sitter-zig", "tree-sitter-python" };
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -429,6 +429,16 @@ fn addParserDeps(b: *std.Build, module: *std.Build.Module, deps: ParserDeps) voi
             .file = .{ .cwd_relative = b.pathJoin(&.{ src_dir, "parser.c" }) },
             .flags = &.{ "-std=c11", "-fno-sanitize=undefined" },
         });
+        // A grammar whose lexing needs state the generated tables cannot hold
+        // (Python's indentation) ships an external scanner beside its parser.
+        // The pinned checkout decides whether one exists, not this list.
+        const scanner = b.pathJoin(&.{ src_dir, "scanner.c" });
+        if (fileExists(b, scanner)) {
+            module.addCSourceFile(.{
+                .file = .{ .cwd_relative = scanner },
+                .flags = &.{ "-std=c11", "-fno-sanitize=undefined" },
+            });
+        }
     }
 }
 

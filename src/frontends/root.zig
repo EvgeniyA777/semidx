@@ -17,6 +17,7 @@ pub const java_members = @import("java_members.zig");
 pub const java_hierarchy = @import("java_hierarchy.zig");
 pub const clojure = @import("clojure.zig");
 pub const zig = @import("zig.zig");
+pub const python = @import("python.zig");
 
 const model = core.model;
 const contract = core.contract;
@@ -26,6 +27,7 @@ pub fn capabilitiesFor(language: model.Language) contract.Capabilities {
         .java => java.capabilities,
         .clojure => clojure.capabilities,
         .zig => zig.capabilities,
+        .python => python.capabilities,
     };
 }
 
@@ -34,6 +36,7 @@ fn grammarFor(language: model.Language) ts.Grammar {
         .java => java.grammar,
         .clojure => clojure.grammar,
         .zig => zig.grammar,
+        .python => python.grammar,
     };
 }
 
@@ -150,6 +153,7 @@ pub const Analyzer = struct {
                     zig.Context.empty;
                 try zig.analyze(builder, input, tree, context);
             },
+            .python => try python.analyze(builder, input, tree),
         }
     }
 
@@ -1430,4 +1434,225 @@ test "the member projection resolves a receiver name in the same order resolveTy
         named = call.claim.relationship.target.entity;
     }
     try testing.expectEqual(make.id, named.?);
+}
+
+fn indexPython(analyzer: *Analyzer, graph: *core.Graph, source: []const u8) !core.reconcile.Outcome {
+    const unit = try graph.addSourceUnit("probe.py", .python, source);
+    return analyzer.indexUnit(graph, unit);
+}
+
+/// The one Python definition with this name and role, so a method and a
+/// module-level function of the same name are told apart.
+fn pythonDefinition(snapshot: *const core.Snapshot, name: []const u8, role: []const u8) ?model.Entity {
+    var found: ?model.Entity = null;
+    for (snapshot.entities) |entity| {
+        if (entity.kind != .definition) continue;
+        if (entity.identity.language != .python) continue;
+        if (!std.mem.eql(u8, entity.identity.role, role)) continue;
+        if (!std.mem.eql(u8, entity.identity.name orelse continue, name)) continue;
+        if (found != null) return null;
+        found = entity;
+    }
+    return found;
+}
+
+fn hasDiagnostic(snapshot: *const core.Snapshot, fragment: []const u8) bool {
+    for (snapshot.diagnostics) |diagnostic| {
+        if (std.mem.indexOf(u8, diagnostic.message, fragment) != null) return true;
+    }
+    return false;
+}
+
+test "python module-level functions, classes, and their direct methods become definitions" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const outcome = try indexPython(&analyzer, &graph,
+        \\"""Module docstring."""
+        \\import os
+        \\from pkg import thing
+        \\
+        \\LIMIT = 3
+        \\
+        \\def plain(a, b=1):
+        \\    return a
+        \\
+        \\async def fetch():
+        \\    pass
+        \\
+        \\@decorator
+        \\def wrapped():
+        \\    pass
+        \\
+        \\@dataclass
+        \\class Point:
+        \\    """Class docstring."""
+        \\    x: int = 0
+        \\    def norm(self):
+        \\        return self.x
+        \\    @property
+        \\    def size(self):
+        \\        return 1
+        \\    async def load(self):
+        \\        pass
+        \\    class Inner:
+        \\        def hidden(self):
+        \\            pass
+        \\
+        \\if LIMIT:
+        \\    def conditional():
+        \\        pass
+        \\
+        \\if __name__ == "__main__":
+        \\    plain(1)
+        \\
+    );
+    try testing.expect(outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+
+    const plain = pythonDefinition(&snapshot, "plain", "function").?;
+    try testing.expectEqualStrings("python", plain.extension.namespace);
+    try testing.expectEqualStrings("function", plain.extension.get("python.construct").?);
+    try testing.expect(plain.extension.get("python.async") == null);
+    try testing.expect(plain.extension.get("python.decorated") == null);
+    try testing.expect(plain.identity.signature == null);
+    try testing.expectEqual(@as(usize, 0), plain.identity.container_path.len);
+
+    try testing.expectEqualStrings("true", pythonDefinition(&snapshot, "fetch", "function").?.extension.get("python.async").?);
+    const wrapped = pythonDefinition(&snapshot, "wrapped", "function").?;
+    try testing.expectEqualStrings("true", wrapped.extension.get("python.decorated").?);
+    // The decorators are part of the statement the claim was read from.
+    try testing.expectEqual(@as(u32, 12), wrapped.evidence.?.range.start_row);
+
+    const point = pythonDefinition(&snapshot, "Point", "class").?;
+    try testing.expectEqualStrings("class", point.extension.get("python.construct").?);
+    try testing.expectEqualStrings("true", point.extension.get("python.decorated").?);
+
+    for ([_][]const u8{ "norm", "size", "load" }) |name| {
+        const method = pythonDefinition(&snapshot, name, "method").?;
+        try testing.expectEqual(@as(usize, 1), method.identity.container_path.len);
+        try testing.expectEqualStrings("Point", method.identity.container_path[0]);
+        try testing.expectEqual(@as(usize, 1), snapshot.countRelationships(.{
+            .kind = .defines,
+            .source = point.id,
+            .target = method.id,
+            .resolution = .fact,
+        }));
+    }
+    try testing.expectEqualStrings("true", pythonDefinition(&snapshot, "size", "method").?.extension.get("python.decorated").?);
+    try testing.expectEqualStrings("true", pythonDefinition(&snapshot, "load", "method").?.extension.get("python.async").?);
+
+    // A nested class, its methods, and a definition inside a module-level block
+    // are outside the slice: reported, not recorded.
+    for ([_][]const u8{ "Inner", "hidden", "conditional" }) |name| {
+        for (snapshot.entities) |entity| {
+            if (entity.identity.name) |entity_name| try testing.expect(!std.mem.eql(u8, entity_name, name));
+        }
+    }
+
+    // Four module-level definitions and three methods.
+    try testing.expectEqual(@as(usize, 7), snapshot.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 7), snapshot.countRelationships(.{ .kind = .defines }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countApproximateAssertions());
+    try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.confirmed_absence));
+
+    // Imports, the assignment, the two `if` blocks, the class attribute, and the
+    // nested class are each reported by kind; docstrings are not.
+    try testing.expect(hasDiagnostic(&snapshot, "1 module-level `import_statement`"));
+    try testing.expect(hasDiagnostic(&snapshot, "1 module-level `import_from_statement`"));
+    try testing.expect(hasDiagnostic(&snapshot, "1 module-level `expression_statement`"));
+    try testing.expect(hasDiagnostic(&snapshot, "2 module-level `if_statement`"));
+    try testing.expect(hasDiagnostic(&snapshot, "1 `expression_statement` in the body of a top-level class"));
+    try testing.expect(hasDiagnostic(&snapshot, "1 `class_definition` in the body of a top-level class"));
+}
+
+test "a python unit that parses with no covered definition reports confirmed absence" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const outcome = try indexPython(&analyzer, &graph, "import os\nVALUE = os.getcwd()\n");
+    try testing.expect(outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(@as(usize, 0), snapshot.countEntities(.{ .kind = .definition }));
+    try testing.expectEqual(@as(usize, 0), snapshot.countAssertions(.{ .resolution = .fact, .producer = "frontend.python" }));
+    try testing.expectEqual(@as(usize, 1), snapshot.countDiagnostics(.confirmed_absence));
+    try testing.expectEqual(@as(usize, 2), snapshot.countDiagnostics(.unsupported_construct));
+}
+
+test "a python unit that does not parse fails analysis and leaves its previous claims stale" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const unit = try graph.addSourceUnit("probe.py", .python, "def keep():\n    pass\n");
+    _ = try analyzer.indexUnit(&graph, unit);
+
+    _ = try graph.setSourceUnitBytes(unit, "def keep(:\n    pass\n");
+    const outcome = try analyzer.indexUnit(&graph, unit);
+    try testing.expect(!outcome.applied);
+
+    var snapshot = try graph.publish();
+    defer snapshot.deinit();
+    try testing.expectEqual(@as(usize, 1), snapshot.countDiagnostics(.analysis_failed));
+    try testing.expectEqual(@as(usize, 0), snapshot.countDiagnostics(.confirmed_absence));
+    const keep = pythonDefinition(&snapshot, "keep", "function").?;
+    try testing.expectEqual(model.Freshness.stale, snapshot.entityFreshness(keep));
+}
+
+test "python body and parameter edits keep identity, and renames lose it" {
+    var analyzer = Analyzer.init(testing.allocator, null);
+    defer analyzer.deinit();
+    var graph = try core.Graph.init(testing.allocator, "fixtures");
+    defer graph.deinit();
+
+    const unit = try graph.addSourceUnit("probe.py", .python,
+        \\def run(a):
+        \\    return a
+        \\
+        \\class Box:
+        \\    def open(self):
+        \\        pass
+        \\
+    );
+    _ = try analyzer.indexUnit(&graph, unit);
+
+    _ = try graph.setSourceUnitBytes(unit,
+        \\# moved down and edited
+        \\
+        \\def run(a, b, c=3):
+        \\    return a + b
+        \\
+        \\class Box:
+        \\    def open(self, mode):
+        \\        return mode
+        \\
+    );
+    const edited = try analyzer.indexUnit(&graph, unit);
+    try testing.expectEqual(@as(usize, 3), edited.preserved);
+    try testing.expectEqual(@as(usize, 0), edited.lost);
+
+    _ = try graph.setSourceUnitBytes(unit,
+        \\def run(a, b, c=3):
+        \\    return a + b
+        \\
+        \\class Crate:
+        \\    def open(self, mode):
+        \\        return mode
+        \\
+    );
+    const renamed = try analyzer.indexUnit(&graph, unit);
+    // `run` is untouched; the class and its member each lost identity, with a
+    // replacement rather than an unrelated removal.
+    try testing.expectEqual(@as(usize, 1), renamed.preserved);
+    try testing.expectEqual(@as(usize, 2), renamed.lost);
+    try testing.expectEqual(@as(usize, 0), renamed.removed);
 }

@@ -9,9 +9,12 @@ TREE_SITTER_CLI_SOURCE="${SEMIDX_TREE_SITTER_CLI_PATH:-}"
 CLOJURE_REPO="${SEMIDX_TREE_SITTER_CLOJURE_GRAMMAR_REPO:-https://github.com/sogaiu/tree-sitter-clojure.git}"
 JAVA_REPO="${SEMIDX_TREE_SITTER_JAVA_GRAMMAR_REPO:-https://github.com/tree-sitter/tree-sitter-java.git}"
 ZIG_REPO="${SEMIDX_TREE_SITTER_ZIG_GRAMMAR_REPO:-https://github.com/tree-sitter-grammars/tree-sitter-zig.git}"
+PYTHON_REPO="${SEMIDX_TREE_SITTER_PYTHON_GRAMMAR_REPO:-https://github.com/tree-sitter/tree-sitter-python.git}"
 CLOJURE_REF="${SEMIDX_TREE_SITTER_CLOJURE_GRAMMAR_REF:-e43eff80d17cf34852dcd92ca5e6986d23a7040f}"
 JAVA_REF="${SEMIDX_TREE_SITTER_JAVA_GRAMMAR_REF:-e10607b45ff745f5f876bfa3e94fbcc6b44bdc11}"
 ZIG_REF="${SEMIDX_TREE_SITTER_ZIG_GRAMMAR_REF:-6479aa13f32f701c383083d8b28360ebd682fb7d}"
+# v0.25.0
+PYTHON_REF="${SEMIDX_TREE_SITTER_PYTHON_GRAMMAR_REF:-293fdc02038ee2bf0e2e206711b69c90ac0d413f}"
 ENV_FILE=""
 
 while [[ $# -gt 0 ]]; do
@@ -30,7 +33,7 @@ done
 # Product grammars: exactly the checkouts `build.zig` compiles, in the order of
 # its `grammar_checkouts` list. This script fetches nothing the build does not
 # compile; analysis tooling that needs other grammars owns its own setup.
-PRODUCT_GRAMMARS=("tree-sitter-java" "tree-sitter-clojure" "tree-sitter-zig")
+PRODUCT_GRAMMARS=("tree-sitter-java" "tree-sitter-clojure" "tree-sitter-zig" "tree-sitter-python")
 
 # Fail before any network access when this list and `build.zig` disagree.
 check_grammars_match_build() {
@@ -79,6 +82,7 @@ for grammar in "${PRODUCT_GRAMMARS[@]}"; do
     tree-sitter-clojure) sync_grammar "$grammar" "$CLOJURE_REPO" "$CLOJURE_REF" ;;
     tree-sitter-java) sync_grammar "$grammar" "$JAVA_REPO" "$JAVA_REF" ;;
     tree-sitter-zig) sync_grammar "$grammar" "$ZIG_REPO" "$ZIG_REF" ;;
+    tree-sitter-python) sync_grammar "$grammar" "$PYTHON_REPO" "$PYTHON_REF" ;;
     *)
       echo "error: no repository and ref configured for $grammar" >&2
       exit 1
@@ -104,6 +108,7 @@ fi
 CLOJURE_PATH="$GRAMMARS_DIR/tree-sitter-clojure"
 JAVA_PATH="$GRAMMARS_DIR/tree-sitter-java"
 ZIG_PATH="$GRAMMARS_DIR/tree-sitter-zig"
+PYTHON_PATH="$GRAMMARS_DIR/tree-sitter-python"
 
 if [[ -n "$ENV_FILE" ]]; then
   {
@@ -113,6 +118,7 @@ if [[ -n "$ENV_FILE" ]]; then
     echo "SEMIDX_TREE_SITTER_CLOJURE_GRAMMAR_PATH=$CLOJURE_PATH"
     echo "SEMIDX_TREE_SITTER_JAVA_GRAMMAR_PATH=$JAVA_PATH"
     echo "SEMIDX_TREE_SITTER_ZIG_GRAMMAR_PATH=$ZIG_PATH"
+    echo "SEMIDX_TREE_SITTER_PYTHON_GRAMMAR_PATH=$PYTHON_PATH"
   } > "$ENV_FILE"
   echo "wrote_env_file=$ENV_FILE"
 fi
@@ -124,9 +130,11 @@ fi
 echo "tree_sitter_clojure_grammar=$CLOJURE_PATH"
 echo "tree_sitter_java_grammar=$JAVA_PATH"
 echo "tree_sitter_zig_grammar=$ZIG_PATH"
+echo "tree_sitter_python_grammar=$PYTHON_PATH"
 echo "tree_sitter_clojure_ref=$CLOJURE_REF"
 echo "tree_sitter_java_ref=$JAVA_REF"
 echo "tree_sitter_zig_ref=$ZIG_REF"
+echo "tree_sitter_python_ref=$PYTHON_REF"
 
 if [[ -n "$TREE_SITTER_CLI_PATH" ]]; then
   echo "export SEMIDX_TREE_SITTER_CLI_PATH=$TREE_SITTER_CLI_PATH"
@@ -134,3 +142,4 @@ fi
 echo "export SEMIDX_TREE_SITTER_CLOJURE_GRAMMAR_PATH=$CLOJURE_PATH"
 echo "export SEMIDX_TREE_SITTER_JAVA_GRAMMAR_PATH=$JAVA_PATH"
 echo "export SEMIDX_TREE_SITTER_ZIG_GRAMMAR_PATH=$ZIG_PATH"
+echo "export SEMIDX_TREE_SITTER_PYTHON_GRAMMAR_PATH=$PYTHON_PATH"

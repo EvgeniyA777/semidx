@@ -18,6 +18,7 @@ const c = @cImport({
 extern fn tree_sitter_java() callconv(.c) *const c.TSLanguage;
 extern fn tree_sitter_clojure() callconv(.c) *const c.TSLanguage;
 extern fn tree_sitter_zig() callconv(.c) *const c.TSLanguage;
+extern fn tree_sitter_python() callconv(.c) *const c.TSLanguage;
 
 pub const Error = error{
     /// The grammar could not be assigned, which in practice means the grammar
@@ -32,12 +33,14 @@ pub const Grammar = enum {
     java,
     clojure,
     zig,
+    python,
 
     fn language(self: Grammar) *const c.TSLanguage {
         return switch (self) {
             .java => tree_sitter_java(),
             .clojure => tree_sitter_clojure(),
             .zig => tree_sitter_zig(),
+            .python => tree_sitter_python(),
         };
     }
 
@@ -311,6 +314,27 @@ test "the local zig grammar parses through the adapter" {
     try testing.expectEqualStrings("greet", function.childByFieldName("name").?.text(source));
 }
 
+test "the local python grammar parses indentation through its external scanner" {
+    var parser = try Parser.init(.python);
+    defer parser.deinit();
+
+    // Only the external scanner emits the indent and dedent tokens that close
+    // `greet`'s body before `salute`; without it this source does not parse.
+    const source = "class Greeter:\n    def greet(self):\n        return 1\n\n    def salute(self):\n        pass\n";
+    var tree = try parser.parse(source, null);
+    defer tree.deinit();
+
+    const root = tree.root();
+    try testing.expect(!root.hasError());
+    try testing.expectEqualStrings("module", root.kind());
+
+    const class = root.namedChild(0).?;
+    try testing.expectEqualStrings("class_definition", class.kind());
+    const body = class.childByFieldName("body").?;
+    try testing.expectEqual(@as(u32, 2), body.namedChildCount());
+    try testing.expectEqualStrings("salute", body.namedChild(1).?.childByFieldName("name").?.text(source));
+}
+
 test "anonymous tokens are reachable where named children skip them" {
     var parser = try Parser.init(.zig);
     defer parser.deinit();
@@ -410,4 +434,5 @@ test "the grammars and the runtime agree on the parser ABI" {
     try testing.expect(Grammar.java.abiVersion() <= runtime_abi_version);
     try testing.expect(Grammar.clojure.abiVersion() <= runtime_abi_version);
     try testing.expect(Grammar.zig.abiVersion() <= runtime_abi_version);
+    try testing.expect(Grammar.python.abiVersion() <= runtime_abi_version);
 }

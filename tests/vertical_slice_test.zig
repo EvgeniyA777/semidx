@@ -249,7 +249,7 @@ test "both languages contribute to one graph without flattening each other" {
         switch (entity.identity.language.?) {
             .java => java_definitions += 1,
             .clojure => clojure_definitions += 1,
-            .zig => {},
+            .zig, .python => {},
         }
     }
     try testing.expectEqual(@as(usize, 4), java_definitions);
@@ -657,7 +657,7 @@ test "a scan of the fixture root discovers its units without a manual list" {
         switch (unit.language) {
             .java => java_units += 1,
             .clojure => clojure_units += 1,
-            .zig => {},
+            .zig, .python => {},
         }
     }
     try testing.expect(java_units > 0);
