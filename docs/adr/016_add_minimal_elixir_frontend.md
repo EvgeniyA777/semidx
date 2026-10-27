@@ -157,9 +157,18 @@ reason:
   resolves no aliases and no other units
   ([ADR 010](010_designator_is_a_structured_name.md));
 - a remote call through anything else (`mod.fun()`, `:erlang.fun()`,
-  `__MODULE__.fun()`), whose designator is `fun` with no qualifier;
+  `__MODULE__.fun()`), written with parentheses or arguments, whose designator
+  is `fun` with no qualifier;
 - an anonymous call `f.(x)` or a callee that is not an identifier, whose
   designator has an empty name.
+
+`value.name` written with no parentheses and no arguments, on anything other
+than an alias, is not recorded at all. Elixir writes a map field read and a
+zero-arity remote call identically there, and only the run-time value decides
+which it is, so recording it as a call would claim a call that usually does not
+exist. `Alias.fun` without parentheses is a remote call, because an alias is
+never a map. Bracket access (`opts[:key]`) and sigils (`~c"..."`) are not calls
+and are not recorded.
 
 ### Not covered
 
@@ -265,6 +274,40 @@ repository's own units.
 
 ## Verification Evidence And Planned Checks
 
+### Evidence before acceptance
+
+The local-call rule was checked on 2026-10-27 against Elixir 1.19.5 (OTP 28)
+with one-module probe scripts:
+
+- a local definition plus an import of the same name and arity, from another
+  module or from `Kernel` (`is_nil/1`), is a compile error ("imported ...
+  conflicts with local function"); with `import Kernel, except: [...]` the call
+  reaches the local definition;
+- a function `def case(a, b)` compiles, yet `case(...)` still reaches the
+  special form, which is why special-form names never resolve to a definition;
+- in a nested module, a call to a function only the enclosing module defines is
+  a compile error ("undefined function"), and the nested module is named
+  `Outer.Inner`;
+- a split run compiles with a warning and the later clause is part of the same
+  function; `def` then `defp` of one name and arity, and a definition whose
+  arity overlaps another's defaults, are compile errors;
+- a local macro invoked before its definition is a compile error;
+- a bare identifier with no binding is a compile error ("undefined variable"),
+  not a zero-arity call; `1 |> inc` calls `inc/1`;
+- after `use GenServer`, the module's own `child_spec/1` replaces the injected
+  one and a local call reaches it.
+
+A read-only estimate over one external Mix project (29 `.ex`/`.exs` files, 19
+modules, no dependencies), made by walking the Elixir AST with the rules above,
+found roughly 180 local-call facts, 220 local calls unresolved (mostly `Kernel`:
+`if`, `is_binary`, `is_list`, `is_map`, `is_nil`), 60 remote calls to the
+project's own modules, 350 remote calls to external modules, and about 75
+no-parenthesis field reads that the rule above leaves unrecorded. Twelve
+ExUnit `test` blocks are module-body macro calls and are not walked. The
+estimate is not a frontend measurement; Plan 019 measures the implementation.
+
+### Planned checks
+
 Plan 019 must add tests proving:
 
 - `.ex` and `.exs` map to Elixir and `.eex`/`.heex` do not; `deps` and
@@ -285,7 +328,8 @@ Plan 019 must add tests proving:
   same-named function of the enclosing one;
 - `quote` bodies are not walked; `super` is unresolved; other special forms are
   not recorded; remote, value, and anonymous callees stay unresolved with the
-  designators above;
+  designators above; `value.name` without parentheses, bracket access, and
+  sigils are not recorded, while `Alias.fun` without parentheses is;
 - body edits and clause additions preserve identity, arity changes and renames
   report identity loss, a broken parse leaves previous claims stale, and an edit
   reanalyzes one unit; and

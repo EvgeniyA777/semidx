@@ -104,8 +104,11 @@ a review stop before implementation.
   other left side and an `identifier` right side; an anonymous call is `call`
   whose target is `dot` with only a left side; a pipe is `binary_operator` with
   operator `|>`; a guard is `binary_operator` with operator `when`; a default is
-  `binary_operator` with operator `\\`; a capture is `unary_operator` `&`. Stage
-  1 pins each shape it relies on with a parse test through the adapter.
+  `binary_operator` with operator `\\`; a capture is `unary_operator` `&`. A
+  dot call written without parentheses has no `arguments` child (`Mod.fun`
+  against `Mod.fun()`, which has an empty one), and bracket access is its own
+  `access_call` node. Stage 1 pins each shape it relies on with a parse test
+  through the adapter.
 - **Special forms.** The identifier-named `Kernel.SpecialForms` the frontend
   recognizes are one constant in `elixir.zig`: `alias`, `case`, `cond`, `for`,
   `import`, `quote`, `receive`, `require`, `super`, `try`, `unquote`,
@@ -198,6 +201,8 @@ decisions and reasons, designators; tests for:
   same-named function of the enclosing module, and never to the enclosing one;
 - a `quote` body not walked and reported; `case`/`with`/`for` not recorded
   while calls in their arguments are; a bare identifier not recorded;
+- `state.field` without parentheses, `opts[:key]`, and `~c"..."` not recorded,
+  while `Mod.fun` without parentheses is an unresolved remote call;
 - calls to a `defp` and to a `defmacro` of the same module both resolving.
 
 DoD: the Stage 1 commands pass; every ADR 016 call check has a named test.
@@ -251,6 +256,7 @@ budget; drift-control closure recorded.
 | A split or overlapping definition yields a false fact | split-run and overlapping-default tests |
 | A nested module's call resolves to the enclosing module | nested-module test |
 | Calls inside `quote` attributed to the macro | `quote` not-walked test |
+| A map field read recorded as a call | `state.field` not-recorded test beside the `Mod.fun` remote-call test |
 | External scanner not linked | heredoc and sigil parse through the adapter; link failure is a build error |
 | Core picks up parser dependency | `test-core -Dgrammars-dir=/nonexistent` |
 | Uncovered forms read as confirmed absence | uncovered-diagnostic and confirmed-absence tests |
