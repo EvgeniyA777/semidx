@@ -30,3 +30,4 @@ ratified constitution.
 - [013: Add An Optional Decision-Model Ranking Projection](013_optional_jev_ranking_projection.md)
 - [014: Distinguish Snapshot Analysis From Working-Copy Synchronization](014_distinguish_snapshot_analysis_from_working_copy_sync.md)
 - [015: Add A Minimal Python Frontend](015_add_minimal_python_frontend.md)
+- [016: Add A Minimal Elixir Frontend](016_add_minimal_elixir_frontend.md)

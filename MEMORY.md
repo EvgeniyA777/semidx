@@ -298,10 +298,10 @@ documents that own history, rationale, and evidence.
   [the adoption strategy](docs/design/002_product_adoption_strategy.md), not
   because it improves semidx's view of itself. Dogfood-only coverage such as
   [006](docs/followups/006_zig_cross_unit_and_member_calls.md) sits behind that.
-- Plans 010-014 are published in preview.4; their progress logs hold the
-  evidence.
 - [Plan 018](docs/plans/018_minimal_python_frontend.md) (minimal Python
   frontend) was run on 2026-10-20 by operator decision, ahead of Plan 017.
+- [Plan 019](docs/plans/019_minimal_elixir_frontend.md) (minimal Elixir, ahead of
+  017) waits for the operator to accept proposed [ADR 016](docs/adr/016_add_minimal_elixir_frontend.md).
 - The [roadmap adoption levels](docs/design/001_project_roadmap.md#adoption-levels)
   now prioritize task value, context cost, useful Java relationships, installation,
   and sustained local sessions. Memory screening happens early; measured blockers
